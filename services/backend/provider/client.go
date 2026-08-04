@@ -22,6 +22,8 @@ type Endpoint struct {
 	ChatModel          string
 	EmbeddingModel     string
 	TranscriptionModel string
+	DiarizationModel   string
+	Capabilities       map[string]bool
 	TimeoutSeconds     int
 	MaxOutputTokens    int
 	Temperature        float64

@@ -21,6 +21,21 @@ type Config struct {
 	MCPOAuthRedirectURL string
 	AllowPrivate        bool
 	DevSeed             bool
+	Transcription       TranscriptionConfig
+}
+
+type TranscriptionConfig struct {
+	StorageDriver      string
+	LocalStoragePath   string
+	S3Endpoint         string
+	S3Region           string
+	S3Bucket           string
+	S3AccessKey        string
+	S3SecretKey        string
+	AudioRetentionDays int
+	DiarizationWindow  int
+	DiarizationOverlap int
+	MaxSessionHours    int
 }
 
 type OIDCConfig struct {
@@ -31,15 +46,30 @@ type OIDCConfig struct {
 }
 
 type fileConfig struct {
-	Port                string         `yaml:"port"`
-	DatabaseURL         string         `yaml:"database_url"`
-	JWTSecret           string         `yaml:"jwt_secret"`
-	EncryptionKey       string         `yaml:"encryption_key"`
-	FrontendOrigins     []string       `yaml:"frontend_origins"`
-	OIDC                fileOIDCConfig `yaml:"oidc"`
-	MCPOAuthRedirectURL string         `yaml:"mcp_oauth_redirect_url"`
-	AllowPrivate        *bool          `yaml:"allow_private_targets"`
-	DevSeed             *bool          `yaml:"dev_seed"`
+	Port                string                  `yaml:"port"`
+	DatabaseURL         string                  `yaml:"database_url"`
+	JWTSecret           string                  `yaml:"jwt_secret"`
+	EncryptionKey       string                  `yaml:"encryption_key"`
+	FrontendOrigins     []string                `yaml:"frontend_origins"`
+	OIDC                fileOIDCConfig          `yaml:"oidc"`
+	MCPOAuthRedirectURL string                  `yaml:"mcp_oauth_redirect_url"`
+	AllowPrivate        *bool                   `yaml:"allow_private_targets"`
+	DevSeed             *bool                   `yaml:"dev_seed"`
+	Transcription       fileTranscriptionConfig `yaml:"transcription"`
+}
+
+type fileTranscriptionConfig struct {
+	StorageDriver      string `yaml:"storage_driver"`
+	LocalStoragePath   string `yaml:"local_storage_path"`
+	S3Endpoint         string `yaml:"s3_endpoint"`
+	S3Region           string `yaml:"s3_region"`
+	S3Bucket           string `yaml:"s3_bucket"`
+	S3AccessKey        string `yaml:"s3_access_key"`
+	S3SecretKey        string `yaml:"s3_secret_key"`
+	AudioRetentionDays int    `yaml:"audio_retention_days"`
+	DiarizationWindow  int    `yaml:"diarization_window_seconds"`
+	DiarizationOverlap int    `yaml:"diarization_overlap_seconds"`
+	MaxSessionHours    int    `yaml:"max_session_hours"`
 }
 
 type fileOIDCConfig struct {
@@ -73,7 +103,40 @@ func Load(configPath string) (Config, error) {
 		MCPOAuthRedirectURL: getenvOrFile("JUSTAI_MCP_OAUTH_REDIRECT_URL", fileValues.MCPOAuthRedirectURL, "http://localhost:8080/api/v1/mcp/oauth/callback"),
 		AllowPrivate:        getenvBoolOrFile("JUSTAI_ALLOW_PRIVATE_TARGETS", fileValues.AllowPrivate, false),
 		DevSeed:             getenvBoolOrFile("JUSTAI_DEV_SEED", fileValues.DevSeed, true),
+		Transcription:       transcriptionConfig(fileValues.Transcription),
 	}, nil
+}
+
+func transcriptionConfig(values fileTranscriptionConfig) TranscriptionConfig {
+	result := TranscriptionConfig{
+		StorageDriver:      getenvOrFile("JUSTAI_TRANSCRIPTION_STORAGE_DRIVER", values.StorageDriver, "local"),
+		LocalStoragePath:   getenvOrFile("JUSTAI_TRANSCRIPTION_LOCAL_STORAGE_PATH", values.LocalStoragePath, "./data/transcription"),
+		S3Endpoint:         getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ENDPOINT", values.S3Endpoint, ""),
+		S3Region:           getenvOrFile("JUSTAI_TRANSCRIPTION_S3_REGION", values.S3Region, "us-east-1"),
+		S3Bucket:           getenvOrFile("JUSTAI_TRANSCRIPTION_S3_BUCKET", values.S3Bucket, ""),
+		S3AccessKey:        getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY", values.S3AccessKey, ""),
+		S3SecretKey:        getenvOrFile("JUSTAI_TRANSCRIPTION_S3_SECRET_KEY", values.S3SecretKey, ""),
+		AudioRetentionDays: values.AudioRetentionDays,
+		DiarizationWindow:  values.DiarizationWindow,
+		DiarizationOverlap: values.DiarizationOverlap,
+		MaxSessionHours:    values.MaxSessionHours,
+	}
+	if result.AudioRetentionDays <= 0 {
+		result.AudioRetentionDays = 30
+	}
+	if result.DiarizationWindow <= 0 {
+		result.DiarizationWindow = 30
+	}
+	if result.DiarizationOverlap <= 0 || result.DiarizationOverlap >= result.DiarizationWindow {
+		result.DiarizationOverlap = 5
+	}
+	if result.MaxSessionHours <= 0 {
+		result.MaxSessionHours = 8
+	}
+	if result.StorageDriver != "s3" {
+		result.StorageDriver = "local"
+	}
+	return result
 }
 
 func readFileConfig(configPath string) (fileConfig, error) {

@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleHelp,
   Cpu,
+  Headphones,
   LibraryBig,
   LogOut,
   MessageSquare,
@@ -20,6 +21,7 @@ import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
 import { EndpointsView } from "@/components/endpoints-view"
 import { KnowledgeView } from "@/components/knowledge-view"
+import { LiveTranscriptionView } from "@/components/live-transcription-view"
 import { MCPView } from "@/components/mcp-view"
 import { SettingsView } from "@/components/settings-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -65,6 +67,7 @@ import type {
   Organization,
   User,
   ViewId,
+  TranscriptionSession,
 } from "@/lib/types"
 import { ThemeSwitcher } from "@/components/theme-switcher"
 
@@ -79,6 +82,12 @@ const navigation: Array<{
     label: "Chat",
     icon: MessageSquare,
     hint: "Conversations and live context",
+  },
+  {
+    id: "transcription",
+    label: "Live transcription",
+    icon: Headphones,
+    hint: "Listen to a room",
   },
   {
     id: "endpoints",
@@ -97,6 +106,7 @@ const navigation: Array<{
 
 const validViews: ViewId[] = [
   "chat",
+  "transcription",
   "endpoints",
   "knowledge",
   "mcp",
@@ -109,6 +119,7 @@ export function Workspace() {
   const searchParams = useSearchParams()
   const requestedView = searchParams.get("view") as ViewId | null
   const requestedConversationId = searchParams.get("conversation")
+  const requestedSessionId = searchParams.get("session")
   const activeView: ViewId =
     requestedView && validViews.includes(requestedView) ? requestedView : "chat"
 
@@ -118,6 +129,7 @@ export function Workspace() {
   const [user, setUser] = useState<User | null>(null)
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [transcriptionSessions, setTranscriptionSessions] = useState<TranscriptionSession[]>([])
   const [endpoints, setEndpoints] = useState<Endpoint[]>([])
   const [sources, setSources] = useState<KnowledgeSource[]>([])
   const [servers, setServers] = useState<MCPServer[]>([])
@@ -142,6 +154,21 @@ export function Workspace() {
     }
   }, [redirectToLogin, setConversations])
 
+  const refreshTranscriptionSessions = useCallback(async () => {
+    try {
+      const result = await api.get<{ sessions: TranscriptionSession[] }>(
+        "/api/v1/transcription/sessions"
+      )
+      setTranscriptionSessions(result.sessions)
+      return result.sessions
+    } catch (caught) {
+      if (caught instanceof APIError && caught.status === 401) {
+        redirectToLogin()
+      }
+      throw caught
+    }
+  }, [redirectToLogin, setTranscriptionSessions])
+
   useEffect(() => {
     let cancelled = false
 
@@ -154,9 +181,10 @@ export function Workspace() {
         )
         if (cancelled) return
 
-        const [conversationResult, endpointResult, sourceResult, serverResult] =
+        const [conversationResult, transcriptionResult, endpointResult, sourceResult, serverResult] =
           await Promise.all([
             api.get<{ conversations: Conversation[] }>("/api/v1/conversations"),
+            api.get<{ sessions: TranscriptionSession[] }>("/api/v1/transcription/sessions"),
             api.get<{ endpoints: Endpoint[] }>("/api/v1/endpoints"),
             api.get<{ sources: KnowledgeSource[] }>(
               "/api/v1/knowledge/sources"
@@ -168,6 +196,7 @@ export function Workspace() {
         setUser(me.user)
         setOrganizations(me.organizations)
         setConversations(conversationResult.conversations)
+        setTranscriptionSessions(transcriptionResult.sessions)
         setEndpoints(endpointResult.endpoints)
         setSources(sourceResult.sources)
         setServers(serverResult.servers)
@@ -199,6 +228,11 @@ export function Workspace() {
   )
     ? requestedConversationId
     : null
+  const activeSessionId = transcriptionSessions.some(
+    (session) => session.id === requestedSessionId
+  )
+    ? requestedSessionId
+    : null
   const initials = useMemo(() => {
     if (!user) return "?"
     return user.displayName
@@ -209,22 +243,29 @@ export function Workspace() {
       .toUpperCase()
   }, [user])
 
-  function navigate(
-    view: ViewId,
-    conversationId: string | null = null,
-    replace = false
-  ) {
-    const params = new URLSearchParams()
-    if (view !== "chat") params.set("view", view)
-    if (view === "chat" && conversationId) {
-      params.set("conversation", conversationId)
-    }
-    const query = params.toString()
-    const path = query ? `/?${query}` : "/"
-    const method = replace ? "replaceState" : "pushState"
-    window.history[method]({}, "", path)
-    window.dispatchEvent(new PopStateEvent("popstate"))
-  }
+  const navigate = useCallback(
+    (
+      view: ViewId,
+      conversationId: string | null = null,
+      replace = false,
+      sessionId: string | null = null
+    ) => {
+      const params = new URLSearchParams()
+      if (view !== "chat") params.set("view", view)
+      if (view === "chat" && conversationId) {
+        params.set("conversation", conversationId)
+      }
+      if (view === "transcription" && sessionId) {
+        params.set("session", sessionId)
+      }
+      const query = params.toString()
+      const path = query ? `/?${query}` : "/"
+      const method = replace ? "replaceState" : "pushState"
+      window.history[method]({}, "", path)
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    },
+    []
+  )
 
   async function signOut() {
     try {
@@ -233,6 +274,21 @@ export function Workspace() {
       window.location.assign("/login")
     }
   }
+
+  const handleTranscriptionSessionCreated = useCallback(
+    (session: TranscriptionSession) => {
+      setTranscriptionSessions((current) => [
+        session,
+        ...current.filter((item) => item.id !== session.id),
+      ])
+      navigate("transcription", null, true, session.id)
+    },
+    [navigate]
+  )
+
+  const handleTranscriptionSessionsChanged = useCallback(() => {
+    void refreshTranscriptionSessions().catch(() => undefined)
+  }, [refreshTranscriptionSessions])
 
   if (status === "loading") return <WorkspaceLoading />
 
@@ -392,6 +448,76 @@ export function Workspace() {
                     )
                   }
 
+                  if (item.id === "transcription") {
+                    return (
+                      <Collapsible
+                        className="group/collapsible"
+                        defaultOpen
+                        key={item.id}
+                      >
+                        <SidebarMenuItem>
+                          <CollapsibleTrigger
+                            render={
+                              <SidebarMenuButton
+                                isActive={activeView === "transcription"}
+                                onClick={() => navigate("transcription", null, false, activeSessionId)}
+                                tooltip={item.hint}
+                              >
+                                <ItemIcon data-icon="inline-start" />
+                                <span>{item.label}</span>
+                                <ChevronRight className="ml-auto transition-transform group-data-[open]/collapsible:rotate-90" />
+                              </SidebarMenuButton>
+                            }
+                          />
+                          <CollapsibleContent>
+                            <div className="px-2.5 pt-1 pb-1 text-[11px] font-medium text-muted-foreground">
+                              Sessions
+                            </div>
+                            <SidebarMenuSub className="mt-0">
+                              {transcriptionSessions.length === 0 ? (
+                                <Empty className="min-h-0 rounded-none p-3">
+                                  <EmptyHeader>
+                                    <EmptyTitle>No sessions yet</EmptyTitle>
+                                    <EmptyDescription>Start listening to create one.</EmptyDescription>
+                                  </EmptyHeader>
+                                </Empty>
+                              ) : (
+                                transcriptionSessions.map((session) => (
+                                  <SidebarMenuSubItem key={session.id}>
+                                    <SidebarMenuSubButton
+                                      href={`/?view=transcription&session=${session.id}`}
+                                      isActive={activeSessionId === session.id}
+                                      onClick={(event) => {
+                                        event.preventDefault()
+                                        navigate("transcription", null, false, session.id)
+                                      }}
+                                      title={`${session.title} · ${session.status}`}
+                                    >
+                                      <span className={`size-1.5 shrink-0 rounded-full ${session.status === "live" ? "bg-primary" : "bg-border"}`} />
+                                      <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                                      <span className="shrink-0 text-[10px] text-muted-foreground">{formatConversationTime(session.updatedAt)}</span>
+                                    </SidebarMenuSubButton>
+                                  </SidebarMenuSubItem>
+                                ))
+                              )}
+                            </SidebarMenuSub>
+                          </CollapsibleContent>
+                          <SidebarMenuAction
+                            aria-label="New live transcription session"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              navigate("transcription")
+                            }}
+                            showOnHover
+                            title="New live transcription session"
+                          >
+                            <Plus aria-hidden="true" />
+                          </SidebarMenuAction>
+                        </SidebarMenuItem>
+                      </Collapsible>
+                    )
+                  }
+
                   return (
                     <SidebarMenuItem key={item.id}>
                       <SidebarMenuButton
@@ -512,6 +638,16 @@ export function Workspace() {
                 void refreshConversations().catch(() => undefined)
               }}
               onNavigate={(view) => navigate(view, null)}
+            />
+          )}
+          {activeView === "transcription" && (
+            <LiveTranscriptionView
+              endpoints={endpoints}
+              onSessionCreated={handleTranscriptionSessionCreated}
+              onSessionsChanged={handleTranscriptionSessionsChanged}
+              sessionId={activeSessionId}
+              sessions={transcriptionSessions}
+              user={user}
             />
           )}
           {activeView === "endpoints" && (

@@ -2,13 +2,10 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -25,7 +22,9 @@ import (
 )
 
 type wsTicketRequest struct {
-	Kind string `json:"kind"`
+	Kind      string `json:"kind"`
+	SessionID string `json:"sessionId"`
+	SourceID  string `json:"sourceId"`
 }
 
 type chatEvent struct {
@@ -64,8 +63,8 @@ func (a *App) createWSTicket(c *gin.Context) {
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if request.Kind != "chat" && request.Kind != "transcription" {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("kind must be chat or transcription"))
+	if request.Kind != "chat" && request.Kind != "transcription" && request.Kind != "transcription-viewer" && request.Kind != "transcription-capture" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported websocket ticket kind"))
 		return
 	}
 	principal, _ := middleware.GetPrincipal(c)
@@ -74,13 +73,38 @@ func (a *App) createWSTicket(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("organization context is required"))
 		return
 	}
+	var sessionID, sourceID any
+	if request.Kind == "transcription" || request.Kind == "transcription-viewer" || request.Kind == "transcription-capture" {
+		parsedSession, err := uuid.Parse(request.SessionID)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("sessionId is required"))
+			return
+		}
+		if err := a.authorizeTranscriptionSession(c, parsedSession, principal.UserID, organizationID); err != nil {
+			writeError(c, http.StatusForbidden, err)
+			return
+		}
+		sessionID = parsedSession
+		if request.Kind == "transcription-capture" {
+			parsedSource, err := uuid.Parse(request.SourceID)
+			if err != nil {
+				writeError(c, http.StatusBadRequest, fmt.Errorf("sourceId is required for capture tickets"))
+				return
+			}
+			if err := a.authorizeTranscriptionSource(c, parsedSession, parsedSource, principal.UserID, organizationID); err != nil {
+				writeError(c, http.StatusForbidden, err)
+				return
+			}
+			sourceID = parsedSource
+		}
+	}
 	value, hash, err := auth.NewOpaqueToken()
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	expiresAt := time.Now().Add(2 * time.Minute)
-	if _, err := a.DB.ExecContext(c, `INSERT INTO ws_tickets (token_hash, user_id, organization_id, kind, expires_at) VALUES ($1, $2, $3, $4, $5)`, hash, principal.UserID, organizationID, request.Kind, expiresAt); err != nil {
+	if _, err := a.DB.ExecContext(c, `INSERT INTO ws_tickets (token_hash, user_id, organization_id, kind, session_id, source_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, hash, principal.UserID, organizationID, request.Kind, sessionID, sourceID, expiresAt); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -100,21 +124,6 @@ func (a *App) chatWebSocket(c *gin.Context) {
 	}
 	defer connection.Close()
 	a.runChatSocket(c, connection, principal.UserID, organizationID)
-}
-
-func (a *App) transcriptionWebSocket(c *gin.Context) {
-	principal, _ := middleware.GetPrincipal(c)
-	organizationID, err := a.consumeTicket(c, c.Query("ticket"), "transcription", principal.UserID)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-	connection, err := a.upgradeWebSocket(c)
-	if err != nil {
-		return
-	}
-	defer connection.Close()
-	a.runTranscriptionSocket(c, connection, principal.UserID, organizationID)
 }
 
 func (a *App) upgradeWebSocket(c *gin.Context) (*websocket.Conn, error) {
@@ -138,8 +147,7 @@ func (a *App) consumeTicket(ctx context.Context, value, kind string, userID uuid
 	if value == "" {
 		return uuid.Nil, fmt.Errorf("websocket ticket is required")
 	}
-	sum := sha256.Sum256([]byte(value))
-	hash := base64.RawURLEncoding.EncodeToString(sum[:])
+	hash := hashToken(value)
 	var organizationID uuid.UUID
 	var ticketUser uuid.UUID
 	transaction, err := a.DB.BeginTx(ctx, nil)
@@ -402,148 +410,4 @@ func citationPrompt(citations []models.Citation) string {
 		builder.WriteByte('\n')
 	}
 	return builder.String()
-}
-
-func (a *App) runTranscriptionSocket(ctx *gin.Context, connection *websocket.Conn, userID, organizationID uuid.UUID) {
-	messageType, payload, err := connection.ReadMessage()
-	if err != nil || messageType != websocket.TextMessage {
-		return
-	}
-	var start struct {
-		Type       string `json:"type"`
-		EndpointID string `json:"endpointId"`
-		Model      string `json:"model"`
-	}
-	if err := json.Unmarshal(payload, &start); err != nil || start.Type != "transcription.start" {
-		_ = connection.WriteJSON(models.SocketEnvelope{Type: "error", Data: gin.H{"message": "send transcription.start first"}})
-		return
-	}
-	endpointID, err := a.resolveEndpoint(ctx, userID, organizationID, start.EndpointID)
-	if err != nil {
-		_ = connection.WriteJSON(models.SocketEnvelope{Type: "error", Data: gin.H{"message": err.Error()}})
-		return
-	}
-	endpoint, err := a.providerEndpoint(ctx, endpointID)
-	if err != nil {
-		_ = connection.WriteJSON(models.SocketEnvelope{Type: "error", Data: gin.H{"message": err.Error()}})
-		return
-	}
-	if endpoint.ProviderType == "openai" || endpoint.ProviderType == "openai-compatible" {
-		model := start.Model
-		if model == "" {
-			model = endpoint.TranscriptionModel
-		}
-		if model == "" {
-			model = "gpt-4o-transcribe"
-		}
-		if err := a.proxyRealtimeTranscription(ctx, connection, endpoint, model); err == nil {
-			return
-		}
-	}
-	sequence := int64(0)
-	_ = connection.WriteJSON(models.SocketEnvelope{Type: "transcription.ready", Sequence: 1, Data: gin.H{"provider": endpoint.ProviderType, "mode": "local-fallback"}})
-	sequence = 1
-	for {
-		messageType, payload, err := connection.ReadMessage()
-		if err != nil {
-			return
-		}
-		if messageType == websocket.TextMessage {
-			var event struct {
-				Type string `json:"type"`
-			}
-			_ = json.Unmarshal(payload, &event)
-			if event.Type == "transcription.stop" {
-				sequence++
-				_ = connection.WriteJSON(models.SocketEnvelope{Type: "transcription.stopped", Sequence: sequence})
-				return
-			}
-			continue
-		}
-		sequence++
-		_ = connection.WriteJSON(models.SocketEnvelope{Type: "transcription.partial", Sequence: sequence, Data: gin.H{"text": fmt.Sprintf("Listening… (%d bytes received)", len(payload))}})
-	}
-}
-
-func (a *App) proxyRealtimeTranscription(ctx context.Context, connection *websocket.Conn, endpoint provider.Endpoint, model string) error {
-	base, err := url.Parse(endpoint.BaseURL)
-	if err != nil {
-		return err
-	}
-	if base.Scheme == "https" {
-		base.Scheme = "wss"
-	} else if base.Scheme == "http" {
-		base.Scheme = "ws"
-	}
-	base.Path = strings.TrimRight(base.Path, "/") + "/realtime"
-	query := base.Query()
-	query.Set("intent", "transcription")
-	query.Set("model", model)
-	base.RawQuery = query.Encode()
-	header := http.Header{}
-	header.Set("Authorization", "Bearer "+endpoint.Credential)
-	header.Set("OpenAI-Beta", "realtime=v1")
-	upstream, _, err := websocket.DefaultDialer.DialContext(ctx, base.String(), header)
-	if err != nil {
-		return err
-	}
-	defer upstream.Close()
-	_ = upstream.WriteJSON(map[string]any{"type": "session.update", "session": map[string]any{"input_audio_format": "pcm16", "input_audio_transcription": map[string]any{"model": model}, "turn_detection": map[string]any{"type": "server_vad"}}})
-	sequence := int64(0)
-	go func() {
-		for {
-			messageType, payload, err := upstream.ReadMessage()
-			if err != nil {
-				return
-			}
-			if messageType != websocket.TextMessage {
-				continue
-			}
-			var event struct {
-				Type  string `json:"type"`
-				Delta string `json:"delta"`
-				Text  string `json:"transcript"`
-			}
-			if json.Unmarshal(payload, &event) != nil {
-				continue
-			}
-			mapped := ""
-			switch event.Type {
-			case "conversation.item.input_audio_transcription.delta":
-				mapped = "transcription.partial"
-			case "conversation.item.input_audio_transcription.completed":
-				mapped = "transcription.final"
-			case "conversation.item.input_audio_transcription.failed":
-				mapped = "error"
-			}
-			if mapped != "" {
-				sequence++
-				textValue := event.Delta
-				if textValue == "" {
-					textValue = event.Text
-				}
-				_ = connection.WriteJSON(models.SocketEnvelope{Type: mapped, Sequence: sequence, Data: gin.H{"text": textValue}})
-			}
-		}
-	}()
-	for {
-		messageType, payload, err := connection.ReadMessage()
-		if err != nil {
-			return err
-		}
-		if messageType == websocket.TextMessage {
-			var event struct {
-				Type string `json:"type"`
-			}
-			_ = json.Unmarshal(payload, &event)
-			if event.Type == "transcription.stop" {
-				return upstream.WriteJSON(map[string]string{"type": "input_audio_buffer.commit"})
-			}
-			continue
-		}
-		encoded := base64.StdEncoding.EncodeToString(payload)
-		if err := upstream.WriteJSON(map[string]string{"type": "input_audio_buffer.append", "audio": encoded}); err != nil {
-			return err
-		}
-	}
 }

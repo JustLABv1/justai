@@ -10,7 +10,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-//go:embed migrations/001_initial.sql
+//go:embed migrations/*.sql
 var migrationFS embed.FS
 
 func Open(ctx context.Context, databaseURL string) (*sql.DB, error) {
@@ -32,10 +32,53 @@ func Open(ctx context.Context, databaseURL string) (*sql.DB, error) {
 }
 
 func RunMigrations(ctx context.Context, db *sql.DB) error {
-	migration, err := migrationFS.ReadFile("migrations/001_initial.sql")
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`); err != nil {
+		return err
+	}
+	var initialSchemaExists bool
+	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.users') IS NOT NULL`).Scan(&initialSchemaExists); err != nil {
+		return err
+	}
+	if initialSchemaExists {
+		if _, err := db.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES ('001_initial.sql') ON CONFLICT (version) DO NOTHING`); err != nil {
+			return fmt.Errorf("recognize existing initial schema: %w", err)
+		}
+	}
+	entries, err := migrationFS.ReadDir("migrations")
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, string(migration))
-	return err
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		version := entry.Name()
+		var applied bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, version).Scan(&applied); err != nil {
+			return err
+		}
+		if applied {
+			continue
+		}
+		migration, err := migrationFS.ReadFile("migrations/" + version)
+		if err != nil {
+			return err
+		}
+		transaction, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		if _, err := transaction.ExecContext(ctx, string(migration)); err != nil {
+			_ = transaction.Rollback()
+			return fmt.Errorf("apply migration %s: %w", version, err)
+		}
+		if _, err := transaction.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, version); err != nil {
+			_ = transaction.Rollback()
+			return err
+		}
+		if err := transaction.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

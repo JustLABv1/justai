@@ -53,6 +53,7 @@ type Endpoint struct {
 	ChatModel            string          `json:"chatModel,omitempty"`
 	EmbeddingModel       string          `json:"embeddingModel,omitempty"`
 	TranscriptionModel   string          `json:"transcriptionModel,omitempty"`
+	DiarizationModel     string          `json:"diarizationModel,omitempty"`
 	Capabilities         json.RawMessage `json:"capabilities"`
 	CredentialConfigured bool            `json:"credentialConfigured"`
 	Enabled              bool            `json:"enabled"`
@@ -62,6 +63,72 @@ type Endpoint struct {
 	Temperature          float64         `json:"temperature"`
 	CreatedAt            time.Time       `json:"createdAt"`
 	UpdatedAt            time.Time       `json:"updatedAt"`
+}
+
+type TranscriptionSession struct {
+	ID                    uuid.UUID  `json:"id"`
+	UserID                uuid.UUID  `json:"-"`
+	OrganizationID        uuid.UUID  `json:"-"`
+	Title                 string     `json:"title"`
+	Status                string     `json:"status"`
+	TranscriptionEndpoint *uuid.UUID `json:"transcriptionEndpointId,omitempty"`
+	DiarizationEndpoint   *uuid.UUID `json:"diarizationEndpointId,omitempty"`
+	Language              string     `json:"language"`
+	RecordAudio           bool       `json:"recordAudio"`
+	JoinCode              string     `json:"joinCode,omitempty"`
+	StartedAt             *time.Time `json:"startedAt,omitempty"`
+	EndedAt               *time.Time `json:"endedAt,omitempty"`
+	CreatedAt             time.Time  `json:"createdAt"`
+	UpdatedAt             time.Time  `json:"updatedAt"`
+	SourceCount           int        `json:"sourceCount"`
+	SegmentCount          int        `json:"segmentCount"`
+}
+
+type TranscriptionSource struct {
+	ID            uuid.UUID  `json:"id"`
+	SessionID     uuid.UUID  `json:"sessionId"`
+	Name          string     `json:"name"`
+	Kind          string     `json:"kind"`
+	DeviceLabel   string     `json:"deviceLabel,omitempty"`
+	Status        string     `json:"status"`
+	ClockOffsetMs int64      `json:"clockOffsetMs"`
+	ConnectedAt   *time.Time `json:"connectedAt,omitempty"`
+	LastSeenAt    *time.Time `json:"lastSeenAt,omitempty"`
+	SignalLevel   float64    `json:"signalLevel"`
+}
+
+type TranscriptionSpeaker struct {
+	ID          uuid.UUID `json:"id"`
+	SessionID   uuid.UUID `json:"sessionId"`
+	Label       string    `json:"label"`
+	DisplayName string    `json:"displayName,omitempty"`
+	Color       string    `json:"color"`
+}
+
+type TranscriptionSegment struct {
+	ID               uuid.UUID   `json:"id"`
+	SessionID        uuid.UUID   `json:"sessionId"`
+	SourceID         *uuid.UUID  `json:"sourceId,omitempty"`
+	SpeakerID        *uuid.UUID  `json:"speakerId,omitempty"`
+	Text             string      `json:"text"`
+	StartOffsetMs    int64       `json:"startOffsetMs"`
+	EndOffsetMs      int64       `json:"endOffsetMs"`
+	Confidence       *float64    `json:"confidence,omitempty"`
+	SignalQuality    *float64    `json:"signalQuality,omitempty"`
+	Canonical        bool        `json:"canonical"`
+	HeardBySourceIDs []uuid.UUID `json:"heardBySourceIds,omitempty"`
+	CreatedAt        time.Time   `json:"createdAt"`
+	UpdatedAt        time.Time   `json:"updatedAt"`
+}
+
+type TranscriptionRecording struct {
+	ID          uuid.UUID  `json:"id"`
+	SessionID   uuid.UUID  `json:"sessionId"`
+	SourceID    uuid.UUID  `json:"sourceId"`
+	MimeType    string     `json:"mimeType"`
+	Bytes       int64      `json:"bytes"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
 }
 
 type KnowledgeSource struct {

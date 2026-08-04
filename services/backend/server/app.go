@@ -25,6 +25,7 @@ type App struct {
 	Tokens  *auth.TokenManager
 	Secrets *security.SecretBox
 	RAG     *rag.Worker
+	Live    *TranscriptionManager
 }
 
 func New(cfg config.Config, db *sql.DB) *App {
@@ -36,6 +37,8 @@ func New(cfg config.Config, db *sql.DB) *App {
 		RAG:     rag.NewWorker(db, cfg.AllowPrivate),
 	}
 	application.RAG.SetSecretBox(application.Secrets)
+	application.Live = NewTranscriptionManager(cfg, db, application.Secrets)
+	application.Live.SetApp(application)
 	return application
 }
 
@@ -47,6 +50,10 @@ func (a *App) Router() *gin.Engine {
 	})
 
 	a.registerAuthRoutes(router)
+	transcriptionPublic := router.Group("/api/v1/transcription")
+	transcriptionPublic.POST("/join-requests", a.createTranscriptionJoinRequest)
+	transcriptionPublic.GET("/join-requests/:id", a.getTranscriptionJoinRequest)
+	transcriptionPublic.POST("/capture-tickets", a.createCaptureWSTicket)
 
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.RequireAuth(a.Tokens, a.DB))
@@ -64,6 +71,27 @@ func (a *App) Router() *gin.Engine {
 	org.DELETE("/endpoints/:id", middleware.RequireOrgRole("owner", "admin"), a.deleteEndpoint)
 	org.POST("/endpoints/:id/test", a.testEndpoint)
 	org.POST("/ws/tickets", a.createWSTicket)
+	org.GET("/transcription/sessions", a.listTranscriptionSessions)
+	org.POST("/transcription/sessions", a.createTranscriptionSession)
+	org.GET("/transcription/sessions/:id", a.getTranscriptionSession)
+	org.PATCH("/transcription/sessions/:id", a.updateTranscriptionSession)
+	org.DELETE("/transcription/sessions/:id", a.deleteTranscriptionSession)
+	org.POST("/transcription/sessions/:id/pause", a.pauseTranscriptionSession)
+	org.POST("/transcription/sessions/:id/resume", a.resumeTranscriptionSession)
+	org.POST("/transcription/sessions/:id/stop", a.stopTranscriptionSession)
+	org.POST("/transcription/sessions/:id/sources", a.createTranscriptionSource)
+	org.POST("/transcription/sessions/:id/join-code", a.rotateTranscriptionJoinCode)
+	org.GET("/transcription/sessions/:id/join-requests", a.listTranscriptionJoinRequests)
+	org.POST("/transcription/join-requests/:id/approve", a.approveTranscriptionJoinRequest)
+	org.POST("/transcription/join-requests/:id/deny", a.denyTranscriptionJoinRequest)
+	org.PATCH("/transcription/sessions/:id/speakers/:speakerId", a.renameTranscriptionSpeaker)
+	org.POST("/transcription/sessions/:id/speakers/merge", a.mergeTranscriptionSpeakers)
+	org.GET("/transcription/sessions/:id/recordings", a.listTranscriptionRecordings)
+	org.GET("/transcription/recordings/:id", a.streamTranscriptionRecording)
+	org.DELETE("/transcription/recordings/:id", a.deleteTranscriptionRecording)
+	org.POST("/transcription/recordings/:id/start", a.startTranscriptionRecording)
+	org.PUT("/transcription/recordings/:id/parts/:part", a.appendTranscriptionRecordingPart)
+	org.POST("/transcription/recordings/:id/complete", a.completeTranscriptionRecording)
 	org.GET("/knowledge/sources", a.listKnowledgeSources)
 	org.POST("/knowledge/sources", a.createKnowledgeSource)
 	org.POST("/knowledge/sources/:id/reindex", a.reindexKnowledgeSource)
@@ -81,7 +109,7 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/conversations/:id/messages", a.listConversationMessages)
 
 	protected.GET("/ws/chat", a.chatWebSocket)
-	protected.GET("/ws/transcription", a.transcriptionWebSocket)
+	router.GET("/api/v1/ws/transcription", a.transcriptionWebSocket)
 	members := protected.Group("/organizations/:id")
 	members.Use(middleware.RequireOrg(a.DB))
 	members.GET("/members", a.listOrganizationMembers)

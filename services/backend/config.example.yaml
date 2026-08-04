@@ -19,3 +19,17 @@ oidc:
 mcp_oauth_redirect_url: "http://localhost:8080/api/v1/mcp/oauth/callback"
 allow_private_targets: false
 dev_seed: true
+
+transcription:
+  # Choose one: local or s3. Audio recording is opt-in per session.
+  storage_driver: "local"
+  local_storage_path: "./data/transcription"
+  s3_endpoint: ""
+  s3_region: "us-east-1"
+  s3_bucket: ""
+  s3_access_key: ""
+  s3_secret_key: ""
+  audio_retention_days: 30
+  diarization_window_seconds: 30
+  diarization_overlap_seconds: 5
+  max_session_hours: 8

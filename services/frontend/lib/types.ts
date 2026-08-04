@@ -1,4 +1,10 @@
-export type ViewId = "chat" | "endpoints" | "knowledge" | "mcp" | "settings"
+export type ViewId =
+  | "chat"
+  | "transcription"
+  | "endpoints"
+  | "knowledge"
+  | "mcp"
+  | "settings"
 
 export type User = {
   id: string
@@ -26,6 +32,7 @@ export type Endpoint = {
   chatModel?: string
   embeddingModel?: string
   transcriptionModel?: string
+  diarizationModel?: string
   capabilities: Record<string, boolean>
   credentialConfigured: boolean
   enabled: boolean
@@ -87,4 +94,79 @@ export type ChatMessage = {
   content: string
   citations?: Citation[]
   createdAt?: string
+}
+
+export type TranscriptionSession = {
+  id: string
+  title: string
+  status: "waiting" | "live" | "paused" | "processing" | "completed" | "failed"
+  transcriptionEndpointId?: string | null
+  diarizationEndpointId?: string | null
+  language: string
+  recordAudio: boolean
+  joinCode?: string
+  joinCodeExpiresAt?: string
+  startedAt?: string | null
+  endedAt?: string | null
+  createdAt: string
+  updatedAt: string
+  sourceCount: number
+  segmentCount: number
+}
+
+export type TranscriptionSource = {
+  id: string
+  sessionId: string
+  name: string
+  kind: string
+  deviceLabel?: string
+  status: "pending" | "connected" | "paused" | "disconnected" | "stopped"
+  clockOffsetMs: number
+  connectedAt?: string | null
+  lastSeenAt?: string | null
+  signalLevel: number
+}
+
+export type TranscriptionSpeaker = {
+  id: string
+  sessionId: string
+  label: string
+  displayName?: string
+  color: string
+}
+
+export type TranscriptionSegment = {
+  id: string
+  sessionId: string
+  sourceId?: string | null
+  speakerId?: string | null
+  text: string
+  startOffsetMs: number
+  endOffsetMs: number
+  confidence?: number | null
+  signalQuality?: number | null
+  canonical: boolean
+  heardBySourceIds?: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type TranscriptionRecording = {
+  id: string
+  sessionId: string
+  sourceId: string
+  mimeType: string
+  bytes: number
+  expiresAt?: string | null
+  completedAt?: string | null
+}
+
+export type TranscriptionJoinRequest = {
+  id: string
+  sourceName: string
+  deviceLabel?: string
+  status: "pending" | "approved" | "denied" | "expired"
+  sourceId?: string | null
+  expiresAt: string
+  createdAt: string
 }

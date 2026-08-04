@@ -52,6 +52,18 @@ export const api = {
       body,
       headers: {},
     }),
+  postWithAuth: <T>(path: string, token: string, body?: unknown) =>
+    request<T>(path, {
+      method: "POST",
+      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  binary: <T>(path: string, body: Blob, method: "PUT" | "POST" = "PUT") =>
+    request<T>(path, {
+      method,
+      body,
+      headers: { "Content-Type": body.type || "application/octet-stream" },
+    }),
 }
 
 export function socketURL(path: string, ticket: string) {
