@@ -1,0 +1,438 @@
+package provider
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+type Endpoint struct {
+	ProviderType       string
+	BaseURL            string
+	APIPath            string
+	APIVersion         string
+	Credential         string
+	ChatModel          string
+	EmbeddingModel     string
+	TranscriptionModel string
+	TimeoutSeconds     int
+	MaxOutputTokens    int
+	Temperature        float64
+}
+
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type ChatOptions struct {
+	Messages []Message
+	Model    string
+}
+
+type DeltaFunc func(string) error
+
+func Embed(ctx context.Context, endpoint Endpoint, input string) ([]float64, error) {
+	if strings.TrimSpace(input) == "" {
+		return nil, fmt.Errorf("embedding input is empty")
+	}
+	switch endpoint.ProviderType {
+	case "openai", "openai-compatible":
+		return embedOpenAI(ctx, endpoint, input)
+	case "ollama":
+		return embedOllama(ctx, endpoint, input)
+	case "gemini":
+		return embedGemini(ctx, endpoint, input)
+	default:
+		return nil, fmt.Errorf("provider %s does not expose an embedding adapter", endpoint.ProviderType)
+	}
+}
+
+func StreamChat(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc) error {
+	if endpoint.ProviderType == "mock" {
+		for _, chunk := range []string{"JustAI is ready. ", "Connect an endpoint to stream responses from OpenAI, Gemini, Anthropic, Ollama, or any OpenAI-compatible gateway."} {
+			if err := onDelta(chunk); err != nil {
+				return err
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		return nil
+	}
+	switch endpoint.ProviderType {
+	case "openai", "openai-compatible":
+		return streamOpenAI(ctx, endpoint, options, onDelta)
+	case "ollama":
+		return streamOllama(ctx, endpoint, options, onDelta)
+	case "gemini":
+		return chatGemini(ctx, endpoint, options, onDelta)
+	case "anthropic":
+		return chatAnthropic(ctx, endpoint, options, onDelta)
+	default:
+		return fmt.Errorf("unsupported provider: %s", endpoint.ProviderType)
+	}
+}
+
+func Test(ctx context.Context, endpoint Endpoint) error {
+	seen := false
+	err := StreamChat(ctx, endpoint, ChatOptions{Messages: []Message{{Role: "user", Content: "Reply with the word ready."}}}, func(_ string) error {
+		seen = true
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !seen {
+		return fmt.Errorf("provider returned no content")
+	}
+	return nil
+}
+
+func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc) error {
+	payload := map[string]any{
+		"model":       firstNonEmpty(options.Model, endpoint.ChatModel, "gpt-4o-mini"),
+		"messages":    options.Messages,
+		"stream":      true,
+		"temperature": endpoint.Temperature,
+		"max_tokens":  endpoint.MaxOutputTokens,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/chat/completions"), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if endpoint.Credential != "" {
+		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
+	}
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return responseError(response)
+	}
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line == "data: [DONE]" {
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
+			continue
+		}
+		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+			if err := onDelta(chunk.Choices[0].Delta.Content); err != nil {
+				return err
+			}
+		}
+	}
+	return scanner.Err()
+}
+
+func embedOpenAI(ctx context.Context, endpoint Endpoint, input string) ([]float64, error) {
+	payload := map[string]any{"model": firstNonEmpty(endpoint.EmbeddingModel, "text-embedding-3-small"), "input": input}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/embeddings"), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if endpoint.Credential != "" {
+		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
+	}
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return nil, responseError(response)
+	}
+	var result struct {
+		Data []struct {
+			Embedding []float64 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if len(result.Data) == 0 || len(result.Data[0].Embedding) == 0 {
+		return nil, fmt.Errorf("embedding provider returned no vector")
+	}
+	return result.Data[0].Embedding, nil
+}
+
+func embedOllama(ctx context.Context, endpoint Endpoint, input string) ([]float64, error) {
+	payload := map[string]any{"model": firstNonEmpty(endpoint.EmbeddingModel, endpoint.ChatModel, "nomic-embed-text"), "prompt": input}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/api/embeddings"), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return nil, responseError(response)
+	}
+	var result struct {
+		Embedding []float64 `json:"embedding"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if len(result.Embedding) == 0 {
+		return nil, fmt.Errorf("ollama returned no vector")
+	}
+	return result.Embedding, nil
+}
+
+func embedGemini(ctx context.Context, endpoint Endpoint, input string) ([]float64, error) {
+	payload := map[string]any{"content": map[string]any{"parts": []map[string]string{{"text": input}}}}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	model := firstNonEmpty(endpoint.EmbeddingModel, "text-embedding-004")
+	requestURL := joinURL(endpoint, "/v1beta/models/"+url.PathEscape(model)+":embedContent")
+	parsed, err := url.Parse(requestURL)
+	if err != nil {
+		return nil, err
+	}
+	query := parsed.Query()
+	query.Set("key", endpoint.Credential)
+	parsed.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, parsed.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return nil, responseError(response)
+	}
+	var result struct {
+		Embedding struct {
+			Values []float64 `json:"values"`
+		} `json:"embedding"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if len(result.Embedding.Values) == 0 {
+		return nil, fmt.Errorf("gemini returned no vector")
+	}
+	return result.Embedding.Values, nil
+}
+
+func streamOllama(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc) error {
+	payload := map[string]any{
+		"model":    firstNonEmpty(options.Model, endpoint.ChatModel, "llama3.2"),
+		"messages": options.Messages,
+		"stream":   true,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/api/chat"), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return responseError(response)
+	}
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	for scanner.Scan() {
+		var chunk struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
+			continue
+		}
+		if chunk.Message.Content != "" {
+			if err := onDelta(chunk.Message.Content); err != nil {
+				return err
+			}
+		}
+	}
+	return scanner.Err()
+}
+
+func chatGemini(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc) error {
+	contents := make([]map[string]any, 0, len(options.Messages))
+	for _, message := range options.Messages {
+		role := "user"
+		if message.Role == "assistant" {
+			role = "model"
+		}
+		contents = append(contents, map[string]any{"role": role, "parts": []map[string]string{{"text": message.Content}}})
+	}
+	payload := map[string]any{
+		"contents": contents,
+		"generationConfig": map[string]any{
+			"temperature":     endpoint.Temperature,
+			"maxOutputTokens": endpoint.MaxOutputTokens,
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	model := firstNonEmpty(options.Model, endpoint.ChatModel, "gemini-2.5-flash")
+	requestURL := joinURL(endpoint, "/v1beta/models/"+url.PathEscape(model)+":generateContent")
+	parsed, err := url.Parse(requestURL)
+	if err != nil {
+		return err
+	}
+	query := parsed.Query()
+	query.Set("key", endpoint.Credential)
+	parsed.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, parsed.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return responseError(response)
+	}
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return err
+	}
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return fmt.Errorf("gemini returned no content")
+	}
+	return onDelta(result.Candidates[0].Content.Parts[0].Text)
+}
+
+func chatAnthropic(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc) error {
+	payload := map[string]any{
+		"model":       firstNonEmpty(options.Model, endpoint.ChatModel, "claude-3-5-haiku-latest"),
+		"messages":    options.Messages,
+		"max_tokens":  endpoint.MaxOutputTokens,
+		"temperature": endpoint.Temperature,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/v1/messages"), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("anthropic-version", firstNonEmpty(endpoint.APIVersion, "2023-06-01"))
+	if endpoint.Credential != "" {
+		request.Header.Set("x-api-key", endpoint.Credential)
+	}
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return responseError(response)
+	}
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return err
+	}
+	if len(result.Content) == 0 {
+		return fmt.Errorf("anthropic returned no content")
+	}
+	return onDelta(result.Content[0].Text)
+}
+
+func doRequest(request *http.Request, timeoutSeconds int) (*http.Response, error) {
+	timeout := time.Duration(timeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	return client.Do(request)
+}
+
+func responseError(response *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+	return fmt.Errorf("provider request failed (%d): %s", response.StatusCode, strings.TrimSpace(string(body)))
+}
+
+func joinURL(endpoint Endpoint, suffix string) string {
+	base := strings.TrimRight(endpoint.BaseURL, "/")
+	path := strings.Trim(endpoint.APIPath, "/")
+	if path != "" && !strings.HasSuffix(base, "/"+path) {
+		base += "/" + path
+	}
+	return base + "/" + strings.TrimLeft(suffix, "/")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
