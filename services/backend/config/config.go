@@ -7,6 +7,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-yaml"
 )
 
 type Config struct {
@@ -28,26 +30,76 @@ type OIDCConfig struct {
 	RedirectURL  string
 }
 
-func Load() Config {
-	jwtSecret := []byte(getenv("JUSTAI_JWT_SECRET", "justai-local-development-secret-change-me"))
-	encryptionKey := []byte(getenv("JUSTAI_ENCRYPTION_KEY", "justai-local-encryption-key-change-me"))
+type fileConfig struct {
+	Port                string         `yaml:"port"`
+	DatabaseURL         string         `yaml:"database_url"`
+	JWTSecret           string         `yaml:"jwt_secret"`
+	EncryptionKey       string         `yaml:"encryption_key"`
+	FrontendOrigins     []string       `yaml:"frontend_origins"`
+	OIDC                fileOIDCConfig `yaml:"oidc"`
+	MCPOAuthRedirectURL string         `yaml:"mcp_oauth_redirect_url"`
+	AllowPrivate        *bool          `yaml:"allow_private_targets"`
+	DevSeed             *bool          `yaml:"dev_seed"`
+}
+
+type fileOIDCConfig struct {
+	Issuer       string `yaml:"issuer"`
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	RedirectURL  string `yaml:"redirect_url"`
+}
+
+func Load(configPath string) (Config, error) {
+	fileValues, err := readFileConfig(configPath)
+	if err != nil {
+		return Config{}, err
+	}
+
+	jwtSecret := []byte(getenvOrFile("JUSTAI_JWT_SECRET", fileValues.JWTSecret, "justai-local-development-secret-change-me"))
+	encryptionKey := []byte(getenvOrFile("JUSTAI_ENCRYPTION_KEY", fileValues.EncryptionKey, "justai-local-encryption-key-change-me"))
 	encryptionSum := sha256.Sum256(encryptionKey)
 	return Config{
-		Port:            getenv("JUSTAI_PORT", "8080"),
-		DatabaseURL:     os.Getenv("JUSTAI_DATABASE_URL"),
+		Port:            getenvOrFile("JUSTAI_PORT", fileValues.Port, "8080"),
+		DatabaseURL:     getenvOrFile("JUSTAI_DATABASE_URL", fileValues.DatabaseURL, ""),
 		JWTSecret:       jwtSecret,
 		EncryptionKey:   encryptionSum[:],
-		FrontendOrigins: splitCSV(getenv("JUSTAI_FRONTEND_ORIGINS", "http://localhost:3000")),
+		FrontendOrigins: frontendOrigins(fileValues.FrontendOrigins),
 		OIDC: OIDCConfig{
-			Issuer:       os.Getenv("JUSTAI_OIDC_ISSUER"),
-			ClientID:     os.Getenv("JUSTAI_OIDC_CLIENT_ID"),
-			ClientSecret: os.Getenv("JUSTAI_OIDC_CLIENT_SECRET"),
-			RedirectURL:  os.Getenv("JUSTAI_OIDC_REDIRECT_URL"),
+			Issuer:       getenvOrFile("JUSTAI_OIDC_ISSUER", fileValues.OIDC.Issuer, ""),
+			ClientID:     getenvOrFile("JUSTAI_OIDC_CLIENT_ID", fileValues.OIDC.ClientID, ""),
+			ClientSecret: getenvOrFile("JUSTAI_OIDC_CLIENT_SECRET", fileValues.OIDC.ClientSecret, ""),
+			RedirectURL:  getenvOrFile("JUSTAI_OIDC_REDIRECT_URL", fileValues.OIDC.RedirectURL, ""),
 		},
-		MCPOAuthRedirectURL: getenv("JUSTAI_MCP_OAUTH_REDIRECT_URL", "http://localhost:8080/api/v1/mcp/oauth/callback"),
-		AllowPrivate:        getenvBool("JUSTAI_ALLOW_PRIVATE_TARGETS", false),
-		DevSeed:             getenvBool("JUSTAI_DEV_SEED", true),
+		MCPOAuthRedirectURL: getenvOrFile("JUSTAI_MCP_OAUTH_REDIRECT_URL", fileValues.MCPOAuthRedirectURL, "http://localhost:8080/api/v1/mcp/oauth/callback"),
+		AllowPrivate:        getenvBoolOrFile("JUSTAI_ALLOW_PRIVATE_TARGETS", fileValues.AllowPrivate, false),
+		DevSeed:             getenvBoolOrFile("JUSTAI_DEV_SEED", fileValues.DevSeed, true),
+	}, nil
+}
+
+func readFileConfig(configPath string) (fileConfig, error) {
+	if strings.TrimSpace(configPath) == "" {
+		return fileConfig{}, nil
 	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fileConfig{}, fmt.Errorf("read config file %q: %w", configPath, err)
+	}
+	var values fileConfig
+	if err := yaml.Unmarshal(data, &values); err != nil {
+		return fileConfig{}, fmt.Errorf("parse config file %q: %w", configPath, err)
+	}
+	return values, nil
+}
+
+func frontendOrigins(fileValues []string) []string {
+	if value := strings.TrimSpace(os.Getenv("JUSTAI_FRONTEND_ORIGINS")); value != "" {
+		return splitCSV(value)
+	}
+	if len(fileValues) > 0 {
+		return append([]string(nil), fileValues...)
+	}
+	return []string{"http://localhost:3000"}
 }
 
 func (c Config) OIDCEnabled() bool {
@@ -61,23 +113,28 @@ func (c Config) Address() string {
 	return fmt.Sprintf(":%s", c.Port)
 }
 
-func getenv(key, fallback string) string {
+func getenvOrFile(key, fileValue, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(fileValue); value != "" {
 		return value
 	}
 	return fallback
 }
 
-func getenvBool(key string, fallback bool) bool {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
+func getenvBoolOrFile(key string, fileValue *bool, fallback bool) bool {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err == nil {
+			return parsed
+		}
 		return fallback
 	}
-	parsed, err := strconv.ParseBool(value)
-	if err != nil {
-		return fallback
+	if fileValue != nil {
+		return *fileValue
 	}
-	return parsed
+	return fallback
 }
 
 func splitCSV(value string) []string {

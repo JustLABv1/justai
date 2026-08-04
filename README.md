@@ -14,9 +14,12 @@ JustAI is the JustLAB workspace for routing chat, transcription, retrieval, and 
 
    ```bash
    cd services/backend
-   export JUSTAI_DATABASE_URL='postgres://justai:justai@localhost:54329/justai?sslmode=disable'
-   go run .
+   cp config.example.yaml config.yaml
+   go run . --config ./config.yaml
    ```
+
+   The backend also accepts the short form `go run . -c ./config.yaml`.
+   YAML values are loaded first; non-empty `JUSTAI_*` environment variables override them.
 
 3. Start the frontend in another terminal:
 

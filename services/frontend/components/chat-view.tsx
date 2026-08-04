@@ -15,7 +15,15 @@ import {
 } from "@/components/ui/attachment"
 import { Badge } from "@/components/ui/badge"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
-import { Message, MessageAvatar, MessageContent } from "@/components/ui/message"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Markdown } from "@/components/markdown"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import {
+  Message,
+  MessageAvatar,
+  MessageContent,
+  MessageHeader,
+} from "@/components/ui/message"
 import {
   MessageScroller,
   MessageScrollerContent,
@@ -25,7 +33,14 @@ import {
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import { api, socketURL } from "@/lib/api"
-import type { ChatMessage, Citation, Endpoint, ViewId } from "@/lib/types"
+import type {
+  ChatMessage,
+  Citation,
+  Conversation,
+  Endpoint,
+  User,
+  ViewId,
+} from "@/lib/types"
 
 type SocketEnvelope = {
   type: string
@@ -33,15 +48,27 @@ type SocketEnvelope = {
 }
 
 type Props = {
+  conversationId: string | null
   endpoints: Endpoint[]
+  user: Pick<User, "displayName" | "email">
+  userInitials: string
+  onConversationCreated?: (conversation: Conversation) => void
+  onConversationUpdated?: () => void
   onNavigate?: (view: ViewId) => void
 }
 
-const demoResponse =
-  "This is a local demo response. Start the Go backend and connect an endpoint to stream a real model response."
-
-export function ChatView({ endpoints, onNavigate }: Props) {
+export function ChatView({
+  conversationId,
+  endpoints,
+  user,
+  userInitials,
+  onConversationCreated,
+  onConversationUpdated,
+  onNavigate,
+}: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [chatError, setChatError] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [connectionState, setConnectionState] = useState("Ready")
   const [activeAssistantId, setActiveAssistantId] = useState("")
@@ -50,9 +77,10 @@ export function ChatView({ endpoints, onNavigate }: Props) {
   const [transcriptionStatus, setTranscriptionStatus] = useState("Ready")
   const socketRef = useRef<WebSocket | null>(null)
   const transcriptionSocketRef = useRef<WebSocket | null>(null)
+  const conversationIdRef = useRef<string | null>(conversationId)
+  const createdConversationIdRef = useRef<string | null>(null)
   const assistantIdRef = useRef("")
   const requestRef = useRef(0)
-  const responseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null)
@@ -80,10 +108,63 @@ export function ChatView({ endpoints, onNavigate }: Props) {
   useEffect(() => {
     return () => {
       socketRef.current?.close()
-      if (responseTimerRef.current) clearTimeout(responseTimerRef.current)
       cleanupTranscriptionResources()
     }
   }, [cleanupTranscriptionResources])
+
+  useEffect(() => {
+    const nextConversationId = conversationId ?? null
+    conversationIdRef.current = nextConversationId
+
+    if (createdConversationIdRef.current === nextConversationId) {
+      createdConversationIdRef.current = null
+      return
+    }
+
+    let cancelled = false
+    socketRef.current?.close()
+    socketRef.current = null
+    assistantIdRef.current = ""
+
+    queueMicrotask(() => {
+      if (cancelled) return
+      setMessages([])
+      setStreaming(false)
+      setActiveAssistantId("")
+      setConnectionState("Ready")
+      setChatError("")
+
+      if (!nextConversationId) {
+        setHistoryLoading(false)
+        return
+      }
+
+      setHistoryLoading(true)
+      void api
+        .get<{ messages: ChatMessage[] }>(
+          `/api/v1/conversations/${nextConversationId}/messages`
+        )
+        .then((result) => {
+          if (cancelled) return
+          setMessages(result.messages)
+        })
+        .catch((caught) => {
+          if (cancelled) return
+          setChatError(
+            caught instanceof Error
+              ? caught.message
+              : "The conversation history could not be loaded."
+          )
+        })
+        .finally(() => {
+          if (!cancelled) setHistoryLoading(false)
+        })
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [conversationId])
 
   const updateAssistant = useCallback(
     (update: (message: ChatMessage) => ChatMessage) => {
@@ -106,6 +187,10 @@ export function ChatView({ endpoints, onNavigate }: Props) {
       }
 
       const data = envelope.data ?? {}
+      const serverConversationId = data.conversationId
+      if (typeof serverConversationId === "string") {
+        conversationIdRef.current = serverConversationId
+      }
       if (envelope.type === "session.ready") setConnectionState("Connected")
       if (envelope.type === "message.accepted") setConnectionState("Thinking")
       if (envelope.type === "message.delta") {
@@ -124,22 +209,25 @@ export function ChatView({ endpoints, onNavigate }: Props) {
       if (envelope.type === "message.completed") {
         setStreaming(false)
         setConnectionState("Connected")
+        setChatError("")
         if (typeof data.content === "string")
           updateAssistant((message) => ({
             ...message,
             content: data.content as string,
           }))
+        onConversationUpdated?.()
       }
       if (envelope.type === "error") {
         setStreaming(false)
         setConnectionState("Needs attention")
-        updateAssistant((message) => ({
-          ...message,
-          content: String(data.message ?? "The model returned an error."),
-        }))
+        setChatError(String(data.message ?? "The model returned an error."))
+        setMessages((current) =>
+          current.filter((message) => message.id !== assistantIdRef.current)
+        )
+        setActiveAssistantId("")
       }
     },
-    [updateAssistant]
+    [onConversationUpdated, updateAssistant]
   )
 
   const handleTranscriptionMessage = useCallback(
@@ -261,9 +349,11 @@ export function ChatView({ endpoints, onNavigate }: Props) {
 
       const audioContextConstructor =
         window.AudioContext ??
-        (window as Window & {
-          webkitAudioContext?: typeof AudioContext
-        }).webkitAudioContext
+        (
+          window as Window & {
+            webkitAudioContext?: typeof AudioContext
+          }
+        ).webkitAudioContext
       if (!audioContextConstructor) {
         throw new Error("This browser does not support the Web Audio API")
       }
@@ -307,7 +397,7 @@ export function ChatView({ endpoints, onNavigate }: Props) {
     onNavigate?.(action)
   }
 
-  async function openChatSocket() {
+  async function openChatSocket(activeConversationId: string) {
     if (socketRef.current?.readyState === WebSocket.OPEN)
       return socketRef.current
 
@@ -330,7 +420,10 @@ export function ChatView({ endpoints, onNavigate }: Props) {
       JSON.stringify({
         type: "session.start",
         requestId: "session",
-        data: { endpointId: activeEndpoint?.id ?? "" },
+        data: {
+          conversationId: activeConversationId,
+          endpointId: activeEndpoint?.id ?? "",
+        },
       })
     )
     return socket
@@ -349,34 +442,70 @@ export function ChatView({ endpoints, onNavigate }: Props) {
       { id: `user-${requestId}`, role: "user", content: prompt },
       { id: assistantId, role: "assistant", content: "" },
     ])
+    setChatError("")
     setStreaming(true)
     setConnectionState("Connecting")
 
     try {
-      const socket = await openChatSocket()
+      let activeConversationId = conversationIdRef.current
+      if (!activeConversationId) {
+        const response = await api.post<{ conversation: Conversation }>(
+          "/api/v1/conversations"
+        )
+        activeConversationId = response.conversation.id
+        conversationIdRef.current = activeConversationId
+        createdConversationIdRef.current = activeConversationId
+        onConversationCreated?.(response.conversation)
+      }
+
+      const socket = await openChatSocket(activeConversationId)
       socket.send(
         JSON.stringify({
           type: "message.send",
           requestId,
           data: {
+            conversationId: activeConversationId,
             content: prompt,
             endpointId: activeEndpoint?.id ?? "",
           },
         })
       )
-    } catch {
-      setConnectionState("Demo response")
-      responseTimerRef.current = setTimeout(() => {
-        setStreaming(false)
-        updateAssistant((message) => ({ ...message, content: demoResponse }))
-      }, 350)
+    } catch (caught) {
+      setStreaming(false)
+      setConnectionState("Needs attention")
+      setChatError(
+        caught instanceof Error
+          ? caught.message
+          : "The message could not be sent."
+      )
+      setMessages((current) =>
+        current.filter((message) => message.id !== assistantIdRef.current)
+      )
+      setActiveAssistantId("")
     }
+  }
+
+  if (historyLoading) {
+    return (
+      <div className="flex min-h-[calc(100svh-4rem)] items-center justify-center">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner />
+          Loading conversation…
+        </div>
+      </div>
+    )
   }
 
   if (messages.length === 0) {
     return (
       <div className="flex min-h-[calc(100svh-4rem)] items-center justify-center">
         <div className="w-full">
+          {chatError && (
+            <Alert className="mx-auto mb-4 max-w-3xl" variant="destructive">
+              <AlertTitle>Chat unavailable</AlertTitle>
+              <AlertDescription>{chatError}</AlertDescription>
+            </Alert>
+          )}
           {transcript && (
             <TranscriptionCard
               recording={recording}
@@ -399,27 +528,40 @@ export function ChatView({ endpoints, onNavigate }: Props) {
       <MessageScrollerProvider>
         <MessageScroller className="min-h-0 flex-1">
           <MessageScrollerViewport>
-            <MessageScrollerContent className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-8">
+            <MessageScrollerContent className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 lg:px-12">
               {messages.map((message) => (
                 <MessageScrollerItem key={message.id}>
                   <Message align={message.role === "user" ? "end" : "start"}>
-                    <MessageAvatar
-                      className={
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-secondary text-secondary-foreground"
-                      }
-                    >
-                      {message.role === "user" ? (
-                        <span className="text-xs font-semibold">You</span>
-                      ) : (
-                        <Bot aria-hidden="true" />
-                      )}
+                    <MessageAvatar className="bg-transparent">
+                      <Avatar
+                        aria-label={
+                          message.role === "user"
+                            ? `${user.displayName} avatar`
+                            : "JustAI avatar"
+                        }
+                        size="sm"
+                      >
+                        <AvatarFallback
+                          className={
+                            message.role === "user"
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-secondary text-secondary-foreground"
+                          }
+                        >
+                          {message.role === "user" ? (
+                            userInitials
+                          ) : (
+                            <Bot aria-hidden="true" />
+                          )}
+                        </AvatarFallback>
+                      </Avatar>
                     </MessageAvatar>
                     <MessageContent>
-                      <div className="flex items-center gap-2 px-3 text-xs text-muted-foreground">
+                      <MessageHeader>
                         <span>
-                          {message.role === "user" ? "You" : "JustAI"}
+                          {message.role === "user"
+                            ? user.displayName
+                            : "JustAI"}
                         </span>
                         {message.role === "assistant" && (
                           <Badge
@@ -429,16 +571,17 @@ export function ChatView({ endpoints, onNavigate }: Props) {
                             assistant
                           </Badge>
                         )}
-                      </div>
+                      </MessageHeader>
                       <Bubble
                         align={message.role === "user" ? "end" : "start"}
                         variant={message.role === "user" ? "default" : "muted"}
                       >
-                        <BubbleContent className="whitespace-pre-wrap">
-                          {message.content ||
-                            (streaming && message.id === activeAssistantId ? (
-                              <Spinner />
-                            ) : null)}
+                        <BubbleContent>
+                          {message.content ? (
+                            <Markdown>{message.content}</Markdown>
+                          ) : streaming && message.id === activeAssistantId ? (
+                            <Spinner />
+                          ) : null}
                         </BubbleContent>
                       </Bubble>
                       {!!message.citations?.length && (
@@ -463,7 +606,13 @@ export function ChatView({ endpoints, onNavigate }: Props) {
         </MessageScroller>
       </MessageScrollerProvider>
 
-      <div className="mx-auto w-full max-w-3xl px-4 pb-4 sm:px-8 sm:pb-6">
+      <div className="mx-auto w-full max-w-5xl px-4 pb-4 sm:px-8 sm:pb-6 lg:px-12">
+        {chatError && (
+          <Alert className="mb-3" variant="destructive">
+            <AlertTitle>Chat unavailable</AlertTitle>
+            <AlertDescription>{chatError}</AlertDescription>
+          </Alert>
+        )}
         {transcript && (
           <TranscriptionCard
             recording={recording}
@@ -508,11 +657,19 @@ function TranscriptionCard({
       </AttachmentContent>
       <AttachmentActions>
         <AttachmentAction
-          aria-label={recording ? "Stop live transcription" : "Start live transcription"}
+          aria-label={
+            recording ? "Stop live transcription" : "Start live transcription"
+          }
           onClick={onToggle}
-          title={recording ? "Stop live transcription" : "Start live transcription"}
+          title={
+            recording ? "Stop live transcription" : "Start live transcription"
+          }
         >
-          {recording ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
+          {recording ? (
+            <MicOff aria-hidden="true" />
+          ) : (
+            <Mic aria-hidden="true" />
+          )}
         </AttachmentAction>
       </AttachmentActions>
     </Attachment>
@@ -551,7 +708,11 @@ function encodePCM16(input: Float32Array) {
   const view = new DataView(buffer)
   for (let index = 0; index < input.length; index++) {
     const sample = Math.max(-1, Math.min(1, input[index]))
-    view.setInt16(index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+    view.setInt16(
+      index * 2,
+      sample < 0 ? sample * 0x8000 : sample * 0x7fff,
+      true
+    )
   }
   return buffer
 }

@@ -51,7 +51,9 @@ func (a *App) register(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	_ = a.issueSession(c, user)
+	if err := a.issueSession(c, user); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+	}
 }
 
 func (a *App) login(c *gin.Context) {
@@ -189,7 +191,9 @@ func (a *App) oidcCallback(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	_ = a.issueSession(c, user)
+	if err := a.issueSession(c, user); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+	}
 }
 
 func (a *App) upsertOIDCUser(ctx context.Context, subject, email, name string) (models.User, error) {

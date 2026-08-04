@@ -72,9 +72,19 @@ export type Citation = {
   snippet: string
 }
 
+export type Conversation = {
+  id: string
+  title: string
+  endpointId?: string | null
+  createdAt: string
+  updatedAt: string
+  messageCount: number
+}
+
 export type ChatMessage = {
   id: string
   role: "user" | "assistant"
   content: string
   citations?: Citation[]
+  createdAt?: string
 }

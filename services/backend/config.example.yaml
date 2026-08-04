@@ -1,0 +1,21 @@
+# Copy this file to config.yaml and start the backend with:
+#   go run . --config ./config.yaml
+#
+# config.yaml is gitignored. Keep real credentials out of the repository.
+
+port: "8080"
+database_url: "postgres://justai:justai@localhost:54329/justai?sslmode=disable"
+jwt_secret: "replace-with-a-long-development-secret"
+encryption_key: "replace-with-a-long-development-encryption-key"
+frontend_origins:
+  - "http://localhost:3000"
+
+oidc:
+  issuer: ""
+  client_id: ""
+  client_secret: ""
+  redirect_url: ""
+
+mcp_oauth_redirect_url: "http://localhost:8080/api/v1/mcp/oauth/callback"
+allow_private_targets: false
+dev_seed: true

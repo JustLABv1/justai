@@ -203,9 +203,10 @@ func (a *App) runChatSocket(ctx *gin.Context, connection *websocket.Conn, userID
 			}
 			conversationID := state.conversationID
 			if data.ConversationID != "" {
-				conversationID, err = uuid.Parse(data.ConversationID)
+				conversationID, err = a.ensureConversation(ctx, userID, organizationID, data.ConversationID)
 				if err != nil {
-					conversationID = uuid.Nil
+					_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": err.Error()}})
+					continue
 				}
 			}
 			if conversationID == uuid.Nil {
@@ -263,6 +264,14 @@ func (a *App) streamChatMessage(ctx context.Context, connection *websocket.Conn,
 		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
 		return
 	}
+	if _, err := a.DB.ExecContext(ctx, `
+		UPDATE conversations
+		SET title = CASE WHEN title = $2 THEN $3 ELSE title END, updated_at = now()
+		WHERE id = $1
+	`, conversationID, defaultConversationTitle, conversationTitle(content)); err != nil {
+		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
+		return
+	}
 	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
 	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
 	citations, err := rag.Search(ctx, a.DB, organizationID, userID, content, 6)
@@ -308,12 +317,17 @@ func (a *App) streamChatMessage(ctx context.Context, connection *websocket.Conn,
 func (a *App) ensureConversation(ctx context.Context, userID, organizationID uuid.UUID, rawID string) (uuid.UUID, error) {
 	if rawID != "" {
 		id, err := uuid.Parse(rawID)
-		if err == nil {
-			var exists bool
-			if err := a.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, id, userID, organizationID).Scan(&exists); err == nil && exists {
-				return id, nil
-			}
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("invalid conversation id")
 		}
+		var exists bool
+		if err := a.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, id, userID, organizationID).Scan(&exists); err != nil {
+			return uuid.Nil, err
+		}
+		if !exists {
+			return uuid.Nil, fmt.Errorf("conversation not found")
+		}
+		return id, nil
 	}
 	var id uuid.UUID
 	err := a.DB.QueryRowContext(ctx, `INSERT INTO conversations (user_id, organization_id) VALUES ($1, $2) RETURNING id`, userID, organizationID).Scan(&id)
@@ -532,27 +546,4 @@ func (a *App) proxyRealtimeTranscription(ctx context.Context, connection *websoc
 			return err
 		}
 	}
-}
-
-func (a *App) listConversations(c *gin.Context) {
-	principal, _ := middleware.GetPrincipal(c)
-	organizationID, _ := middleware.GetOrganizationID(c)
-	rows, err := a.DB.QueryContext(c, `SELECT id, title, COALESCE(endpoint_id::text, ''), updated_at FROM conversations WHERE user_id = $1 AND organization_id = $2 ORDER BY updated_at DESC LIMIT 50`, principal.UserID, organizationID)
-	if err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
-	}
-	defer rows.Close()
-	result := []gin.H{}
-	for rows.Next() {
-		var id uuid.UUID
-		var title, endpointID string
-		var updatedAt time.Time
-		if err := rows.Scan(&id, &title, &endpointID, &updatedAt); err != nil {
-			writeError(c, http.StatusInternalServerError, err)
-			return
-		}
-		result = append(result, gin.H{"id": id, "title": title, "endpointId": endpointID, "updatedAt": updatedAt})
-	}
-	c.JSON(http.StatusOK, gin.H{"conversations": result})
 }

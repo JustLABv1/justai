@@ -53,7 +53,6 @@ func (a *App) Router() *gin.Engine {
 	protected.GET("/auth/me", a.me)
 	protected.GET("/organizations", a.listOrganizations)
 	protected.POST("/auth/logout", a.logout)
-	protected.POST("/ws/tickets", a.createWSTicket)
 	protected.GET("/providers/supported", a.supportedProviders)
 	protected.GET("/mcp/oauth/callback", a.mcpOAuthCallback)
 
@@ -64,6 +63,7 @@ func (a *App) Router() *gin.Engine {
 	org.PATCH("/endpoints/:id", middleware.RequireOrgRole("owner", "admin"), a.updateEndpoint)
 	org.DELETE("/endpoints/:id", middleware.RequireOrgRole("owner", "admin"), a.deleteEndpoint)
 	org.POST("/endpoints/:id/test", a.testEndpoint)
+	org.POST("/ws/tickets", a.createWSTicket)
 	org.GET("/knowledge/sources", a.listKnowledgeSources)
 	org.POST("/knowledge/sources", a.createKnowledgeSource)
 	org.POST("/knowledge/sources/:id/reindex", a.reindexKnowledgeSource)
@@ -77,6 +77,8 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/mcp/servers/:id/tools/:tool/call", a.callMCPTool)
 	org.GET("/mcp/servers/:id/oauth/start", a.mcpOAuthStart)
 	org.GET("/conversations", a.listConversations)
+	org.POST("/conversations", a.createConversation)
+	org.GET("/conversations/:id/messages", a.listConversationMessages)
 
 	protected.GET("/ws/chat", a.chatWebSocket)
 	protected.GET("/ws/transcription", a.transcriptionWebSocket)

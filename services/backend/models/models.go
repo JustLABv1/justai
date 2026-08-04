@@ -21,6 +21,26 @@ type Organization struct {
 	Role string    `json:"role,omitempty"`
 }
 
+type Conversation struct {
+	ID             uuid.UUID  `json:"id"`
+	UserID         uuid.UUID  `json:"-"`
+	OrganizationID uuid.UUID  `json:"-"`
+	Title          string     `json:"title"`
+	EndpointID     *uuid.UUID `json:"endpointId,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	MessageCount   int        `json:"messageCount"`
+}
+
+type Message struct {
+	ID             uuid.UUID  `json:"id"`
+	ConversationID uuid.UUID  `json:"conversationId"`
+	Role           string     `json:"role"`
+	Content        string     `json:"content"`
+	Citations      []Citation `json:"citations,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+}
+
 type Endpoint struct {
 	ID                   uuid.UUID       `json:"id"`
 	ScopeType            string          `json:"scopeType"`

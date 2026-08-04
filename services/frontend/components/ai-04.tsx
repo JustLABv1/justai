@@ -38,11 +38,7 @@ interface AttachedFile {
   preview?: string
 }
 
-export type Ai04Action =
-  | "endpoints"
-  | "knowledge"
-  | "mcp"
-  | "transcription"
+export type Ai04Action = "endpoints" | "knowledge" | "mcp" | "transcription"
 
 const ACTIONS = [
   { id: "endpoints", icon: IconPlus, label: "Add endpoint" },
@@ -165,7 +161,7 @@ export default function Ai04({
       <div
         className={cn(
           "relative z-10 mx-auto flex w-full max-w-2xl flex-col content-center",
-          compact && "max-w-3xl"
+          compact && "max-w-5xl"
         )}
       >
         <form
@@ -212,13 +208,21 @@ export default function Ai04({
               ))}
             </div>
           )}
-          <Textarea
-            className="max-h-50 min-h-12 resize-none rounded-none border-none bg-transparent! p-0 text-sm shadow-none focus-visible:border-transparent focus-visible:ring-0"
-            onChange={handleTextareaChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask anything"
-            value={prompt}
-          />
+          <div className="relative">
+            <Textarea
+              aria-label="Ask anything"
+              className="max-h-50 min-h-12 resize-none rounded-none border-none bg-transparent! px-1.5 py-1.5 text-sm shadow-none placeholder:text-transparent focus-visible:border-transparent focus-visible:ring-0"
+              onChange={handleTextareaChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask anything"
+              value={prompt}
+            />
+            {!prompt && (
+              <span className="pointer-events-none absolute inset-x-1.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                Ask anything
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center gap-1">
             <div className="flex items-end gap-0.5 sm:gap-1">

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"log"
 	"net/http"
 	"time"
@@ -15,7 +16,15 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	var configPath string
+	flag.StringVar(&configPath, "c", "", "path to a YAML config file")
+	flag.StringVar(&configPath, "config", "", "path to a YAML config file")
+	flag.Parse()
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx := context.Background()
 	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
