@@ -3,21 +3,16 @@
 import {
   Check,
   Copy,
-  Headphones,
   LoaderCircle,
-  Mic,
-  Pause,
   Play,
   Radio,
-  RefreshCw,
-  Share2,
-  Square,
-  Users,
-  X,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { ListeningOrb, type ListeningOrbState } from "@/components/listening-orb"
+import {
+  LiveTranscriptionOrbit,
+  type LiveTranscriptionSnapshot,
+} from "@/components/live-transcription-orbit"
 import {
   Dialog,
   DialogContent,
@@ -27,16 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -49,7 +35,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { api, socketURL } from "@/lib/api"
 import type {
@@ -59,17 +44,10 @@ import type {
   TranscriptionSegment,
   TranscriptionSession,
   TranscriptionSource,
-  TranscriptionSpeaker,
   User,
 } from "@/lib/types"
 
-type Snapshot = {
-  session: TranscriptionSession
-  sources: TranscriptionSource[]
-  speakers: TranscriptionSpeaker[]
-  segments: TranscriptionSegment[]
-  recordings: TranscriptionRecording[]
-}
+type Snapshot = LiveTranscriptionSnapshot
 
 type SocketEvent = {
   type: string
@@ -95,6 +73,8 @@ export function LiveTranscriptionView({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [partial, setPartial] = useState("")
+  const [partialSourceId, setPartialSourceId] = useState<string | null>(null)
+  const [partialSpeakerId, setPartialSpeakerId] = useState<string | null>(null)
   const [level, setLevel] = useState(0)
   const [createOpen, setCreateOpen] = useState(!sessionId)
   const [shareOpen, setShareOpen] = useState(false)
@@ -240,12 +220,16 @@ export function LiveTranscriptionView({
       }
       if (event.type === "transcription.partial") {
         setPartial(String(data.text ?? ""))
+        setPartialSourceId(data.sourceId ? String(data.sourceId) : null)
+        setPartialSpeakerId(data.speakerId ? String(data.speakerId) : null)
         return
       }
       if (event.type === "transcription.final") {
         const segment = data.segment as TranscriptionSegment | undefined
         if (!segment) return
         setPartial("")
+        setPartialSourceId(null)
+        setPartialSpeakerId(null)
         setSnapshot((current) => {
           if (!current) return current
           const hasSegment = current.segments.some((item) => item.id === segment.id)
@@ -480,6 +464,9 @@ export function LiveTranscriptionView({
         if (cancelled) return
         closeSockets()
         setSnapshot(null)
+        setPartial("")
+        setPartialSourceId(null)
+        setPartialSpeakerId(null)
         setCreateOpen(true)
       })
       return () => {
@@ -524,29 +511,42 @@ export function LiveTranscriptionView({
 
   const ensureCapture = async () => {
     if (!snapshot || capturing) return
-    let source = snapshot.sources.find((item) => item.kind === "browser")
-    if (!source) {
-      const result = await api.post<{ source: TranscriptionSource }>(`/api/v1/transcription/sessions/${snapshot.session.id}/sources`, { name: "This laptop", kind: "browser", deviceLabel: selectedDeviceName })
-      source = result.source
-      setSnapshot((current) => current ? { ...current, sources: [...current.sources, source as TranscriptionSource] } : current)
+    try {
+      let source = snapshot.sources.find((item) => item.kind === "browser")
+      if (!source) {
+        const result = await api.post<{ source: TranscriptionSource }>(`/api/v1/transcription/sessions/${snapshot.session.id}/sources`, { name: "This laptop", kind: "browser", deviceLabel: selectedDeviceName })
+        source = result.source
+        setSnapshot((current) => current ? { ...current, sources: [...current.sources, source as TranscriptionSource] } : current)
+      }
+      await startCapture(snapshot.session, source)
+      await api.post(`/api/v1/transcription/sessions/${snapshot.session.id}/resume`)
+      setSnapshot((current) => current ? { ...current, session: { ...current.session, status: "live" } } : current)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The microphone could not be started.")
     }
-    await startCapture(snapshot.session, source)
-    await api.post(`/api/v1/transcription/sessions/${snapshot.session.id}/resume`)
   }
 
   const pauseOrResume = async () => {
     if (!snapshot) return
-    const action = snapshot.session.status === "paused" ? "resume" : "pause"
-    await api.post(`/api/v1/transcription/sessions/${snapshot.session.id}/${action}`)
-    setSnapshot((current) => current ? { ...current, session: { ...current.session, status: action === "pause" ? "paused" : "live" } } : current)
+    try {
+      const action = snapshot.session.status === "paused" ? "resume" : "pause"
+      await api.post(`/api/v1/transcription/sessions/${snapshot.session.id}/${action}`)
+      setSnapshot((current) => current ? { ...current, session: { ...current.session, status: action === "pause" ? "paused" : "live" } } : current)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The transcription session could not be updated.")
+    }
   }
 
   const stopSession = async () => {
     if (!snapshot) return
-    closeCapture()
-    await api.post(`/api/v1/transcription/sessions/${snapshot.session.id}/stop`)
-    onSessionsChanged()
-    await loadSession(snapshot.session.id)
+    try {
+      closeCapture()
+      await api.post(`/api/v1/transcription/sessions/${snapshot.session.id}/stop`)
+      onSessionsChanged()
+      await loadSession(snapshot.session.id)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The transcription session could not be stopped.")
+    }
   }
 
   const refreshJoinRequests = async () => {
@@ -561,12 +561,16 @@ export function LiveTranscriptionView({
     await refreshJoinRequests()
   }
 
-  const renameSpeaker = async (speaker: TranscriptionSpeaker) => {
+  const renameSpeaker = async (speakerId: string, displayName: string) => {
     if (!snapshot) return
-    const displayName = window.prompt("Name this speaker", speaker.displayName || speaker.label)
-    if (displayName === null) return
-    await api.patch(`/api/v1/transcription/sessions/${snapshot.session.id}/speakers/${speaker.id}`, { displayName })
-    setSnapshot((current) => current ? { ...current, speakers: current.speakers.map((item) => item.id === speaker.id ? { ...item, displayName } : item) } : current)
+    const trimmedName = displayName.trim()
+    if (!trimmedName) return
+    try {
+      await api.patch(`/api/v1/transcription/sessions/${snapshot.session.id}/speakers/${speakerId}`, { displayName: trimmedName })
+      setSnapshot((current) => current ? { ...current, speakers: current.speakers.map((item) => item.id === speakerId ? { ...item, displayName: trimmedName } : item) } : current)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The speaker name could not be saved.")
+    }
   }
 
   const copyJoinCode = async () => {
@@ -586,16 +590,6 @@ export function LiveTranscriptionView({
       setError(caught instanceof Error ? caught.message : "A room code could not be generated.")
     }
   }
-
-  const formatOffset = (value: number) => {
-    const seconds = Math.max(0, Math.floor(value / 1000))
-    return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
-  }
-
-  const orbState: ListeningOrbState = error ? "error" : snapshot?.session.status === "paused" ? "paused" : capturing ? level > 0.12 ? "speaking" : "listening" : "idle"
-  const latestSource = snapshot?.sources.slice().sort((left, right) => right.signalLevel - left.signalLevel)[0]
-  const speakerById = new Map((snapshot?.speakers ?? []).map((speaker) => [speaker.id, speaker]))
-  const sourceById = new Map((snapshot?.sources ?? []).map((source) => [source.id, source]))
 
   if (!sessionId && sessions.length > 0 && !createOpen) {
     return null
@@ -625,149 +619,24 @@ export function LiveTranscriptionView({
           </Button>
         </Empty>
       ) : (
-        <>
-          <header className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Headphones aria-hidden="true" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h1 className="truncate font-heading text-xl font-semibold tracking-tight">{snapshot.session.title}</h1>
-                  <Badge variant={snapshot.session.status === "live" ? "default" : "secondary"}>{snapshot.session.status}</Badge>
-                </div>
-                <p className="truncate text-sm text-muted-foreground">{snapshot.session.language === "auto" ? "Automatic language" : snapshot.session.language} · {snapshot.session.segmentCount} finalized segments · Hosted by {user.displayName}</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {snapshot.session.status !== "completed" && <Button onClick={() => void (snapshot.session.joinCode ? setShareOpen(true) : rotateJoinCode())} size="sm" variant="outline"><Share2 data-icon="inline-start" /> Share room</Button>}
-              {!capturing && snapshot.session.status !== "completed" && (
-                <Button onClick={() => void ensureCapture()} size="sm">
-                  <Mic data-icon="inline-start" /> Start microphone
-                </Button>
-              )}
-              {capturing && snapshot.session.status !== "completed" && (
-                <Button onClick={() => void pauseOrResume()} size="sm" variant="outline">
-                  {snapshot.session.status === "paused" ? <Play data-icon="inline-start" /> : <Pause data-icon="inline-start" />}
-                  {snapshot.session.status === "paused" ? "Resume" : "Pause"}
-                </Button>
-              )}
-              {snapshot.session.status !== "completed" && (
-                <Button onClick={() => void stopSession()} size="sm" variant="destructive">
-                  <Square data-icon="inline-start" /> Stop
-                </Button>
-              )}
-            </div>
-          </header>
-
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-            <div className="flex min-h-0 flex-col gap-4">
-              <Card className="relative min-h-[20rem] flex-1 overflow-hidden bg-gradient-to-br from-primary/5 via-card to-card">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,hsl(var(--primary)/0.08),transparent_56%)]" />
-                <CardContent className="relative flex min-h-[20rem] flex-col items-center justify-center py-8">
-                  <ListeningOrb className="max-h-[23rem]" level={level} state={orbState} />
-                  <div className="-mt-5 text-center">
-                    <p className="font-medium">{capturing ? (latestSource?.name ?? "Listening") : snapshot.session.status === "completed" ? "Session complete" : "Ready to listen"}</p>
-                    <p className="text-sm text-muted-foreground">{capturing ? "Live audio is being processed" : snapshot.session.status === "paused" ? "Capture is paused" : error ? "Check the provider connection" : "Start a microphone to begin"}</p>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="min-h-0 flex-[1.1]">
-                <CardHeader className="flex-row items-center justify-between border-b">
-                  <div>
-                    <CardTitle>Live transcript</CardTitle>
-                    <CardDescription>Final text stays in order; the last line is provisional while the provider listens.</CardDescription>
-                  </div>
-                  {loading && <Spinner />}
-                </CardHeader>
-                <CardContent className="min-h-0 flex-1 p-0">
-                  <div className="h-[22rem] overflow-y-auto p-4 lg:h-[calc(100%-1px)]" ref={transcriptRef}>
-                    {snapshot.segments.length === 0 && !partial ? (
-                      <div className="flex h-full min-h-40 items-center justify-center text-center text-sm text-muted-foreground">The transcript will appear here as people speak.</div>
-                    ) : (
-                      <div className="flex flex-col gap-4">
-                        {snapshot.segments.map((segment) => {
-                          const speaker = segment.speakerId ? speakerById.get(segment.speakerId) : undefined
-                          const source = segment.sourceId ? sourceById.get(segment.sourceId) : undefined
-                          return (
-                            <div className="flex gap-3" key={segment.id}>
-                              <Avatar className="mt-0.5 size-7 shrink-0">
-                                <AvatarFallback>{speaker?.displayName?.slice(0, 1) ?? speaker?.label?.slice(-1) ?? "·"}</AvatarFallback>
-                              </Avatar>
-                              <div className="min-w-0 flex-1">
-                                <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                  <span className="font-medium text-foreground">{speaker?.displayName || speaker?.label || "Unassigned speaker"}</span>
-                                  {source && <Badge variant="outline">{source.name}</Badge>}
-                                  <span>{formatOffset(segment.startOffsetMs)}</span>
-                                </div>
-                                <p className="whitespace-pre-wrap text-sm leading-6">{segment.text}</p>
-                              </div>
-                            </div>
-                          )
-                        })}
-                        {partial && <div className="border-l-2 border-primary/50 pl-3 text-sm leading-6 text-muted-foreground italic">{partial}</div>}
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <aside className="flex min-h-0 flex-col gap-4">
-              <Card>
-                <CardHeader className="flex-row items-center justify-between border-b">
-                  <div>
-                    <CardTitle className="flex items-center gap-2"><Mic data-icon="inline-start" /> Sources</CardTitle>
-                    <CardDescription>{snapshot.sources.length} microphone{snapshot.sources.length === 1 ? "" : "s"} in this room</CardDescription>
-                  </div>
-                  <Badge variant="outline">{capturing ? "local live" : "viewer"}</Badge>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2 pt-4">
-                  {snapshot.sources.length === 0 ? <p className="text-sm text-muted-foreground">No microphones have joined yet.</p> : snapshot.sources.map((source) => (
-                    <div className="rounded-xl border bg-muted/20 p-3" key={source.id}>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className={`size-2 shrink-0 rounded-full ${source.status === "connected" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
-                          <span className="truncate text-sm font-medium">{source.name}</span>
-                        </div>
-                        <span className="text-xs text-muted-foreground">{source.status}</span>
-                      </div>
-                      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-[width] duration-150" style={{ width: `${Math.round(source.signalLevel * 100)}%` }} /></div>
-                      {source.deviceLabel && <p className="mt-2 truncate text-xs text-muted-foreground">{source.deviceLabel}</p>}
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-
-              <Card className="min-h-0 flex-1">
-                <CardHeader className="flex-row items-center justify-between border-b">
-                  <div>
-                    <CardTitle className="flex items-center gap-2"><Users data-icon="inline-start" /> Speakers</CardTitle>
-                    <CardDescription>Anonymous labels can be corrected during review.</CardDescription>
-                  </div>
-                  <Badge variant="secondary">{snapshot.speakers.length}</Badge>
-                </CardHeader>
-                <CardContent className="flex min-h-32 flex-col gap-2 overflow-y-auto pt-4">
-                  {snapshot.speakers.length === 0 ? <p className="text-sm text-muted-foreground">Speaker labels will arrive after a short audio window.</p> : snapshot.speakers.map((speaker) => (
-                    <button className="flex items-center gap-3 rounded-xl border p-2 text-left transition-colors hover:bg-muted" key={speaker.id} onClick={() => void renameSpeaker(speaker)} type="button">
-                      <Avatar className="size-8"><AvatarFallback>{speaker.displayName?.slice(0, 1) ?? speaker.label.slice(-1)}</AvatarFallback></Avatar>
-                      <span className="min-w-0 flex-1 truncate text-sm">{speaker.displayName || speaker.label}</span>
-                      <span className="text-xs text-muted-foreground">Rename</span>
-                    </button>
-                  ))}
-                </CardContent>
-              </Card>
-
-              {joinRequests.some((request) => request.status === "pending") && <Card>
-                <CardHeader className="flex-row items-center justify-between border-b"><div><CardTitle>Join requests</CardTitle><CardDescription>Approve another microphone.</CardDescription></div><Button onClick={() => void refreshJoinRequests()} size="icon-sm" variant="ghost"><RefreshCw /></Button></CardHeader>
-                <CardContent className="flex flex-col gap-2 pt-4">{joinRequests.filter((request) => request.status === "pending").map((request) => <div className="flex items-center gap-2" key={request.id}><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{request.sourceName}</p><p className="truncate text-xs text-muted-foreground">{request.deviceLabel || "Unknown device"}</p></div><Button aria-label={`Approve ${request.sourceName}`} onClick={() => void setJoinRequest(request, "approve")} size="icon-sm" variant="outline"><Check /></Button><Button aria-label={`Deny ${request.sourceName}`} onClick={() => void setJoinRequest(request, "deny")} size="icon-sm" variant="ghost"><X /></Button></div>)}</CardContent>
-              </Card>}
-
-              {snapshot.recordings.length > 0 && <Card><CardHeader><CardTitle>Audio tracks</CardTitle><CardDescription>Encrypted source recordings remain available until their retention date.</CardDescription></CardHeader><CardContent className="flex flex-col gap-3">{snapshot.recordings.map((recording) => <div className="flex flex-col gap-2" key={recording.id}><div className="flex items-center justify-between text-xs text-muted-foreground"><span>{sourceById.get(recording.sourceId)?.name ?? "Source"}</span><span>{recording.expiresAt ? `Until ${new Date(recording.expiresAt).toLocaleDateString()}` : ""}</span></div><audio controls preload="none" src={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/api/v1/transcription/recordings/${recording.id}`} /></div>)}</CardContent></Card>}
-            </aside>
-          </div>
-        </>
+        <LiveTranscriptionOrbit
+          capturing={capturing}
+          joinRequests={joinRequests}
+          level={level}
+          loading={loading}
+          onPauseOrResume={pauseOrResume}
+          onRefreshJoinRequests={refreshJoinRequests}
+          onRenameSpeaker={renameSpeaker}
+          onSetJoinRequest={setJoinRequest}
+          onShare={() => void (snapshot.session.joinCode ? setShareOpen(true) : rotateJoinCode())}
+          onStartCapture={ensureCapture}
+          onStopSession={stopSession}
+          partial={partial}
+          partialSourceId={partialSourceId}
+          partialSpeakerId={partialSpeakerId}
+          snapshot={snapshot}
+          user={user}
+        />
       )}
 
       <Dialog open={createOpen && !sessionId} onOpenChange={(open) => { setCreateOpen(open); if (open) void refreshDevices() }}>

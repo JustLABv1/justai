@@ -618,7 +618,13 @@ export function Workspace() {
       </Sidebar>
 
       <SidebarInset>
-        <div className="mx-auto min-h-svh max-w-[1440px] p-4 sm:p-6 lg:p-8">
+        <div
+          className={
+            activeView === "transcription"
+              ? "min-h-svh w-full"
+              : "mx-auto min-h-svh max-w-[1440px] p-4 sm:p-6 lg:p-8"
+          }
+        >
           {activeView === "chat" && (
             <ChatView
               conversationId={activeConversationId}
