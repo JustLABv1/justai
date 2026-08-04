@@ -1,0 +1,54 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+
+  "extends": ["config:recommended"],
+
+  "timezone": "Europe/Berlin",
+
+  "labels": ["dependencies"],
+
+  "rangeStrategy": "bump",
+
+  "packageRules": [
+    {
+      "description": "Keep TypeScript below v7 until Next.js supports its compiler API",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Keep @internationalized/date aligned with HeroUI and React Aria",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["@internationalized/date"],
+      "allowedVersions": "3.12.1"
+    },
+    {
+      "description": "Group all minor/patch updates",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "all non-major dependencies",
+      "minimumReleaseAge": "2 days"
+    },
+    {
+      "description": "Separate major updates",
+      "matchUpdateTypes": ["major"],
+      "minimumReleaseAge": "2 days"
+    },
+    {
+      "description": "Go modules",
+      "matchManagers": ["gomod"],
+      "groupName": "go dependencies",
+      "minimumReleaseAge": "2 days"
+    },
+    {
+      "description": "Node / Next.js dependencies",
+      "matchManagers": ["npm"],
+      "groupName": "frontend dependencies",
+      "minimumReleaseAge": "2 days"
+    }
+  ],
+
+  "ignoreDeps": ["eslint"],
+
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2
+}
