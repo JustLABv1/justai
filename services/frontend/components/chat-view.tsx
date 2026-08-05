@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/message"
 import {
   MessageScroller,
+  MessageScrollerButton,
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
@@ -290,7 +291,7 @@ export function ChatView({
 
   if (historyLoading) {
     return (
-      <div className="flex min-h-[calc(100svh-4rem)] items-center justify-center">
+      <div className="flex h-full min-h-0 items-center justify-center">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner />
           Loading conversation…
@@ -301,7 +302,7 @@ export function ChatView({
 
   if (messages.length === 0) {
     return (
-      <div className="flex min-h-[calc(100svh-4rem)] items-center justify-center">
+      <div className="flex h-full min-h-0 items-center justify-center">
         <div className="w-full">
           {chatError && (
             <Alert className="mx-auto mb-4 max-w-3xl" variant="destructive">
@@ -319,13 +320,13 @@ export function ChatView({
   }
 
   return (
-    <div className="flex min-h-[calc(100svh-4rem)] min-w-0 flex-col">
-      <MessageScrollerProvider>
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="min-h-0 flex-1">
           <MessageScrollerViewport>
             <MessageScrollerContent className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 lg:px-12">
-              {messages.map((message) => (
-                <MessageScrollerItem key={message.id}>
+              {messages.map((message, index) => (
+                <MessageScrollerItem key={message.id} scrollAnchor={index === messages.length - 1}>
                   <Message align={message.role === "user" ? "end" : "start"}>
                     <MessageAvatar className="bg-transparent">
                       <Avatar
@@ -398,6 +399,7 @@ export function ChatView({
               ))}
             </MessageScrollerContent>
           </MessageScrollerViewport>
+          <MessageScrollerButton aria-label="Jump to latest message" direction="end" />
         </MessageScroller>
       </MessageScrollerProvider>
 

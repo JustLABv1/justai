@@ -48,6 +48,14 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 
@@ -568,42 +576,57 @@ export function TranscriptTray({
       <div className={styles.transcriptTrayHeader}>
         <CollapsibleTrigger
           render={
-            <Button className="min-w-0 flex-1 justify-start gap-2 px-1.5 text-left" variant="ghost" />
+            <Button
+              aria-label={open ? "Collapse live transcription" : "Expand live transcription"}
+              className="min-w-0 flex-1 justify-start gap-2 px-1.5 text-left"
+              variant="ghost"
+            />
           }
         >
           <span className={cn(styles.liveDot, open && styles.liveDotActive)} />
           <span className="truncate text-xs font-semibold">Live transcription</span>
           <Badge className="shrink-0" variant="secondary">{transcript.length} segments</Badge>
-          {latest ? <span className="ml-auto text-[11px] text-muted-foreground">{latestSpeaker?.name || "Unassigned"} · {latest.timestamp}</span> : null}
+          {latest ? <span className="ml-auto min-w-0 max-w-[45%] truncate text-[11px] text-muted-foreground">{latestSpeaker?.name || "Unassigned"} · {latest.timestamp}</span> : null}
           {open ? <ChevronDown data-icon="inline-end" /> : <ChevronUp data-icon="inline-end" />}
         </CollapsibleTrigger>
-        {!open ? (
-          <Button aria-label="Expand live transcription" className="shrink-0" onClick={() => onOpenChange(true)} size="icon-sm" variant="ghost">
-            <ChevronUp data-icon="inline-start" />
-          </Button>
-        ) : null}
       </div>
       <CollapsibleContent>
         <div className={styles.transcriptTrayBody}>
-          {transcript.map((line) => {
-            const speaker = speakers.find((item) => item.id === line.speakerId)
-            return (
-              <div className={styles.transcriptLine} key={line.id}>
-                <span className="w-10 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">{line.timestamp}</span>
-                <Avatar className="mt-0.5" size="sm">
-                  <AvatarFallback style={{ background: speaker?.accent, color: "var(--background)" } as CSSProperties}>{speaker?.initials}</AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-xs font-semibold">{speaker?.name}</span>
-                    <Badge variant="outline">{speaker?.source}</Badge>
-                    {line.provisional ? <Badge variant="secondary">Listening</Badge> : null}
-                  </div>
-                  <p className={cn("mt-1 text-sm leading-relaxed", line.provisional && "text-muted-foreground italic")}>{line.text}</p>
-                </div>
-              </div>
-            )
-          })}
+          <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+            <MessageScroller className="min-h-0 flex-1">
+              <MessageScrollerViewport aria-label="Live transcription">
+                <MessageScrollerContent className="gap-1">
+                  {transcript.map((line, index) => {
+                    const speaker = speakers.find((item) => item.id === line.speakerId)
+                    return (
+                      <MessageScrollerItem
+                        className="w-full"
+                        key={line.id}
+                        messageId={line.id}
+                        scrollAnchor={index === transcript.length - 1}
+                      >
+                        <div className={styles.transcriptLine}>
+                          <span className="w-10 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">{line.timestamp}</span>
+                          <Avatar className="mt-0.5" size="sm">
+                            <AvatarFallback style={{ background: speaker?.accent, color: "var(--background)" } as CSSProperties}>{speaker?.initials}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span className="text-xs font-semibold">{speaker?.name}</span>
+                              <Badge className="max-w-full truncate" variant="outline">{speaker?.source}</Badge>
+                              {line.provisional ? <Badge variant="secondary">Listening</Badge> : null}
+                            </div>
+                            <p className={cn("mt-1 min-w-0 text-sm leading-relaxed", line.provisional && "text-muted-foreground italic")}>{line.text}</p>
+                          </div>
+                        </div>
+                      </MessageScrollerItem>
+                    )
+                  })}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <MessageScrollerButton aria-label="Scroll to latest transcript" direction="end" />
+            </MessageScroller>
+          </MessageScrollerProvider>
         </div>
       </CollapsibleContent>
     </Collapsible>

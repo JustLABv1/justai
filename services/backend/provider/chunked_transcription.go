@@ -277,6 +277,9 @@ func (s *ChunkedStream) emit(event RealtimeEvent) {
 }
 
 func (s *ChunkedStream) transcribe(job chunkedAudio) error {
+	if !PCM16HasSustainedSpeech(job.pcm) {
+		return nil
+	}
 	prompt := ""
 	if !s.promptDisabled {
 		prompt = trimTranscriptPrompt(s.previousText, s.promptMaxChars)
@@ -310,7 +313,7 @@ func (s *ChunkedStream) transcribe(job chunkedAudio) error {
 	if err != nil {
 		return err
 	}
-	textValue = strings.TrimSpace(textValue)
+	textValue = CleanTranscriptText(textValue)
 	if textValue == "" {
 		return nil
 	}
@@ -415,7 +418,8 @@ func (s *ChunkedStream) readTranscriptionResponse(body io.Reader, contentType st
 func (s *ChunkedStream) readSSETranscriptionResponse(body io.Reader, job chunkedAudio) (string, error) {
 	accumulated := ""
 	apply := func(value string, replace bool) {
-		if strings.TrimSpace(value) == "" {
+		value = CleanTranscriptText(value)
+		if value == "" {
 			return
 		}
 		if replace {

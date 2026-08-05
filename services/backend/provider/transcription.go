@@ -25,6 +25,64 @@ type RealtimeEvent struct {
 	EndOffsetMs   int64
 }
 
+// DefaultPCMVoiceThreshold is deliberately conservative: samples below this
+// RMS level are treated as microphone silence. Sending long runs of digital
+// silence to Whisper-style endpoints can produce fabricated phrases, so both
+// capture clients and the backend use this threshold as a final audio gate.
+const DefaultPCMVoiceThreshold = 0.01
+
+// PCM16RMS returns the normalized root-mean-square level of mono PCM16 audio.
+func PCM16RMS(pcm []byte) float64 {
+	if len(pcm) < 2 {
+		return 0
+	}
+	var total float64
+	samples := 0
+	for index := 0; index+1 < len(pcm); index += 2 {
+		value := float64(int16(binary.LittleEndian.Uint16(pcm[index:index+2]))) / 32768
+		total += value * value
+		samples++
+	}
+	if samples == 0 {
+		return 0
+	}
+	return math.Sqrt(total / float64(samples))
+}
+
+// PCM16HasSpeech reports whether a PCM16 window has enough energy to send to
+// a transcription provider. It is not speaker detection; it is only a
+// defense against muted microphones and long stretches of room silence.
+func PCM16HasSpeech(pcm []byte) bool {
+	return PCM16RMS(pcm) >= DefaultPCMVoiceThreshold
+}
+
+// PCM16HasSustainedSpeech requires several adjacent 20 ms frames above the
+// voice threshold. A single click, breath, or microphone pop should not be
+// enough to make a Whisper rolling window request.
+func PCM16HasSustainedSpeech(pcm []byte) bool {
+	const frameBytes = 640 // 20 ms of mono PCM16 at 16 kHz
+	availableFrames := len(pcm) / frameBytes
+	if availableFrames == 0 {
+		return false
+	}
+	requiredFrames := 4 // 80 ms of continuous audio
+	if availableFrames < requiredFrames {
+		requiredFrames = availableFrames
+	}
+	consecutiveFrames := 0
+	for offset := 0; offset+frameBytes <= len(pcm); offset += frameBytes {
+		if PCM16HasSpeech(pcm[offset : offset+frameBytes]) {
+			consecutiveFrames++
+			if consecutiveFrames >= requiredFrames {
+				return true
+			}
+			continue
+		}
+		consecutiveFrames = 0
+	}
+	return false
+}
+
 type RealtimeStream struct {
 	provider  string
 	inputRate int

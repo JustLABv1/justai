@@ -104,7 +104,6 @@ export function LiveTranscriptionView({
   const recordingUploadQueueRef = useRef<Promise<void>>(Promise.resolve())
   const completingRecordingsRef = useRef(new Set<string>())
   const levelTimerRef = useRef<number | null>(null)
-  const transcriptRef = useRef<HTMLDivElement>(null)
   const transcriptionEndpoints = useMemo(
     () => endpoints.filter((endpoint) => endpoint.capabilities["realtime-transcription"] || endpoint.capabilities["chunked-transcription"] || endpoint.capabilities.transcription || endpoint.providerType === "openai" || endpoint.providerType === "gemini"),
     [endpoints]
@@ -317,9 +316,25 @@ export function LiveTranscriptionView({
     return buffer
   }
 
+  const calculateRMS = (input: Float32Array) => {
+    if (input.length === 0) return 0
+    let total = 0
+    input.forEach((value) => {
+      total += value * value
+    })
+    return Math.sqrt(total / input.length)
+  }
+
   const beginAudio = useCallback(async (socket: WebSocket, session: TranscriptionSession, source: TranscriptionSource) => {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("This browser does not support microphone capture.")
-    const constraints: MediaStreamConstraints = { audio: deviceLabel ? { deviceId: { exact: deviceLabel } } : { echoCancellation: false, noiseSuppression: true, autoGainControl: true } }
+    const constraints: MediaStreamConstraints = {
+      audio: {
+        ...(deviceLabel ? { deviceId: { exact: deviceLabel } } : {}),
+        echoCancellation: false,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    }
     const stream = await navigator.mediaDevices.getUserMedia(constraints)
     audioStreamRef.current = stream
     void refreshDevices()
@@ -339,9 +354,17 @@ export function LiveTranscriptionView({
     analyserRef.current = analyser
     workletRef.current = worklet
     let sequence = 0
+    let voiceUntil = 0
+    const voiceThreshold = 0.01
+    const voiceHangoverMs = 650
     worklet.port.onmessage = (message: MessageEvent<Float32Array>) => {
       if (socket.readyState !== WebSocket.OPEN) return
-      const pcm = encodePCM16(downsample(message.data, context.sampleRate, 16000))
+      const samples = downsample(message.data, context.sampleRate, 16000)
+      const rms = calculateRMS(samples)
+      const now = performance.now()
+      if (rms >= voiceThreshold) voiceUntil = now + voiceHangoverMs
+      if (now > voiceUntil) return
+      const pcm = encodePCM16(samples)
       const frame = new ArrayBuffer(17 + pcm.byteLength)
       const view = new DataView(frame)
       view.setUint8(0, 1)
@@ -482,11 +505,6 @@ export function LiveTranscriptionView({
       closeSockets()
     }
   }, [closeSockets, loadSession, sessionId])
-
-  useEffect(() => {
-    if (!transcriptRef.current) return
-    transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
-  }, [snapshot?.segments.length, partial])
 
   const createSession = async () => {
     setStarting(true)

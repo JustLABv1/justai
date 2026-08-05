@@ -715,6 +715,9 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 	var latestCaptureOffset atomic.Int64
 	_ = a.Live.send(client, "transcription.ready", ginData{"sessionId": info.SessionID, "sourceId": info.SourceID, "provider": endpoint.ProviderType, "model": endpoint.TranscriptionModel, "mode": mode})
 	providerDone := make(chan struct{})
+	voiceActive := false
+	lastVoiceAt := time.Time{}
+	const voiceHangover = 650 * time.Millisecond
 	go func() {
 		defer close(providerDone)
 		for event := range stream.Events() {
@@ -723,7 +726,8 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 				_ = connection.Close()
 				return
 			}
-			if strings.TrimSpace(event.Text) == "" {
+			event.Text = provider.CleanTranscriptText(event.Text)
+			if event.Text == "" {
 				continue
 			}
 			if isTranscriptionProtocolPayload(event.Text) {
@@ -795,6 +799,15 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 		if len(pcm) == 0 {
 			continue
 		}
+		pcm16 := provider.ResamplePCM16(pcm, frame.SampleRate, 16000)
+		hasSpeech := provider.PCM16HasSpeech(pcm16)
+		if hasSpeech {
+			voiceActive = true
+			lastVoiceAt = time.Now()
+		} else if !voiceActive || time.Since(lastVoiceAt) > voiceHangover {
+			voiceActive = false
+			continue
+		}
 		if err := stream.SendPCM(ctx, pcm, frame.SampleRate); err != nil {
 			a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": fmt.Sprintf("transcription audio transport failed (%s): %v", mode, err)})
 			return
@@ -802,7 +815,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 		if frame.CaptureTimestamp > 0 {
 			latestCaptureOffset.Store(a.Live.captureOffset(info.SessionID, info.SourceID, frame.CaptureTimestamp))
 		}
-		a.Live.appendPCM(info.SessionID, info.SourceID, provider.ResamplePCM16(pcm, frame.SampleRate, 16000))
+		a.Live.appendPCM(info.SessionID, info.SourceID, pcm16)
 	}
 }
 

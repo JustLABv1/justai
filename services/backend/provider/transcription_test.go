@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -47,6 +48,42 @@ func TestResamplePCM16(t *testing.T) {
 	}
 	if got := ResamplePCM16(input, 16000, 16000); len(got) != len(input) {
 		t.Fatalf("same-rate resampling changed length")
+	}
+}
+
+func TestPCM16VoiceGateRejectsDigitalSilence(t *testing.T) {
+	if PCM16HasSpeech(make([]byte, durationBytes(250*time.Millisecond))) {
+		t.Fatal("digital silence should not pass the voice gate")
+	}
+	pcm := make([]byte, durationBytes(250*time.Millisecond))
+	for index := 0; index+1 < len(pcm); index += 2 {
+		binary.LittleEndian.PutUint16(pcm[index:index+2], uint16(int16(5000)))
+	}
+	if !PCM16HasSpeech(pcm) {
+		t.Fatal("a voiced PCM window should pass the voice gate")
+	}
+	if !PCM16HasSustainedSpeech(pcm) {
+		t.Fatal("a sustained voiced PCM window should pass the sustained voice gate")
+	}
+	shortNoise := make([]byte, durationBytes(100*time.Millisecond))
+	for index := 0; index+1 < durationBytes(20*time.Millisecond); index += 2 {
+		binary.LittleEndian.PutUint16(shortNoise[index:index+2], uint16(int16(5000)))
+	}
+	if PCM16HasSustainedSpeech(shortNoise) {
+		t.Fatal("a short microphone pop should not pass the sustained voice gate")
+	}
+}
+
+func TestCleanTranscriptTextDropsProviderNoiseMarkers(t *testing.T) {
+	for _, value := range []string{".", "...", "*disk*", "*puh*", "[BLANK_AUDIO]", "(background noise)"} {
+		if got := CleanTranscriptText(value); got != "" {
+			t.Fatalf("expected provider artifact %q to be discarded, got %q", value, got)
+		}
+	}
+	for _, value := range []string{"Ja", "Nein", "Naja, da kannst du halt nix machen, ne?", "*das ist wichtig*"} {
+		if got := CleanTranscriptText(value); got != value {
+			t.Fatalf("expected spoken text %q to be preserved, got %q", value, got)
+		}
 	}
 }
 
@@ -107,7 +144,7 @@ func TestChunkedStreamPostsWhisperAudioAndStreamsSSE(t *testing.T) {
 		}
 		close(done)
 	}()
-	if err := stream.SendPCM(nil, make([]byte, durationBytes(80*time.Millisecond)), 16000); err != nil {
+	if err := stream.SendPCM(nil, speechPCM(80*time.Millisecond), 16000); err != nil {
 		t.Fatal(err)
 	}
 	if err := stream.Commit(); err != nil {
@@ -173,7 +210,7 @@ func TestChunkedStreamUnwrapsEmbeddedSSEFromJSONResponse(t *testing.T) {
 		}
 		close(done)
 	}()
-	if err := stream.SendPCM(nil, make([]byte, durationBytes(80*time.Millisecond)), 16000); err != nil {
+	if err := stream.SendPCM(nil, speechPCM(80*time.Millisecond), 16000); err != nil {
 		t.Fatal(err)
 	}
 	if err := stream.Commit(); err != nil {
@@ -249,10 +286,10 @@ func TestChunkedStreamLimitsRollingPromptSentToProvider(t *testing.T) {
 		}
 		close(done)
 	}()
-	if err := stream.SendPCM(nil, make([]byte, durationBytes(100*time.Millisecond)), 16000); err != nil {
+	if err := stream.SendPCM(nil, speechPCM(100*time.Millisecond), 16000); err != nil {
 		t.Fatal(err)
 	}
-	if err := stream.SendPCM(nil, make([]byte, durationBytes(80*time.Millisecond)), 16000); err != nil {
+	if err := stream.SendPCM(nil, speechPCM(80*time.Millisecond), 16000); err != nil {
 		t.Fatal(err)
 	}
 	if err := stream.Commit(); err != nil {
@@ -317,10 +354,10 @@ func TestChunkedStreamRetriesContextLimitWithoutRollingPrompt(t *testing.T) {
 		}
 		close(done)
 	}()
-	if err := stream.SendPCM(nil, make([]byte, durationBytes(100*time.Millisecond)), 16000); err != nil {
+	if err := stream.SendPCM(nil, speechPCM(100*time.Millisecond), 16000); err != nil {
 		t.Fatal(err)
 	}
-	if err := stream.SendPCM(nil, make([]byte, durationBytes(80*time.Millisecond)), 16000); err != nil {
+	if err := stream.SendPCM(nil, speechPCM(80*time.Millisecond), 16000); err != nil {
 		t.Fatal(err)
 	}
 	if err := stream.Commit(); err != nil {
@@ -333,6 +370,52 @@ func TestChunkedStreamRetriesContextLimitWithoutRollingPrompt(t *testing.T) {
 	if requestCount != 3 || prompts[1] == "" || prompts[2] != "" {
 		t.Fatalf("expected context retry without prompt, requests=%d prompts=%#v", requestCount, prompts)
 	}
+}
+
+func TestChunkedStreamDoesNotRequestDigitalSilence(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(writer, `{"text":"should not be returned"}`)
+	}))
+	defer server.Close()
+
+	stream, err := OpenChunked(context.Background(), Endpoint{
+		ProviderType:       "openai-compatible",
+		BaseURL:            server.URL + "/v1",
+		TranscriptionModel: "whisper-large-v3-turbo",
+		TimeoutSeconds:     10,
+	}, "", "en", ChunkedOptions{Window: 100 * time.Millisecond, Overlap: 20 * time.Millisecond, Minimum: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		for range stream.Events() {
+			t.Errorf("silent audio produced a transcription event")
+		}
+		close(done)
+	}()
+	if err := stream.SendPCM(nil, make([]byte, durationBytes(100*time.Millisecond)), 16000); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if requests != 0 {
+		t.Fatalf("expected no provider request for silence, got %d", requests)
+	}
+}
+
+func speechPCM(duration time.Duration) []byte {
+	pcm := make([]byte, durationBytes(duration))
+	for index := 0; index+1 < len(pcm); index += 2 {
+		binary.LittleEndian.PutUint16(pcm[index:index+2], uint16(int16(5000)))
+	}
+	return pcm
 }
 
 func TestParseHTTPTranscriptionEvent(t *testing.T) {

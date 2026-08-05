@@ -210,7 +210,7 @@ export function EndpointsView({ endpoints, onChange }: Props) {
       </div>
 
       <Dialog open={open} onOpenChange={(nextOpen) => nextOpen ? setOpen(true) : closeEditor()}>
-        <DialogContent className="grid-rows-[auto_minmax(0,1fr)] max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-2xl overflow-hidden">
+        <DialogContent className="grid-rows-[auto_minmax(0,1fr)] max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-2xl overflow-hidden sm:max-w-2xl">
           <DialogHeader><DialogTitle>{editingEndpoint ? "Edit LLM endpoint" : "Add an LLM endpoint"}</DialogTitle><DialogDescription>{editingEndpoint ? "Update the provider, model, capabilities, or credential for this endpoint." : "Choose a native provider or point JustAI at a compatible gateway such as LiteLLM, Ollama, or OpenRouter."}</DialogDescription></DialogHeader>
           <form onSubmit={saveEndpoint} className="flex min-h-0 flex-col overflow-hidden">
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">

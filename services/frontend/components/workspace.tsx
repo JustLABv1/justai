@@ -29,6 +29,16 @@ import { LiveTranscriptionView } from "@/components/live-transcription-view"
 import { MCPView } from "@/components/mcp-view"
 import { SettingsView } from "@/components/settings-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -126,6 +136,10 @@ const validViews: ViewId[] = [
 
 type WorkspaceStatus = "loading" | "ready" | "error"
 
+type DeleteTarget =
+  | { kind: "conversation"; id: string; title: string }
+  | { kind: "transcription"; id: string; title: string }
+
 export function Workspace() {
   const searchParams = useSearchParams()
   const requestedView = searchParams.get("view") as ViewId | null
@@ -147,6 +161,7 @@ export function Workspace() {
   const [sources, setSources] = useState<KnowledgeSource[]>([])
   const [servers, setServers] = useState<MCPServer[]>([])
   const [actionError, setActionError] = useState("")
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
 
   const redirectToLogin = useCallback(() => {
     const next = `${window.location.pathname}${window.location.search}`
@@ -317,30 +332,9 @@ export function Workspace() {
     [navigate, refreshConversations, requestedConversationId]
   )
 
-  const handleDeleteConversation = useCallback(
-    async (conversation: Conversation) => {
-      if (
-        !window.confirm(
-          `Delete “${conversation.title}”? This permanently removes the chat and its messages.`
-        )
-      ) {
-        return
-      }
-      setActionError("")
-      try {
-        await api.delete(`/api/v1/conversations/${conversation.id}`)
-        await refreshConversations()
-        if (requestedConversationId === conversation.id) {
-          navigate("chat")
-        }
-      } catch (caught) {
-        setActionError(
-          caught instanceof Error ? caught.message : "The conversation could not be deleted."
-        )
-      }
-    },
-    [navigate, refreshConversations, requestedConversationId]
-  )
+  const handleDeleteConversation = useCallback((conversation: Conversation) => {
+    setDeleteTarget({ kind: "conversation", id: conversation.id, title: conversation.title })
+  }, [])
 
   const handleArchiveSession = useCallback(
     async (sessionId: string, archived: boolean) => {
@@ -360,30 +354,35 @@ export function Workspace() {
     [navigate, refreshTranscriptionSessions, requestedSessionId]
   )
 
-  const handleDeleteSession = useCallback(
-    async (session: TranscriptionSession) => {
-      if (
-        !window.confirm(
-          `Delete “${session.title}”? This permanently removes the live transcription and recordings.`
-        )
-      ) {
-        return
-      }
-      setActionError("")
-      try {
-        await api.delete(`/api/v1/transcription/sessions/${session.id}`)
+  const handleDeleteSession = useCallback((session: TranscriptionSession) => {
+    setDeleteTarget({ kind: "transcription", id: session.id, title: session.title })
+  }, [])
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return
+    const target = deleteTarget
+    setDeleteTarget(null)
+    setActionError("")
+    try {
+      if (target.kind === "conversation") {
+        await api.delete(`/api/v1/conversations/${target.id}`)
+        await refreshConversations()
+        if (requestedConversationId === target.id) navigate("chat")
+      } else {
+        await api.delete(`/api/v1/transcription/sessions/${target.id}`)
         await refreshTranscriptionSessions()
-        if (requestedSessionId === session.id) {
-          navigate("transcription")
-        }
-      } catch (caught) {
-        setActionError(
-          caught instanceof Error ? caught.message : "The transcription session could not be deleted."
-        )
+        if (requestedSessionId === target.id) navigate("transcription")
       }
-    },
-    [navigate, refreshTranscriptionSessions, requestedSessionId]
-  )
+    } catch (caught) {
+      setActionError(
+        caught instanceof Error
+          ? caught.message
+          : target.kind === "conversation"
+            ? "The conversation could not be deleted."
+            : "The transcription session could not be deleted."
+      )
+    }
+  }, [deleteTarget, navigate, refreshConversations, refreshTranscriptionSessions, requestedConversationId, requestedSessionId])
 
   async function signOut() {
     try {
@@ -434,10 +433,11 @@ export function Workspace() {
   }
 
   return (
-    <SidebarProvider defaultOpen>
+    <>
+      <SidebarProvider defaultOpen>
       <Sidebar collapsible="icon" variant="sidebar">
         <SidebarHeader className="gap-3">
-          <div className="flex items-center gap-2 px-2 py-1.5">
+          <div className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:px-0">
             <BrandMark className="size-8" priority />
             <div className="min-w-0 group-data-[collapsible=icon]:hidden">
               <p className="truncate font-heading text-sm font-semibold tracking-tight">
@@ -478,7 +478,7 @@ export function Workspace() {
 
         <SidebarContent>
           {actionError && (
-            <Alert className="mx-2 mt-2" variant="destructive">
+            <Alert className="mx-2 mt-2 group-data-[collapsible=icon]:hidden" variant="destructive">
               <AlertDescription className="text-xs">
                 {actionError}
               </AlertDescription>
@@ -510,13 +510,13 @@ export function Workspace() {
                                 tooltip={item.hint}
                               >
                                 <ItemIcon data-icon="inline-start" />
-                                <span>{item.label}</span>
-                                <ChevronRight className="ml-auto transition-transform group-data-[open]/collapsible:rotate-90" />
+                                <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
+                                <ChevronRight className="ml-auto transition-transform group-data-[collapsible=icon]:hidden group-data-[open]/collapsible:rotate-90" />
                               </SidebarMenuButton>
                             }
                           />
-                          <CollapsibleContent>
-                            <div className="px-2.5 pt-1 pb-1 text-[11px] font-medium text-muted-foreground">
+                          <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
+                            <div className="px-2.5 pt-1 pb-1 text-[11px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
                               Conversations
                             </div>
                             <SidebarMenuSub className="mt-0">
@@ -547,7 +547,7 @@ export function Workspace() {
                             </SidebarMenuSub>
                             {archivedConversations.length > 0 && (
                               <>
-                                <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium text-muted-foreground">
+                                <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
                                   Archived
                                 </div>
                                 <SidebarMenuSub className="mt-0">
@@ -598,13 +598,13 @@ export function Workspace() {
                                 tooltip={item.hint}
                               >
                                 <ItemIcon data-icon="inline-start" />
-                                <span>{item.label}</span>
-                                <ChevronRight className="ml-auto transition-transform group-data-[open]/collapsible:rotate-90" />
+                                <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
+                                <ChevronRight className="ml-auto transition-transform group-data-[collapsible=icon]:hidden group-data-[open]/collapsible:rotate-90" />
                               </SidebarMenuButton>
                             }
                           />
-                          <CollapsibleContent>
-                            <div className="px-2.5 pt-1 pb-1 text-[11px] font-medium text-muted-foreground">
+                          <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
+                            <div className="px-2.5 pt-1 pb-1 text-[11px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
                               Sessions
                             </div>
                             <SidebarMenuSub className="mt-0">
@@ -633,7 +633,7 @@ export function Workspace() {
                             </SidebarMenuSub>
                             {archivedTranscriptionSessions.length > 0 && (
                               <>
-                                <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium text-muted-foreground">
+                                <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
                                   Archived
                                 </div>
                                 <SidebarMenuSub className="mt-0">
@@ -681,7 +681,7 @@ export function Workspace() {
                         tooltip={item.hint}
                       >
                         <ItemIcon data-icon="inline-start" />
-                        <span>{item.label}</span>
+                        <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )
@@ -704,7 +704,7 @@ export function Workspace() {
                     tooltip="Workspace preferences"
                   >
                     <Settings2 data-icon="inline-start" />
-                    <span>Settings</span>
+                    <span className="group-data-[collapsible=icon]:hidden">Settings</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
@@ -719,7 +719,7 @@ export function Workspace() {
                     tooltip="MCP and integration docs"
                   >
                     <CircleHelp data-icon="inline-start" />
-                    <span>Docs &amp; guides</span>
+                    <span className="group-data-[collapsible=icon]:hidden">Docs &amp; guides</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -746,7 +746,7 @@ export function Workspace() {
                 <Avatar size="sm">
                   <AvatarFallback>{initials}</AvatarFallback>
                 </Avatar>
-                <span className="min-w-0 flex-1 text-left">
+                <span className="min-w-0 flex-1 text-left group-data-[collapsible=icon]:hidden">
                   <span className="block truncate text-xs font-medium">
                     {user.displayName}
                   </span>
@@ -774,7 +774,9 @@ export function Workspace() {
           className={
             activeView === "transcription"
               ? "min-h-svh w-full"
-              : "mx-auto min-h-svh max-w-[1440px] p-4 sm:p-6 lg:p-8"
+              : activeView === "chat"
+                ? "mx-auto flex h-svh min-h-0 w-full max-w-[1440px] flex-col p-4 sm:p-6 lg:p-8"
+                : "mx-auto min-h-svh max-w-[1440px] p-4 sm:p-6 lg:p-8"
           }
         >
           {activeView === "chat" && (
@@ -822,7 +824,31 @@ export function Workspace() {
           )}
         </div>
       </SidebarInset>
-    </SidebarProvider>
+      </SidebarProvider>
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null)
+        }}
+        open={deleteTarget !== null}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {deleteTarget?.kind === "conversation" ? "chat" : "live transcription"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              “{deleteTarget?.title}” and its stored data will be permanently removed. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void confirmDelete()}>
+              Delete permanently
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
 

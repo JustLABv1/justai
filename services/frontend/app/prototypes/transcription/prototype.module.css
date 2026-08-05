@@ -286,9 +286,11 @@
   z-index: 4;
   display: flex;
   width: 148px;
+  height: 96px;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  justify-content: center;
+  gap: 0;
   overflow: visible;
   padding: 0;
   transform: translate(-50%, -50%) rotate(var(--speaker-angle)) translateY(calc(-1 * var(--orbit-radius))) rotate(calc(-1 * var(--speaker-angle)));
@@ -307,13 +309,14 @@
 
 .speakerNodeHalo {
   position: absolute;
-  top: 1px;
+  top: 50%;
+  left: 50%;
   width: 62px;
   height: 62px;
   border: 1px solid color-mix(in oklch, var(--speaker-accent) 50%, transparent);
   border-radius: 50%;
   opacity: 0;
-  transform: scale(0.8);
+  transform: translate(-50%, -50%) scale(0.8);
 }
 
 .speakerNodeActive .speakerNodeHalo {
@@ -324,21 +327,24 @@
 @keyframes speaker-halo {
   0% {
     opacity: 0.8;
-    transform: scale(0.9);
+    transform: translate(-50%, -50%) scale(0.9);
   }
 
   75%,
   100% {
     opacity: 0;
-    transform: scale(1.65);
+    transform: translate(-50%, -50%) scale(1.65);
   }
 }
 
 .speakerAvatar {
-  position: relative;
+  position: absolute;
+  top: 50%;
+  left: 50%;
   border: 2px solid var(--background);
   background: color-mix(in oklch, var(--speaker-accent) 28%, var(--muted));
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--speaker-accent) 44%, var(--border));
+  transform: translate(-50%, -50%);
   transition: transform 180ms ease-out, box-shadow 180ms ease-out;
 }
 
@@ -347,7 +353,7 @@
     0 0 0 2px var(--background),
     0 0 0 4px color-mix(in oklch, var(--speaker-accent) 76%, transparent),
     0 0 30px color-mix(in oklch, var(--speaker-accent) 26%, transparent);
-  transform: scale(1.12);
+  transform: translate(-50%, -50%) scale(1.12);
 }
 
 .speakerAvatar [data-slot="avatar-fallback"] {
@@ -356,6 +362,9 @@
 }
 
 .speakerNodeLabel {
+  position: absolute;
+  top: calc(50% + 38px);
+  left: 50%;
   max-width: 148px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -363,6 +372,7 @@
   padding: 5px 8px;
   text-align: center;
   box-shadow: var(--shadow-xs);
+  transform: translateX(-50%);
 }
 
 .listenCore {
@@ -476,6 +486,11 @@
 .transcriptTray {
   position: relative;
   z-index: 8;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(calc(42svh + 64px), 424px);
+  flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -486,6 +501,7 @@
 
 .transcriptTrayHeader {
   display: flex;
+  flex-shrink: 0;
   min-height: 52px;
   align-items: center;
   gap: 4px;
@@ -507,20 +523,34 @@
 
 .transcriptTrayBody {
   display: flex;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  height: min(42svh, 360px);
   max-height: min(42svh, 360px);
   flex-direction: column;
   gap: 1px;
-  overflow-y: auto;
+  overflow: hidden;
   border-top: 1px solid var(--border);
   padding: 8px 12px 12px;
 }
 
 .transcriptLine {
   display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   align-items: flex-start;
   gap: 9px;
   border-radius: 12px;
   padding: 9px 6px;
+}
+
+.transcriptLine p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .transcriptLine:hover {
@@ -890,7 +920,7 @@
   }
 
   .speakerAvatar {
-    transform: scale(0.88);
+    transform: translate(-50%, -50%) scale(0.88);
   }
 
   .speakerNodeLabel {
