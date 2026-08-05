@@ -59,6 +59,7 @@ func (a *App) Router() *gin.Engine {
 	protected.Use(middleware.RequireAuth(a.Tokens, a.DB))
 	protected.GET("/auth/me", a.me)
 	protected.GET("/organizations", a.listOrganizations)
+	protected.POST("/organizations", a.createOrganization)
 	protected.POST("/auth/logout", a.logout)
 	protected.GET("/providers/supported", a.supportedProviders)
 	protected.GET("/mcp/oauth/callback", a.mcpOAuthCallback)
@@ -112,12 +113,13 @@ func (a *App) Router() *gin.Engine {
 
 	protected.GET("/ws/chat", a.chatWebSocket)
 	router.GET("/api/v1/ws/transcription", a.transcriptionWebSocket)
-	members := protected.Group("/organizations/:id")
-	members.Use(middleware.RequireOrg(a.DB))
-	members.GET("/members", a.listOrganizationMembers)
-	members.POST("/members", middleware.RequireOrgRole("owner", "admin"), a.addOrganizationMember)
-	members.PATCH("/members/:userId", middleware.RequireOrgRole("owner", "admin"), a.updateOrganizationMember)
-	members.DELETE("/members/:userId", middleware.RequireOrgRole("owner", "admin"), a.removeOrganizationMember)
+	organizationRoutes := protected.Group("/organizations/:id")
+	organizationRoutes.Use(middleware.RequireOrg(a.DB))
+	organizationRoutes.PATCH("", middleware.RequireOrgRole("owner", "admin"), a.updateOrganization)
+	organizationRoutes.GET("/members", a.listOrganizationMembers)
+	organizationRoutes.POST("/members", middleware.RequireOrgRole("owner", "admin"), a.addOrganizationMember)
+	organizationRoutes.PATCH("/members/:userId", middleware.RequireOrgRole("owner", "admin"), a.updateOrganizationMember)
+	organizationRoutes.DELETE("/members/:userId", middleware.RequireOrgRole("owner", "admin"), a.removeOrganizationMember)
 	return router
 }
 

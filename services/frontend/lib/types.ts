@@ -20,6 +20,14 @@ export type Organization = {
   role?: string
 }
 
+export type OrganizationMember = {
+  id: string
+  email: string
+  displayName: string
+  role: "owner" | "admin" | "member"
+  createdAt: string
+}
+
 export type Endpoint = {
   id: string
   scopeType: "global" | "organization" | "user"

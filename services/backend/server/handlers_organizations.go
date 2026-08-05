@@ -9,11 +9,106 @@ import (
 	"github.com/google/uuid"
 
 	"justai-backend/middleware"
+	"justai-backend/models"
 )
+
+type organizationRequest struct {
+	Name string `json:"name"`
+}
 
 type organizationMemberRequest struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
+}
+
+func (a *App) createOrganization(c *gin.Context) {
+	principal, ok := middleware.GetPrincipal(c)
+	if !ok {
+		writeError(c, http.StatusUnauthorized, fmt.Errorf("authentication required"))
+		return
+	}
+	var request organizationRequest
+	if !decodeJSON(c, &request) {
+		return
+	}
+	request.Name = strings.TrimSpace(request.Name)
+	if request.Name == "" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("a workspace name is required"))
+		return
+	}
+	if len([]rune(request.Name)) > 80 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("workspace names must be 80 characters or fewer"))
+		return
+	}
+
+	organizationID := uuid.New()
+	transaction, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer transaction.Rollback()
+	slug := organizationSlug(request.Name, organizationID)
+	if _, err := transaction.ExecContext(c, `INSERT INTO organizations (id, name, slug) VALUES ($1, $2, $3)`, organizationID, request.Name, slug); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if _, err := transaction.ExecContext(c, `INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, 'owner')`, organizationID, principal.UserID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := transaction.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"organization": models.Organization{
+		ID: organizationID, Name: request.Name, Slug: slug, Role: "owner",
+	}})
+}
+
+func (a *App) updateOrganization(c *gin.Context) {
+	organizationID, err := a.organizationRouteID(c)
+	if err != nil {
+		writeError(c, http.StatusForbidden, err)
+		return
+	}
+	var request organizationRequest
+	if !decodeJSON(c, &request) {
+		return
+	}
+	request.Name = strings.TrimSpace(request.Name)
+	if request.Name == "" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("a workspace name is required"))
+		return
+	}
+	if len([]rune(request.Name)) > 80 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("workspace names must be 80 characters or fewer"))
+		return
+	}
+	var organization models.Organization
+	organization.Role = middleware.GetOrganizationRole(c)
+	err = a.DB.QueryRowContext(c, `UPDATE organizations SET name = $2 WHERE id = $1 RETURNING id, name, slug`, organizationID, request.Name).Scan(&organization.ID, &organization.Name, &organization.Slug)
+	if err != nil {
+		writeError(c, http.StatusNotFound, fmt.Errorf("workspace not found"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"organization": organization})
+}
+
+func organizationSlug(name string, organizationID uuid.UUID) string {
+	var builder strings.Builder
+	for _, character := range strings.ToLower(name) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' {
+			builder.WriteRune(character)
+		} else if character == ' ' || character == '_' {
+			builder.WriteRune('-')
+		}
+	}
+	slug := strings.Trim(builder.String(), "-")
+	if slug == "" {
+		slug = "workspace"
+	}
+	return slug + "-" + organizationID.String()[:8]
 }
 
 func (a *App) listOrganizationMembers(c *gin.Context) {
@@ -69,7 +164,7 @@ func (a *App) addOrganizationMember(c *gin.Context) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("the user must register before being added to an organization"))
 		return
 	}
-	if _, err := a.DB.ExecContext(c, `INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT (organization_id, user_id) DO UPDATE SET role = EXCLUDED.role`, organizationID, userID, request.Role); err != nil {
+	if _, err := a.DB.ExecContext(c, `INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT (organization_id, user_id) DO UPDATE SET role = EXCLUDED.role WHERE organization_members.role <> 'owner'`, organizationID, userID, request.Role); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -95,6 +190,27 @@ func (a *App) updateOrganizationMember(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("role must be owner, admin, or member"))
 		return
 	}
+	var targetRole string
+	if err := a.DB.QueryRowContext(c, `SELECT role FROM organization_members WHERE organization_id = $1 AND user_id = $2`, organizationID, userID).Scan(&targetRole); err != nil {
+		writeError(c, http.StatusNotFound, fmt.Errorf("member not found"))
+		return
+	}
+	currentRole := middleware.GetOrganizationRole(c)
+	if currentRole != "owner" && (targetRole == "owner" || request.Role == "owner") {
+		writeError(c, http.StatusForbidden, fmt.Errorf("only an owner can manage owner access"))
+		return
+	}
+	if targetRole == "owner" && request.Role != "owner" {
+		var ownerCount int
+		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM organization_members WHERE organization_id = $1 AND role = 'owner'`, organizationID).Scan(&ownerCount); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if ownerCount <= 1 {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("an organization must always have an owner"))
+			return
+		}
+	}
 	if _, err := a.DB.ExecContext(c, `UPDATE organization_members SET role = $3 WHERE organization_id = $1 AND user_id = $2`, organizationID, userID, request.Role); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -113,8 +229,26 @@ func (a *App) removeOrganizationMember(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid user id"))
 		return
 	}
-	if _, err := a.DB.ExecContext(c, `DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2 AND role <> 'owner'`, organizationID, userID); err != nil {
+	var targetRole string
+	if err := a.DB.QueryRowContext(c, `SELECT role FROM organization_members WHERE organization_id = $1 AND user_id = $2`, organizationID, userID).Scan(&targetRole); err != nil {
+		writeError(c, http.StatusNotFound, fmt.Errorf("member not found"))
+		return
+	}
+	if targetRole == "owner" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("owners must transfer ownership before leaving the workspace"))
+		return
+	}
+	if middleware.GetOrganizationRole(c) == "admin" && targetRole != "member" {
+		writeError(c, http.StatusForbidden, fmt.Errorf("admins can only remove members"))
+		return
+	}
+	result, err := a.DB.ExecContext(c, `DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2`, organizationID, userID)
+	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected == 0 {
+		writeError(c, http.StatusNotFound, fmt.Errorf("member not found"))
 		return
 	}
 	c.Status(http.StatusNoContent)

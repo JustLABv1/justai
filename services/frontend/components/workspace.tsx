@@ -6,7 +6,6 @@ import {
   Bot,
   Archive,
   ChevronDown,
-  ChevronRight,
   CircleHelp,
   Cpu,
   Headphones,
@@ -42,11 +41,6 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -77,6 +71,8 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { APIError, api } from "@/lib/api"
@@ -146,6 +142,7 @@ export function Workspace() {
   const [reloadToken, setReloadToken] = useState(0)
   const [user, setUser] = useState<User | null>(null)
   const [organizations, setOrganizations] = useState<Organization[]>([])
+  const [activeOrganizationId, setActiveOrganizationId] = useState<string | null>(null)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
   const [transcriptionSessions, setTranscriptionSessions] = useState<TranscriptionSession[]>([])
@@ -213,6 +210,14 @@ export function Workspace() {
         )
         if (cancelled) return
 
+        const storedOrganizationId = api.getOrganizationId()
+        const nextOrganization =
+          me.organizations.find((organization) => organization.id === storedOrganizationId) ??
+          me.organizations[0] ??
+          null
+        api.setOrganizationId(nextOrganization?.id ?? null)
+        setActiveOrganizationId(nextOrganization?.id ?? null)
+
         const [conversationResult, archivedConversationResult, transcriptionResult, archivedTranscriptionResult, endpointResult, sourceResult, serverResult] =
           await Promise.all([
             api.get<{ conversations: Conversation[] }>("/api/v1/conversations"),
@@ -262,7 +267,9 @@ export function Workspace() {
     }
   }, [redirectToLogin, reloadToken])
 
-  const activeOrganization = organizations[0]
+  const activeOrganization = organizations.find(
+    (organization) => organization.id === activeOrganizationId
+  ) ?? organizations[0]
   const activeConversationId = [...conversations, ...archivedConversations].some(
     (conversation) => conversation.id === requestedConversationId
   )
@@ -299,6 +306,34 @@ export function Workspace() {
     },
     [router]
   )
+
+  const selectOrganization = useCallback(
+    (organizationId: string) => {
+      if (!organizations.some((organization) => organization.id === organizationId)) {
+        return
+      }
+      api.setOrganizationId(organizationId)
+      setActiveOrganizationId(organizationId)
+      setReloadToken((value) => value + 1)
+    },
+    [organizations]
+  )
+
+  const handleOrganizationCreated = useCallback((organization: Organization) => {
+    setOrganizations((current) => [
+      ...current.filter((item) => item.id !== organization.id),
+      organization,
+    ])
+    api.setOrganizationId(organization.id)
+    setActiveOrganizationId(organization.id)
+    setReloadToken((value) => value + 1)
+  }, [])
+
+  const handleOrganizationUpdated = useCallback((organization: Organization) => {
+    setOrganizations((current) =>
+      current.map((item) => (item.id === organization.id ? organization : item))
+    )
+  }, [])
 
   const handleArchiveConversation = useCallback(
     async (conversationId: string, archived: boolean) => {
@@ -437,27 +472,57 @@ export function Workspace() {
 
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton
-                size="lg"
-                tooltip={`${activeOrganization?.name ?? "Workspace"} organization`}
-                variant="outline"
-              >
-                <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                  <Bot aria-hidden="true" />
-                </div>
-                <span className="min-w-0 flex-1 text-left group-data-[collapsible=icon]:hidden">
-                  <span className="block truncate text-xs font-medium">
-                    {activeOrganization?.name ?? "Workspace"}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <SidebarMenuButton
+                      size="lg"
+                      tooltip={`${activeOrganization?.name ?? "Workspace"} organization`}
+                      variant="outline"
+                    />
+                  }
+                >
+                  <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+                    <Bot aria-hidden="true" />
+                  </div>
+                  <span className="min-w-0 flex-1 text-left group-data-[collapsible=icon]:hidden">
+                    <span className="block truncate text-xs font-medium">
+                      {activeOrganization?.name ?? "Workspace"}
+                    </span>
+                    <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                      {activeOrganization?.role ?? "member"} access
+                    </span>
                   </span>
-                  <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                    {activeOrganization?.role ?? "member"} access
-                  </span>
-                </span>
-                <ChevronDown
-                  aria-hidden="true"
-                  className="text-muted-foreground group-data-[collapsible=icon]:hidden"
-                />
-              </SidebarMenuButton>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="text-muted-foreground group-data-[collapsible=icon]:hidden"
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-64" side="right">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+                    {organizations.map((organization) => (
+                      <DropdownMenuItem
+                        key={organization.id}
+                        onClick={() => selectOrganization(organization.id)}
+                      >
+                        <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
+                          <Bot aria-hidden="true" />
+                        </div>
+                        <span className="min-w-0 flex-1 truncate">{organization.name}</span>
+                        {organization.id === activeOrganization?.id && (
+                          <span className="text-xs text-muted-foreground">Current</span>
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => navigate("settings")}>
+                    <Settings2 data-icon="inline-start" />
+                    <span>Manage workspaces</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarHeader>
@@ -470,208 +535,196 @@ export function Workspace() {
               </AlertDescription>
             </Alert>
           )}
-          <SidebarGroup>
+          <SidebarGroup className="pb-1">
+            <SidebarGroupContent>
+              <div className="flex items-center gap-1">
+                <SidebarMenu className="min-w-0 flex-1">
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={activeView === "chat"}
+                      render={<div aria-label="Chat" aria-level={2} role="heading" />}
+                      tooltip="Chat"
+                    >
+                      <MessageSquare data-icon="inline-start" />
+                      <span className="group-data-[collapsible=icon]:hidden">Chat</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+                <Button
+                  aria-label="New chat"
+                  className="h-8 shrink-0 gap-1 px-2 text-xs group-data-[collapsible=icon]:hidden"
+                  onClick={() => navigate("chat")}
+                  size="sm"
+                  title="New chat"
+                  variant="outline"
+                >
+                  <Plus data-icon="inline-start" />
+                  <span>New chat</span>
+                </Button>
+              </div>
+              <SidebarGroupLabel className="mt-1 h-7 px-2.5 text-[11px]">
+                Conversations
+              </SidebarGroupLabel>
+              <SidebarMenuSub className="mt-0">
+                {conversations.length === 0 ? (
+                  <SidebarMenuSubItem>
+                    <Empty className="min-h-0 rounded-md p-3">
+                      <EmptyHeader>
+                        <EmptyTitle>No conversations yet</EmptyTitle>
+                        <EmptyDescription>
+                          Start a new chat to create one.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  </SidebarMenuSubItem>
+                ) : (
+                  conversations.map((conversation) => (
+                    <ConversationSidebarItem
+                      active={activeConversationId === conversation.id}
+                      archived={false}
+                      conversation={conversation}
+                      key={conversation.id}
+                      onArchive={handleArchiveConversation}
+                      onDelete={handleDeleteConversation}
+                      onSelect={(id) => navigate("chat", id)}
+                    />
+                  ))
+                )}
+              </SidebarMenuSub>
+              {archivedConversations.length > 0 && (
+                <>
+                  <SidebarGroupLabel className="mt-2 h-7 px-2.5 text-[11px]">
+                    Archived
+                  </SidebarGroupLabel>
+                  <SidebarMenuSub className="mt-0">
+                    {archivedConversations.map((conversation) => (
+                      <ConversationSidebarItem
+                        active={activeConversationId === conversation.id}
+                        archived
+                        conversation={conversation}
+                        key={conversation.id}
+                        onArchive={handleArchiveConversation}
+                        onDelete={handleDeleteConversation}
+                        onSelect={(id) => navigate("chat", id)}
+                      />
+                    ))}
+                  </SidebarMenuSub>
+                </>
+              )}
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          <SidebarGroup className="pt-1 pb-1">
+            <SidebarGroupContent>
+              <div className="flex items-center gap-1">
+                <SidebarMenu className="min-w-0 flex-1">
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={activeView === "transcription"}
+                      render={<div aria-label="Live transcription" aria-level={2} role="heading" />}
+                      tooltip="Live transcription"
+                    >
+                      <Headphones data-icon="inline-start" />
+                      <span className="group-data-[collapsible=icon]:hidden">
+                        Live transcription
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+                <Button
+                  aria-label="New live transcription session"
+                  className="h-8 shrink-0 gap-1 px-2 text-xs group-data-[collapsible=icon]:hidden"
+                  onClick={() => navigate("transcription")}
+                  size="sm"
+                  title="New live transcription session"
+                  variant="outline"
+                >
+                  <Plus data-icon="inline-start" />
+                  <span>New session</span>
+                </Button>
+              </div>
+              <SidebarGroupLabel className="mt-1 h-7 px-2.5 text-[11px]">
+                Sessions
+              </SidebarGroupLabel>
+              <SidebarMenuSub className="mt-0">
+                {transcriptionSessions.length === 0 ? (
+                  <SidebarMenuSubItem>
+                    <Empty className="min-h-0 rounded-md p-3">
+                      <EmptyHeader>
+                        <EmptyTitle>No sessions yet</EmptyTitle>
+                        <EmptyDescription>
+                          Start listening to create one.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  </SidebarMenuSubItem>
+                ) : (
+                  transcriptionSessions.map((session) => (
+                    <TranscriptionSidebarItem
+                      active={activeSessionId === session.id}
+                      archived={false}
+                      key={session.id}
+                      onArchive={handleArchiveSession}
+                      onDelete={handleDeleteSession}
+                      onSelect={(id) =>
+                        navigate("transcription", null, false, id)
+                      }
+                      session={session}
+                    />
+                  ))
+                )}
+              </SidebarMenuSub>
+              {archivedTranscriptionSessions.length > 0 && (
+                <>
+                  <SidebarGroupLabel className="mt-2 h-7 px-2.5 text-[11px]">
+                    Archived
+                  </SidebarGroupLabel>
+                  <SidebarMenuSub className="mt-0">
+                    {archivedTranscriptionSessions.map((session) => (
+                      <TranscriptionSidebarItem
+                        active={activeSessionId === session.id}
+                        archived
+                        key={session.id}
+                        onArchive={handleArchiveSession}
+                        onDelete={handleDeleteSession}
+                        onSelect={(id) =>
+                          navigate("transcription", null, false, id)
+                        }
+                        session={session}
+                      />
+                    ))}
+                  </SidebarMenuSub>
+                </>
+              )}
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          <SidebarGroup className="pt-1">
             <SidebarGroupLabel>Workspace</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {navigation.map((item) => {
-                  const ItemIcon = item.icon
-                  const active = item.id === activeView
-
-                  if (item.id === "chat") {
+                {navigation
+                  .filter((item) => item.id !== "chat" && item.id !== "transcription")
+                  .map((item) => {
+                    const ItemIcon = item.icon
                     return (
-                      <Collapsible
-                        className="group/collapsible"
-                        defaultOpen
-                        key={item.id}
-                      >
-                        <SidebarMenuItem>
-                          <CollapsibleTrigger
-                            render={
-                              <SidebarMenuButton
-                                isActive={active}
-                                onClick={() =>
-                                  navigate("chat", activeConversationId)
-                                }
-                                tooltip={item.hint}
-                              >
-                                <ItemIcon data-icon="inline-start" />
-                                <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
-                                <ChevronRight className="ml-auto transition-transform group-data-[collapsible=icon]:hidden group-data-[open]/collapsible:rotate-90" />
-                              </SidebarMenuButton>
-                            }
-                          />
-                          <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
-                            <div className="px-2.5 pt-1 pb-1 text-[11px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
-                              Conversations
-                            </div>
-                            <SidebarMenuSub className="mt-0">
-                              {conversations.length === 0 ? (
-                                <Empty className="min-h-0 rounded-none p-3">
-                                  <EmptyHeader>
-                                    <EmptyTitle>
-                                      No conversations yet
-                                    </EmptyTitle>
-                                    <EmptyDescription>
-                                      Start a new chat to create one.
-                                    </EmptyDescription>
-                                  </EmptyHeader>
-                                </Empty>
-                              ) : (
-                                conversations.map((conversation) => (
-                                  <ConversationSidebarItem
-                                    active={activeConversationId === conversation.id}
-                                    archived={false}
-                                    conversation={conversation}
-                                    key={conversation.id}
-                                    onArchive={handleArchiveConversation}
-                                    onDelete={handleDeleteConversation}
-                                    onSelect={(id) => navigate("chat", id)}
-                                  />
-                                ))
-                              )}
-                            </SidebarMenuSub>
-                            {archivedConversations.length > 0 && (
-                              <>
-                                <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
-                                  Archived
-                                </div>
-                                <SidebarMenuSub className="mt-0">
-                                  {archivedConversations.map((conversation) => (
-                                    <ConversationSidebarItem
-                                      active={activeConversationId === conversation.id}
-                                      archived
-                                      conversation={conversation}
-                                      key={conversation.id}
-                                      onArchive={handleArchiveConversation}
-                                      onDelete={handleDeleteConversation}
-                                      onSelect={(id) => navigate("chat", id)}
-                                    />
-                                  ))}
-                                </SidebarMenuSub>
-                              </>
-                            )}
-                          </CollapsibleContent>
-                          <SidebarMenuAction
-                            aria-label="New chat"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              navigate("chat")
-                            }}
-                            showOnHover
-                            title="New chat"
-                          >
-                            <Plus aria-hidden="true" />
-                          </SidebarMenuAction>
-                        </SidebarMenuItem>
-                      </Collapsible>
+                      <SidebarMenuItem key={item.id}>
+                        <SidebarMenuButton
+                          isActive={item.id === activeView}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            navigate(item.id)
+                          }}
+                          tooltip={item.hint}
+                        >
+                          <ItemIcon data-icon="inline-start" />
+                          <span className="group-data-[collapsible=icon]:hidden">
+                            {item.label}
+                          </span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
                     )
-                  }
-
-                  if (item.id === "transcription") {
-                    return (
-                      <Collapsible
-                        className="group/collapsible"
-                        defaultOpen
-                        key={item.id}
-                      >
-                        <SidebarMenuItem>
-                          <CollapsibleTrigger
-                            render={
-                              <SidebarMenuButton
-                                isActive={activeView === "transcription"}
-                                onClick={() => navigate("transcription", null, false, activeSessionId)}
-                                tooltip={item.hint}
-                              >
-                                <ItemIcon data-icon="inline-start" />
-                                <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
-                                <ChevronRight className="ml-auto transition-transform group-data-[collapsible=icon]:hidden group-data-[open]/collapsible:rotate-90" />
-                              </SidebarMenuButton>
-                            }
-                          />
-                          <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
-                            <div className="px-2.5 pt-1 pb-1 text-[11px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
-                              Sessions
-                            </div>
-                            <SidebarMenuSub className="mt-0">
-                              {transcriptionSessions.length === 0 ? (
-                                <Empty className="min-h-0 rounded-none p-3">
-                                  <EmptyHeader>
-                                    <EmptyTitle>No sessions yet</EmptyTitle>
-                                    <EmptyDescription>Start listening to create one.</EmptyDescription>
-                                  </EmptyHeader>
-                                </Empty>
-                              ) : (
-                                transcriptionSessions.map((session) => (
-                                  <TranscriptionSidebarItem
-                                    active={activeSessionId === session.id}
-                                    archived={false}
-                                    key={session.id}
-                                    onArchive={handleArchiveSession}
-                                    onDelete={handleDeleteSession}
-                                    onSelect={(id) =>
-                                      navigate("transcription", null, false, id)
-                                    }
-                                    session={session}
-                                  />
-                                ))
-                              )}
-                            </SidebarMenuSub>
-                            {archivedTranscriptionSessions.length > 0 && (
-                              <>
-                                <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
-                                  Archived
-                                </div>
-                                <SidebarMenuSub className="mt-0">
-                                  {archivedTranscriptionSessions.map((session) => (
-                                    <TranscriptionSidebarItem
-                                      active={activeSessionId === session.id}
-                                      archived
-                                      key={session.id}
-                                      onArchive={handleArchiveSession}
-                                      onDelete={handleDeleteSession}
-                                      onSelect={(id) =>
-                                        navigate("transcription", null, false, id)
-                                      }
-                                      session={session}
-                                    />
-                                  ))}
-                                </SidebarMenuSub>
-                              </>
-                            )}
-                          </CollapsibleContent>
-                          <SidebarMenuAction
-                            aria-label="New live transcription session"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              navigate("transcription")
-                            }}
-                            showOnHover
-                            title="New live transcription session"
-                          >
-                            <Plus aria-hidden="true" />
-                          </SidebarMenuAction>
-                        </SidebarMenuItem>
-                      </Collapsible>
-                    )
-                  }
-
-                  return (
-                    <SidebarMenuItem key={item.id}>
-                      <SidebarMenuButton
-                        isActive={active}
-                        onClick={(event) => {
-                          event.preventDefault()
-                          navigate(item.id)
-                        }}
-                        tooltip={item.hint}
-                      >
-                        <ItemIcon data-icon="inline-start" />
-                        <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )
-                })}
+                  })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -806,7 +859,14 @@ export function Workspace() {
             <MCPView servers={servers} onChange={setServers} />
           )}
           {activeView === "settings" && (
-            <SettingsView user={user} organizations={organizations} />
+            <SettingsView
+              activeOrganizationId={activeOrganization?.id ?? null}
+              onOrganizationCreated={handleOrganizationCreated}
+              onOrganizationSelect={selectOrganization}
+              onOrganizationUpdated={handleOrganizationUpdated}
+              organizations={organizations}
+              user={user}
+            />
           )}
         </div>
       </SidebarInset>

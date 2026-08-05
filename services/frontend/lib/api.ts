@@ -1,5 +1,16 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
 
+let selectedOrganizationId = ""
+let hasLoadedOrganizationId = false
+
+function organizationIdForRequest() {
+  if (!hasLoadedOrganizationId && typeof window !== "undefined") {
+    selectedOrganizationId = window.localStorage.getItem("justai.organizationId") || ""
+    hasLoadedOrganizationId = true
+  }
+  return selectedOrganizationId
+}
+
 export class APIError extends Error {
   status: number
 
@@ -14,6 +25,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json")
+  }
+  const organizationId = organizationIdForRequest()
+  if (organizationId && !headers.has("X-Organization-ID")) {
+    headers.set("X-Organization-ID", organizationId)
   }
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -64,6 +79,18 @@ export const api = {
       body,
       headers: { "Content-Type": body.type || "application/octet-stream" },
     }),
+  getOrganizationId: () => organizationIdForRequest() || null,
+  setOrganizationId: (organizationId: string | null) => {
+    selectedOrganizationId = organizationId || ""
+    hasLoadedOrganizationId = true
+    if (typeof window !== "undefined") {
+      if (selectedOrganizationId) {
+        window.localStorage.setItem("justai.organizationId", selectedOrganizationId)
+      } else {
+        window.localStorage.removeItem("justai.organizationId")
+      }
+    }
+  },
 }
 
 export function socketURL(path: string, ticket: string) {
