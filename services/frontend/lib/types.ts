@@ -85,6 +85,7 @@ export type Conversation = {
   endpointId?: string | null
   createdAt: string
   updatedAt: string
+  archivedAt?: string | null
   messageCount: number
 }
 
@@ -110,6 +111,7 @@ export type TranscriptionSession = {
   endedAt?: string | null
   createdAt: string
   updatedAt: string
+  archivedAt?: string | null
   sourceCount: number
   segmentCount: number
 }

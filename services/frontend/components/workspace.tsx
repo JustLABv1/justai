@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   Bot,
+  Archive,
   ChevronDown,
   ChevronRight,
   CircleHelp,
@@ -12,9 +13,12 @@ import {
   LibraryBig,
   LogOut,
   MessageSquare,
+  MoreHorizontal,
   Plug,
   Plus,
+  RotateCcw,
   Settings2,
+  Trash2,
 } from "lucide-react"
 
 import { ChatView } from "@/components/chat-view"
@@ -58,6 +62,13 @@ import {
   SidebarRail,
   SidebarSeparator,
 } from "@/components/ui/sidebar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { APIError, api } from "@/lib/api"
 import type {
   Conversation,
@@ -129,10 +140,13 @@ export function Workspace() {
   const [user, setUser] = useState<User | null>(null)
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([])
   const [transcriptionSessions, setTranscriptionSessions] = useState<TranscriptionSession[]>([])
+  const [archivedTranscriptionSessions, setArchivedTranscriptionSessions] = useState<TranscriptionSession[]>([])
   const [endpoints, setEndpoints] = useState<Endpoint[]>([])
   const [sources, setSources] = useState<KnowledgeSource[]>([])
   const [servers, setServers] = useState<MCPServer[]>([])
+  const [actionError, setActionError] = useState("")
 
   const redirectToLogin = useCallback(() => {
     const next = `${window.location.pathname}${window.location.search}`
@@ -141,11 +155,15 @@ export function Workspace() {
 
   const refreshConversations = useCallback(async () => {
     try {
-      const result = await api.get<{ conversations: Conversation[] }>(
-        "/api/v1/conversations"
-      )
-      setConversations(result.conversations)
-      return result.conversations
+      const [activeResult, archivedResult] = await Promise.all([
+        api.get<{ conversations: Conversation[] }>("/api/v1/conversations"),
+        api.get<{ conversations: Conversation[] }>(
+          "/api/v1/conversations?archived=true"
+        ),
+      ])
+      setConversations(activeResult.conversations)
+      setArchivedConversations(archivedResult.conversations)
+      return activeResult.conversations
     } catch (caught) {
       if (caught instanceof APIError && caught.status === 401) {
         redirectToLogin()
@@ -156,11 +174,17 @@ export function Workspace() {
 
   const refreshTranscriptionSessions = useCallback(async () => {
     try {
-      const result = await api.get<{ sessions: TranscriptionSession[] }>(
-        "/api/v1/transcription/sessions"
-      )
-      setTranscriptionSessions(result.sessions)
-      return result.sessions
+      const [activeResult, archivedResult] = await Promise.all([
+        api.get<{ sessions: TranscriptionSession[] }>(
+          "/api/v1/transcription/sessions"
+        ),
+        api.get<{ sessions: TranscriptionSession[] }>(
+          "/api/v1/transcription/sessions?archived=true"
+        ),
+      ])
+      setTranscriptionSessions(activeResult.sessions)
+      setArchivedTranscriptionSessions(archivedResult.sessions)
+      return activeResult.sessions
     } catch (caught) {
       if (caught instanceof APIError && caught.status === 401) {
         redirectToLogin()
@@ -181,10 +205,16 @@ export function Workspace() {
         )
         if (cancelled) return
 
-        const [conversationResult, transcriptionResult, endpointResult, sourceResult, serverResult] =
+        const [conversationResult, archivedConversationResult, transcriptionResult, archivedTranscriptionResult, endpointResult, sourceResult, serverResult] =
           await Promise.all([
             api.get<{ conversations: Conversation[] }>("/api/v1/conversations"),
+            api.get<{ conversations: Conversation[] }>(
+              "/api/v1/conversations?archived=true"
+            ),
             api.get<{ sessions: TranscriptionSession[] }>("/api/v1/transcription/sessions"),
+            api.get<{ sessions: TranscriptionSession[] }>(
+              "/api/v1/transcription/sessions?archived=true"
+            ),
             api.get<{ endpoints: Endpoint[] }>("/api/v1/endpoints"),
             api.get<{ sources: KnowledgeSource[] }>(
               "/api/v1/knowledge/sources"
@@ -196,7 +226,9 @@ export function Workspace() {
         setUser(me.user)
         setOrganizations(me.organizations)
         setConversations(conversationResult.conversations)
+        setArchivedConversations(archivedConversationResult.conversations)
         setTranscriptionSessions(transcriptionResult.sessions)
+        setArchivedTranscriptionSessions(archivedTranscriptionResult.sessions)
         setEndpoints(endpointResult.endpoints)
         setSources(sourceResult.sources)
         setServers(serverResult.servers)
@@ -223,12 +255,12 @@ export function Workspace() {
   }, [redirectToLogin, reloadToken])
 
   const activeOrganization = organizations[0]
-  const activeConversationId = conversations.some(
+  const activeConversationId = [...conversations, ...archivedConversations].some(
     (conversation) => conversation.id === requestedConversationId
   )
     ? requestedConversationId
     : null
-  const activeSessionId = transcriptionSessions.some(
+  const activeSessionId = [...transcriptionSessions, ...archivedTranscriptionSessions].some(
     (session) => session.id === requestedSessionId
   )
     ? requestedSessionId
@@ -267,6 +299,92 @@ export function Workspace() {
     []
   )
 
+  const handleArchiveConversation = useCallback(
+    async (conversationId: string, archived: boolean) => {
+      setActionError("")
+      try {
+        await api.patch(`/api/v1/conversations/${conversationId}`, { archived })
+        await refreshConversations()
+        if (archived && requestedConversationId === conversationId) {
+          navigate("chat")
+        }
+      } catch (caught) {
+        setActionError(
+          caught instanceof Error ? caught.message : "The conversation could not be updated."
+        )
+      }
+    },
+    [navigate, refreshConversations, requestedConversationId]
+  )
+
+  const handleDeleteConversation = useCallback(
+    async (conversation: Conversation) => {
+      if (
+        !window.confirm(
+          `Delete “${conversation.title}”? This permanently removes the chat and its messages.`
+        )
+      ) {
+        return
+      }
+      setActionError("")
+      try {
+        await api.delete(`/api/v1/conversations/${conversation.id}`)
+        await refreshConversations()
+        if (requestedConversationId === conversation.id) {
+          navigate("chat")
+        }
+      } catch (caught) {
+        setActionError(
+          caught instanceof Error ? caught.message : "The conversation could not be deleted."
+        )
+      }
+    },
+    [navigate, refreshConversations, requestedConversationId]
+  )
+
+  const handleArchiveSession = useCallback(
+    async (sessionId: string, archived: boolean) => {
+      setActionError("")
+      try {
+        await api.patch(`/api/v1/transcription/sessions/${sessionId}`, { archived })
+        await refreshTranscriptionSessions()
+        if (archived && requestedSessionId === sessionId) {
+          navigate("transcription")
+        }
+      } catch (caught) {
+        setActionError(
+          caught instanceof Error ? caught.message : "The transcription session could not be updated."
+        )
+      }
+    },
+    [navigate, refreshTranscriptionSessions, requestedSessionId]
+  )
+
+  const handleDeleteSession = useCallback(
+    async (session: TranscriptionSession) => {
+      if (
+        !window.confirm(
+          `Delete “${session.title}”? This permanently removes the live transcription and recordings.`
+        )
+      ) {
+        return
+      }
+      setActionError("")
+      try {
+        await api.delete(`/api/v1/transcription/sessions/${session.id}`)
+        await refreshTranscriptionSessions()
+        if (requestedSessionId === session.id) {
+          navigate("transcription")
+        }
+      } catch (caught) {
+        setActionError(
+          caught instanceof Error ? caught.message : "The transcription session could not be deleted."
+        )
+      }
+    },
+    [navigate, refreshTranscriptionSessions, requestedSessionId]
+  )
+
   async function signOut() {
     try {
       await api.post("/api/v1/auth/logout")
@@ -281,6 +399,9 @@ export function Workspace() {
         session,
         ...current.filter((item) => item.id !== session.id),
       ])
+      setArchivedTranscriptionSessions((current) =>
+        current.filter((item) => item.id !== session.id)
+      )
       navigate("transcription", null, true, session.id)
     },
     [navigate]
@@ -356,6 +477,13 @@ export function Workspace() {
         </SidebarHeader>
 
         <SidebarContent>
+          {actionError && (
+            <Alert className="mx-2 mt-2" variant="destructive">
+              <AlertDescription className="text-xs">
+                {actionError}
+              </AlertDescription>
+            </Alert>
+          )}
           <SidebarGroup>
             <SidebarGroupLabel>Workspace</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -405,32 +533,38 @@ export function Workspace() {
                                 </Empty>
                               ) : (
                                 conversations.map((conversation) => (
-                                  <SidebarMenuSubItem key={conversation.id}>
-                                    <SidebarMenuSubButton
-                                      href={`/?conversation=${conversation.id}`}
-                                      isActive={
-                                        activeConversationId === conversation.id
-                                      }
-                                      onClick={(event) => {
-                                        event.preventDefault()
-                                        navigate("chat", conversation.id)
-                                      }}
-                                      title={`${conversation.title} · ${conversation.messageCount} message${conversation.messageCount === 1 ? "" : "s"}`}
-                                    >
-                                      <span className="size-1.5 shrink-0 rounded-full bg-border" />
-                                      <span className="min-w-0 flex-1 truncate">
-                                        {conversation.title}
-                                      </span>
-                                      <span className="shrink-0 text-[10px] text-muted-foreground">
-                                        {formatConversationTime(
-                                          conversation.updatedAt
-                                        )}
-                                      </span>
-                                    </SidebarMenuSubButton>
-                                  </SidebarMenuSubItem>
+                                  <ConversationSidebarItem
+                                    active={activeConversationId === conversation.id}
+                                    archived={false}
+                                    conversation={conversation}
+                                    key={conversation.id}
+                                    onArchive={handleArchiveConversation}
+                                    onDelete={handleDeleteConversation}
+                                    onSelect={(id) => navigate("chat", id)}
+                                  />
                                 ))
                               )}
                             </SidebarMenuSub>
+                            {archivedConversations.length > 0 && (
+                              <>
+                                <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium text-muted-foreground">
+                                  Archived
+                                </div>
+                                <SidebarMenuSub className="mt-0">
+                                  {archivedConversations.map((conversation) => (
+                                    <ConversationSidebarItem
+                                      active={activeConversationId === conversation.id}
+                                      archived
+                                      conversation={conversation}
+                                      key={conversation.id}
+                                      onArchive={handleArchiveConversation}
+                                      onDelete={handleDeleteConversation}
+                                      onSelect={(id) => navigate("chat", id)}
+                                    />
+                                  ))}
+                                </SidebarMenuSub>
+                              </>
+                            )}
                           </CollapsibleContent>
                           <SidebarMenuAction
                             aria-label="New chat"
@@ -483,24 +617,42 @@ export function Workspace() {
                                 </Empty>
                               ) : (
                                 transcriptionSessions.map((session) => (
-                                  <SidebarMenuSubItem key={session.id}>
-                                    <SidebarMenuSubButton
-                                      href={`/?view=transcription&session=${session.id}`}
-                                      isActive={activeSessionId === session.id}
-                                      onClick={(event) => {
-                                        event.preventDefault()
-                                        navigate("transcription", null, false, session.id)
-                                      }}
-                                      title={`${session.title} · ${session.status}`}
-                                    >
-                                      <span className={`size-1.5 shrink-0 rounded-full ${session.status === "live" ? "bg-primary" : "bg-border"}`} />
-                                      <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                                      <span className="shrink-0 text-[10px] text-muted-foreground">{formatConversationTime(session.updatedAt)}</span>
-                                    </SidebarMenuSubButton>
-                                  </SidebarMenuSubItem>
+                                  <TranscriptionSidebarItem
+                                    active={activeSessionId === session.id}
+                                    archived={false}
+                                    key={session.id}
+                                    onArchive={handleArchiveSession}
+                                    onDelete={handleDeleteSession}
+                                    onSelect={(id) =>
+                                      navigate("transcription", null, false, id)
+                                    }
+                                    session={session}
+                                  />
                                 ))
                               )}
                             </SidebarMenuSub>
+                            {archivedTranscriptionSessions.length > 0 && (
+                              <>
+                                <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium text-muted-foreground">
+                                  Archived
+                                </div>
+                                <SidebarMenuSub className="mt-0">
+                                  {archivedTranscriptionSessions.map((session) => (
+                                    <TranscriptionSidebarItem
+                                      active={activeSessionId === session.id}
+                                      archived
+                                      key={session.id}
+                                      onArchive={handleArchiveSession}
+                                      onDelete={handleDeleteSession}
+                                      onSelect={(id) =>
+                                        navigate("transcription", null, false, id)
+                                      }
+                                      session={session}
+                                    />
+                                  ))}
+                                </SidebarMenuSub>
+                              </>
+                            )}
                           </CollapsibleContent>
                           <SidebarMenuAction
                             aria-label="New live transcription session"
@@ -682,6 +834,152 @@ function WorkspaceLoading() {
         <p className="text-sm text-muted-foreground">Loading JustAI…</p>
       </div>
     </main>
+  )
+}
+
+function ConversationSidebarItem({
+  active,
+  archived,
+  conversation,
+  onArchive,
+  onDelete,
+  onSelect,
+}: {
+  active: boolean
+  archived: boolean
+  conversation: Conversation
+  onArchive: (id: string, archived: boolean) => void
+  onDelete: (conversation: Conversation) => void
+  onSelect: (id: string) => void
+}) {
+  return (
+    <SidebarMenuSubItem>
+      <SidebarMenuSubButton
+        className="pr-8"
+        href={`/?conversation=${conversation.id}`}
+        isActive={active}
+        onClick={(event) => {
+          event.preventDefault()
+          onSelect(conversation.id)
+        }}
+        title={`${conversation.title} · ${conversation.messageCount} message${conversation.messageCount === 1 ? "" : "s"}`}
+      >
+        <span className="size-1.5 shrink-0 rounded-full bg-border" />
+        <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {formatConversationTime(conversation.updatedAt)}
+        </span>
+      </SidebarMenuSubButton>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <SidebarMenuAction
+              aria-label={`Actions for ${conversation.title}`}
+              className="group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:opacity-100"
+              showOnHover
+              title={`Actions for ${conversation.title}`}
+            />
+          }
+          onClick={(event) => event.stopPropagation()}
+        >
+          <MoreHorizontal aria-hidden="true" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40" side="right">
+          <DropdownMenuGroup>
+            <DropdownMenuItem
+              onClick={() => onArchive(conversation.id, !archived)}
+            >
+              {archived ? (
+                <RotateCcw data-icon="inline-start" />
+              ) : (
+                <Archive data-icon="inline-start" />
+              )}
+              <span>{archived ? "Restore" : "Archive"}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onDelete(conversation)}
+              variant="destructive"
+            >
+              <Trash2 data-icon="inline-start" />
+              <span>Delete</span>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SidebarMenuSubItem>
+  )
+}
+
+function TranscriptionSidebarItem({
+  active,
+  archived,
+  onArchive,
+  onDelete,
+  onSelect,
+  session,
+}: {
+  active: boolean
+  archived: boolean
+  onArchive: (id: string, archived: boolean) => void
+  onDelete: (session: TranscriptionSession) => void
+  onSelect: (id: string) => void
+  session: TranscriptionSession
+}) {
+  return (
+    <SidebarMenuSubItem>
+      <SidebarMenuSubButton
+        className="pr-8"
+        href={`/?view=transcription&session=${session.id}`}
+        isActive={active}
+        onClick={(event) => {
+          event.preventDefault()
+          onSelect(session.id)
+        }}
+        title={`${session.title} · ${session.status}`}
+      >
+        <span
+          className={`size-1.5 shrink-0 rounded-full ${session.status === "live" ? "bg-primary" : "bg-border"}`}
+        />
+        <span className="min-w-0 flex-1 truncate">{session.title}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {formatConversationTime(session.updatedAt)}
+        </span>
+      </SidebarMenuSubButton>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <SidebarMenuAction
+              aria-label={`Actions for ${session.title}`}
+              className="group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:opacity-100"
+              showOnHover
+              title={`Actions for ${session.title}`}
+            />
+          }
+          onClick={(event) => event.stopPropagation()}
+        >
+          <MoreHorizontal aria-hidden="true" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40" side="right">
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={() => onArchive(session.id, !archived)}>
+              {archived ? (
+                <RotateCcw data-icon="inline-start" />
+              ) : (
+                <Archive data-icon="inline-start" />
+              )}
+              <span>{archived ? "Restore" : "Archive"}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onDelete(session)}
+              variant="destructive"
+            >
+              <Trash2 data-icon="inline-start" />
+              <span>Delete</span>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SidebarMenuSubItem>
   )
 }
 

@@ -31,6 +31,7 @@ type EndpointForm = {
   transcriptionModel: string
   diarizationModel: string
   realtimeTranscription: boolean
+  chunkedTranscription: boolean
   diarization: boolean
   credential: string
 }
@@ -46,6 +47,7 @@ const defaults: EndpointForm = {
   transcriptionModel: "",
   diarizationModel: "",
   realtimeTranscription: false,
+  chunkedTranscription: false,
   diarization: false,
   credential: "",
 }
@@ -78,6 +80,7 @@ export function EndpointsView({ endpoints, onChange }: Props) {
       providerType: provider,
       baseUrl: providerDetails[provider]?.baseUrl ?? current.baseUrl,
       realtimeTranscription: nativeTranscription,
+      chunkedTranscription: false,
       diarization: nativeTranscription,
     }))
   }
@@ -95,6 +98,11 @@ export function EndpointsView({ endpoints, onChange }: Props) {
 
   function openEdit(endpoint: Endpoint) {
     setEditingEndpoint(endpoint)
+    const isWhisperGateway = endpoint.providerType === "openai-compatible" && /whisper/i.test(endpoint.transcriptionModel ?? "")
+    const chunkedTranscription = Boolean(
+      endpoint.capabilities["chunked-transcription"] ||
+      ((!endpoint.capabilities["realtime-transcription"] || isWhisperGateway) && endpoint.capabilities.transcription)
+    )
     setForm({
       name: endpoint.name,
       providerType: endpoint.providerType,
@@ -105,7 +113,8 @@ export function EndpointsView({ endpoints, onChange }: Props) {
       embeddingModel: endpoint.embeddingModel ?? "",
       transcriptionModel: endpoint.transcriptionModel ?? "",
       diarizationModel: endpoint.diarizationModel ?? "",
-      realtimeTranscription: Boolean(endpoint.capabilities["realtime-transcription"] ?? endpoint.capabilities.transcription),
+      realtimeTranscription: Boolean(endpoint.capabilities["realtime-transcription"] && !chunkedTranscription),
+      chunkedTranscription,
       diarization: Boolean(endpoint.capabilities.diarization),
       credential: "",
     })
@@ -126,8 +135,9 @@ export function EndpointsView({ endpoints, onChange }: Props) {
       const capabilities = {
         chat: true,
         embeddings: Boolean(form.embeddingModel),
-        transcription: form.realtimeTranscription,
+        transcription: form.chunkedTranscription,
         "realtime-transcription": form.realtimeTranscription,
+        "chunked-transcription": form.chunkedTranscription,
         diarization: form.diarization && Boolean(form.diarizationModel),
       }
       const payload = {
@@ -212,8 +222,8 @@ export function EndpointsView({ endpoints, onChange }: Props) {
               <Field><FieldLabel>Visibility</FieldLabel><Select value={form.scopeType} onValueChange={(value) => update("scopeType", value ?? "organization")}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="organization">Organization</SelectItem><SelectItem value="user">Only me</SelectItem><SelectItem value="global">Global (platform admin)</SelectItem></SelectContent></Select><FieldDescription>Routing precedence is explicit selection, personal, organization, then global.</FieldDescription></Field>
               <Field><FieldLabel htmlFor="endpoint-url">Base URL</FieldLabel><Input id="endpoint-url" value={form.baseUrl} onChange={(event) => update("baseUrl", event.target.value)} placeholder="https://api.openai.com/v1" required /><FieldDescription>{providerDetails[form.providerType]?.description}</FieldDescription></Field>
               <div className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor="endpoint-model">Chat model</FieldLabel><Input id="endpoint-model" value={form.chatModel} onChange={(event) => update("chatModel", event.target.value)} placeholder="gpt-4o-mini" /></Field><Field><FieldLabel htmlFor="endpoint-embedding">Embedding model</FieldLabel><Input id="endpoint-embedding" value={form.embeddingModel} onChange={(event) => update("embeddingModel", event.target.value)} placeholder="text-embedding-3-small" /></Field></div>
-              <div className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor="endpoint-transcription">Realtime transcription model</FieldLabel><Input id="endpoint-transcription" value={form.transcriptionModel} onChange={(event) => update("transcriptionModel", event.target.value)} placeholder="gpt-live-transcribe" /><FieldDescription>Only enable this for gateways with explicit realtime transcription support.</FieldDescription></Field><Field><FieldLabel htmlFor="endpoint-diarization">Diarization model</FieldLabel><Input id="endpoint-diarization" value={form.diarizationModel} onChange={(event) => update("diarizationModel", event.target.value)} placeholder="gpt-4o-transcribe-diarize" /><FieldDescription>Runs on delayed rolling windows and can assign anonymous speakers.</FieldDescription></Field></div>
-              <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2"><label className="flex items-start justify-between gap-3"><span><span className="block text-sm font-medium">Realtime transcription</span><span className="mt-1 block text-xs text-muted-foreground">Stream PCM audio through this endpoint.</span></span><Switch checked={form.realtimeTranscription} onCheckedChange={(checked) => update("realtimeTranscription", checked)} /></label><label className="flex items-start justify-between gap-3"><span><span className="block text-sm font-medium">Speaker diarization</span><span className="mt-1 block text-xs text-muted-foreground">Identify anonymous speakers after a delay.</span></span><Switch checked={form.diarization} onCheckedChange={(checked) => update("diarization", checked)} /></label></div>
+              <div className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor="endpoint-transcription">Transcription model</FieldLabel><Input id="endpoint-transcription" value={form.transcriptionModel} onChange={(event) => update("transcriptionModel", event.target.value)} placeholder="whisper-large-v3-turbo" /><FieldDescription>Use the model exposed by your realtime or /audio/transcriptions endpoint.</FieldDescription></Field><Field><FieldLabel htmlFor="endpoint-diarization">Diarization model</FieldLabel><Input id="endpoint-diarization" value={form.diarizationModel} onChange={(event) => update("diarizationModel", event.target.value)} placeholder="gpt-4o-transcribe-diarize" /><FieldDescription>Runs on delayed rolling windows and can assign anonymous speakers.</FieldDescription></Field></div>
+              <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-3"><label className="flex items-start justify-between gap-3"><span><span className="block text-sm font-medium">Realtime transcription</span><span className="mt-1 block text-xs text-muted-foreground">Native provider WebSocket such as OpenAI or Gemini Live.</span></span><Switch checked={form.realtimeTranscription} onCheckedChange={(checked) => setForm((current) => ({ ...current, realtimeTranscription: checked, chunkedTranscription: checked ? false : current.chunkedTranscription }))} /></label><label className="flex items-start justify-between gap-3"><span><span className="block text-sm font-medium">Chunked HTTP transcription</span><span className="mt-1 block text-xs text-muted-foreground">Rolling /audio/transcriptions windows for Whisper models.</span></span><Switch checked={form.chunkedTranscription} onCheckedChange={(checked) => setForm((current) => ({ ...current, chunkedTranscription: checked, realtimeTranscription: checked ? false : current.realtimeTranscription }))} /></label><label className="flex items-start justify-between gap-3"><span><span className="block text-sm font-medium">Speaker diarization</span><span className="mt-1 block text-xs text-muted-foreground">Identify anonymous speakers after a delay.</span></span><Switch checked={form.diarization} onCheckedChange={(checked) => update("diarization", checked)} /></label></div>
               <Field><FieldLabel htmlFor="endpoint-key">API key or token</FieldLabel><Input id="endpoint-key" type="password" value={form.credential} onChange={(event) => update("credential", event.target.value)} placeholder="Stored encrypted by JustAI" autoComplete="off" /><FieldDescription>For local runtimes this can stay empty. OAuth-ready MCP credentials follow the same encrypted storage boundary.</FieldDescription></Field>
               </FieldGroup>
             </div>

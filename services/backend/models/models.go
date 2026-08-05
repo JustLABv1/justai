@@ -29,6 +29,7 @@ type Conversation struct {
 	EndpointID     *uuid.UUID `json:"endpointId,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	UpdatedAt      time.Time  `json:"updatedAt"`
+	ArchivedAt     *time.Time `json:"archivedAt,omitempty"`
 	MessageCount   int        `json:"messageCount"`
 }
 
@@ -80,6 +81,7 @@ type TranscriptionSession struct {
 	EndedAt               *time.Time `json:"endedAt,omitempty"`
 	CreatedAt             time.Time  `json:"createdAt"`
 	UpdatedAt             time.Time  `json:"updatedAt"`
+	ArchivedAt            *time.Time `json:"archivedAt,omitempty"`
 	SourceCount           int        `json:"sourceCount"`
 	SegmentCount          int        `json:"segmentCount"`
 }

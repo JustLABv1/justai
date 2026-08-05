@@ -25,17 +25,20 @@ type Config struct {
 }
 
 type TranscriptionConfig struct {
-	StorageDriver      string
-	LocalStoragePath   string
-	S3Endpoint         string
-	S3Region           string
-	S3Bucket           string
-	S3AccessKey        string
-	S3SecretKey        string
-	AudioRetentionDays int
-	DiarizationWindow  int
-	DiarizationOverlap int
-	MaxSessionHours    int
+	StorageDriver        string
+	LocalStoragePath     string
+	S3Endpoint           string
+	S3Region             string
+	S3Bucket             string
+	S3AccessKey          string
+	S3SecretKey          string
+	AudioRetentionDays   int
+	DiarizationWindow    int
+	DiarizationOverlap   int
+	StreamingChunkMs     int
+	StreamingOverlapMs   int
+	StreamingPromptChars int
+	MaxSessionHours      int
 }
 
 type OIDCConfig struct {
@@ -59,17 +62,20 @@ type fileConfig struct {
 }
 
 type fileTranscriptionConfig struct {
-	StorageDriver      string `yaml:"storage_driver"`
-	LocalStoragePath   string `yaml:"local_storage_path"`
-	S3Endpoint         string `yaml:"s3_endpoint"`
-	S3Region           string `yaml:"s3_region"`
-	S3Bucket           string `yaml:"s3_bucket"`
-	S3AccessKey        string `yaml:"s3_access_key"`
-	S3SecretKey        string `yaml:"s3_secret_key"`
-	AudioRetentionDays int    `yaml:"audio_retention_days"`
-	DiarizationWindow  int    `yaml:"diarization_window_seconds"`
-	DiarizationOverlap int    `yaml:"diarization_overlap_seconds"`
-	MaxSessionHours    int    `yaml:"max_session_hours"`
+	StorageDriver        string `yaml:"storage_driver"`
+	LocalStoragePath     string `yaml:"local_storage_path"`
+	S3Endpoint           string `yaml:"s3_endpoint"`
+	S3Region             string `yaml:"s3_region"`
+	S3Bucket             string `yaml:"s3_bucket"`
+	S3AccessKey          string `yaml:"s3_access_key"`
+	S3SecretKey          string `yaml:"s3_secret_key"`
+	AudioRetentionDays   int    `yaml:"audio_retention_days"`
+	DiarizationWindow    int    `yaml:"diarization_window_seconds"`
+	DiarizationOverlap   int    `yaml:"diarization_overlap_seconds"`
+	StreamingChunkMs     int    `yaml:"streaming_chunk_ms"`
+	StreamingOverlapMs   int    `yaml:"streaming_overlap_ms"`
+	StreamingPromptChars int    `yaml:"streaming_prompt_chars"`
+	MaxSessionHours      int    `yaml:"max_session_hours"`
 }
 
 type fileOIDCConfig struct {
@@ -109,17 +115,20 @@ func Load(configPath string) (Config, error) {
 
 func transcriptionConfig(values fileTranscriptionConfig) TranscriptionConfig {
 	result := TranscriptionConfig{
-		StorageDriver:      getenvOrFile("JUSTAI_TRANSCRIPTION_STORAGE_DRIVER", values.StorageDriver, "local"),
-		LocalStoragePath:   getenvOrFile("JUSTAI_TRANSCRIPTION_LOCAL_STORAGE_PATH", values.LocalStoragePath, "./data/transcription"),
-		S3Endpoint:         getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ENDPOINT", values.S3Endpoint, ""),
-		S3Region:           getenvOrFile("JUSTAI_TRANSCRIPTION_S3_REGION", values.S3Region, "us-east-1"),
-		S3Bucket:           getenvOrFile("JUSTAI_TRANSCRIPTION_S3_BUCKET", values.S3Bucket, ""),
-		S3AccessKey:        getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY", values.S3AccessKey, ""),
-		S3SecretKey:        getenvOrFile("JUSTAI_TRANSCRIPTION_S3_SECRET_KEY", values.S3SecretKey, ""),
-		AudioRetentionDays: values.AudioRetentionDays,
-		DiarizationWindow:  values.DiarizationWindow,
-		DiarizationOverlap: values.DiarizationOverlap,
-		MaxSessionHours:    values.MaxSessionHours,
+		StorageDriver:        getenvOrFile("JUSTAI_TRANSCRIPTION_STORAGE_DRIVER", values.StorageDriver, "local"),
+		LocalStoragePath:     getenvOrFile("JUSTAI_TRANSCRIPTION_LOCAL_STORAGE_PATH", values.LocalStoragePath, "./data/transcription"),
+		S3Endpoint:           getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ENDPOINT", values.S3Endpoint, ""),
+		S3Region:             getenvOrFile("JUSTAI_TRANSCRIPTION_S3_REGION", values.S3Region, "us-east-1"),
+		S3Bucket:             getenvOrFile("JUSTAI_TRANSCRIPTION_S3_BUCKET", values.S3Bucket, ""),
+		S3AccessKey:          getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY", values.S3AccessKey, ""),
+		S3SecretKey:          getenvOrFile("JUSTAI_TRANSCRIPTION_S3_SECRET_KEY", values.S3SecretKey, ""),
+		AudioRetentionDays:   values.AudioRetentionDays,
+		DiarizationWindow:    values.DiarizationWindow,
+		DiarizationOverlap:   values.DiarizationOverlap,
+		StreamingChunkMs:     values.StreamingChunkMs,
+		StreamingOverlapMs:   values.StreamingOverlapMs,
+		StreamingPromptChars: values.StreamingPromptChars,
+		MaxSessionHours:      values.MaxSessionHours,
 	}
 	if result.AudioRetentionDays <= 0 {
 		result.AudioRetentionDays = 30
@@ -129,6 +138,15 @@ func transcriptionConfig(values fileTranscriptionConfig) TranscriptionConfig {
 	}
 	if result.DiarizationOverlap <= 0 || result.DiarizationOverlap >= result.DiarizationWindow {
 		result.DiarizationOverlap = 5
+	}
+	if result.StreamingChunkMs <= 0 {
+		result.StreamingChunkMs = 2500
+	}
+	if result.StreamingOverlapMs <= 0 || result.StreamingOverlapMs >= result.StreamingChunkMs {
+		result.StreamingOverlapMs = 500
+	}
+	if result.StreamingPromptChars <= 0 {
+		result.StreamingPromptChars = 160
 	}
 	if result.MaxSessionHours <= 0 {
 		result.MaxSessionHours = 8

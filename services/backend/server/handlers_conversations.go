@@ -53,6 +53,10 @@ func (a *App) createConversation(c *gin.Context) {
 func (a *App) listConversations(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
+	archiveFilter := "c.archived_at IS NULL"
+	if strings.EqualFold(strings.TrimSpace(c.Query("archived")), "true") {
+		archiveFilter = "c.archived_at IS NOT NULL"
+	}
 	rows, err := a.DB.QueryContext(c, `
 		SELECT
 			c.id,
@@ -60,9 +64,10 @@ func (a *App) listConversations(c *gin.Context) {
 			COALESCE(c.endpoint_id::text, ''),
 			c.created_at,
 			c.updated_at,
+			c.archived_at,
 			(SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id)::int
 		FROM conversations c
-		WHERE c.user_id = $1 AND c.organization_id = $2
+		WHERE c.user_id = $1 AND c.organization_id = $2 AND `+archiveFilter+`
 		ORDER BY c.updated_at DESC
 		LIMIT 50
 	`, principal.UserID, organizationID)
@@ -76,7 +81,7 @@ func (a *App) listConversations(c *gin.Context) {
 	for rows.Next() {
 		var item models.Conversation
 		var rawEndpointID string
-		if err := rows.Scan(&item.ID, &item.Title, &rawEndpointID, &item.CreatedAt, &item.UpdatedAt, &item.MessageCount); err != nil {
+		if err := rows.Scan(&item.ID, &item.Title, &rawEndpointID, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.MessageCount); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
@@ -88,6 +93,64 @@ func (a *App) listConversations(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"conversations": result})
+}
+
+func (a *App) updateConversation(c *gin.Context) {
+	principal, _ := middleware.GetPrincipal(c)
+	organizationID, _ := middleware.GetOrganizationID(c)
+	conversationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid conversation id"))
+		return
+	}
+	var request struct {
+		Archived *bool `json:"archived"`
+	}
+	if !decodeJSON(c, &request) {
+		return
+	}
+	if request.Archived == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("archived is required"))
+		return
+	}
+	result, err := a.DB.ExecContext(c, `
+		UPDATE conversations
+		SET archived_at = CASE WHEN $4 THEN COALESCE(archived_at, now()) ELSE NULL END,
+		    updated_at = now()
+		WHERE id = $1 AND user_id = $2 AND organization_id = $3
+	`, conversationID, principal.UserID, organizationID, *request.Archived)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		writeError(c, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (a *App) deleteConversation(c *gin.Context) {
+	principal, _ := middleware.GetPrincipal(c)
+	organizationID, _ := middleware.GetOrganizationID(c)
+	conversationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid conversation id"))
+		return
+	}
+	result, err := a.DB.ExecContext(c, `
+		DELETE FROM conversations
+		WHERE id = $1 AND user_id = $2 AND organization_id = $3
+	`, conversationID, principal.UserID, organizationID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		writeError(c, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (a *App) listConversationMessages(c *gin.Context) {

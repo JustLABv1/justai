@@ -70,14 +70,18 @@ type transcriptionTicketInfo struct {
 func (a *App) listTranscriptionSessions(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
+	archiveFilter := "s.archived_at IS NULL"
+	if strings.EqualFold(strings.TrimSpace(c.Query("archived")), "true") {
+		archiveFilter = "s.archived_at IS NOT NULL"
+	}
 	rows, err := a.DB.QueryContext(c, `
 		SELECT s.id, s.user_id, s.organization_id, s.title, s.status,
 		       s.transcription_endpoint_id, s.diarization_endpoint_id, s.language,
-		       s.record_audio, s.started_at, s.ended_at, s.created_at, s.updated_at,
+		       s.record_audio, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at,
 		       (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id),
 		       (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE)
 		FROM transcription_sessions s
-		WHERE s.user_id = $1 AND s.organization_id = $2
+		WHERE s.user_id = $1 AND s.organization_id = $2 AND `+archiveFilter+`
 		ORDER BY s.updated_at DESC`, principal.UserID, organizationID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -107,7 +111,7 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 	}
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
-	transcriptionEndpoint, err := a.resolveTranscriptionEndpoint(c, principal.UserID, organizationID, request.TranscriptionEndpoint, "realtime-transcription")
+	transcriptionEndpoint, err := a.resolveTranscriptionEndpoint(c, principal.UserID, organizationID, request.TranscriptionEndpoint, "transcription")
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
@@ -185,16 +189,24 @@ func (a *App) updateTranscriptionSession(c *gin.Context) {
 		return
 	}
 	var request struct {
-		Title string `json:"title"`
+		Title    string `json:"title"`
+		Archived *bool  `json:"archived"`
 	}
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if strings.TrimSpace(request.Title) == "" {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("title is required"))
+	title := strings.TrimSpace(request.Title)
+	if title == "" && request.Archived == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("title or archived is required"))
 		return
 	}
-	_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET title = $2, updated_at = now() WHERE id = $1`, id, strings.TrimSpace(request.Title))
+	if request.Archived == nil {
+		_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET title = $2, updated_at = now() WHERE id = $1`, id, title)
+	} else if title == "" {
+		_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET archived_at = CASE WHEN $2 THEN COALESCE(archived_at, now()) ELSE NULL END, updated_at = now() WHERE id = $1`, id, *request.Archived)
+	} else {
+		_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET title = $2, archived_at = CASE WHEN $3 THEN COALESCE(archived_at, now()) ELSE NULL END, updated_at = now() WHERE id = $1`, id, title, *request.Archived)
+	}
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -679,20 +691,29 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 		_ = a.Live.send(client, "error", ginData{"message": "transcription endpoint could not be loaded: " + err.Error()})
 		return
 	}
-	if !endpointSupports(endpoint, "realtime-transcription") {
-		_ = a.Live.send(client, "error", ginData{"message": fmt.Sprintf("provider %s does not support realtime transcription", endpoint.ProviderType)})
+	mode := transcriptionMode(endpoint)
+	if mode == "" {
+		_ = a.Live.send(client, "error", ginData{"message": fmt.Sprintf("provider %s does not support a compatible transcription transport", endpoint.ProviderType)})
 		return
 	}
-	stream, err := provider.OpenRealtime(ctx, endpoint, endpoint.TranscriptionModel, language)
+	var stream provider.TranscriptionStream
+	if mode == "chunked" {
+		stream, err = provider.OpenChunked(ctx, endpoint, endpoint.TranscriptionModel, language, provider.ChunkedOptions{
+			Window:         time.Duration(a.Config.Transcription.StreamingChunkMs) * time.Millisecond,
+			Overlap:        time.Duration(a.Config.Transcription.StreamingOverlapMs) * time.Millisecond,
+			PromptMaxChars: a.Config.Transcription.StreamingPromptChars,
+		})
+	} else {
+		stream, err = provider.OpenRealtime(ctx, endpoint, endpoint.TranscriptionModel, language)
+	}
 	if err != nil {
 		_ = a.Live.send(client, "error", ginData{"message": "transcription provider connection failed: " + err.Error()})
 		return
 	}
-	defer stream.Close()
 	a.Live.markSource(info.SessionID, info.SourceID, "connected")
 	started := time.Now()
 	var latestCaptureOffset atomic.Int64
-	_ = a.Live.send(client, "transcription.ready", ginData{"sessionId": info.SessionID, "sourceId": info.SourceID, "provider": endpoint.ProviderType, "model": endpoint.TranscriptionModel})
+	_ = a.Live.send(client, "transcription.ready", ginData{"sessionId": info.SessionID, "sourceId": info.SourceID, "provider": endpoint.ProviderType, "model": endpoint.TranscriptionModel, "mode": mode})
 	providerDone := make(chan struct{})
 	go func() {
 		defer close(providerDone)
@@ -705,6 +726,9 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			if strings.TrimSpace(event.Text) == "" {
 				continue
 			}
+			if isTranscriptionProtocolPayload(event.Text) {
+				continue
+			}
 			if event.Kind == "partial" {
 				a.Live.broadcast(info.SessionID, "transcription.partial", ginData{"sourceId": info.SourceID, "text": event.Text})
 				continue
@@ -714,7 +738,13 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 				if offset <= 0 {
 					offset = time.Since(started).Milliseconds()
 				}
-				segment, persistErr := a.persistTranscriptionSegment(ctx, info.SessionID, info.SourceID, strings.TrimSpace(event.Text), maxInt64(0, offset-3000), offset)
+				startOffset := maxInt64(0, offset-3000)
+				endOffset := offset
+				if event.EndOffsetMs > 0 {
+					startOffset = maxInt64(0, event.StartOffsetMs)
+					endOffset = event.EndOffsetMs
+				}
+				segment, persistErr := a.persistTranscriptionSegment(ctx, info.SessionID, info.SourceID, strings.TrimSpace(event.Text), startOffset, endOffset)
 				if persistErr != nil {
 					a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "could not persist transcript: " + persistErr.Error()})
 					continue
@@ -724,13 +754,11 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 		}
 	}()
 	defer func() {
+		stream.Close()
+		<-providerDone
 		a.Live.markSource(info.SessionID, info.SourceID, "disconnected")
 		a.Live.flushPCM(info.SessionID, info.SourceID)
 		a.Live.clearPCM(info.SourceID)
-		select {
-		case <-providerDone:
-		default:
-		}
 	}()
 
 	for {
@@ -750,7 +778,9 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			case "source.level":
 				a.Live.updateSourceLevel(info.SessionID, info.SourceID, event.Level)
 			case "transcription.stop":
-				_ = stream.Commit()
+				if err := stream.Commit(); err != nil {
+					a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "transcription finalization failed: " + err.Error()})
+				}
 				return
 			case "ping":
 				_ = a.Live.send(client, "pong", ginData{"serverTime": time.Now().UnixMilli()})
@@ -766,7 +796,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			continue
 		}
 		if err := stream.SendPCM(ctx, pcm, frame.SampleRate); err != nil {
-			a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "transcription provider rejected audio: " + err.Error()})
+			a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": fmt.Sprintf("transcription audio transport failed (%s): %v", mode, err)})
 			return
 		}
 		if frame.CaptureTimestamp > 0 {
@@ -846,7 +876,12 @@ func (a *App) persistTranscriptionSegmentWithSpeaker(ctx context.Context, sessio
 		heardBy = append(heardBy, sourceID)
 	}
 	heardJSON, _ := json.Marshal(heardBy)
-	err := a.DB.QueryRowContext(ctx, `INSERT INTO transcription_segments (session_id, source_id, speaker_id, text, start_offset_ms, end_offset_ms, canonical, heard_by_source_ids) VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7) RETURNING id, session_id, source_id, speaker_id, text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at`, sessionID, nullableUUIDValue(sourceValue), nullableUUIDValue(speakerValue), text, start, end, heardJSON).Scan(&segment.ID, &segment.SessionID, &sourceValue, &speakerValue, &segment.Text, &segment.StartOffsetMs, &segment.EndOffsetMs, &segment.Confidence, &segment.SignalQuality, &segment.Canonical, &segment.HeardBySourceIDs, &segment.CreatedAt, &segment.UpdatedAt)
+	var heard []byte
+	err := a.DB.QueryRowContext(ctx, `INSERT INTO transcription_segments (session_id, source_id, speaker_id, text, start_offset_ms, end_offset_ms, canonical, heard_by_source_ids) VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7) RETURNING id, session_id, source_id, speaker_id, text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at`, sessionID, nullableUUIDValue(sourceValue), nullableUUIDValue(speakerValue), text, start, end, heardJSON).Scan(&segment.ID, &segment.SessionID, &sourceValue, &speakerValue, &segment.Text, &segment.StartOffsetMs, &segment.EndOffsetMs, &segment.Confidence, &segment.SignalQuality, &segment.Canonical, &heard, &segment.CreatedAt, &segment.UpdatedAt)
+	if err != nil {
+		return segment, err
+	}
+	segment.HeardBySourceIDs, err = decodeTranscriptionSourceIDs(heard)
 	if err != nil {
 		return segment, err
 	}
@@ -876,15 +911,18 @@ func (a *App) mergeTranscriptionSegment(ctx context.Context, sessionID, sourceID
 		if !transcriptionTextsMatch(item.Text, text) {
 			continue
 		}
+		if isTranscriptionProtocolPayload(item.Text) {
+			continue
+		}
 		if sourceValue.Valid {
 			item.SourceID = &sourceValue.UUID
 		}
 		if speakerValue.Valid {
 			item.SpeakerID = &speakerValue.UUID
 		}
-		_ = json.Unmarshal(heard, &item.HeardBySourceIDs)
-		if item.HeardBySourceIDs == nil {
-			item.HeardBySourceIDs = []uuid.UUID{}
+		item.HeardBySourceIDs, err = decodeTranscriptionSourceIDs(heard)
+		if err != nil {
+			return models.TranscriptionSegment{}, false, err
 		}
 		if item.SourceID != nil && !containsUUID(item.HeardBySourceIDs, *item.SourceID) {
 			item.HeardBySourceIDs = append(item.HeardBySourceIDs, *item.SourceID)
@@ -919,6 +957,26 @@ func containsUUID(values []uuid.UUID, target uuid.UUID) bool {
 		}
 	}
 	return false
+}
+
+func decodeTranscriptionSourceIDs(raw []byte) ([]uuid.UUID, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return []uuid.UUID{}, nil
+	}
+	var values []uuid.UUID
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, fmt.Errorf("decode heard_by_source_ids: %w", err)
+	}
+	if values == nil {
+		values = []uuid.UUID{}
+	}
+	return values, nil
+}
+
+func isTranscriptionProtocolPayload(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return strings.Contains(normalized, "transcription.chunk") && strings.Contains(normalized, "choices") && strings.Contains(normalized, "delta")
 }
 
 func transcriptionTextsMatch(left, right string) bool {
@@ -1208,7 +1266,7 @@ func (a *App) resolveTranscriptionEndpoint(ctx context.Context, userID, organiza
 		return id, nil
 	}
 	var id uuid.UUID
-	if err := a.DB.QueryRowContext(ctx, `SELECT id FROM endpoint_settings WHERE enabled = TRUE AND ((scope_type = 'user' AND scope_id = $1) OR (scope_type = 'organization' AND scope_id = $2) OR scope_type = 'global') AND (capabilities ? $3 OR provider_type IN ('openai', 'gemini')) ORDER BY CASE WHEN scope_type = 'user' THEN 1 WHEN scope_type = 'organization' THEN 2 ELSE 3 END, is_default DESC, created_at LIMIT 1`, userID, organizationID, capability).Scan(&id); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT id FROM endpoint_settings WHERE enabled = TRUE AND ((scope_type = 'user' AND scope_id = $1) OR (scope_type = 'organization' AND scope_id = $2) OR scope_type = 'global') AND (capabilities ? $3 OR ($3 = 'transcription' AND (capabilities ? 'realtime-transcription' OR capabilities ? 'chunked-transcription')) OR provider_type IN ('openai', 'gemini')) ORDER BY CASE WHEN scope_type = 'user' THEN 1 WHEN scope_type = 'organization' THEN 2 ELSE 3 END, is_default DESC, created_at LIMIT 1`, userID, organizationID, capability).Scan(&id); err != nil {
 		return uuid.Nil, fmt.Errorf("no endpoint with %s capability is configured", capability)
 	}
 	return id, nil
@@ -1219,12 +1277,18 @@ func endpointSupportsModel(endpoint models.Endpoint, capability string) bool {
 	if json.Unmarshal(endpoint.Capabilities, &capabilities) == nil && capabilities[capability] {
 		return true
 	}
+	if capability == "transcription" {
+		return capabilities["realtime-transcription"] || capabilities["chunked-transcription"] || capabilities["transcription"] || endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
+	}
 	return (capability == "realtime-transcription" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini")) || (capability == "diarization" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"))
 }
 
 func endpointSupports(endpoint provider.Endpoint, capability string) bool {
 	if endpoint.Capabilities != nil && endpoint.Capabilities[capability] {
 		return true
+	}
+	if capability == "transcription" {
+		return endpoint.Capabilities["realtime-transcription"] || endpoint.Capabilities["chunked-transcription"] || endpoint.Capabilities["transcription"] || endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
 	}
 	switch capability {
 	case "realtime-transcription":
@@ -1236,15 +1300,40 @@ func endpointSupports(endpoint provider.Endpoint, capability string) bool {
 	}
 }
 
+func transcriptionMode(endpoint provider.Endpoint) string {
+	if endpoint.Capabilities != nil && endpoint.Capabilities["chunked-transcription"] {
+		return "chunked"
+	}
+	// Older endpoint records used the generic "transcription" capability for
+	// both transport modes. Whisper models are HTTP transcription models in the
+	// common OpenAI-compatible serving stacks, so keep those existing records
+	// working without requiring a database edit.
+	if endpoint.ProviderType == "openai-compatible" && endpoint.Capabilities != nil && endpoint.Capabilities["transcription"] && strings.Contains(strings.ToLower(endpoint.TranscriptionModel), "whisper") {
+		return "chunked"
+	}
+	if endpoint.Capabilities != nil && endpoint.Capabilities["realtime-transcription"] {
+		return "realtime"
+	}
+	// "transcription" was the original generic capability used by the
+	// endpoint form. Keep it as an HTTP/chunked alias for existing gateways.
+	if endpoint.Capabilities != nil && endpoint.Capabilities["transcription"] {
+		return "chunked"
+	}
+	if endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini" {
+		return "realtime"
+	}
+	return ""
+}
+
 func loadTranscriptionSession(ctx context.Context, db *sql.DB, sessionID uuid.UUID) (models.TranscriptionSession, error) {
-	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.language, s.record_audio, s.started_at, s.ended_at, s.created_at, s.updated_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
+	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.language, s.record_audio, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
 	return scanTranscriptionSession(row)
 }
 
 func scanTranscriptionSession(scanner interface{ Scan(dest ...any) error }) (models.TranscriptionSession, error) {
 	var item models.TranscriptionSession
 	var transcriptionEndpoint, diarizationEndpoint uuid.NullUUID
-	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &item.Language, &item.RecordAudio, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.SourceCount, &item.SegmentCount); err != nil {
+	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &item.Language, &item.RecordAudio, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.SourceCount, &item.SegmentCount); err != nil {
 		return item, err
 	}
 	if transcriptionEndpoint.Valid {
@@ -1310,7 +1399,13 @@ func loadTranscriptionSegments(ctx context.Context, db *sql.DB, sessionID uuid.U
 		if speakerID.Valid {
 			item.SpeakerID = &speakerID.UUID
 		}
-		_ = json.Unmarshal(heard, &item.HeardBySourceIDs)
+		if isTranscriptionProtocolPayload(item.Text) {
+			continue
+		}
+		item.HeardBySourceIDs, err = decodeTranscriptionSourceIDs(heard)
+		if err != nil {
+			return nil, err
+		}
 		result = append(result, item)
 	}
 	return result, rows.Err()

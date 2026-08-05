@@ -18,9 +18,11 @@ import (
 )
 
 type RealtimeEvent struct {
-	Kind string
-	Text string
-	Err  error
+	Kind          string
+	Text          string
+	Err           error
+	StartOffsetMs int64
+	EndOffsetMs   int64
 }
 
 type RealtimeStream struct {
@@ -151,6 +153,12 @@ func (s *RealtimeStream) readEvents() {
 	for {
 		messageType, payload, err := s.conn.ReadMessage()
 		if err != nil {
+			if closeErr, ok := err.(*websocket.CloseError); ok {
+				if closeErr.Code != websocket.CloseNormalClosure && closeErr.Code != websocket.CloseGoingAway {
+					s.events <- RealtimeEvent{Kind: "error", Err: fmt.Errorf("provider websocket closed (%d): %s", closeErr.Code, closeErr.Text)}
+				}
+				return
+			}
 			if !strings.Contains(strings.ToLower(err.Error()), "close") {
 				s.events <- RealtimeEvent{Kind: "error", Err: err}
 			}

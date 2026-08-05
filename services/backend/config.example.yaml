@@ -32,4 +32,9 @@ transcription:
   audio_retention_days: 30
   diarization_window_seconds: 30
   diarization_overlap_seconds: 5
+  # Rolling HTTP transcription for Whisper-style endpoints.
+  streaming_chunk_ms: 2500
+  streaming_overlap_ms: 500
+  # Keep the decoder prompt well below Whisper's small text context window.
+  streaming_prompt_chars: 160
   max_session_hours: 8

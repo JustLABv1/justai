@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,8 +92,8 @@ func TestListConversationsReturnsCountsAndScopesRows(t *testing.T) {
 	updatedAt := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	mock.ExpectQuery("SELECT\\s+c\\.id").
 		WithArgs(userID, organizationID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "endpoint_id", "created_at", "updated_at", "message_count"}).
-			AddRow(conversationID, "Provider routing", "", updatedAt, updatedAt, 4))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "endpoint_id", "created_at", "updated_at", "archived_at", "message_count"}).
+			AddRow(conversationID, "Provider routing", "", updatedAt, updatedAt, nil, 4))
 
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
@@ -111,6 +112,59 @@ func TestListConversationsReturnsCountsAndScopesRows(t *testing.T) {
 	}
 	if len(response.Conversations) != 1 || response.Conversations[0].MessageCount != 4 {
 		t.Fatalf("unexpected conversation response: %+v", response.Conversations)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateConversationArchiveIsScopedToUserAndOrganization(t *testing.T) {
+	app, mock, cleanup := newConversationTestApp(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	organizationID := uuid.New()
+	conversationID := uuid.New()
+	mock.ExpectExec("UPDATE conversations").
+		WithArgs(conversationID, userID, organizationID, true).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPatch, "/api/v1/conversations/"+conversationID.String(), strings.NewReader(`{"archived":true}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: conversationID.String()}}
+	setConversationPrincipal(context, userID, organizationID)
+	app.updateConversation(context)
+
+	if context.Writer.Status() != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", context.Writer.Status())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteConversationRejectsRowsOutsideScope(t *testing.T) {
+	app, mock, cleanup := newConversationTestApp(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	organizationID := uuid.New()
+	conversationID := uuid.New()
+	mock.ExpectExec("DELETE FROM conversations").
+		WithArgs(conversationID, userID, organizationID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/conversations/"+conversationID.String(), nil)
+	context.Params = gin.Params{{Key: "id", Value: conversationID.String()}}
+	setConversationPrincipal(context, userID, organizationID)
+	app.deleteConversation(context)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", recorder.Code)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

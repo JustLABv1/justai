@@ -52,6 +52,9 @@ dev_seed: false
 	if !loaded.AllowPrivate || loaded.DevSeed || !loaded.OIDCEnabled() {
 		t.Fatalf("unexpected feature config: %+v", loaded)
 	}
+	if loaded.Transcription.StreamingChunkMs != 2500 || loaded.Transcription.StreamingOverlapMs != 500 || loaded.Transcription.StreamingPromptChars != 160 {
+		t.Fatalf("unexpected streaming transcription defaults: %+v", loaded.Transcription)
+	}
 }
 
 func TestEnvironmentOverridesYAML(t *testing.T) {

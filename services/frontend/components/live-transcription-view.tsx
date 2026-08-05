@@ -105,8 +105,8 @@ export function LiveTranscriptionView({
   const completingRecordingsRef = useRef(new Set<string>())
   const levelTimerRef = useRef<number | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
-  const realtimeEndpoints = useMemo(
-    () => endpoints.filter((endpoint) => endpoint.capabilities["realtime-transcription"] || endpoint.providerType === "openai" || endpoint.providerType === "gemini"),
+  const transcriptionEndpoints = useMemo(
+    () => endpoints.filter((endpoint) => endpoint.capabilities["realtime-transcription"] || endpoint.capabilities["chunked-transcription"] || endpoint.capabilities.transcription || endpoint.providerType === "openai" || endpoint.providerType === "gemini"),
     [endpoints]
   )
   const diarizationEndpoints = useMemo(
@@ -116,8 +116,8 @@ export function LiveTranscriptionView({
 
   const effectiveSelectedEndpoint =
     selectedEndpoint ||
-    realtimeEndpoints.find((endpoint) => endpoint.isDefault)?.id ||
-    realtimeEndpoints[0]?.id ||
+    transcriptionEndpoints.find((endpoint) => endpoint.isDefault)?.id ||
+    transcriptionEndpoints[0]?.id ||
     ""
   const selectedDeviceName =
     devices.find((device) => device.deviceId === deviceLabel)?.label ||
@@ -648,7 +648,7 @@ export function LiveTranscriptionView({
           <FieldGroup>
             <Field><FieldLabel htmlFor="session-title">Session name</FieldLabel><Input id="session-title" onChange={(event) => setTitle(event.target.value)} value={title} /></Field>
             <Field><FieldLabel htmlFor="session-language">Language</FieldLabel><Input id="session-language" onChange={(event) => setLanguage(event.target.value || "auto")} placeholder="auto" value={language} /><FieldDescription>Use a BCP-47 code such as de or en, or auto.</FieldDescription></Field>
-            <Field><FieldLabel>Realtime endpoint</FieldLabel><Select onValueChange={(value) => setSelectedEndpoint(value ?? "")} value={effectiveSelectedEndpoint}><SelectTrigger className="w-full"><SelectValue placeholder="Select a transcription endpoint" /></SelectTrigger><SelectContent><SelectGroup><SelectLabel>Transcription providers</SelectLabel>{realtimeEndpoints.map((endpoint) => <SelectItem key={endpoint.id} value={endpoint.id}>{endpoint.name} · {endpoint.providerType}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
+            <Field><FieldLabel>Transcription endpoint</FieldLabel><Select onValueChange={(value) => setSelectedEndpoint(value ?? "")} value={effectiveSelectedEndpoint}><SelectTrigger className="w-full"><SelectValue placeholder="Select a transcription endpoint" /></SelectTrigger><SelectContent><SelectGroup><SelectLabel>Transcription providers</SelectLabel>{transcriptionEndpoints.map((endpoint) => <SelectItem key={endpoint.id} value={endpoint.id}>{endpoint.name} · {endpoint.providerType} · {transcriptionModeLabel(endpoint)}</SelectItem>)}</SelectGroup></SelectContent></Select><FieldDescription>Native providers use Realtime WebSockets. Whisper-style gateways use rolling HTTP chunks.</FieldDescription></Field>
             <Field><FieldLabel>Microphone</FieldLabel><Select onValueChange={(value) => setDeviceLabel(value === "default" ? "" : value ?? "")} value={deviceLabel || "default"}><SelectTrigger className="w-full"><SelectValue placeholder="System default" /></SelectTrigger><SelectContent><SelectGroup><SelectLabel>Audio inputs</SelectLabel><SelectItem value="default">System default</SelectItem>{devices.map((device, index) => <SelectItem key={device.deviceId || `audio-input-${index}`} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</SelectItem>)}</SelectGroup></SelectContent></Select><FieldDescription>Select which microphone this host browser should stream.</FieldDescription></Field>
             <Field><FieldLabel>Diarization endpoint</FieldLabel><Select onValueChange={(value) => setSelectedDiarizationEndpoint(value === "none" ? "" : value ?? "")} value={selectedDiarizationEndpoint || "none"}><SelectTrigger className="w-full"><SelectValue placeholder="Optional speaker separation" /></SelectTrigger><SelectContent><SelectGroup><SelectLabel>Speaker providers</SelectLabel><SelectItem value="none">No speaker separation</SelectItem>{diarizationEndpoints.map((endpoint) => <SelectItem key={endpoint.id} value={endpoint.id}>{endpoint.name} · {endpoint.providerType}</SelectItem>)}</SelectGroup></SelectContent></Select><FieldDescription>Labels arrive after a short rolling audio window and remain anonymous.</FieldDescription></Field>
             <div className="flex items-center justify-between rounded-xl border p-3"><div><p className="text-sm font-medium">Record source audio</p><p className="text-xs text-muted-foreground">Encrypted, source-separated tracks. Default retention: 30 days.</p></div><Switch aria-label="Record source audio" checked={recordAudio} onCheckedChange={setRecordAudio} /></div>
@@ -666,4 +666,12 @@ export function LiveTranscriptionView({
       </Dialog>
     </div>
   )
+}
+
+function transcriptionModeLabel(endpoint: Endpoint) {
+  const realtime = Boolean(endpoint.capabilities["realtime-transcription"] || endpoint.providerType === "openai" || endpoint.providerType === "gemini")
+  const whisperGateway = endpoint.providerType === "openai-compatible" && /whisper/i.test(endpoint.transcriptionModel ?? "")
+  const chunked = Boolean(endpoint.capabilities["chunked-transcription"] || (endpoint.capabilities.transcription && (!realtime || whisperGateway)))
+  if (chunked) return "HTTP chunks"
+  return "Realtime"
 }

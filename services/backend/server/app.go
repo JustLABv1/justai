@@ -106,6 +106,8 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/mcp/servers/:id/oauth/start", a.mcpOAuthStart)
 	org.GET("/conversations", a.listConversations)
 	org.POST("/conversations", a.createConversation)
+	org.PATCH("/conversations/:id", a.updateConversation)
+	org.DELETE("/conversations/:id", a.deleteConversation)
 	org.GET("/conversations/:id/messages", a.listConversationMessages)
 
 	protected.GET("/ws/chat", a.chatWebSocket)

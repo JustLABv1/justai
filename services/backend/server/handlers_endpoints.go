@@ -42,7 +42,7 @@ func (a *App) supportedProviders(c *gin.Context) {
 		{"id": "gemini", "name": "Google Gemini", "kind": "native", "capabilities": []string{"chat", "embeddings", "realtime-transcription", "diarization"}},
 		{"id": "anthropic", "name": "Anthropic", "kind": "native", "capabilities": []string{"chat"}},
 		{"id": "ollama", "name": "Ollama", "kind": "local", "capabilities": []string{"chat", "embeddings"}},
-		{"id": "openai-compatible", "name": "OpenAI-compatible", "kind": "gateway", "examples": []string{"LiteLLM", "vLLM", "LM Studio", "OpenRouter"}, "capabilities": []string{"chat", "embeddings", "realtime-transcription"}},
+		{"id": "openai-compatible", "name": "OpenAI-compatible", "kind": "gateway", "examples": []string{"LiteLLM", "vLLM", "LM Studio", "OpenRouter"}, "capabilities": []string{"chat", "embeddings", "realtime-transcription", "chunked-transcription"}},
 		{"id": "mock", "name": "JustAI demo", "kind": "local", "capabilities": []string{"chat"}},
 	}})
 }
