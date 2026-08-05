@@ -321,12 +321,16 @@ export function ChatView({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <MessageScrollerProvider
+        autoScroll
+        defaultScrollPosition="end"
+        key={conversationId ?? "new-chat"}
+      >
         <MessageScroller className="min-h-0 flex-1">
           <MessageScrollerViewport>
             <MessageScrollerContent className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 lg:px-12">
-              {messages.map((message, index) => (
-                <MessageScrollerItem key={message.id} scrollAnchor={index === messages.length - 1}>
+            {messages.map((message) => (
+              <MessageScrollerItem key={message.id}>
                   <Message align={message.role === "user" ? "end" : "start"}>
                     <MessageAvatar className="bg-transparent">
                       <Avatar

@@ -596,15 +596,14 @@ export function TranscriptTray({
             <MessageScroller className="min-h-0 flex-1">
               <MessageScrollerViewport aria-label="Live transcription">
                 <MessageScrollerContent className="gap-1">
-                  {transcript.map((line, index) => {
+                    {transcript.map((line) => {
                     const speaker = speakers.find((item) => item.id === line.speakerId)
                     return (
                       <MessageScrollerItem
-                        className="w-full"
-                        key={line.id}
-                        messageId={line.id}
-                        scrollAnchor={index === transcript.length - 1}
-                      >
+                          className="w-full"
+                          key={line.id}
+                          messageId={line.id}
+                        >
                         <div className={styles.transcriptLine}>
                           <span className="w-10 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">{line.timestamp}</span>
                           <Avatar className="mt-0.5" size="sm">

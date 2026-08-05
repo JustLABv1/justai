@@ -395,7 +395,7 @@ export function LiveTranscriptionOrbit({
           </aside>
         </div>
 
-        <TranscriptTray onOpenChange={setTranscriptOpen} open={transcriptOpen} speakers={transcriptSpeakers} transcript={transcript} />
+        <TranscriptTray key={snapshot.session.id} onOpenChange={setTranscriptOpen} open={transcriptOpen} speakers={transcriptSpeakers} transcript={transcript} />
       </div>
 
       <SpeakerDetailDialog
