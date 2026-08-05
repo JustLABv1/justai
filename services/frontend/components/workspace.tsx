@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Bot,
   Archive,
@@ -91,6 +91,7 @@ import type {
   TranscriptionSession,
 } from "@/lib/types"
 import { ThemeSwitcher } from "@/components/theme-switcher"
+import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
 
 const navigation: Array<{
   id: ViewId
@@ -125,15 +126,6 @@ const navigation: Array<{
   { id: "mcp", label: "MCP", icon: Plug, hint: "Tools and connections" },
 ]
 
-const validViews: ViewId[] = [
-  "chat",
-  "transcription",
-  "endpoints",
-  "knowledge",
-  "mcp",
-  "settings",
-]
-
 type WorkspaceStatus = "loading" | "ready" | "error"
 
 type DeleteTarget =
@@ -141,12 +133,13 @@ type DeleteTarget =
   | { kind: "transcription"; id: string; title: string }
 
 export function Workspace() {
+  const pathname = usePathname()
+  const router = useRouter()
   const searchParams = useSearchParams()
-  const requestedView = searchParams.get("view") as ViewId | null
-  const requestedConversationId = searchParams.get("conversation")
-  const requestedSessionId = searchParams.get("session")
-  const activeView: ViewId =
-    requestedView && validViews.includes(requestedView) ? requestedView : "chat"
+  const route = parseWorkspaceRoute(pathname ?? "/", searchParams)
+  const activeView = route.view
+  const requestedConversationId = route.conversationId
+  const requestedSessionId = route.sessionId
 
   const [status, setStatus] = useState<WorkspaceStatus>("loading")
   const [loadError, setLoadError] = useState("")
@@ -297,21 +290,14 @@ export function Workspace() {
       replace = false,
       sessionId: string | null = null
     ) => {
-      const params = new URLSearchParams()
-      if (view !== "chat") params.set("view", view)
-      if (view === "chat" && conversationId) {
-        params.set("conversation", conversationId)
+      const path = workspacePath(view, conversationId, sessionId)
+      if (replace) {
+        router.replace(path)
+      } else {
+        router.push(path)
       }
-      if (view === "transcription" && sessionId) {
-        params.set("session", sessionId)
-      }
-      const query = params.toString()
-      const path = query ? `/?${query}` : "/"
-      const method = replace ? "replaceState" : "pushState"
-      window.history[method]({}, "", path)
-      window.dispatchEvent(new PopStateEvent("popstate"))
     },
-    []
+    [router]
   )
 
   const handleArchiveConversation = useCallback(
@@ -882,7 +868,7 @@ function ConversationSidebarItem({
     <SidebarMenuSubItem>
       <SidebarMenuSubButton
         className="pr-8"
-        href={`/?conversation=${conversation.id}`}
+        href={workspacePath("chat", conversation.id)}
         isActive={active}
         onClick={(event) => {
           event.preventDefault()
@@ -955,7 +941,7 @@ function TranscriptionSidebarItem({
     <SidebarMenuSubItem>
       <SidebarMenuSubButton
         className="pr-8"
-        href={`/?view=transcription&session=${session.id}`}
+        href={workspacePath("transcription", null, session.id)}
         isActive={active}
         onClick={(event) => {
           event.preventDefault()

@@ -175,6 +175,8 @@ export function LoginForm({
               </FieldSeparator>
 
               <Field>
+                {/* OIDC is an auth endpoint and must perform a full redirect. */}
+                {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                 <a
                   className={buttonVariants({ variant: "outline" })}
                   href="/api/v1/auth/oidc/start"
