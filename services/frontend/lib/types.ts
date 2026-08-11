@@ -88,6 +88,19 @@ export type Citation = {
   snippet: string
 }
 
+export type ChatToolEvent = {
+  kind: "mcp_tool"
+  status: "running" | "awaiting_approval" | "completed" | "declined" | "failed"
+  serverId?: string
+  serverName: string
+  toolName: string
+  callId: string
+  approvalId?: string
+  arguments?: Record<string, unknown>
+  result?: string
+  error?: string
+}
+
 export type Conversation = {
   id: string
   title: string
@@ -100,9 +113,10 @@ export type Conversation = {
 
 export type ChatMessage = {
   id: string
-  role: "user" | "assistant"
+  role: "user" | "assistant" | "tool"
   content: string
   citations?: Citation[]
+  toolCall?: ChatToolEvent
   createdAt?: string
 }
 

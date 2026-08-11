@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Check, ExternalLink, KeyRound, MoreHorizontal, Plug, Plus, ShieldCheck, TerminalSquare, Trash2, Wrench } from "lucide-react"
 
-import { api, API_URL } from "@/lib/api"
+import { APIError, api, API_URL } from "@/lib/api"
 import type { MCPServer } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -51,7 +51,11 @@ export function MCPView({ servers, onChange }: Props) {
       const server = await api.post<MCPServer>("/api/v1/mcp/servers", { ...form, allowedTools })
       onChange([server, ...servers])
       setNotice(`${form.name} is connected. Tool discovery is explicit and allowlisted.`)
-    } catch {
+    } catch (caught) {
+      if (caught instanceof APIError) {
+        setNotice(`Could not connect MCP server: ${caught.message}`)
+        return
+      }
       const local: MCPServer = { id: `local-${Date.now()}`, scopeType: form.scopeType, scopeId: "local", name: form.name, endpointUrl: form.endpointUrl, authType: form.authType, credentialConfigured: Boolean(form.credential), enabled: true, allowedTools, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
       onChange([local, ...servers])
       setNotice("Added to the local preview. Start the backend to negotiate Streamable HTTP or SSE.")

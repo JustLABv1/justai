@@ -1,7 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Bot } from "lucide-react"
+import {
+  Bot,
+  CheckCircle2,
+  CircleAlert,
+  LoaderCircle,
+  ShieldAlert,
+  Wrench,
+} from "lucide-react"
 
 import Ai04, { type Ai04Action } from "@/components/ai-04"
 import { VoiceMode } from "@/components/voice-mode"
@@ -25,11 +32,13 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import { api, socketURL } from "@/lib/api"
 import type {
   ChatMessage,
   Citation,
   Conversation,
+  ChatToolEvent,
   Endpoint,
   User,
   ViewId,
@@ -40,6 +49,16 @@ type SocketEnvelope = {
   data?: Record<string, unknown>
 }
 
+type ToolApproval = {
+  approvalId: string
+  messageId: string
+  callId: string
+  serverName: string
+  toolName: string
+  arguments: Record<string, unknown>
+  round: number
+}
+
 type Props = {
   conversationId: string | null
   endpoints: Endpoint[]
@@ -48,6 +67,130 @@ type Props = {
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
   onNavigate?: (view: ViewId) => void
+}
+
+function parseToolEvent(content: string): ChatToolEvent | undefined {
+  try {
+    const event = JSON.parse(content) as ChatToolEvent
+    if (event.kind === "mcp_tool" && event.toolName && event.serverName) {
+      return event
+    }
+  } catch {
+    // Older or malformed tool records stay visible as plain tool messages.
+  }
+  return undefined
+}
+
+function normalizeChatMessage(message: ChatMessage): ChatMessage {
+  if (message.role !== "tool" || message.toolCall) return message
+  return { ...message, toolCall: parseToolEvent(message.content) }
+}
+
+function socketToolEvent(data: Record<string, unknown>): ChatToolEvent {
+  const argumentsValue = data.arguments
+  return {
+    kind: "mcp_tool",
+    status: String(data.status ?? "running") as ChatToolEvent["status"],
+    serverId: typeof data.serverId === "string" ? data.serverId : undefined,
+    serverName: String(data.serverName ?? "MCP server"),
+    toolName: String(data.toolName ?? "tool"),
+    callId: String(data.callId ?? ""),
+    approvalId:
+      typeof data.approvalId === "string" ? data.approvalId : undefined,
+    arguments:
+      argumentsValue && typeof argumentsValue === "object"
+        ? (argumentsValue as Record<string, unknown>)
+        : undefined,
+    result: typeof data.result === "string" ? data.result : undefined,
+    error: typeof data.error === "string" ? data.error : undefined,
+  }
+}
+
+function upsertToolMessage(
+  messages: ChatMessage[],
+  messageId: string,
+  toolCall: ChatToolEvent
+) {
+  const index = messages.findIndex((message) => message.id === messageId)
+  if (index < 0) {
+    return [
+      ...messages,
+      { id: messageId, role: "tool" as const, content: "", toolCall },
+    ]
+  }
+  return messages.map((message, currentIndex) =>
+    currentIndex === index ? { ...message, toolCall } : message
+  )
+}
+
+function formatToolResult(result: string) {
+  try {
+    return JSON.stringify(JSON.parse(result), null, 2)
+  } catch {
+    return result
+  }
+}
+
+function ToolCallCard({ toolCall }: { toolCall: ChatToolEvent }) {
+  const statusLabel =
+    toolCall.status === "awaiting_approval"
+      ? "Needs approval"
+      : toolCall.status === "running"
+        ? "Running"
+        : toolCall.status === "completed"
+          ? "Completed"
+          : toolCall.status === "declined"
+            ? "Declined"
+            : "Failed"
+  const statusVariant =
+    toolCall.status === "failed"
+      ? "destructive"
+      : toolCall.status === "completed"
+        ? "secondary"
+        : "outline"
+
+  return (
+    <Bubble align="start" className="w-full max-w-xl" variant="outline">
+      <BubbleContent className="w-full min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          {toolCall.status === "running" ||
+          toolCall.status === "awaiting_approval" ? (
+            <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin" />
+          ) : toolCall.status === "completed" ? (
+            <CheckCircle2 aria-hidden="true" className="shrink-0 text-muted-foreground" />
+          ) : (
+            <CircleAlert aria-hidden="true" className="shrink-0 text-destructive" />
+          )}
+          <span className="min-w-0 truncate font-medium">{toolCall.toolName}</span>
+          <Badge className="ml-auto shrink-0" variant={statusVariant}>
+            {statusLabel}
+          </Badge>
+        </div>
+        <p className="truncate text-xs text-muted-foreground">{toolCall.serverName}</p>
+        {toolCall.arguments && Object.keys(toolCall.arguments).length > 0 && (
+          <details className="min-w-0 max-w-full overflow-hidden rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
+            <summary className="cursor-pointer font-medium">Arguments</summary>
+            <pre className="mt-2 max-h-32 max-w-full overflow-auto whitespace-pre-wrap break-all text-muted-foreground">
+              {JSON.stringify(toolCall.arguments, null, 2)}
+            </pre>
+          </details>
+        )}
+        {toolCall.result && (
+          <details className="min-w-0 max-w-full overflow-hidden rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
+            <summary className="cursor-pointer font-medium">Result</summary>
+            <pre className="mt-2 max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-all text-muted-foreground">
+              {formatToolResult(toolCall.result)}
+            </pre>
+          </details>
+        )}
+        {toolCall.error && (
+          <p className="rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+            {toolCall.error}
+          </p>
+        )}
+      </BubbleContent>
+    </Bubble>
+  )
 }
 
 export function ChatView({
@@ -67,6 +210,9 @@ export function ChatView({
   const [activeAssistantId, setActiveAssistantId] = useState("")
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [historyRefresh, setHistoryRefresh] = useState(0)
+  const [toolApproval, setToolApproval] = useState<ToolApproval | null>(null)
+  const [toolApprovalBusy, setToolApprovalBusy] = useState(false)
+  const [toolNotice, setToolNotice] = useState("")
   const socketRef = useRef<WebSocket | null>(null)
   const conversationIdRef = useRef<string | null>(conversationId)
   const createdConversationIdRef = useRef<string | null>(null)
@@ -84,6 +230,7 @@ export function ChatView({
 
   useEffect(() => {
     const nextConversationId = conversationId ?? null
+    const conversationChanged = conversationIdRef.current !== nextConversationId
     conversationIdRef.current = nextConversationId
 
     if (createdConversationIdRef.current === nextConversationId) {
@@ -92,17 +239,24 @@ export function ChatView({
     }
 
     let cancelled = false
-    socketRef.current?.close()
-    socketRef.current = null
-    assistantIdRef.current = ""
+    if (conversationChanged) {
+      socketRef.current?.close()
+      socketRef.current = null
+      assistantIdRef.current = ""
+      setToolApproval(null)
+      setToolApprovalBusy(false)
+      setToolNotice("")
+    }
 
     queueMicrotask(() => {
       if (cancelled) return
       setMessages([])
-      setStreaming(false)
-      setActiveAssistantId("")
-      setConnectionState("Ready")
-      setChatError("")
+      if (conversationChanged) {
+        setStreaming(false)
+        setActiveAssistantId("")
+        setConnectionState("Ready")
+        setChatError("")
+      }
 
       if (!nextConversationId) {
         setHistoryLoading(false)
@@ -116,7 +270,7 @@ export function ChatView({
         )
         .then((result) => {
           if (cancelled) return
-          setMessages(result.messages)
+          setMessages(result.messages.map(normalizeChatMessage))
         })
         .catch((caught) => {
           if (cancelled) return
@@ -190,6 +344,44 @@ export function ChatView({
           ...message,
           citations: (data.citations ?? []) as Citation[],
         }))
+      }
+      if (envelope.type === "tool.call") {
+        const messageId = String(data.messageId ?? `tool-${data.callId ?? Date.now()}`)
+        setMessages((current) =>
+          upsertToolMessage(current, messageId, socketToolEvent(data))
+        )
+      }
+      if (envelope.type === "tool.approval_required") {
+        setToolApproval({
+          approvalId: String(data.approvalId ?? ""),
+          messageId: String(data.messageId ?? ""),
+          callId: String(data.callId ?? ""),
+          serverName: String(data.serverName ?? "MCP server"),
+          toolName: String(data.toolName ?? "tool"),
+          arguments:
+            data.arguments && typeof data.arguments === "object"
+              ? (data.arguments as Record<string, unknown>)
+              : {},
+          round: Number(data.round ?? 1),
+        })
+        setToolApprovalBusy(false)
+        setConnectionState("Needs approval")
+      }
+      if (envelope.type === "tools.ready") setToolNotice("")
+      if (envelope.type === "tools.unavailable") {
+        setToolNotice(String(data.message ?? "MCP tools are unavailable for this endpoint."))
+      }
+      if (envelope.type === "tool.updated" || envelope.type === "tool.completed") {
+        const messageId = String(data.messageId ?? "")
+        if (messageId) {
+          setMessages((current) =>
+            upsertToolMessage(current, messageId, socketToolEvent(data))
+          )
+        }
+      }
+      if (envelope.type === "tool.completed") {
+        setToolApproval(null)
+        setToolApprovalBusy(false)
       }
       if (envelope.type === "message.completed") {
         setStreaming(false)
@@ -307,6 +499,18 @@ export function ChatView({
     }
   }
 
+  function decideTool(approved: boolean) {
+    if (!toolApproval || socketRef.current?.readyState !== WebSocket.OPEN) return
+    setToolApprovalBusy(true)
+    socketRef.current.send(
+      JSON.stringify({
+        type: "tool.decision",
+        requestId: `tool-decision-${toolApproval.approvalId}`,
+        data: { approvalId: toolApproval.approvalId, approved },
+      })
+    )
+  }
+
   const voiceOverlay = (
     <VoiceMode
       conversationId={conversationId}
@@ -319,7 +523,17 @@ export function ChatView({
   )
 
   if (historyLoading) {
-    return <>{voiceOverlay}<div className="flex h-full min-h-0 items-center justify-center"><div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Loading conversation…</div></div></>
+    return (
+      <>
+        {voiceOverlay}
+        <div className="flex h-full min-h-0 items-center justify-center">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner />
+            Loading conversation…
+          </div>
+        </div>
+      </>
+    )
   }
 
   if (messages.length === 0) {
@@ -327,17 +541,17 @@ export function ChatView({
       <>
         <div className="flex h-full min-h-0 items-center justify-center">
           <div className="w-full">
-          {chatError && (
-            <Alert className="mx-auto mb-4 max-w-3xl" variant="destructive">
-              <AlertTitle>Chat unavailable</AlertTitle>
-              <AlertDescription>{chatError}</AlertDescription>
-            </Alert>
-          )}
-          <Ai04
-            onAction={handleAction}
-            onVoice={() => setVoiceOpen(true)}
-            onSubmit={(prompt) => void sendMessage(prompt)}
-          />
+            {chatError && (
+              <Alert className="mx-auto mb-4 max-w-3xl" variant="destructive">
+                <AlertTitle>Chat unavailable</AlertTitle>
+                <AlertDescription>{chatError}</AlertDescription>
+              </Alert>
+            )}
+            <Ai04
+              onAction={handleAction}
+              onVoice={() => setVoiceOpen(true)}
+              onSubmit={(prompt) => void sendMessage(prompt)}
+            />
           </div>
         </div>
         {voiceOverlay}
@@ -346,24 +560,30 @@ export function ChatView({
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <MessageScrollerProvider
         autoScroll
         defaultScrollPosition="end"
         key={conversationId ?? "new-chat"}
       >
-        <MessageScroller className="min-h-0 flex-1">
-          <MessageScrollerViewport>
+        <MessageScroller className="min-h-0 min-w-0 flex-1 basis-0">
+          <MessageScrollerViewport className="min-h-0 flex-1">
             <MessageScrollerContent className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 lg:px-12">
-            {messages.map((message) => (
-              <MessageScrollerItem key={message.id}>
+              {messages.map((message, index) => (
+                <MessageScrollerItem
+                  key={message.id}
+                  messageId={message.id}
+                  scrollAnchor={index === messages.length - 1}
+                >
                   <Message align={message.role === "user" ? "end" : "start"}>
                     <MessageAvatar className="bg-transparent">
                       <Avatar
                         aria-label={
                           message.role === "user"
                             ? `${user.displayName} avatar`
-                            : "JustAI avatar"
+                            : message.role === "tool"
+                              ? "MCP tool"
+                              : "JustAI avatar"
                         }
                         size="sm"
                       >
@@ -376,6 +596,8 @@ export function ChatView({
                         >
                           {message.role === "user" ? (
                             userInitials
+                          ) : message.role === "tool" ? (
+                            <Wrench aria-hidden="true" />
                           ) : (
                             <Bot aria-hidden="true" />
                           )}
@@ -387,7 +609,9 @@ export function ChatView({
                         <span>
                           {message.role === "user"
                             ? user.displayName
-                            : "JustAI"}
+                            : message.role === "tool"
+                              ? "MCP tool"
+                              : "JustAI"}
                         </span>
                         {message.role === "assistant" && (
                           <Badge
@@ -397,19 +621,31 @@ export function ChatView({
                             assistant
                           </Badge>
                         )}
+                        {message.role === "tool" && (
+                          <Badge
+                            className="h-5 px-1.5 text-[10px]"
+                            variant="outline"
+                          >
+                            tool call
+                          </Badge>
+                        )}
                       </MessageHeader>
-                      <Bubble
-                        align={message.role === "user" ? "end" : "start"}
-                        variant={message.role === "user" ? "default" : "muted"}
-                      >
-                        <BubbleContent>
-                          {message.content ? (
-                            <Markdown>{message.content}</Markdown>
-                          ) : streaming && message.id === activeAssistantId ? (
-                            <Spinner />
-                          ) : null}
-                        </BubbleContent>
-                      </Bubble>
+                      {message.role === "tool" && message.toolCall ? (
+                        <ToolCallCard toolCall={message.toolCall} />
+                      ) : (
+                        <Bubble
+                          align={message.role === "user" ? "end" : "start"}
+                          variant={message.role === "user" ? "default" : "muted"}
+                        >
+                          <BubbleContent>
+                            {message.content ? (
+                              <Markdown>{message.content}</Markdown>
+                            ) : streaming && message.id === activeAssistantId ? (
+                              <Spinner />
+                            ) : null}
+                          </BubbleContent>
+                        </Bubble>
+                      )}
                       {!!message.citations?.length && (
                         <div className="flex flex-wrap gap-1.5 px-3">
                           {message.citations.map((citation) => (
@@ -429,18 +665,67 @@ export function ChatView({
               ))}
             </MessageScrollerContent>
           </MessageScrollerViewport>
-          <MessageScrollerButton aria-label="Jump to latest message" direction="end" />
+          <MessageScrollerButton
+            aria-label="Jump to latest message"
+            direction="end"
+          />
         </MessageScroller>
       </MessageScrollerProvider>
 
-      <div className="mx-auto w-full max-w-5xl px-4 pb-4 sm:px-8 sm:pb-6 lg:px-12">
+      <div className="mx-auto w-full max-w-5xl shrink-0 px-4 pb-4 sm:px-8 sm:pb-6 lg:px-12">
         {chatError && (
           <Alert className="mb-3" variant="destructive">
             <AlertTitle>Chat unavailable</AlertTitle>
             <AlertDescription>{chatError}</AlertDescription>
           </Alert>
         )}
-        <Ai04 compact onVoice={() => setVoiceOpen(true)} onSubmit={(prompt) => void sendMessage(prompt)} />
+        {toolNotice && (
+          <Alert className="mb-3">
+            <ShieldAlert aria-hidden="true" />
+            <AlertTitle>MCP tools not active</AlertTitle>
+            <AlertDescription>{toolNotice}</AlertDescription>
+          </Alert>
+        )}
+        {toolApproval && (
+          <Alert className="mb-3">
+            <ShieldAlert aria-hidden="true" />
+            <AlertTitle>Approve MCP tool call</AlertTitle>
+            <AlertDescription>
+              <p>
+                {toolApproval.serverName} wants to run{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                  {toolApproval.toolName}
+                </code>{" "}
+                (round {toolApproval.round}).
+              </p>
+              <pre className="mt-2 max-h-28 overflow-auto rounded-md bg-muted p-2 text-xs">
+                {JSON.stringify(toolApproval.arguments, null, 2)}
+              </pre>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={toolApprovalBusy}
+                  onClick={() => decideTool(true)}
+                >
+                  Approve
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={toolApprovalBusy}
+                  onClick={() => decideTool(false)}
+                >
+                  Decline
+                </Button>
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+        <Ai04
+          compact
+          onVoice={() => setVoiceOpen(true)}
+          onSubmit={(prompt) => void sendMessage(prompt)}
+        />
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
           {connectionState} · Responses use your connected JustAI endpoint.
         </p>

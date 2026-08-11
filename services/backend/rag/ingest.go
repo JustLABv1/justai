@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -195,20 +196,36 @@ func (w *Worker) fetchURL(ctx context.Context, rawURL string) (string, error) {
 }
 
 func Search(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, query string, limit int) ([]models.Citation, error) {
-	if strings.TrimSpace(query) == "" {
+	query = strings.TrimSpace(query)
+	if query == "" {
 		return nil, nil
 	}
 	if limit <= 0 || limit > 12 {
 		limit = 6
+	}
+	// plainto_tsquery joins every word with AND. That is too strict for a
+	// conversational question such as "where is the deployment runbook?" when
+	// a chunk contains only the relevant phrase. Keep the precise match first,
+	// then fall back to an OR query built from safe lexical tokens.
+	orQuery := lexicalOrQuery(query)
+	if orQuery == "" {
+		return nil, nil
 	}
 	rows, err := db.QueryContext(ctx, `
 		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
 		FROM knowledge_chunks kc
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
 		WHERE ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2))
-		  AND to_tsvector('simple', kc.content) @@ plainto_tsquery('simple', $3)
-		ORDER BY ts_rank(to_tsvector('simple', kc.content), plainto_tsquery('simple', $3)) DESC
-		LIMIT $4`, organizationID, userID, query, limit)
+		  AND ks.status = 'ready'
+		  AND (
+			to_tsvector('simple', kc.content) @@ plainto_tsquery('simple', $3)
+			OR to_tsvector('simple', kc.content) @@ to_tsquery('simple', $4)
+		  )
+		ORDER BY GREATEST(
+			ts_rank(to_tsvector('simple', kc.content), plainto_tsquery('simple', $3)),
+			ts_rank(to_tsvector('simple', kc.content), to_tsquery('simple', $4))
+		) DESC
+		LIMIT $5`, organizationID, userID, query, orQuery, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -219,12 +236,139 @@ func Search(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, q
 		if err := rows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); err != nil {
 			return nil, err
 		}
-		if len([]rune(citation.Snippet)) > 260 {
-			citation.Snippet = string([]rune(citation.Snippet)[:260]) + "…"
-		}
+		citation.Snippet = truncateSnippet(citation.Snippet)
 		result = append(result, citation)
 	}
 	return result, rows.Err()
+}
+
+// Search augments the forgiving lexical search with vector similarity when an
+// embedding endpoint is configured. Embeddings are optional, so an unavailable
+// embedding provider never prevents a text source from being retrieved.
+func (w *Worker) Search(ctx context.Context, organizationID, userID uuid.UUID, query string, limit int) ([]models.Citation, error) {
+	if w == nil || w.db == nil {
+		return nil, fmt.Errorf("knowledge worker is not configured")
+	}
+	lexical, err := Search(ctx, w.db, organizationID, userID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	if w.secrets == nil {
+		return lexical, nil
+	}
+	endpoint, err := w.searchEmbeddingEndpoint(ctx, organizationID, userID)
+	if err != nil || endpoint == nil {
+		return lexical, nil
+	}
+	embeddingContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	values, err := provider.Embed(embeddingContext, *endpoint, query)
+	cancel()
+	if err != nil || len(values) == 0 {
+		return lexical, nil
+	}
+	semantic, err := searchByEmbedding(ctx, w.db, organizationID, userID, vectorLiteral(values, 1536), limit)
+	if err != nil {
+		return lexical, nil
+	}
+	return mergeCitations(lexical, semantic, limit), nil
+}
+
+func (w *Worker) searchEmbeddingEndpoint(ctx context.Context, organizationID, userID uuid.UUID) (*provider.Endpoint, error) {
+	var endpoint provider.Endpoint
+	var credential []byte
+	if err := w.db.QueryRowContext(ctx, `SELECT provider_type, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(embedding_model, ''), credential_ciphertext, timeout_seconds FROM endpoint_settings WHERE enabled = TRUE AND embedding_model IS NOT NULL AND embedding_model <> '' AND ((scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) OR scope_type = 'global') ORDER BY CASE WHEN scope_type = 'organization' THEN 1 WHEN scope_type = 'user' THEN 2 ELSE 3 END, is_default DESC, created_at LIMIT 1`, organizationID, userID).Scan(&endpoint.ProviderType, &endpoint.BaseURL, &endpoint.APIPath, &endpoint.APIVersion, &endpoint.EmbeddingModel, &credential, &endpoint.TimeoutSeconds); err != nil {
+		return nil, nil
+	}
+	if len(credential) > 0 {
+		var err error
+		endpoint.Credential, err = w.secrets.Decrypt(credential)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &endpoint, nil
+}
+
+func searchByEmbedding(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, embedding string, limit int) ([]models.Citation, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
+		FROM knowledge_chunks kc
+		JOIN knowledge_sources ks ON ks.id = kc.source_id
+		WHERE ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2))
+		  AND ks.status = 'ready'
+		  AND kc.embedding IS NOT NULL
+		ORDER BY kc.embedding <=> $3::vector
+		LIMIT $4`, organizationID, userID, embedding, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]models.Citation, 0, limit)
+	for rows.Next() {
+		var citation models.Citation
+		if err := rows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); err != nil {
+			return nil, err
+		}
+		citation.Snippet = truncateSnippet(citation.Snippet)
+		result = append(result, citation)
+	}
+	return result, rows.Err()
+}
+
+func mergeCitations(first, second []models.Citation, limit int) []models.Citation {
+	if limit <= 0 || limit > 12 {
+		limit = 6
+	}
+	result := make([]models.Citation, 0, limit)
+	seen := map[string]struct{}{}
+	for _, citations := range [][]models.Citation{first, second} {
+		for _, citation := range citations {
+			key := citation.SourceID.String() + ":" + strconv.Itoa(citation.ChunkIndex)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, citation)
+			if len(result) == limit {
+				return result
+			}
+		}
+	}
+	return result
+}
+
+func truncateSnippet(value string) string {
+	if len([]rune(value)) > 260 {
+		return string([]rune(value)[:260]) + "…"
+	}
+	return value
+}
+
+func lexicalOrQuery(value string) string {
+	seen := map[string]struct{}{}
+	terms := make([]string, 0, 8)
+	var builder strings.Builder
+	flush := func() {
+		term := builder.String()
+		builder.Reset()
+		if utf8.RuneCountInString(term) < 3 {
+			return
+		}
+		if _, exists := seen[term]; exists {
+			return
+		}
+		seen[term] = struct{}{}
+		terms = append(terms, term)
+	}
+	for _, character := range strings.ToLower(value) {
+		if unicode.IsLetter(character) || unicode.IsDigit(character) || character == '_' {
+			builder.WriteRune(character)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return strings.Join(terms, " | ")
 }
 
 func NewSource(ctx context.Context, db *sql.DB, scopeType string, scopeID, userID uuid.UUID, title, sourceType, sourceURL, mimeType, content string) (models.KnowledgeSource, error) {

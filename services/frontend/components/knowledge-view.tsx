@@ -1,9 +1,9 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FileText, Globe2, Link2, LoaderCircle, RefreshCw, Search, Trash2, UploadCloud } from "lucide-react"
 
-import { api } from "@/lib/api"
+import { APIError, api } from "@/lib/api"
 import type { KnowledgeSource } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Attachment, AttachmentContent, AttachmentDescription, AttachmentGroup, AttachmentMedia, AttachmentTitle } from "@/components/ui/attachment"
@@ -31,6 +31,32 @@ export function KnowledgeView({ sources, onChange }: Props) {
   const [uploading, setUploading] = useState(false)
   const [notice, setNotice] = useState("")
 
+  const hasPendingRemoteSources = sources.some(
+    (source) =>
+      !source.id.startsWith("local-") &&
+      (source.status === "queued" || source.status === "processing")
+  )
+
+  useEffect(() => {
+    if (!hasPendingRemoteSources) return
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const result = await api.get<{ sources: KnowledgeSource[] }>(
+          "/api/v1/knowledge/sources"
+        )
+        if (!cancelled) onChange(result.sources)
+      } catch {
+        // The source card keeps its last known state when a refresh is offline.
+      }
+    }
+    const interval = window.setInterval(() => void refresh(), 2000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [hasPendingRemoteSources, onChange])
+
   async function uploadFile(file: File) {
     setUploading(true)
     setNotice("")
@@ -42,7 +68,11 @@ export function KnowledgeView({ sources, onChange }: Props) {
       const result = await api.upload<KnowledgeSource>("/api/v1/knowledge/sources", form)
       onChange([result, ...sources])
       setNotice(`${file.name} queued for indexing.`)
-    } catch {
+    } catch (caught) {
+      if (caught instanceof APIError) {
+        setNotice(`Upload failed: ${caught.message}`)
+        return
+      }
       const local: KnowledgeSource = { id: `local-${Date.now()}`, scopeType, scopeId: "local", title: title || file.name, sourceType: "upload", mimeType: file.type, status: "processing", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
       onChange([local, ...sources])
       setNotice("Added to the local preview. Start the backend to run ingestion and citations.")
@@ -63,7 +93,11 @@ export function KnowledgeView({ sources, onChange }: Props) {
       setDialogOpen(false)
       setUrl("")
       setTitle("")
-    } catch {
+    } catch (caught) {
+      if (caught instanceof APIError) {
+        setNotice(`URL indexing failed: ${caught.message}`)
+        return
+      }
       onChange([{ id: `local-${Date.now()}`, scopeType, scopeId: "local", title: title || url, sourceType: "url", sourceUrl: url, status: "queued", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...sources])
       setNotice("Added to the local preview. Start the backend to fetch and index it.")
       setDialogOpen(false)
@@ -101,7 +135,7 @@ export function KnowledgeView({ sources, onChange }: Props) {
 
       <div className="grid gap-4 md:grid-cols-3"><Metric label="Indexed sources" value={String(sources.filter((source) => source.status === "ready").length)} detail="ready for retrieval" /><Metric label="In progress" value={String(sources.filter((source) => source.status === "queued" || source.status === "processing").length)} detail="async jobs" /><Metric label="Scope" value="Private" detail="org + personal access" /></div>
 
-      {sources.length === 0 ? <Empty className="min-h-72 border bg-card shadow-xs"><EmptyHeader><EmptyMedia variant="icon"><FileText aria-hidden="true" /></EmptyMedia><EmptyTitle>Your knowledge base is empty</EmptyTitle><EmptyDescription>Start with a project brief, a runbook, or a public documentation URL.</EmptyDescription></EmptyHeader><EmptyContent><div className="flex gap-2"><Button variant="outline" onClick={() => fileInputRef.current?.click()}>Upload a file</Button><Button variant="secondary" onClick={() => setDialogOpen(true)}>Index a URL</Button></div></EmptyContent></Empty> : <Card><CardHeader><CardTitle className="text-base">Sources</CardTitle><CardDescription>Each source is chunked for lexical retrieval now, with embeddings ready to add per endpoint.</CardDescription></CardHeader><CardContent><AttachmentGroup className="grid grid-cols-1 gap-3 overflow-visible sm:grid-cols-2 lg:grid-cols-3">{sources.map((source) => <Attachment key={source.id} state={source.status === "failed" ? "error" : source.status === "processing" ? "processing" : source.status === "queued" ? "uploading" : "done"} orientation="vertical" className="w-full"><AttachmentMedia variant="icon">{source.sourceType === "url" ? <Globe2 aria-hidden="true" /> : <FileText aria-hidden="true" />}</AttachmentMedia><AttachmentContent className="p-2"><AttachmentTitle>{source.title}</AttachmentTitle><AttachmentDescription>{source.sourceType === "url" ? source.sourceUrl : source.mimeType || "Text source"}</AttachmentDescription><div className="mt-3 flex items-center gap-2"><Badge variant={source.status === "ready" ? "secondary" : source.status === "failed" ? "destructive" : "outline"} className="text-[10px]">{source.status}</Badge><div className="ml-auto flex gap-1"><Button variant="ghost" size="icon-xs" onClick={() => void reindex(source)} aria-label={`Reindex ${source.title}`}><RefreshCw aria-hidden="true" /></Button><Button variant="ghost" size="icon-xs" onClick={() => void remove(source)} aria-label={`Remove ${source.title}`}><Trash2 aria-hidden="true" /></Button></div></div>{source.status === "processing" && <Progress value={62} className="mt-3" />}{source.error && <p className="mt-2 text-[11px] text-destructive">{source.error}</p>}</AttachmentContent></Attachment>)}</AttachmentGroup></CardContent></Card>}
+      {sources.length === 0 ? <Empty className="min-h-72 border bg-card shadow-xs"><EmptyHeader><EmptyMedia variant="icon"><FileText aria-hidden="true" /></EmptyMedia><EmptyTitle>Your knowledge base is empty</EmptyTitle><EmptyDescription>Start with a project brief, a runbook, or a public documentation URL.</EmptyDescription></EmptyHeader><EmptyContent><div className="flex gap-2"><Button variant="outline" onClick={() => fileInputRef.current?.click()}>Upload a file</Button><Button variant="secondary" onClick={() => setDialogOpen(true)}>Index a URL</Button></div></EmptyContent></Empty> : <Card><CardHeader><CardTitle className="text-base">Sources</CardTitle><CardDescription>Each ready source is chunked for lexical retrieval, with optional semantic retrieval when an embedding endpoint is configured.</CardDescription></CardHeader><CardContent><AttachmentGroup className="grid grid-cols-1 gap-3 overflow-visible sm:grid-cols-2 lg:grid-cols-3">{sources.map((source) => <Attachment key={source.id} state={source.status === "failed" ? "error" : source.status === "processing" ? "processing" : source.status === "queued" ? "uploading" : "done"} orientation="vertical" className="w-full"><AttachmentMedia variant="icon">{source.sourceType === "url" ? <Globe2 aria-hidden="true" /> : <FileText aria-hidden="true" />}</AttachmentMedia><AttachmentContent className="p-2"><AttachmentTitle>{source.title}</AttachmentTitle><AttachmentDescription>{source.sourceType === "url" ? source.sourceUrl : source.mimeType || "Text source"}</AttachmentDescription><div className="mt-3 flex items-center gap-2"><Badge variant={source.status === "ready" ? "secondary" : source.status === "failed" ? "destructive" : "outline"} className="text-[10px]">{source.status}</Badge><div className="ml-auto flex gap-1"><Button variant="ghost" size="icon-xs" onClick={() => void reindex(source)} aria-label={`Reindex ${source.title}`}><RefreshCw aria-hidden="true" /></Button><Button variant="ghost" size="icon-xs" onClick={() => void remove(source)} aria-label={`Remove ${source.title}`}><Trash2 aria-hidden="true" /></Button></div></div>{source.status === "processing" && <Progress value={62} className="mt-3" />}{source.error && <p className="mt-2 text-[11px] text-destructive">{source.error}</p>}</AttachmentContent></Attachment>)}</AttachmentGroup></CardContent></Card>}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent><DialogHeader><DialogTitle>Index a URL</DialogTitle><DialogDescription>JustAI fetches public HTTP(S) content and blocks private or loopback targets by default.</DialogDescription></DialogHeader><form onSubmit={addURL}><FieldGroup><Field><FieldLabel htmlFor="knowledge-title">Source title</FieldLabel><Input id="knowledge-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Product docs" /></Field><Field><FieldLabel htmlFor="knowledge-url">URL</FieldLabel><Input id="knowledge-url" type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://docs.example.com" required /><FieldDescription>Reindex manually when the source changes.</FieldDescription></Field><Field><FieldLabel>Visibility</FieldLabel><Select value={scopeType} onValueChange={(value) => setScopeType(value ?? "organization")}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="organization">Organization</SelectItem><SelectItem value="user">Only me</SelectItem></SelectContent></Select></Field></FieldGroup><DialogFooter className="mt-6"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button><Button type="submit" disabled={uploading}>{uploading ? <><LoaderCircle data-icon="inline-start" className="animate-spin" aria-hidden="true" />Indexing…</> : "Start indexing"}</Button></DialogFooter></form></DialogContent></Dialog>
     </div>

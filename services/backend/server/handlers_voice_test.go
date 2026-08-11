@@ -47,3 +47,18 @@ func TestVoiceToolCallingCapabilityIsExplicitForCompatibleProviders(t *testing.T
 		t.Fatal("explicit compatible tool calling capability was ignored")
 	}
 }
+
+func TestMCPToolAllowlistTreatsEmptyAsAll(t *testing.T) {
+	if !mcpToolAllowed(nil, "search_plain_docs") {
+		t.Fatal("an empty allowlist should allow discovered tools")
+	}
+	if !mcpToolAllowed(map[string]bool{}, "search_plain_docs") {
+		t.Fatal("an empty map allowlist should allow discovered tools")
+	}
+	if !mcpToolAllowed(map[string]bool{"search_plain_docs": true}, "search_plain_docs") {
+		t.Fatal("an explicitly allowlisted tool should be allowed")
+	}
+	if mcpToolAllowed(map[string]bool{"other_tool": true}, "search_plain_docs") {
+		t.Fatal("a non-allowlisted tool should be rejected")
+	}
+}

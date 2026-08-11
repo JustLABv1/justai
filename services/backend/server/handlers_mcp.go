@@ -107,11 +107,17 @@ func (a *App) createMCPServer(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if _, err := a.DB.ExecContext(c, `INSERT INTO mcp_servers (scope_type, scope_id, name, endpoint_url, auth_type, encrypted_credential, oauth_authorization_url, oauth_token_url, oauth_client_id, oauth_scopes, enabled, allowed_tools, created_by) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), $11, $12, $13)`, scopeType, scopeID, request.Name, request.EndpointURL, request.AuthType, nullableBytes(credential), request.OAuthAuthorizationURL, request.OAuthTokenURL, request.OAuthClientID, request.OAuthScopes, boolValue(request.Enabled, true), jsonRaw(request.AllowedTools), principal.UserID); err != nil {
+	var serverID uuid.UUID
+	if err := a.DB.QueryRowContext(c, `INSERT INTO mcp_servers (scope_type, scope_id, name, endpoint_url, auth_type, encrypted_credential, oauth_authorization_url, oauth_token_url, oauth_client_id, oauth_scopes, enabled, allowed_tools, created_by) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), $11, $12, $13) RETURNING id`, scopeType, scopeID, request.Name, request.EndpointURL, request.AuthType, nullableBytes(credential), request.OAuthAuthorizationURL, request.OAuthTokenURL, request.OAuthClientID, request.OAuthScopes, boolValue(request.Enabled, true), jsonRaw(request.AllowedTools), principal.UserID).Scan(&serverID); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"ok": true})
+	item, err := a.getMCPServer(c, serverID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusCreated, item)
 }
 
 func (a *App) updateMCPServer(c *gin.Context) {
@@ -278,8 +284,15 @@ func scanMCPServer(scanner interface{ Scan(dest ...any) error }) (models.MCPServ
 		return item, err
 	}
 	item.ScopeID = scopeID
+	if len(allowed) == 0 || string(allowed) == "null" {
+		allowed = []byte("[]")
+	}
 	item.AllowedTools = json.RawMessage(allowed)
 	return item, nil
+}
+
+func (a *App) getMCPServer(ctx context.Context, id uuid.UUID) (models.MCPServer, error) {
+	return scanMCPServer(a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, name, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, created_at, updated_at FROM mcp_servers WHERE id = $1`, id))
 }
 
 func (a *App) loadMCPServer(ctx context.Context, rawID string) (mcp.Server, error) {

@@ -484,7 +484,7 @@ export function Workspace() {
               activeView === "transcription"
                 ? "flex min-h-0 w-full flex-1"
                 : activeView === "chat"
-                  ? "mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col p-4 sm:p-6 lg:p-8"
+                  ? "mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col overflow-hidden p-4 sm:p-6 lg:p-8"
                   : "mx-auto w-full max-w-[1440px] flex-1 p-4 sm:p-6 lg:p-8"
             }
           >

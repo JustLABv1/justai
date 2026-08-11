@@ -15,16 +15,24 @@ import (
 )
 
 type Server struct {
-	EndpointURL string
-	AuthType    string
-	Credential  string
-	Allowed     map[string]bool
+	EndpointURL   string
+	AuthType      string
+	Credential    string
+	Allowed       map[string]bool
+	SessionID     string
+	nextRequestID int
+}
+
+type ToolAnnotations struct {
+	ReadOnlyHint    bool `json:"readOnlyHint,omitempty"`
+	DestructiveHint bool `json:"destructiveHint,omitempty"`
 }
 
 type Tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+	Annotations ToolAnnotations `json:"annotations,omitempty"`
 }
 
 type rpcRequest struct {
@@ -53,15 +61,22 @@ func (s Server) ValidateURL(allowPrivate bool) error {
 	return validateHost(parsed.Hostname())
 }
 
-func (s Server) Initialize(ctx context.Context) (json.RawMessage, error) {
-	return s.request(ctx, "initialize", map[string]any{
+func (s *Server) Initialize(ctx context.Context) (json.RawMessage, error) {
+	result, err := s.request(ctx, "initialize", map[string]any{
 		"protocolVersion": "2025-06-18",
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]string{"name": "JustAI", "version": "0.1.0"},
 	})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.notifyInitialized(ctx); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
-func (s Server) ListTools(ctx context.Context) ([]Tool, error) {
+func (s *Server) ListTools(ctx context.Context) ([]Tool, error) {
 	if _, err := s.Initialize(ctx); err != nil {
 		return s.listToolsLegacy(ctx)
 	}
@@ -140,15 +155,21 @@ func (s Server) listToolsLegacy(ctx context.Context) ([]Tool, error) {
 	return filtered, nil
 }
 
-func (s Server) CallTool(ctx context.Context, name string, arguments map[string]any) (json.RawMessage, error) {
+func (s *Server) CallTool(ctx context.Context, name string, arguments map[string]any) (json.RawMessage, error) {
 	if len(s.Allowed) > 0 && !s.Allowed[name] {
 		return nil, fmt.Errorf("MCP tool is not allowlisted")
+	}
+	if s.SessionID == "" {
+		if _, err := s.Initialize(ctx); err != nil {
+			return s.callToolLegacy(ctx, name, arguments)
+		}
 	}
 	return s.request(ctx, "tools/call", map[string]any{"name": name, "arguments": arguments})
 }
 
-func (s Server) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: 1, Method: method, Params: params})
+func (s *Server) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	s.nextRequestID++
+	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: s.nextRequestID, Method: method, Params: params})
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +180,9 @@ func (s Server) request(ctx context.Context, method string, params any) (json.Ra
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
 	request.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	if s.SessionID != "" {
+		request.Header.Set("Mcp-Session-Id", s.SessionID)
+	}
 	s.setAuth(request)
 	client := &http.Client{Timeout: 45 * time.Second}
 	response, err := client.Do(request)
@@ -169,6 +193,9 @@ func (s Server) request(ctx context.Context, method string, params any) (json.Ra
 	if response.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return nil, fmt.Errorf("MCP request failed (%d): %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if sessionID := response.Header.Get("Mcp-Session-Id"); sessionID != "" {
+		s.SessionID = sessionID
 	}
 	contentType := response.Header.Get("Content-Type")
 	if strings.Contains(contentType, "text/event-stream") {
@@ -182,6 +209,69 @@ func (s Server) request(ctx context.Context, method string, params any) (json.Ra
 		return nil, scanner.Err()
 	}
 	return parseResponseReader(response.Body)
+}
+
+func (s Server) callToolLegacy(ctx context.Context, name string, arguments map[string]any) (json.RawMessage, error) {
+	streamRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, s.EndpointURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	streamRequest.Header.Set("Accept", "text/event-stream")
+	s.setAuth(streamRequest)
+	response, err := (&http.Client{Timeout: 45 * time.Second}).Do(streamRequest)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return nil, fmt.Errorf("legacy MCP stream failed (%d): %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	reader := bufio.NewReader(response.Body)
+	messageURL, err := legacyMessageURL(reader, s.EndpointURL)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := legacyRPC(ctx, reader, messageURL, s, rpcRequest{JSONRPC: "2.0", ID: 1, Method: "initialize", Params: map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]string{"name": "JustAI", "version": "0.1.0"},
+	}}); err != nil {
+		return nil, err
+	}
+	return legacyRPC(ctx, reader, messageURL, s, rpcRequest{JSONRPC: "2.0", ID: 2, Method: "tools/call", Params: map[string]any{"name": name, "arguments": arguments}})
+}
+
+func (s *Server) notifyInitialized(ctx context.Context) error {
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/initialized",
+		"params":  map[string]any{},
+	})
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.EndpointURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	if s.SessionID != "" {
+		request.Header.Set("Mcp-Session-Id", s.SessionID)
+	}
+	s.setAuth(request)
+	response, err := (&http.Client{Timeout: 45 * time.Second}).Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return fmt.Errorf("MCP initialized notification failed (%d): %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
 }
 
 func (s Server) setAuth(request *http.Request) {

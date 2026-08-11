@@ -16,7 +16,6 @@ import (
 	"justai-backend/middleware"
 	"justai-backend/models"
 	"justai-backend/provider"
-	"justai-backend/rag"
 )
 
 type voiceTicket struct {
@@ -53,10 +52,18 @@ type voiceApproval struct {
 }
 
 type voiceToolBinding struct {
-	ServerID   uuid.UUID
-	ServerName string
-	ToolName   string
-	Definition provider.ToolDefinition
+	ServerID         uuid.UUID
+	ServerName       string
+	ToolName         string
+	Definition       provider.ToolDefinition
+	RequiresApproval bool
+}
+
+type voiceToolDiscovery struct {
+	Definitions []provider.ToolDefinition
+	Bindings    map[string]voiceToolBinding
+	ServerCount int
+	Errors      []string
 }
 
 type voiceState struct {
@@ -388,7 +395,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	}
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
-	citations, err := rag.Search(ctx, a.DB, organizationID, userID, content, 6)
+	citations, err := a.searchKnowledge(ctx, organizationID, userID, content, 6)
 	if err != nil {
 		citations = nil
 	}
@@ -516,42 +523,69 @@ func voiceToolMessages(history []provider.Message) []provider.ToolMessage {
 }
 
 func (a *App) loadVoiceTools(ctx context.Context, userID, organizationID uuid.UUID) ([]provider.ToolDefinition, map[string]voiceToolBinding) {
+	discovery := a.discoverVoiceTools(ctx, userID, organizationID)
+	return discovery.Definitions, discovery.Bindings
+}
+
+func (a *App) discoverVoiceTools(ctx context.Context, userID, organizationID uuid.UUID) voiceToolDiscovery {
+	result := voiceToolDiscovery{
+		Definitions: []provider.ToolDefinition{},
+		Bindings:    map[string]voiceToolBinding{},
+	}
 	rows, err := a.DB.QueryContext(ctx, `SELECT id, name FROM mcp_servers WHERE enabled = TRUE AND ((scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2)) ORDER BY created_at`, organizationID, userID)
 	if err != nil {
-		return nil, map[string]voiceToolBinding{}
+		result.Errors = []string{"could not load configured MCP servers: " + err.Error()}
+		return result
 	}
 	defer rows.Close()
-	definitions := []provider.ToolDefinition{}
-	bindings := map[string]voiceToolBinding{}
 	for rows.Next() {
 		var serverID uuid.UUID
 		var serverName string
 		if err := rows.Scan(&serverID, &serverName); err != nil {
+			result.Errors = append(result.Errors, "could not read an MCP server configuration: "+err.Error())
 			continue
 		}
+		result.ServerCount++
 		server, err := a.loadMCPServer(ctx, serverID.String())
-		if err != nil || len(server.Allowed) == 0 {
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s could not be loaded: %v", serverName, err))
 			continue
 		}
 		tools, err := server.ListTools(ctx)
 		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s tool discovery failed: %v", serverName, err))
 			continue
 		}
 		for _, tool := range tools {
-			if !server.Allowed[tool.Name] {
+			if !mcpToolAllowed(server.Allowed, tool.Name) {
 				continue
 			}
-			name := voiceToolName(serverID, tool.Name, bindings)
+			name := voiceToolName(serverID, tool.Name, result.Bindings)
 			parameters := tool.InputSchema
 			if len(parameters) == 0 || !json.Valid(parameters) {
 				parameters = json.RawMessage(`{"type":"object","properties":{}}`)
 			}
 			definition := provider.ToolDefinition{Name: name, Description: tool.Description, Parameters: parameters}
-			definitions = append(definitions, definition)
-			bindings[name] = voiceToolBinding{ServerID: serverID, ServerName: serverName, ToolName: tool.Name, Definition: definition}
+			result.Definitions = append(result.Definitions, definition)
+			result.Bindings[name] = voiceToolBinding{
+				ServerID:         serverID,
+				ServerName:       serverName,
+				ToolName:         tool.Name,
+				Definition:       definition,
+				RequiresApproval: !tool.Annotations.ReadOnlyHint || tool.Annotations.DestructiveHint,
+			}
 		}
 	}
-	return definitions, bindings
+	if err := rows.Err(); err != nil {
+		result.Errors = append(result.Errors, "could not finish MCP server discovery: "+err.Error())
+	}
+	return result
+}
+
+func mcpToolAllowed(allowed map[string]bool, toolName string) bool {
+	// An empty allowlist means "all discovered tools". A plain map lookup
+	// would otherwise discard every tool because missing keys return false.
+	return len(allowed) == 0 || allowed[toolName]
 }
 
 func voiceToolName(serverID uuid.UUID, toolName string, existing map[string]voiceToolBinding) string {

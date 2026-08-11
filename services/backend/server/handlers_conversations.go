@@ -65,7 +65,7 @@ func (a *App) listConversations(c *gin.Context) {
 			c.created_at,
 			c.updated_at,
 			c.archived_at,
-			(SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id)::int
+			(SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'assistant'))::int
 		FROM conversations c
 		WHERE c.user_id = $1 AND c.organization_id = $2 AND `+archiveFilter+`
 		ORDER BY c.updated_at DESC
