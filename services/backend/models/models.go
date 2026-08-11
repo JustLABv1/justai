@@ -55,6 +55,7 @@ type Endpoint struct {
 	EmbeddingModel       string          `json:"embeddingModel,omitempty"`
 	TranscriptionModel   string          `json:"transcriptionModel,omitempty"`
 	DiarizationModel     string          `json:"diarizationModel,omitempty"`
+	SpeechModel          string          `json:"speechModel,omitempty"`
 	Capabilities         json.RawMessage `json:"capabilities"`
 	CredentialConfigured bool            `json:"credentialConfigured"`
 	Enabled              bool            `json:"enabled"`

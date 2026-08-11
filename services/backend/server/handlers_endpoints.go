@@ -27,6 +27,7 @@ type endpointRequest struct {
 	EmbeddingModel     string          `json:"embeddingModel"`
 	TranscriptionModel string          `json:"transcriptionModel"`
 	DiarizationModel   string          `json:"diarizationModel"`
+	SpeechModel        string          `json:"speechModel"`
 	Capabilities       map[string]bool `json:"capabilities"`
 	Credential         string          `json:"credential"`
 	Enabled            *bool           `json:"enabled"`
@@ -38,11 +39,11 @@ type endpointRequest struct {
 
 func (a *App) supportedProviders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"providers": []gin.H{
-		{"id": "openai", "name": "OpenAI", "kind": "native", "capabilities": []string{"chat", "embeddings", "realtime-transcription", "diarization"}},
+		{"id": "openai", "name": "OpenAI", "kind": "native", "capabilities": []string{"chat", "embeddings", "realtime-transcription", "diarization", "tool-calling", "tts"}},
 		{"id": "gemini", "name": "Google Gemini", "kind": "native", "capabilities": []string{"chat", "embeddings", "realtime-transcription", "diarization"}},
 		{"id": "anthropic", "name": "Anthropic", "kind": "native", "capabilities": []string{"chat"}},
 		{"id": "ollama", "name": "Ollama", "kind": "local", "capabilities": []string{"chat", "embeddings"}},
-		{"id": "openai-compatible", "name": "OpenAI-compatible", "kind": "gateway", "examples": []string{"LiteLLM", "vLLM", "LM Studio", "OpenRouter"}, "capabilities": []string{"chat", "embeddings", "realtime-transcription", "chunked-transcription"}},
+		{"id": "openai-compatible", "name": "OpenAI-compatible", "kind": "gateway", "examples": []string{"LiteLLM", "vLLM", "LM Studio", "OpenRouter"}, "capabilities": []string{"chat", "embeddings", "realtime-transcription", "chunked-transcription", "tool-calling", "tts"}},
 		{"id": "mock", "name": "JustAI demo", "kind": "local", "capabilities": []string{"chat"}},
 	}})
 }
@@ -50,7 +51,7 @@ func (a *App) supportedProviders(c *gin.Context) {
 func (a *App) listEndpoints(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
-	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_at, updated_at FROM endpoint_settings WHERE (scope_type = 'global') OR (scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) ORDER BY is_default DESC, created_at DESC`, organizationID, principal.UserID)
+	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_at, updated_at FROM endpoint_settings WHERE (scope_type = 'global') OR (scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) ORDER BY is_default DESC, created_at DESC`, organizationID, principal.UserID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -102,7 +103,7 @@ func (a *App) createEndpoint(c *gin.Context) {
 		_, _ = a.DB.ExecContext(c, `UPDATE endpoint_settings SET is_default = FALSE WHERE scope_type = $1 AND scope_id IS NOT DISTINCT FROM $2`, scopeType, scopeID)
 	}
 	var id uuid.UUID
-	err = a.DB.QueryRowContext(c, `INSERT INTO endpoint_settings (scope_type, scope_id, provider_type, name, base_url, api_path, api_version, chat_model, embedding_model, transcription_model, diarization_model, capabilities, credential_ciphertext, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_by) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`, scopeType, scopeID, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, jsonRaw(capabilities), nullableBytes(credential), boolValue(request.Enabled, true), isDefault, intValue(request.TimeoutSeconds, 120), intValue(request.MaxOutputTokens, 2048), floatValue(request.Temperature, 0.2), principal.UserID).Scan(&id)
+	err = a.DB.QueryRowContext(c, `INSERT INTO endpoint_settings (scope_type, scope_id, provider_type, name, base_url, api_path, api_version, chat_model, embedding_model, transcription_model, diarization_model, speech_model, capabilities, credential_ciphertext, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_by) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), $13, $14, $15, $16, $17, $18, $19, $20) RETURNING id`, scopeType, scopeID, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, jsonRaw(capabilities), nullableBytes(credential), boolValue(request.Enabled, true), isDefault, intValue(request.TimeoutSeconds, 120), intValue(request.MaxOutputTokens, 2048), floatValue(request.Temperature, 0.2), principal.UserID).Scan(&id)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -165,7 +166,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 	if request.Capabilities != nil {
 		capabilities = jsonRaw(request.Capabilities)
 	}
-	_, err = a.DB.ExecContext(c, `UPDATE endpoint_settings SET provider_type = $2, name = $3, base_url = $4, api_path = NULLIF($5, ''), api_version = NULLIF($6, ''), chat_model = NULLIF($7, ''), embedding_model = NULLIF($8, ''), transcription_model = NULLIF($9, ''), diarization_model = NULLIF($10, ''), capabilities = $11, credential_ciphertext = COALESCE($12, credential_ciphertext), enabled = $13, is_default = $14, timeout_seconds = $15, max_output_tokens = $16, temperature = $17, updated_at = now() WHERE id = $1`, id, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, capabilities, encrypted, boolValue(request.Enabled, current.Enabled), boolValue(request.IsDefault, current.IsDefault), intValue(request.TimeoutSeconds, current.TimeoutSeconds), intValue(request.MaxOutputTokens, 2048), floatValue(request.Temperature, current.Temperature))
+	_, err = a.DB.ExecContext(c, `UPDATE endpoint_settings SET provider_type = $2, name = $3, base_url = $4, api_path = NULLIF($5, ''), api_version = NULLIF($6, ''), chat_model = NULLIF($7, ''), embedding_model = NULLIF($8, ''), transcription_model = NULLIF($9, ''), diarization_model = NULLIF($10, ''), speech_model = NULLIF($11, ''), capabilities = $12, credential_ciphertext = COALESCE($13, credential_ciphertext), enabled = $14, is_default = $15, timeout_seconds = $16, max_output_tokens = $17, temperature = $18, updated_at = now() WHERE id = $1`, id, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, capabilities, encrypted, boolValue(request.Enabled, current.Enabled), boolValue(request.IsDefault, current.IsDefault), intValue(request.TimeoutSeconds, current.TimeoutSeconds), intValue(request.MaxOutputTokens, 2048), floatValue(request.Temperature, current.Temperature))
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -232,7 +233,7 @@ func (a *App) testEndpoint(c *gin.Context) {
 }
 
 func (a *App) getEndpoint(ctx context.Context, id uuid.UUID) (models.Endpoint, error) {
-	row := a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_at, updated_at FROM endpoint_settings WHERE id = $1`, id)
+	row := a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_at, updated_at FROM endpoint_settings WHERE id = $1`, id)
 	return scanEndpoint(row)
 }
 
@@ -240,7 +241,7 @@ func scanEndpoint(scanner interface{ Scan(dest ...any) error }) (models.Endpoint
 	var item models.Endpoint
 	var scopeID sql.NullString
 	var capabilities []byte
-	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.ProviderType, &item.Name, &item.BaseURL, &item.APIPath, &item.APIVersion, &item.ChatModel, &item.EmbeddingModel, &item.TranscriptionModel, &item.DiarizationModel, &capabilities, &item.CredentialConfigured, &item.Enabled, &item.IsDefault, &item.TimeoutSeconds, &item.MaxOutputTokens, &item.Temperature, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.ProviderType, &item.Name, &item.BaseURL, &item.APIPath, &item.APIVersion, &item.ChatModel, &item.EmbeddingModel, &item.TranscriptionModel, &item.DiarizationModel, &item.SpeechModel, &capabilities, &item.CredentialConfigured, &item.Enabled, &item.IsDefault, &item.TimeoutSeconds, &item.MaxOutputTokens, &item.Temperature, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	if scopeID.Valid {
@@ -257,7 +258,7 @@ func (a *App) providerEndpoint(ctx context.Context, id uuid.UUID) (provider.Endp
 	var endpoint provider.Endpoint
 	var credential []byte
 	var capabilities []byte
-	err := a.DB.QueryRowContext(ctx, `SELECT provider_type, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), capabilities, credential_ciphertext, timeout_seconds, max_output_tokens, temperature FROM endpoint_settings WHERE id = $1 AND enabled = TRUE`, id).Scan(&endpoint.ProviderType, &endpoint.BaseURL, &endpoint.APIPath, &endpoint.APIVersion, &endpoint.ChatModel, &endpoint.EmbeddingModel, &endpoint.TranscriptionModel, &endpoint.DiarizationModel, &capabilities, &credential, &endpoint.TimeoutSeconds, &endpoint.MaxOutputTokens, &endpoint.Temperature)
+	err := a.DB.QueryRowContext(ctx, `SELECT provider_type, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext, timeout_seconds, max_output_tokens, temperature FROM endpoint_settings WHERE id = $1 AND enabled = TRUE`, id).Scan(&endpoint.ProviderType, &endpoint.BaseURL, &endpoint.APIPath, &endpoint.APIVersion, &endpoint.ChatModel, &endpoint.EmbeddingModel, &endpoint.TranscriptionModel, &endpoint.DiarizationModel, &endpoint.SpeechModel, &capabilities, &credential, &endpoint.TimeoutSeconds, &endpoint.MaxOutputTokens, &endpoint.Temperature)
 	if err != nil {
 		return endpoint, err
 	}

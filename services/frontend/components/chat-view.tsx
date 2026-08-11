@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Bot } from "lucide-react"
 
 import Ai04, { type Ai04Action } from "@/components/ai-04"
+import { VoiceMode } from "@/components/voice-mode"
 import { Badge } from "@/components/ui/badge"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -64,6 +65,8 @@ export function ChatView({
   const [streaming, setStreaming] = useState(false)
   const [connectionState, setConnectionState] = useState("Ready")
   const [activeAssistantId, setActiveAssistantId] = useState("")
+  const [voiceOpen, setVoiceOpen] = useState(false)
+  const [historyRefresh, setHistoryRefresh] = useState(0)
   const socketRef = useRef<WebSocket | null>(null)
   const conversationIdRef = useRef<string | null>(conversationId)
   const createdConversationIdRef = useRef<string | null>(null)
@@ -131,7 +134,22 @@ export function ChatView({
     return () => {
       cancelled = true
     }
-  }, [conversationId])
+  }, [conversationId, historyRefresh])
+
+  const notifyConversationUpdated = useCallback(() => {
+    setHistoryRefresh((current) => current + 1)
+    onConversationUpdated?.()
+  }, [onConversationUpdated])
+
+  const handleConversationCreated = useCallback(
+    (conversation: Conversation) => {
+      setMessages([])
+      conversationIdRef.current = conversation.id
+      createdConversationIdRef.current = conversation.id
+      onConversationCreated?.(conversation)
+    },
+    [onConversationCreated]
+  )
 
   const updateAssistant = useCallback(
     (update: (message: ChatMessage) => ChatMessage) => {
@@ -182,7 +200,7 @@ export function ChatView({
             ...message,
             content: data.content as string,
           }))
-        onConversationUpdated?.()
+        notifyConversationUpdated()
       }
       if (envelope.type === "error") {
         setStreaming(false)
@@ -194,7 +212,7 @@ export function ChatView({
         setActiveAssistantId("")
       }
     },
-    [onConversationUpdated, updateAssistant]
+    [notifyConversationUpdated, updateAssistant]
   )
 
   function handleAction(action: Ai04Action) {
@@ -259,7 +277,7 @@ export function ChatView({
         activeConversationId = response.conversation.id
         conversationIdRef.current = activeConversationId
         createdConversationIdRef.current = activeConversationId
-        onConversationCreated?.(response.conversation)
+        handleConversationCreated(response.conversation)
       }
 
       const socket = await openChatSocket(activeConversationId)
@@ -289,21 +307,26 @@ export function ChatView({
     }
   }
 
+  const voiceOverlay = (
+    <VoiceMode
+      conversationId={conversationId}
+      endpoints={endpoints}
+      onClose={() => setVoiceOpen(false)}
+      onConversationCreated={handleConversationCreated}
+      onConversationUpdated={notifyConversationUpdated}
+      open={voiceOpen}
+    />
+  )
+
   if (historyLoading) {
-    return (
-      <div className="flex h-full min-h-0 items-center justify-center">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner />
-          Loading conversation…
-        </div>
-      </div>
-    )
+    return <>{voiceOverlay}<div className="flex h-full min-h-0 items-center justify-center"><div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Loading conversation…</div></div></>
   }
 
   if (messages.length === 0) {
     return (
-      <div className="flex h-full min-h-0 items-center justify-center">
-        <div className="w-full">
+      <>
+        <div className="flex h-full min-h-0 items-center justify-center">
+          <div className="w-full">
           {chatError && (
             <Alert className="mx-auto mb-4 max-w-3xl" variant="destructive">
               <AlertTitle>Chat unavailable</AlertTitle>
@@ -312,10 +335,13 @@ export function ChatView({
           )}
           <Ai04
             onAction={handleAction}
+            onVoice={() => setVoiceOpen(true)}
             onSubmit={(prompt) => void sendMessage(prompt)}
           />
+          </div>
         </div>
-      </div>
+        {voiceOverlay}
+      </>
     )
   }
 
@@ -414,11 +440,12 @@ export function ChatView({
             <AlertDescription>{chatError}</AlertDescription>
           </Alert>
         )}
-        <Ai04 compact onSubmit={(prompt) => void sendMessage(prompt)} />
+        <Ai04 compact onVoice={() => setVoiceOpen(true)} onSubmit={(prompt) => void sendMessage(prompt)} />
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
           {connectionState} · Responses use your connected JustAI endpoint.
         </p>
       </div>
+      {voiceOverlay}
     </div>
   )
 }

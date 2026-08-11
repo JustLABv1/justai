@@ -8,6 +8,7 @@ import {
   IconFileUpload,
   IconHistory,
   IconLink,
+  IconMicrophone,
   IconPaperclip,
   IconPlayerPlay,
   IconPlus,
@@ -49,10 +50,12 @@ const ACTIONS = [
 
 export default function Ai04({
   onAction,
+  onVoice,
   onSubmit,
   compact = false,
 }: {
   onAction?: (action: Ai04Action) => void
+  onVoice?: () => void
   onSubmit?: (prompt: string) => void
   compact?: boolean
 }) {
@@ -150,10 +153,10 @@ export default function Ai04({
       {!compact && (
         <>
           <h1 className="text-center font-heading text-[29px] font-semibold tracking-tighter text-balance text-pretty text-foreground sm:text-[32px] md:text-[46px]">
-            Prompt. Refine. Ship.
+            Your AI workspace.
           </h1>
           <h2 className="-my-5 pb-4 text-center text-xl text-balance text-muted-foreground">
-            Build real, working software just by describing it
+            Connect models, knowledge, tools, and live transcription in one place.
           </h2>
         </>
       )}
@@ -210,16 +213,16 @@ export default function Ai04({
           )}
           <div className="relative">
             <Textarea
-              aria-label="Ask anything"
+              aria-label="Ask JustAI"
               className="max-h-50 min-h-12 resize-none rounded-none border-none bg-transparent! px-1.5 py-1.5 text-sm shadow-none placeholder:text-transparent focus-visible:border-transparent focus-visible:ring-0"
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
-              placeholder="Ask anything"
+              placeholder="Ask JustAI"
               value={prompt}
             />
             {!prompt && (
               <span className="pointer-events-none absolute inset-x-1.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                Ask anything
+                Ask JustAI
               </span>
             )}
           </div>
@@ -369,6 +372,16 @@ export default function Ai04({
 
             <div className="ml-auto flex items-center gap-0.5 sm:gap-1">
               <Button
+                aria-label="Open Voice Mode"
+                className="rounded-md"
+                onClick={() => onVoice?.()}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+              >
+                <IconMicrophone size={16} />
+              </Button>
+              <Button
                 aria-label="Send message"
                 className="rounded-md"
                 disabled={!prompt.trim()}
@@ -409,6 +422,15 @@ export default function Ai04({
               {action.label}
             </Button>
           ))}
+          <Button
+            className="gap-2 rounded-full"
+            onClick={() => onVoice?.()}
+            size="sm"
+            variant="outline"
+          >
+            <IconMicrophone size={16} />
+            Voice mode
+          </Button>
         </div>
       )}
     </div>

@@ -72,6 +72,7 @@ func (a *App) Router() *gin.Engine {
 	org.DELETE("/endpoints/:id", middleware.RequireOrgRole("owner", "admin"), a.deleteEndpoint)
 	org.POST("/endpoints/:id/test", a.testEndpoint)
 	org.POST("/ws/tickets", a.createWSTicket)
+	org.POST("/voice/speech", a.synthesizeVoiceSpeech)
 	org.GET("/transcription/sessions", a.listTranscriptionSessions)
 	org.POST("/transcription/sessions", a.createTranscriptionSession)
 	org.GET("/transcription/sessions/:id", a.getTranscriptionSession)
@@ -112,6 +113,7 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/conversations/:id/messages", a.listConversationMessages)
 
 	protected.GET("/ws/chat", a.chatWebSocket)
+	protected.GET("/ws/voice", a.voiceWebSocket)
 	router.GET("/api/v1/ws/transcription", a.transcriptionWebSocket)
 	organizationRoutes := protected.Group("/organizations/:id")
 	organizationRoutes.Use(middleware.RequireOrg(a.DB))

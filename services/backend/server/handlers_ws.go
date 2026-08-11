@@ -22,9 +22,10 @@ import (
 )
 
 type wsTicketRequest struct {
-	Kind      string `json:"kind"`
-	SessionID string `json:"sessionId"`
-	SourceID  string `json:"sourceId"`
+	Kind           string `json:"kind"`
+	SessionID      string `json:"sessionId"`
+	SourceID       string `json:"sourceId"`
+	ConversationID string `json:"conversationId"`
 }
 
 type chatEvent struct {
@@ -63,7 +64,7 @@ func (a *App) createWSTicket(c *gin.Context) {
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if request.Kind != "chat" && request.Kind != "transcription" && request.Kind != "transcription-viewer" && request.Kind != "transcription-capture" {
+	if request.Kind != "chat" && request.Kind != "voice" && request.Kind != "transcription" && request.Kind != "transcription-viewer" && request.Kind != "transcription-capture" {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported websocket ticket kind"))
 		return
 	}
@@ -73,7 +74,24 @@ func (a *App) createWSTicket(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("organization context is required"))
 		return
 	}
-	var sessionID, sourceID any
+	var conversationID, sessionID, sourceID any
+	if request.Kind == "voice" {
+		parsedConversation, err := uuid.Parse(request.ConversationID)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("conversationId is required for voice tickets"))
+			return
+		}
+		var allowed bool
+		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, parsedConversation, principal.UserID, organizationID).Scan(&allowed); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if !allowed {
+			writeError(c, http.StatusForbidden, fmt.Errorf("conversation not found"))
+			return
+		}
+		conversationID = parsedConversation
+	}
 	if request.Kind == "transcription" || request.Kind == "transcription-viewer" || request.Kind == "transcription-capture" {
 		parsedSession, err := uuid.Parse(request.SessionID)
 		if err != nil {
@@ -104,7 +122,7 @@ func (a *App) createWSTicket(c *gin.Context) {
 		return
 	}
 	expiresAt := time.Now().Add(2 * time.Minute)
-	if _, err := a.DB.ExecContext(c, `INSERT INTO ws_tickets (token_hash, user_id, organization_id, kind, session_id, source_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, hash, principal.UserID, organizationID, request.Kind, sessionID, sourceID, expiresAt); err != nil {
+	if _, err := a.DB.ExecContext(c, `INSERT INTO ws_tickets (token_hash, user_id, organization_id, kind, conversation_id, session_id, source_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, hash, principal.UserID, organizationID, request.Kind, conversationID, sessionID, sourceID, expiresAt); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}

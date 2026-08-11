@@ -1,0 +1,269 @@
+package provider
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+)
+
+// ToolDefinition is the provider-neutral tool shape used by the voice turn
+// runner. Parameters must be a JSON Schema object supplied by MCP.
+type ToolDefinition struct {
+	Name        string
+	Description string
+	Parameters  json.RawMessage
+}
+
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+type ToolMessage struct {
+	Role       string
+	Content    string
+	ToolCallID string
+	ToolCalls  []ToolCall
+}
+
+type ToolChatOptions struct {
+	Messages []ToolMessage
+	Tools    []ToolDefinition
+	Model    string
+}
+
+type ToolChatEvent struct {
+	Delta     string
+	ToolCalls []ToolCall
+}
+
+// SupportsToolCalling reports the provider transports implemented by the
+// normalized tool-call adapter. OpenAI-compatible gateways must explicitly
+// advertise the capability because not every gateway exposes function calls.
+func SupportsToolCalling(endpoint Endpoint) bool {
+	if endpoint.ProviderType == "openai" {
+		return true
+	}
+	return endpoint.ProviderType == "openai-compatible" && endpoint.Capabilities["tool-calling"]
+}
+
+// StreamChatWithTools streams an OpenAI Chat Completions response and
+// normalizes streamed text and tool calls for the server turn runner.
+func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolChatOptions, onEvent func(ToolChatEvent) error) error {
+	if !SupportsToolCalling(endpoint) {
+		return fmt.Errorf("provider %s does not expose compatible tool calling", endpoint.ProviderType)
+	}
+
+	messages := make([]map[string]any, 0, len(options.Messages))
+	for _, message := range options.Messages {
+		item := map[string]any{
+			"role":    message.Role,
+			"content": message.Content,
+		}
+		if message.ToolCallID != "" {
+			item["tool_call_id"] = message.ToolCallID
+		}
+		if len(message.ToolCalls) > 0 {
+			calls := make([]map[string]any, 0, len(message.ToolCalls))
+			for _, call := range message.ToolCalls {
+				calls = append(calls, map[string]any{
+					"id":   call.ID,
+					"type": "function",
+					"function": map[string]any{
+						"name":      call.Name,
+						"arguments": call.Arguments,
+					},
+				})
+			}
+			item["tool_calls"] = calls
+		}
+		messages = append(messages, item)
+	}
+
+	tools := make([]map[string]any, 0, len(options.Tools))
+	for _, tool := range options.Tools {
+		parameters := tool.Parameters
+		if len(parameters) == 0 {
+			parameters = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		tools = append(tools, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        tool.Name,
+				"description": tool.Description,
+				"parameters":  json.RawMessage(parameters),
+			},
+		})
+	}
+
+	payload := map[string]any{
+		"model":       firstNonEmpty(options.Model, endpoint.ChatModel, "gpt-4o-mini"),
+		"messages":    messages,
+		"tools":       tools,
+		"tool_choice": "auto",
+		"stream":      true,
+		"temperature": endpoint.Temperature,
+		"max_tokens":  endpoint.MaxOutputTokens,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/chat/completions"), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if endpoint.Credential != "" {
+		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
+	}
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return responseError(response)
+	}
+
+	type accumulator struct {
+		ID        string
+		Name      string
+		Arguments strings.Builder
+	}
+	accumulators := map[int]*accumulator{}
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line == "data: [DONE]" {
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(line), &chunk); err != nil || len(chunk.Choices) == 0 {
+			continue
+		}
+		delta := chunk.Choices[0].Delta
+		if delta.Content != "" {
+			if err := onEvent(ToolChatEvent{Delta: delta.Content}); err != nil {
+				return err
+			}
+		}
+		for _, call := range delta.ToolCalls {
+			item := accumulators[call.Index]
+			if item == nil {
+				item = &accumulator{}
+				accumulators[call.Index] = item
+			}
+			if call.ID != "" {
+				item.ID = call.ID
+			}
+			if call.Function.Name != "" {
+				item.Name = call.Function.Name
+			}
+			item.Arguments.WriteString(call.Function.Arguments)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if len(accumulators) == 0 {
+		return nil
+	}
+	indices := make([]int, 0, len(accumulators))
+	for index := range accumulators {
+		indices = append(indices, index)
+	}
+	for left := 0; left < len(indices); left++ {
+		for right := left + 1; right < len(indices); right++ {
+			if indices[right] < indices[left] {
+				indices[left], indices[right] = indices[right], indices[left]
+			}
+		}
+	}
+	calls := make([]ToolCall, 0, len(indices))
+	for _, index := range indices {
+		item := accumulators[index]
+		calls = append(calls, ToolCall{ID: item.ID, Name: item.Name, Arguments: item.Arguments.String()})
+	}
+	return onEvent(ToolChatEvent{ToolCalls: calls})
+}
+
+// SynthesizeSpeech uses the OpenAI-compatible audio speech contract and keeps
+// provider credentials on the backend.
+func SynthesizeSpeech(ctx context.Context, endpoint Endpoint, text, voice string) ([]byte, string, error) {
+	if endpoint.ProviderType != "openai" && endpoint.ProviderType != "openai-compatible" {
+		return nil, "", fmt.Errorf("provider %s does not expose compatible text to speech", endpoint.ProviderType)
+	}
+	payload := map[string]any{
+		"model":           firstNonEmpty(endpoint.SpeechModel, "gpt-4o-mini-tts"),
+		"voice":           firstNonEmpty(voice, "alloy"),
+		"input":           text,
+		"response_format": "mp3",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/audio/speech"), bytes.NewReader(body))
+	if err != nil {
+		return nil, "", err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if endpoint.Credential != "" {
+		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
+	}
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return nil, "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return nil, "", responseError(response)
+	}
+	contentType := response.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "audio/mpeg"
+	}
+	data := make([]byte, 0, 64*1024)
+	buffer := make([]byte, 32*1024)
+	for {
+		count, readErr := response.Body.Read(buffer)
+		if count > 0 {
+			data = append(data, buffer[:count]...)
+			if len(data) > 12*1024*1024 {
+				return nil, "", fmt.Errorf("speech response is too large")
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return nil, "", readErr
+		}
+	}
+	return data, contentType, nil
+}

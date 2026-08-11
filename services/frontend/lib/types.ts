@@ -41,6 +41,7 @@ export type Endpoint = {
   embeddingModel?: string
   transcriptionModel?: string
   diarizationModel?: string
+  speechModel?: string
   capabilities: Record<string, boolean>
   credentialConfigured: boolean
   enabled: boolean

@@ -1293,7 +1293,7 @@ func endpointSupportsModel(endpoint models.Endpoint, capability string) bool {
 	if capability == "transcription" {
 		return capabilities["realtime-transcription"] || capabilities["chunked-transcription"] || capabilities["transcription"] || endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
 	}
-	return (capability == "realtime-transcription" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini")) || (capability == "diarization" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"))
+	return (capability == "realtime-transcription" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini")) || (capability == "diarization" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini")) || (capability == "tts" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "openai-compatible"))
 }
 
 func endpointSupports(endpoint provider.Endpoint, capability string) bool {
@@ -1308,6 +1308,8 @@ func endpointSupports(endpoint provider.Endpoint, capability string) bool {
 		return endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
 	case "diarization":
 		return endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
+	case "tts":
+		return endpoint.ProviderType == "openai" || endpoint.ProviderType == "openai-compatible"
 	default:
 		return false
 	}

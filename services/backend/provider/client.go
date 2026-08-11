@@ -23,6 +23,7 @@ type Endpoint struct {
 	EmbeddingModel     string
 	TranscriptionModel string
 	DiarizationModel   string
+	SpeechModel        string
 	Capabilities       map[string]bool
 	TimeoutSeconds     int
 	MaxOutputTokens    int

@@ -51,10 +51,42 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const headers = new Headers(init?.headers)
+  if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json")
+  }
+  const organizationId = organizationIdForRequest()
+  if (organizationId && !headers.has("X-Organization-ID")) {
+    headers.set("X-Organization-ID", organizationId)
+  }
+  const response = await fetch(`${API_URL}${path}`, {
+    ...init,
+    credentials: "include",
+    headers,
+  })
+  if (!response.ok) {
+    let message = response.statusText
+    try {
+      const payload = (await response.json()) as { error?: string }
+      message = payload.error ?? message
+    } catch {
+      // Keep the HTTP status text when the backend did not return JSON.
+    }
+    throw new APIError(message, response.status)
+  }
+  return response.blob()
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, {
+      method: "POST",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  postBlob: (path: string, body?: unknown) =>
+    requestBlob(path, {
       method: "POST",
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
