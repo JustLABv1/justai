@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"justai-backend/provider"
 )
 
 func (a *App) startChatRun(ctx context.Context, requestID string, conversationID, userID, organizationID, endpointID uuid.UUID, model string) (uuid.UUID, bool, error) {
@@ -49,6 +51,18 @@ func (a *App) finishChatRun(ctx context.Context, runID uuid.UUID, status string,
 		status = "complete"
 	}
 	_, err := a.DB.ExecContext(ctx, `UPDATE chat_runs SET status = $2, finished_at = now(), tool_call_count = $3 WHERE id = $1`, runID, status, toolCalls)
+	return err
+}
+
+func (a *App) recordChatRunUsage(ctx context.Context, runID uuid.UUID, usage provider.Usage) error {
+	if runID == uuid.Nil {
+		return nil
+	}
+	_, err := a.DB.ExecContext(ctx, `
+		UPDATE chat_runs
+		SET input_tokens = $2, output_tokens = $3, total_tokens = $4
+		WHERE id = $1
+	`, runID, usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 	return err
 }
 

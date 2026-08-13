@@ -28,5 +28,6 @@ export const config = {
     "/knowledge/:path*",
     "/mcp/:path*",
     "/settings/:path*",
+    "/admin/:path*",
   ],
 }

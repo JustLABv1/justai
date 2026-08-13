@@ -287,12 +287,12 @@ func (a *App) canUseKnowledgeSource(c *gin.Context, sourceID, targetConversation
 
 func scanMCPServerContext(scanner interface{ Scan(dest ...any) error }) (models.MCPServer, error) {
 	var item models.MCPServer
-	var scopeID uuid.UUID
+	var scopeID sql.NullString
 	var allowed []byte
 	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.EndpointURL, &item.AuthType, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
 	}
-	item.ScopeID = scopeID
+	item.ScopeID = parseMCPScopeID(scopeID)
 	if len(allowed) == 0 {
 		allowed = []byte("[]")
 	}

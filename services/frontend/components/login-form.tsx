@@ -33,13 +33,21 @@ export function LoginForm({
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const [oidcEnabled, setOidcEnabled] = useState(false)
+  const [loginEnabled, setLoginEnabled] = useState(true)
+  const [signupEnabled, setSignupEnabled] = useState(true)
+  const [maintenanceMessage, setMaintenanceMessage] = useState("")
 
   useEffect(() => {
     let cancelled = false
     void api
       .getAuthConfig()
       .then((config) => {
-        if (!cancelled) setOidcEnabled(config.oidcEnabled)
+        if (!cancelled) {
+          setOidcEnabled(config.oidcEnabled)
+          setLoginEnabled(config.loginEnabled !== false)
+          setSignupEnabled(config.signupEnabled !== false)
+          setMaintenanceMessage(config.maintenanceMessage ?? "")
+        }
       })
       .catch(() => {
         if (!cancelled) setOidcEnabled(false)
@@ -50,6 +58,11 @@ export function LoginForm({
   }, [])
 
   const isRegister = mode === "register"
+  // Keep the sign-in form usable even when the platform gate is closed. The
+  // backend intentionally allows platform administrators to recover the
+  // deployment while rejecting regular users.
+  const modeGateEnabled = isRegister ? signupEnabled : loginEnabled
+  const modeEnabled = isRegister ? signupEnabled : true
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode)
@@ -61,6 +74,16 @@ export function LoginForm({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError("")
+
+    if (isRegister && !signupEnabled) {
+      setError(
+        maintenanceMessage ||
+          (isRegister
+            ? "Account creation is temporarily disabled."
+            : "Sign in is temporarily disabled.")
+      )
+      return
+    }
 
     if (isRegister && password !== confirmPassword) {
       setError("Passwords do not match.")
@@ -170,6 +193,19 @@ export function LoginForm({
                 </Field>
               )}
 
+              {!modeGateEnabled && !error && (
+                <Alert>
+                  <ShieldCheck aria-hidden="true" />
+                  <AlertTitle>Temporarily unavailable</AlertTitle>
+                  <AlertDescription>
+                    {maintenanceMessage ||
+                      (isRegister
+                        ? "Account creation is temporarily disabled."
+                        : "Sign in is temporarily disabled for regular users. Platform administrators can still sign in for recovery.")}
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {error && (
                 <Alert variant="destructive">
                   <ShieldCheck aria-hidden="true" />
@@ -179,7 +215,10 @@ export function LoginForm({
               )}
 
               <Field>
-                <Button type="submit" disabled={loading}>
+                <Button
+                  type="submit"
+                  disabled={loading || (isRegister && !modeEnabled)}
+                >
                   {loading && <Spinner data-icon="inline-start" />}
                   {loading
                     ? "Working…"
@@ -192,7 +231,7 @@ export function LoginForm({
                 </Button>
               </Field>
 
-              {oidcEnabled && (
+              {oidcEnabled && (!isRegister || signupEnabled) && (
                 <>
                   <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
                     Or continue with
@@ -210,16 +249,18 @@ export function LoginForm({
                 </>
               )}
 
-              <FieldDescription className="text-center">
-                {isRegister ? "Already have an account?" : "New to JustAI?"}{" "}
-                <button
-                  className="underline underline-offset-4 hover:no-underline"
-                  type="button"
-                  onClick={() => switchMode(isRegister ? "login" : "register")}
-                >
-                  {isRegister ? "Sign in" : "Create an account"}
-                </button>
-              </FieldDescription>
+              {(isRegister || signupEnabled) && (
+                <FieldDescription className="text-center">
+                  {isRegister ? "Already have an account?" : "New to JustAI?"}{" "}
+                  <button
+                    className="underline underline-offset-4 hover:no-underline"
+                    type="button"
+                    onClick={() => switchMode(isRegister ? "login" : "register")}
+                  >
+                    {isRegister ? "Sign in" : "Create an account"}
+                  </button>
+                </FieldDescription>
+              )}
             </FieldGroup>
           </form>
 

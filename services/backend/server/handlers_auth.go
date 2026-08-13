@@ -14,6 +14,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"justai-backend/auth"
+	"justai-backend/middleware"
 	"justai-backend/models"
 	"justai-backend/security"
 )
@@ -25,6 +26,15 @@ type credentialsRequest struct {
 }
 
 func (a *App) register(c *gin.Context) {
+	settings, settingsErr := a.readPlatformSettings(c)
+	if settingsErr == nil && !settings.SignupEnabled {
+		message := strings.TrimSpace(settings.MaintenanceMessage)
+		if message == "" {
+			message = "Sign up is temporarily disabled by the platform administrator"
+		}
+		middleware.AbortError(c, http.StatusServiceUnavailable, "feature_disabled", message)
+		return
+	}
 	var request credentialsRequest
 	if !decodeJSON(c, &request) {
 		return
@@ -65,11 +75,25 @@ func (a *App) login(c *gin.Context) {
 	request.Email = strings.ToLower(strings.TrimSpace(request.Email))
 	var user models.User
 	var passwordHash sql.NullString
-	err := a.DB.QueryRowContext(c, `SELECT id, email, display_name, is_platform_admin, password_hash FROM users WHERE email = $1`, request.Email).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &passwordHash)
+	err := a.DB.QueryRowContext(c, `SELECT id, email, display_name, is_platform_admin, password_hash, COALESCE(status, 'active'), COALESCE(session_version, 0) FROM users WHERE email = $1`, request.Email).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &passwordHash, &user.Status, &user.SessionVersion)
 	if err != nil || !passwordHash.Valid || !security.CheckPassword(request.Password, passwordHash.String) {
 		writeError(c, http.StatusUnauthorized, fmt.Errorf("invalid email or password"))
 		return
 	}
+	if user.Status == "suspended" {
+		writeError(c, http.StatusForbidden, fmt.Errorf("this account is suspended"))
+		return
+	}
+	settings, settingsErr := a.readPlatformSettings(c)
+	if settingsErr == nil && !settings.LoginEnabled && !user.PlatformAdmin {
+		message := strings.TrimSpace(settings.MaintenanceMessage)
+		if message == "" {
+			message = "Login is temporarily disabled by the platform administrator"
+		}
+		middleware.AbortError(c, http.StatusServiceUnavailable, "feature_disabled", message)
+		return
+	}
+	_, _ = a.DB.ExecContext(c, `UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1`, user.ID)
 	if err := a.issueSession(c, user); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 	}
@@ -86,7 +110,7 @@ func (a *App) createUserWorkspace(ctx context.Context, email, displayName, passw
 		return models.User{}, err
 	}
 	userID := uuid.New()
-	user := models.User{ID: userID, Email: email, DisplayName: displayName, PlatformAdmin: count == 0}
+	user := models.User{ID: userID, Email: email, DisplayName: displayName, PlatformAdmin: count == 0, Status: "active"}
 	if _, err := transaction.ExecContext(ctx, `INSERT INTO users (id, email, display_name, password_hash, is_platform_admin) VALUES ($1, $2, $3, $4, $5)`, user.ID, user.Email, user.DisplayName, passwordHash, user.PlatformAdmin); err != nil {
 		return models.User{}, err
 	}
@@ -121,6 +145,9 @@ func workspaceSlug(email string, organizationID uuid.UUID) string {
 }
 
 func (a *App) oidcStart(c *gin.Context) {
+	// Do not gate the authorization redirect itself. The callback can identify
+	// an existing platform administrator and still allow recovery while login
+	// is disabled; non-admin and first-time identities are rejected there.
 	if !a.Config.OIDCEnabled() {
 		writeError(c, http.StatusNotFound, fmt.Errorf("OIDC is not configured"))
 		return
@@ -199,12 +226,32 @@ func (a *App) oidcCallback(c *gin.Context) {
 		writeError(c, http.StatusBadGateway, fmt.Errorf("OIDC identity did not include sub and email"))
 		return
 	}
+	var identityExists bool
+	_ = a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM oidc_identities WHERE issuer = $1 AND subject = $2)`, a.Config.OIDC.Issuer, claims.Subject).Scan(&identityExists)
+	settings, settingsErr := a.readPlatformSettings(c)
+	if settingsErr == nil && (!settings.LoginEnabled || (!settings.SignupEnabled && !identityExists)) {
+		var existingAdmin bool
+		_ = a.DB.QueryRowContext(c, `SELECT COALESCE(is_platform_admin, FALSE) FROM oidc_identities oi JOIN users u ON u.id = oi.user_id WHERE oi.issuer = $1 AND oi.subject = $2`, a.Config.OIDC.Issuer, claims.Subject).Scan(&existingAdmin)
+		if !existingAdmin {
+			message := strings.TrimSpace(settings.MaintenanceMessage)
+			if message == "" {
+				message = "This sign-in is temporarily disabled by the platform administrator"
+			}
+			middleware.AbortError(c, http.StatusServiceUnavailable, "feature_disabled", message)
+			return
+		}
+	}
 	user, err := a.upsertOIDCUser(c, claims.Subject, claims.Email, claims.Name)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	sessionToken, err := a.Tokens.Issue(user.ID, user.Email, user.PlatformAdmin)
+	if user.Status == "suspended" {
+		writeError(c, http.StatusForbidden, fmt.Errorf("this account is suspended"))
+		return
+	}
+	_, _ = a.DB.ExecContext(c, `UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1`, user.ID)
+	sessionToken, err := a.Tokens.Issue(user.ID, user.Email, user.PlatformAdmin, user.SessionVersion)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -231,7 +278,7 @@ func safeOIDCNext(value string) string {
 
 func (a *App) upsertOIDCUser(ctx context.Context, subject, email, name string) (models.User, error) {
 	var user models.User
-	err := a.DB.QueryRowContext(ctx, `SELECT u.id, u.email, u.display_name, u.is_platform_admin FROM oidc_identities oi JOIN users u ON u.id = oi.user_id WHERE oi.issuer = $1 AND oi.subject = $2`, a.Config.OIDC.Issuer, subject).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin)
+	err := a.DB.QueryRowContext(ctx, `SELECT u.id, u.email, u.display_name, u.is_platform_admin, COALESCE(u.status, 'active'), COALESCE(u.session_version, 0) FROM oidc_identities oi JOIN users u ON u.id = oi.user_id WHERE oi.issuer = $1 AND oi.subject = $2`, a.Config.OIDC.Issuer, subject).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &user.Status, &user.SessionVersion)
 	if err == nil {
 		return user, nil
 	}
@@ -249,7 +296,7 @@ func (a *App) upsertOIDCUser(ctx context.Context, subject, email, name string) (
 		// Read through the same transaction. Using the pool while this
 		// transaction is open can deadlock deployments configured with a small
 		// connection limit and could observe a partially committed identity.
-		if err := transaction.QueryRowContext(ctx, `SELECT id, email, display_name, is_platform_admin FROM users WHERE id = $1`, existingID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin); err != nil {
+		if err := transaction.QueryRowContext(ctx, `SELECT id, email, display_name, is_platform_admin, COALESCE(status, 'active'), COALESCE(session_version, 0) FROM users WHERE id = $1`, existingID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &user.Status, &user.SessionVersion); err != nil {
 			return models.User{}, err
 		}
 	} else if err == sql.ErrNoRows {
@@ -257,7 +304,7 @@ func (a *App) upsertOIDCUser(ctx context.Context, subject, email, name string) (
 		if err := transaction.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
 			return models.User{}, err
 		}
-		user = models.User{ID: uuid.New(), Email: strings.ToLower(email), DisplayName: name, PlatformAdmin: count == 0}
+		user = models.User{ID: uuid.New(), Email: strings.ToLower(email), DisplayName: name, PlatformAdmin: count == 0, Status: "active"}
 		if _, err := transaction.ExecContext(ctx, `INSERT INTO users (id, email, display_name, is_platform_admin) VALUES ($1, $2, $3, $4)`, user.ID, user.Email, user.DisplayName, user.PlatformAdmin); err != nil {
 			return models.User{}, err
 		}

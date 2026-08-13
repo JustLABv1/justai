@@ -5,16 +5,32 @@ export type ViewId =
   | "knowledge"
   | "mcp"
   | "settings"
+  | "admin"
   | "profile"
 
 export type SettingsTab =
   "workspace" | "endpoints" | "knowledge" | "mcp" | "members" | "admin"
+
+export type AdminTab =
+  | "overview"
+  | "users"
+  | "workspaces"
+  | "endpoints"
+  | "mcp"
+  | "controls"
+  | "health"
+  | "analytics"
+  | "audit"
 
 export type User = {
   id: string
   email: string
   displayName: string
   platformAdmin: boolean
+  status?: "active" | "suspended"
+  suspendedAt?: string | null
+  suspendedReason?: string
+  lastLoginAt?: string | null
 }
 
 export type Organization = {
@@ -22,6 +38,7 @@ export type Organization = {
   name: string
   slug: string
   role?: string
+  status?: "active" | "archived" | "suspended"
 }
 
 export type OrganizationMember = {
@@ -60,7 +77,7 @@ export type Endpoint = {
 export type KnowledgeSource = {
   id: string
   scopeType: string
-  scopeId: string
+  scopeId?: string | null
   title: string
   sourceType: string
   sourceUrl?: string
@@ -76,7 +93,7 @@ export type KnowledgeSource = {
 export type MCPServer = {
   id: string
   scopeType: string
-  scopeId: string
+  scopeId?: string | null
   name: string
   endpointUrl: string
   authType: string

@@ -19,6 +19,7 @@ import (
 
 type mcpRequest struct {
 	ScopeType             string   `json:"scopeType"`
+	ScopeID               *string  `json:"scopeId"`
 	Name                  string   `json:"name"`
 	EndpointURL           string   `json:"endpointUrl"`
 	AuthType              string   `json:"authType"`
@@ -35,7 +36,7 @@ type mcpRequest struct {
 func (a *App) listMCPServers(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
-	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, name, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE (scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) ORDER BY created_at DESC`, organizationID, principal.UserID)
+	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, name, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE (scope_type = 'global') OR (scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) ORDER BY created_at DESC`, organizationID, principal.UserID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -64,14 +65,45 @@ func (a *App) createMCPServer(c *gin.Context) {
 	if scopeType == "" {
 		scopeType = "organization"
 	}
-	scopeID := organizationID
+	requestedScopeID, err := parseNullableUUID(request.ScopeID)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid scopeId"))
+		return
+	}
+	var scopeID any = organizationID
 	if scopeType == "user" {
-		scopeID = principal.UserID
+		if requestedScopeID != nil {
+			if !principal.PlatformAdmin && *requestedScopeID != principal.UserID {
+				writeError(c, http.StatusForbidden, fmt.Errorf("personal MCP scope belongs to another user"))
+				return
+			}
+			scopeID = *requestedScopeID
+		} else {
+			scopeID = principal.UserID
+		}
+	} else if scopeType == "global" {
+		if !principal.PlatformAdmin {
+			writeError(c, http.StatusForbidden, fmt.Errorf("global MCP servers require platform admin access"))
+			return
+		}
+		scopeID = nil
 	} else if scopeType != "organization" {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("scopeType must be organization or user"))
+		writeError(c, http.StatusBadRequest, fmt.Errorf("scopeType must be global, organization, or user"))
 		return
 	}
 	if scopeType == "organization" {
+		if requestedScopeID != nil {
+			if !principal.PlatformAdmin && *requestedScopeID != organizationID {
+				writeError(c, http.StatusForbidden, fmt.Errorf("organization MCP scope does not match the active organization"))
+				return
+			}
+			organizationID = *requestedScopeID
+			scopeID = organizationID
+		}
+		if organizationID == uuid.Nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("organization scope requires an organization id"))
+			return
+		}
 		role := middleware.GetOrganizationRole(c)
 		if role != "owner" && role != "admin" && !principal.PlatformAdmin {
 			writeError(c, http.StatusForbidden, fmt.Errorf("organization MCP servers require owner or admin access"))
@@ -113,7 +145,6 @@ func (a *App) createMCPServer(c *gin.Context) {
 		return
 	}
 	var credential []byte
-	var err error
 	if request.Credential = strings.TrimSpace(request.Credential); request.Credential != "" {
 		credential, err = a.Secrets.Encrypt(request.Credential)
 		if err != nil {
@@ -306,14 +337,21 @@ func (a *App) authorizeMCPServer(c *gin.Context, rawID string) error {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
 	var scopeType string
-	var scopeID uuid.UUID
+	var scopeID sql.NullString
 	if err := a.DB.QueryRowContext(c, `SELECT scope_type, scope_id FROM mcp_servers WHERE id = $1`, id).Scan(&scopeType, &scopeID); err != nil {
 		return fmt.Errorf("MCP server not found")
 	}
-	if scopeType == "organization" && scopeID == organizationID {
+	parsedScopeID := parseMCPScopeID(scopeID)
+	if principal.PlatformAdmin {
 		return nil
 	}
-	if scopeType == "user" && scopeID == principal.UserID {
+	if scopeType == "global" {
+		return nil
+	}
+	if scopeType == "organization" && parsedScopeID != nil && *parsedScopeID == organizationID {
+		return nil
+	}
+	if scopeType == "user" && parsedScopeID != nil && *parsedScopeID == principal.UserID {
 		return nil
 	}
 	return fmt.Errorf("MCP server belongs to another scope")
@@ -326,21 +364,25 @@ func (a *App) authorizeMCPServerManage(c *gin.Context, rawID string) error {
 	principal, _ := middleware.GetPrincipal(c)
 	id, _ := uuid.Parse(rawID)
 	var scopeType string
-	var scopeID uuid.UUID
+	var scopeID sql.NullString
 	if err := a.DB.QueryRowContext(c, `SELECT scope_type, scope_id FROM mcp_servers WHERE id = $1`, id).Scan(&scopeType, &scopeID); err != nil {
 		return fmt.Errorf("MCP server not found")
 	}
+	parsedScopeID := parseMCPScopeID(scopeID)
 	// Personal servers are private even to organization administrators. An
 	// organization owner/admin (or platform admin) can manage only servers in
 	// the active organization scope.
 	if scopeType == "user" {
-		if scopeID != principal.UserID {
+		if parsedScopeID == nil || *parsedScopeID != principal.UserID {
 			return fmt.Errorf("personal MCP servers can only be managed by their owner")
 		}
 		return nil
 	}
 	if principal.PlatformAdmin {
 		return nil
+	}
+	if scopeType == "global" {
+		return fmt.Errorf("global MCP servers can only be managed by a platform administrator")
 	}
 	if role := middleware.GetOrganizationRole(c); role != "owner" && role != "admin" {
 		return fmt.Errorf("organization MCP servers require owner or admin access")
@@ -350,17 +392,28 @@ func (a *App) authorizeMCPServerManage(c *gin.Context, rawID string) error {
 
 func scanMCPServer(scanner interface{ Scan(dest ...any) error }) (models.MCPServer, error) {
 	var item models.MCPServer
-	var scopeID uuid.UUID
+	var scopeID sql.NullString
 	var allowed []byte
 	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.EndpointURL, &item.AuthType, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
 	}
-	item.ScopeID = scopeID
+	item.ScopeID = parseMCPScopeID(scopeID)
 	if len(allowed) == 0 || string(allowed) == "null" {
 		allowed = []byte("[]")
 	}
 	item.AllowedTools = json.RawMessage(allowed)
 	return item, nil
+}
+
+func parseMCPScopeID(value sql.NullString) *uuid.UUID {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return nil
+	}
+	id, err := uuid.Parse(value.String)
+	if err != nil {
+		return nil
+	}
+	return &id
 }
 
 func (a *App) getMCPServer(ctx context.Context, id uuid.UUID) (models.MCPServer, error) {

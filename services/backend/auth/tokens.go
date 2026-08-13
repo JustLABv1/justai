@@ -12,8 +12,9 @@ import (
 )
 
 type Claims struct {
-	Email         string `json:"email"`
-	PlatformAdmin bool   `json:"platformAdmin"`
+	Email          string `json:"email"`
+	PlatformAdmin  bool   `json:"platformAdmin"`
+	SessionVersion int    `json:"sv,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -25,11 +26,16 @@ func NewTokenManager(secret []byte) *TokenManager {
 	return &TokenManager{secret: append([]byte(nil), secret...)}
 }
 
-func (m *TokenManager) Issue(userID uuid.UUID, email string, platformAdmin bool) (string, error) {
+func (m *TokenManager) Issue(userID uuid.UUID, email string, platformAdmin bool, sessionVersions ...int) (string, error) {
+	sessionVersion := 0
+	if len(sessionVersions) > 0 {
+		sessionVersion = sessionVersions[0]
+	}
 	now := time.Now()
 	claims := Claims{
-		Email:         email,
-		PlatformAdmin: platformAdmin,
+		Email:          email,
+		PlatformAdmin:  platformAdmin,
+		SessionVersion: sessionVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),

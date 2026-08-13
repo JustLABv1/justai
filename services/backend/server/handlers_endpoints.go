@@ -19,6 +19,7 @@ import (
 
 type endpointRequest struct {
 	ScopeType          string          `json:"scopeType"`
+	ScopeID            *string         `json:"scopeId"`
 	ProviderType       string          `json:"providerType"`
 	Name               string          `json:"name"`
 	BaseURL            string          `json:"baseUrl"`
@@ -95,7 +96,12 @@ func (a *App) createEndpoint(c *gin.Context) {
 	if scopeType == "" {
 		scopeType = "organization"
 	}
-	scopeID, err := a.authorizeEndpointScope(c, scopeType, principal, organizationID)
+	requestedScopeID, err := parseNullableUUID(request.ScopeID)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid scopeId"))
+		return
+	}
+	scopeID, err := a.authorizeEndpointScope(c, scopeType, principal, organizationID, requestedScopeID)
 	if err != nil {
 		writeError(c, http.StatusForbidden, err)
 		return
@@ -526,7 +532,7 @@ func (a *App) providerEndpoint(ctx context.Context, id uuid.UUID) (provider.Endp
 	return endpoint, nil
 }
 
-func (a *App) authorizeEndpointScope(c *gin.Context, scopeType string, principal middleware.Principal, organizationID uuid.UUID) (any, error) {
+func (a *App) authorizeEndpointScope(c *gin.Context, scopeType string, principal middleware.Principal, organizationID uuid.UUID, requestedScopeID *uuid.UUID) (any, error) {
 	switch scopeType {
 	case "global":
 		if !principal.PlatformAdmin {
@@ -534,11 +540,26 @@ func (a *App) authorizeEndpointScope(c *gin.Context, scopeType string, principal
 		}
 		return nil, nil
 	case "organization":
+		if requestedScopeID != nil {
+			if !principal.PlatformAdmin && *requestedScopeID != organizationID {
+				return nil, fmt.Errorf("organization endpoint scope does not match the active organization")
+			}
+			organizationID = *requestedScopeID
+		}
+		if organizationID == uuid.Nil {
+			return nil, fmt.Errorf("organization scope requires an organization id")
+		}
 		if role := middleware.GetOrganizationRole(c); role != "owner" && role != "admin" && !principal.PlatformAdmin {
 			return nil, fmt.Errorf("organization endpoints require owner or admin access")
 		}
 		return organizationID, nil
 	case "user":
+		if requestedScopeID != nil {
+			if !principal.PlatformAdmin && *requestedScopeID != principal.UserID {
+				return nil, fmt.Errorf("personal endpoint scope belongs to another user")
+			}
+			return *requestedScopeID, nil
+		}
 		return principal.UserID, nil
 	default:
 		return nil, fmt.Errorf("scopeType must be global, organization, or user")
@@ -565,6 +586,9 @@ func (a *App) canManageEndpoint(item models.Endpoint, principal middleware.Princ
 }
 
 func (a *App) canUseEndpoint(item models.Endpoint, principal middleware.Principal, organizationID uuid.UUID) error {
+	if principal.PlatformAdmin {
+		return nil
+	}
 	if item.ScopeType == "global" {
 		return nil
 	}

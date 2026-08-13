@@ -62,7 +62,7 @@ func (a *App) Router() *gin.Engine {
 			return
 		}
 		var migrated bool
-		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '009_admin_analytics.sql')`).Scan(&migrated); err != nil || !migrated {
+		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '010_platform_admin.sql')`).Scan(&migrated); err != nil || !migrated {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
@@ -86,9 +86,9 @@ func (a *App) Router() *gin.Engine {
 
 	a.registerAuthRoutes(router)
 	transcriptionPublic := router.Group("/api/v1/transcription")
-	transcriptionPublic.POST("/join-requests", a.createTranscriptionJoinRequest)
-	transcriptionPublic.GET("/join-requests/:id", a.getTranscriptionJoinRequest)
-	transcriptionPublic.POST("/capture-tickets", a.createCaptureWSTicket)
+	transcriptionPublic.POST("/join-requests", a.platformFeature("transcription"), a.createTranscriptionJoinRequest)
+	transcriptionPublic.GET("/join-requests/:id", a.platformFeature("transcription"), a.getTranscriptionJoinRequest)
+	transcriptionPublic.POST("/capture-tickets", a.platformFeature("transcription"), a.createCaptureWSTicket)
 
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.RequireAuth(a.Tokens, a.DB))
@@ -101,6 +101,32 @@ func (a *App) Router() *gin.Engine {
 	protected.GET("/admin/defaults", a.getGlobalAdminDefaults)
 	protected.PUT("/admin/defaults", a.putGlobalAdminDefaults)
 	protected.GET("/admin/analytics", a.getPlatformAnalytics)
+	protected.GET("/admin/overview", a.getPlatformOverview)
+	protected.GET("/admin/settings", a.getPlatformSettings)
+	protected.PUT("/admin/settings", a.putPlatformSettings)
+	protected.GET("/admin/users", a.listPlatformUsers)
+	protected.GET("/admin/users/:id", a.getPlatformUser)
+	protected.PATCH("/admin/users/:id", a.updatePlatformUser)
+	protected.POST("/admin/users/:id/revoke-sessions", a.revokePlatformUserSessions)
+	protected.DELETE("/admin/users/:id", a.deletePlatformUser)
+	protected.GET("/admin/organizations", a.listPlatformOrganizations)
+	protected.GET("/admin/organizations/:id", a.getPlatformOrganization)
+	protected.PATCH("/admin/organizations/:id", a.updatePlatformOrganization)
+	protected.POST("/admin/organizations/:id/transfer-ownership", a.transferPlatformOrganizationOwnership)
+	protected.DELETE("/admin/organizations/:id", a.deletePlatformOrganization)
+	protected.GET("/admin/endpoints", a.listPlatformEndpoints)
+	protected.POST("/admin/endpoints", a.createPlatformEndpoint)
+	protected.PATCH("/admin/endpoints/:id", a.updatePlatformEndpoint)
+	protected.DELETE("/admin/endpoints/:id", a.deletePlatformEndpoint)
+	protected.POST("/admin/endpoints/:id/test", a.testPlatformEndpoint)
+	protected.GET("/admin/mcp/servers", a.listPlatformMCPServers)
+	protected.POST("/admin/mcp/servers", a.createPlatformMCPServer)
+	protected.PATCH("/admin/mcp/servers/:id", a.updatePlatformMCPServer)
+	protected.DELETE("/admin/mcp/servers/:id", a.deletePlatformMCPServer)
+	protected.POST("/admin/mcp/servers/:id/test", a.testPlatformMCPServer)
+	protected.GET("/admin/mcp/servers/:id/tools", a.discoverPlatformMCPTools)
+	protected.GET("/admin/audit", a.listPlatformAudit)
+	protected.GET("/admin/health", a.getPlatformHealth)
 
 	org := protected.Group("")
 	org.Use(middleware.RequireOrg(a.DB))
@@ -108,52 +134,52 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/endpoints", a.createEndpoint)
 	org.PATCH("/endpoints/:id", a.updateEndpoint)
 	org.DELETE("/endpoints/:id", a.deleteEndpoint)
-	org.POST("/endpoints/:id/test", a.testEndpoint)
-	org.GET("/endpoints/:id/models", a.discoverEndpointModels)
-	org.POST("/ws/tickets", a.createWSTicket)
-	org.POST("/voice/speech", a.synthesizeVoiceSpeech)
-	org.GET("/transcription/sessions", a.listTranscriptionSessions)
-	org.POST("/transcription/sessions", a.createTranscriptionSession)
-	org.GET("/transcription/sessions/:id", a.getTranscriptionSession)
-	org.PATCH("/transcription/sessions/:id", a.updateTranscriptionSession)
-	org.DELETE("/transcription/sessions/:id", a.deleteTranscriptionSession)
-	org.POST("/transcription/sessions/:id/pause", a.pauseTranscriptionSession)
-	org.POST("/transcription/sessions/:id/resume", a.resumeTranscriptionSession)
-	org.POST("/transcription/sessions/:id/stop", a.stopTranscriptionSession)
-	org.POST("/transcription/sessions/:id/sources", a.createTranscriptionSource)
-	org.POST("/transcription/sessions/:id/join-code", a.rotateTranscriptionJoinCode)
-	org.GET("/transcription/sessions/:id/join-requests", a.listTranscriptionJoinRequests)
-	org.POST("/transcription/join-requests/:id/approve", a.approveTranscriptionJoinRequest)
-	org.POST("/transcription/join-requests/:id/deny", a.denyTranscriptionJoinRequest)
-	org.PATCH("/transcription/sessions/:id/speakers/:speakerId", a.renameTranscriptionSpeaker)
-	org.POST("/transcription/sessions/:id/speakers/merge", a.mergeTranscriptionSpeakers)
-	org.GET("/transcription/sessions/:id/recordings", a.listTranscriptionRecordings)
-	org.GET("/transcription/recordings/:id", a.streamTranscriptionRecording)
-	org.DELETE("/transcription/recordings/:id", a.deleteTranscriptionRecording)
-	org.POST("/transcription/recordings/:id/start", a.startTranscriptionRecording)
-	org.PUT("/transcription/recordings/:id/parts/:part", a.appendTranscriptionRecordingPart)
-	org.POST("/transcription/recordings/:id/complete", a.completeTranscriptionRecording)
-	org.GET("/knowledge/sources", a.listKnowledgeSources)
-	org.POST("/knowledge/sources", a.createKnowledgeSource)
-	org.POST("/knowledge/sources/:id/reindex", a.reindexKnowledgeSource)
-	org.DELETE("/knowledge/sources/:id", a.deleteKnowledgeSource)
+	org.POST("/endpoints/:id/test", a.platformFeature("ai"), a.testEndpoint)
+	org.GET("/endpoints/:id/models", a.platformFeature("ai"), a.discoverEndpointModels)
+	org.POST("/ws/tickets", a.platformFeature("ai"), a.createWSTicket)
+	org.POST("/voice/speech", a.platformFeature("voice"), a.synthesizeVoiceSpeech)
+	org.GET("/transcription/sessions", a.platformFeature("transcription"), a.listTranscriptionSessions)
+	org.POST("/transcription/sessions", a.platformFeature("transcription"), a.createTranscriptionSession)
+	org.GET("/transcription/sessions/:id", a.platformFeature("transcription"), a.getTranscriptionSession)
+	org.PATCH("/transcription/sessions/:id", a.platformFeature("transcription"), a.updateTranscriptionSession)
+	org.DELETE("/transcription/sessions/:id", a.platformFeature("transcription"), a.deleteTranscriptionSession)
+	org.POST("/transcription/sessions/:id/pause", a.platformFeature("transcription"), a.pauseTranscriptionSession)
+	org.POST("/transcription/sessions/:id/resume", a.platformFeature("transcription"), a.resumeTranscriptionSession)
+	org.POST("/transcription/sessions/:id/stop", a.platformFeature("transcription"), a.stopTranscriptionSession)
+	org.POST("/transcription/sessions/:id/sources", a.platformFeature("transcription"), a.createTranscriptionSource)
+	org.POST("/transcription/sessions/:id/join-code", a.platformFeature("transcription"), a.rotateTranscriptionJoinCode)
+	org.GET("/transcription/sessions/:id/join-requests", a.platformFeature("transcription"), a.listTranscriptionJoinRequests)
+	org.POST("/transcription/join-requests/:id/approve", a.platformFeature("transcription"), a.approveTranscriptionJoinRequest)
+	org.POST("/transcription/join-requests/:id/deny", a.platformFeature("transcription"), a.denyTranscriptionJoinRequest)
+	org.PATCH("/transcription/sessions/:id/speakers/:speakerId", a.platformFeature("transcription"), a.renameTranscriptionSpeaker)
+	org.POST("/transcription/sessions/:id/speakers/merge", a.platformFeature("transcription"), a.mergeTranscriptionSpeakers)
+	org.GET("/transcription/sessions/:id/recordings", a.platformFeature("transcription"), a.listTranscriptionRecordings)
+	org.GET("/transcription/recordings/:id", a.platformFeature("transcription"), a.streamTranscriptionRecording)
+	org.DELETE("/transcription/recordings/:id", a.platformFeature("transcription"), a.deleteTranscriptionRecording)
+	org.POST("/transcription/recordings/:id/start", a.platformFeature("transcription"), a.startTranscriptionRecording)
+	org.PUT("/transcription/recordings/:id/parts/:part", a.platformFeature("transcription"), a.appendTranscriptionRecordingPart)
+	org.POST("/transcription/recordings/:id/complete", a.platformFeature("transcription"), a.completeTranscriptionRecording)
+	org.GET("/knowledge/sources", a.platformFeature("knowledge"), a.listKnowledgeSources)
+	org.POST("/knowledge/sources", a.platformFeature("knowledge"), a.createKnowledgeSource)
+	org.POST("/knowledge/sources/:id/reindex", a.platformFeature("knowledge"), a.reindexKnowledgeSource)
+	org.DELETE("/knowledge/sources/:id", a.platformFeature("knowledge"), a.deleteKnowledgeSource)
 	org.GET("/conversations/:id/context", a.getConversationContext)
-	org.POST("/conversations/:id/context/knowledge/:sourceId", a.attachConversationKnowledge)
-	org.DELETE("/conversations/:id/context/knowledge/:sourceId", a.detachConversationKnowledge)
-	org.POST("/conversations/:id/context/mcp/:serverId", a.attachConversationMCP)
-	org.DELETE("/conversations/:id/context/mcp/:serverId", a.detachConversationMCP)
-	org.POST("/conversations/:id/context/transcription/:sessionId", a.attachConversationTranscription)
-	org.DELETE("/conversations/:id/context/transcription/:sessionId", a.detachConversationTranscription)
-	org.POST("/conversations/:id/attachments", a.createConversationAttachment)
-	org.POST("/conversations/:id/attachments/url", a.createConversationURLAttachment)
-	org.POST("/conversations/:id/attachments/text", a.createConversationTextAttachment)
-	org.GET("/mcp/servers", a.listMCPServers)
-	org.POST("/mcp/servers", a.createMCPServer)
-	org.PATCH("/mcp/servers/:id", a.updateMCPServer)
-	org.DELETE("/mcp/servers/:id", a.deleteMCPServer)
-	org.POST("/mcp/servers/:id/test", a.testMCPServer)
-	org.GET("/mcp/servers/:id/tools", a.listMCPTools)
-	org.GET("/mcp/servers/:id/oauth/start", a.mcpOAuthStart)
+	org.POST("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.attachConversationKnowledge)
+	org.DELETE("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.detachConversationKnowledge)
+	org.POST("/conversations/:id/context/mcp/:serverId", a.platformFeature("mcp"), a.attachConversationMCP)
+	org.DELETE("/conversations/:id/context/mcp/:serverId", a.platformFeature("mcp"), a.detachConversationMCP)
+	org.POST("/conversations/:id/context/transcription/:sessionId", a.platformFeature("transcription"), a.attachConversationTranscription)
+	org.DELETE("/conversations/:id/context/transcription/:sessionId", a.platformFeature("transcription"), a.detachConversationTranscription)
+	org.POST("/conversations/:id/attachments", a.platformFeature("attachments"), a.createConversationAttachment)
+	org.POST("/conversations/:id/attachments/url", a.platformFeature("attachments"), a.createConversationURLAttachment)
+	org.POST("/conversations/:id/attachments/text", a.platformFeature("attachments"), a.createConversationTextAttachment)
+	org.GET("/mcp/servers", a.platformFeature("mcp"), a.listMCPServers)
+	org.POST("/mcp/servers", a.platformFeature("mcp"), a.createMCPServer)
+	org.PATCH("/mcp/servers/:id", a.platformFeature("mcp"), a.updateMCPServer)
+	org.DELETE("/mcp/servers/:id", a.platformFeature("mcp"), a.deleteMCPServer)
+	org.POST("/mcp/servers/:id/test", a.platformFeature("mcp"), a.testMCPServer)
+	org.GET("/mcp/servers/:id/tools", a.platformFeature("mcp"), a.listMCPTools)
+	org.GET("/mcp/servers/:id/oauth/start", a.platformFeature("mcp"), a.mcpOAuthStart)
 	org.GET("/conversations", a.listConversations)
 	org.POST("/conversations", a.createConversation)
 	org.GET("/conversations/:id", a.getConversation)
@@ -162,10 +188,10 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/conversations/:id/messages", a.listConversationMessages)
 	org.PUT("/conversations/:id/messages/:messageId", a.upsertAssistantMessage)
 	org.PATCH("/conversations/:id/messages/:messageId", a.updateAssistantMessage)
-	org.POST("/chat", a.assistantUIChat)
+	org.POST("/chat", a.platformFeature("ai"), a.assistantUIChat)
 
-	protected.GET("/ws/voice", a.voiceWebSocket)
-	router.GET("/api/v1/ws/transcription", a.transcriptionWebSocket)
+	protected.GET("/ws/voice", a.platformFeature("voice"), a.voiceWebSocket)
+	router.GET("/api/v1/ws/transcription", a.platformFeature("transcription"), a.transcriptionWebSocket)
 	organizationRoutes := protected.Group("/organizations/:id")
 	organizationRoutes.Use(middleware.RequireOrg(a.DB))
 	organizationRoutes.PATCH("", middleware.RequireOrgRole("owner", "admin"), a.updateOrganization)
@@ -189,7 +215,7 @@ func (a *App) registerAuthRoutes(router *gin.Engine) {
 }
 
 func (a *App) issueSession(c *gin.Context, user models.User) error {
-	token, err := a.Tokens.Issue(user.ID, user.Email, user.PlatformAdmin)
+	token, err := a.Tokens.Issue(user.ID, user.Email, user.PlatformAdmin, user.SessionVersion)
 	if err != nil {
 		return err
 	}
@@ -220,12 +246,12 @@ func (a *App) cookieSameSite() http.SameSite {
 
 func (a *App) userByID(ctx context.Context, userID uuid.UUID) (models.User, error) {
 	var user models.User
-	err := a.DB.QueryRowContext(ctx, `SELECT id, email, display_name, is_platform_admin FROM users WHERE id = $1`, userID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin)
+	err := a.DB.QueryRowContext(ctx, `SELECT id, email, display_name, is_platform_admin, COALESCE(status, 'active'), suspended_at, COALESCE(suspended_reason, ''), COALESCE(session_version, 0), last_login_at FROM users WHERE id = $1`, userID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &user.Status, &user.SuspendedAt, &user.SuspendedReason, &user.SessionVersion, &user.LastLoginAt)
 	return user, err
 }
 
 func (a *App) organizationsFor(ctx context.Context, userID uuid.UUID) ([]models.Organization, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT o.id, o.name, o.slug, om.role FROM organizations o JOIN organization_members om ON om.organization_id = o.id WHERE om.user_id = $1 ORDER BY o.created_at`, userID)
+	rows, err := a.DB.QueryContext(ctx, `SELECT o.id, o.name, o.slug, om.role, COALESCE(o.status, 'active') FROM organizations o JOIN organization_members om ON om.organization_id = o.id WHERE om.user_id = $1 ORDER BY o.created_at`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +259,7 @@ func (a *App) organizationsFor(ctx context.Context, userID uuid.UUID) ([]models.
 	result := []models.Organization{}
 	for rows.Next() {
 		var item models.Organization
-		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Role); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Role, &item.Status); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -257,7 +283,11 @@ func (a *App) me(c *gin.Context) {
 }
 
 func (a *App) authConfig(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"oidcEnabled": a.Config.OIDCEnabled(), "oidcLabel": "Continue with OIDC"})
+	settings, err := a.readPlatformSettings(c)
+	if err != nil {
+		settings = platformSettings{LoginEnabled: true, SignupEnabled: true, AIEnabled: true, VoiceEnabled: true, TranscriptionEnabled: true, MCPEnabled: true, KnowledgeEnabled: true, AttachmentsEnabled: true}
+	}
+	c.JSON(http.StatusOK, gin.H{"oidcEnabled": a.Config.OIDCEnabled(), "oidcLabel": "Continue with OIDC", "loginEnabled": settings.LoginEnabled, "signupEnabled": settings.SignupEnabled, "maintenanceMessage": settings.MaintenanceMessage})
 }
 
 func (a *App) listOrganizations(c *gin.Context) {

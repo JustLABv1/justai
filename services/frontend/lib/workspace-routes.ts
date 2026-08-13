@@ -1,4 +1,4 @@
-import type { SettingsTab, ViewId } from "@/lib/types"
+import type { AdminTab, SettingsTab, ViewId } from "@/lib/types"
 
 const validViews: ViewId[] = [
   "chat",
@@ -7,6 +7,7 @@ const validViews: ViewId[] = [
   "knowledge",
   "mcp",
   "settings",
+  "admin",
   "profile",
 ]
 
@@ -19,6 +20,7 @@ export type WorkspaceRoute = {
   conversationId: string | null
   sessionId: string | null
   settingsTab: SettingsTab
+  adminTab: AdminTab
 }
 
 const settingsTabs: SettingsTab[] = [
@@ -28,6 +30,18 @@ const settingsTabs: SettingsTab[] = [
   "mcp",
   "members",
   "admin",
+]
+
+const adminTabs: AdminTab[] = [
+  "overview",
+  "users",
+  "workspaces",
+  "endpoints",
+  "mcp",
+  "controls",
+  "health",
+  "analytics",
+  "audit",
 ]
 
 function isUUID(value: string | null): value is string {
@@ -45,6 +59,12 @@ function parseSettingsTab(value: string | null | undefined): SettingsTab {
     : "workspace"
 }
 
+function parseAdminTab(value: string | null | undefined): AdminTab {
+  return value && adminTabs.includes(value as AdminTab)
+    ? (value as AdminTab)
+    : "overview"
+}
+
 function decodeSegment(value: string | undefined) {
   if (!value) return null
 
@@ -59,7 +79,8 @@ export function workspacePath(
   view: ViewId,
   conversationId: string | null = null,
   sessionId: string | null = null,
-  settingsTab: SettingsTab = "workspace"
+  settingsTab: SettingsTab = "workspace",
+  adminTab: AdminTab = "overview"
 ) {
   if (view === "chat") {
     return conversationId ? `/${encodeURIComponent(conversationId)}` : "/"
@@ -75,6 +96,12 @@ export function workspacePath(
     return settingsTab === "workspace"
       ? "/settings"
       : `/settings?tab=${encodeURIComponent(settingsTab)}`
+  }
+
+  if (view === "admin") {
+    return adminTab === "overview"
+      ? "/admin"
+      : `/admin?tab=${encodeURIComponent(adminTab)}`
   }
 
   if (view === "endpoints" || view === "knowledge" || view === "mcp") {
@@ -97,6 +124,7 @@ export function parseWorkspaceRoute(
       conversationId: decodeSegment(segments[1]),
       sessionId: null,
       settingsTab: "workspace",
+      adminTab: "overview",
     }
   }
 
@@ -106,6 +134,7 @@ export function parseWorkspaceRoute(
       conversationId: null,
       sessionId: decodeSegment(segments[1]),
       settingsTab: "workspace",
+      adminTab: "overview",
     }
   }
 
@@ -115,6 +144,17 @@ export function parseWorkspaceRoute(
       conversationId: null,
       sessionId: null,
       settingsTab: parseSettingsTab(searchParams.get("tab")),
+      adminTab: "overview",
+    }
+  }
+
+  if (section === "admin") {
+    return {
+      view: "admin",
+      conversationId: null,
+      sessionId: null,
+      settingsTab: "workspace",
+      adminTab: parseAdminTab(searchParams.get("tab")),
     }
   }
 
@@ -124,6 +164,7 @@ export function parseWorkspaceRoute(
       conversationId: null,
       sessionId: null,
       settingsTab: "workspace",
+      adminTab: "overview",
     }
   }
 
@@ -133,6 +174,7 @@ export function parseWorkspaceRoute(
       conversationId: null,
       sessionId: null,
       settingsTab: section,
+      adminTab: "overview",
     }
   }
 
@@ -142,6 +184,7 @@ export function parseWorkspaceRoute(
       conversationId: decodeSegment(section),
       sessionId: null,
       settingsTab: "workspace",
+      adminTab: "overview",
     }
   }
 
@@ -151,6 +194,7 @@ export function parseWorkspaceRoute(
       conversationId: null,
       sessionId: null,
       settingsTab: "workspace",
+      adminTab: "overview",
     }
   }
 
@@ -162,5 +206,6 @@ export function parseWorkspaceRoute(
     conversationId: view === "chat" ? searchParams.get("conversation") : null,
     sessionId: view === "transcription" ? searchParams.get("session") : null,
     settingsTab: parseSettingsTab(searchParams.get("tab")),
+    adminTab: parseAdminTab(searchParams.get("tab")),
   }
 }

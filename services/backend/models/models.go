@@ -8,17 +8,23 @@ import (
 )
 
 type User struct {
-	ID            uuid.UUID `json:"id"`
-	Email         string    `json:"email"`
-	DisplayName   string    `json:"displayName"`
-	PlatformAdmin bool      `json:"platformAdmin"`
+	ID              uuid.UUID  `json:"id"`
+	Email           string     `json:"email"`
+	DisplayName     string     `json:"displayName"`
+	PlatformAdmin   bool       `json:"platformAdmin"`
+	Status          string     `json:"status,omitempty"`
+	SuspendedAt     *time.Time `json:"suspendedAt,omitempty"`
+	SuspendedReason string     `json:"suspendedReason,omitempty"`
+	SessionVersion  int        `json:"-"`
+	LastLoginAt     *time.Time `json:"lastLoginAt,omitempty"`
 }
 
 type Organization struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
-	Slug string    `json:"slug"`
-	Role string    `json:"role,omitempty"`
+	ID     uuid.UUID `json:"id"`
+	Name   string    `json:"name"`
+	Slug   string    `json:"slug"`
+	Role   string    `json:"role,omitempty"`
+	Status string    `json:"status,omitempty"`
 }
 
 type Conversation struct {
@@ -153,7 +159,7 @@ type KnowledgeSource struct {
 type MCPServer struct {
 	ID                   uuid.UUID       `json:"id"`
 	ScopeType            string          `json:"scopeType"`
-	ScopeID              uuid.UUID       `json:"scopeId"`
+	ScopeID              *uuid.UUID      `json:"scopeId,omitempty"`
 	Name                 string          `json:"name"`
 	EndpointURL          string          `json:"endpointUrl"`
 	AuthType             string          `json:"authType"`

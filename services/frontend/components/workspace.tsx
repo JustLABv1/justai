@@ -6,6 +6,7 @@ import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
 import { ProfileView } from "@/components/profile-view"
+import { PlatformAdminShell } from "@/components/platform-admin-shell"
 import { SettingsShell } from "@/components/settings-shell"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
@@ -28,6 +29,7 @@ import type {
   Organization,
   User,
   ViewId,
+  AdminTab,
   TranscriptionSession,
 } from "@/lib/types"
 import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
@@ -185,22 +187,39 @@ export function Workspace() {
         setSources([])
         setServers([])
 
-        const results = await Promise.allSettled([
-          api.get<{ conversations: Conversation[] }>("/api/v1/conversations"),
-          api.get<{ conversations: Conversation[] }>(
-            "/api/v1/conversations?archived=true"
-          ),
-          api.get<{ sessions: TranscriptionSession[] }>(
-            "/api/v1/transcription/sessions"
-          ),
-          api.get<{ sessions: TranscriptionSession[] }>(
-            "/api/v1/transcription/sessions?archived=true"
-          ),
-          api.get<{ endpoints: Endpoint[] }>("/api/v1/endpoints"),
-          api.get<{ sources: KnowledgeSource[] }>("/api/v1/knowledge/sources"),
-          api.get<{ servers: MCPServer[] }>("/api/v1/mcp/servers"),
-        ])
+        // The platform-admin shell is intentionally independent from the
+        // active workspace. Avoid loading workspace resources (and emitting
+        // misleading feature-gate errors) when a platform administrator does
+        // not belong to an organization.
+        const results =
+          activeView === "admin"
+            ? []
+            : await Promise.allSettled([
+                api.get<{ conversations: Conversation[] }>(
+                  "/api/v1/conversations"
+                ),
+                api.get<{ conversations: Conversation[] }>(
+                  "/api/v1/conversations?archived=true"
+                ),
+                api.get<{ sessions: TranscriptionSession[] }>(
+                  "/api/v1/transcription/sessions"
+                ),
+                api.get<{ sessions: TranscriptionSession[] }>(
+                  "/api/v1/transcription/sessions?archived=true"
+                ),
+                api.get<{ endpoints: Endpoint[] }>("/api/v1/endpoints"),
+                api.get<{ sources: KnowledgeSource[] }>(
+                  "/api/v1/knowledge/sources"
+                ),
+                api.get<{ servers: MCPServer[] }>("/api/v1/mcp/servers"),
+              ])
         if (cancelled) return
+
+        if (activeView === "admin") {
+          setFeatureErrors({})
+          setStatus("ready")
+          return
+        }
 
         const errors: Record<string, string> = {}
         if (
@@ -277,7 +296,27 @@ export function Workspace() {
     return () => {
       cancelled = true
     }
-  }, [redirectToLogin, reloadToken])
+  }, [activeView, redirectToLogin, reloadToken])
+
+  // `/settings?tab=admin` was the old platform-admin entry point. Keep the
+  // organization Operations page for ordinary workspace owners/admins, but
+  // move platform administrators to the dedicated control plane.
+  useEffect(() => {
+    if (
+      status === "ready" &&
+      activeView === "settings" &&
+      route.settingsTab === "admin" &&
+      user?.platformAdmin
+    ) {
+      router.replace("/admin")
+    }
+  }, [activeView, route.settingsTab, router, status, user?.platformAdmin])
+
+  useEffect(() => {
+    if (status === "ready" && activeView === "admin" && !user?.platformAdmin) {
+      router.replace("/")
+    }
+  }, [activeView, router, status, user?.platformAdmin])
 
   const activeOrganization =
     organizations.find(
@@ -363,7 +402,8 @@ export function Workspace() {
       conversationId: string | null = null,
       replace = false,
       sessionId: string | null = null,
-      settingsTab: import("@/lib/types").SettingsTab = "workspace"
+      settingsTab: import("@/lib/types").SettingsTab = "workspace",
+      adminTab: AdminTab = "overview"
     ) => {
       if (view !== "chat") setContextOpen(false)
       if (view === "chat") {
@@ -371,7 +411,7 @@ export function Workspace() {
         pendingConversationIdRef.current = null
         setPendingConversationId(null)
       }
-      const path = workspacePath(view, conversationId, sessionId, settingsTab)
+      const path = workspacePath(view, conversationId, sessionId, settingsTab, adminTab)
       if (replace) {
         router.replace(path)
       } else {
@@ -662,8 +702,17 @@ export function Workspace() {
             view,
             conversationId = null,
             sessionId = null,
-            settingsTab = "workspace"
-          ) => navigate(view, conversationId, false, sessionId, settingsTab)}
+            settingsTab = "workspace",
+            adminTab = "overview"
+          ) =>
+            navigate(
+              view,
+              conversationId,
+              false,
+              sessionId,
+              settingsTab,
+              adminTab
+            )}
           historyOpen={historyOpen}
           onHistoryOpenChange={setHistoryOpen}
           onOrganizationSelect={selectOrganization}
@@ -763,6 +812,13 @@ export function Workspace() {
               />
             )}
             {activeView === "profile" && <ProfileView user={user} />}
+            {activeView === "admin" && (
+              <PlatformAdminShell
+                activeTab={route.adminTab}
+                onTabChange={(tab) => navigate("admin", null, false, null, "workspace", tab)}
+                user={user}
+              />
+            )}
           </div>
         </main>
         {activeView === "chat" && contextOpen && (

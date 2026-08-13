@@ -454,7 +454,7 @@ func (a *App) conversationHasMCPServer(ctx context.Context, userID, organization
 			WHERE cms.conversation_id = $1 AND cms.server_id = $2
 			  AND c.user_id = $3 AND c.organization_id = $4
 			  AND ms.enabled = TRUE
-			  AND ((ms.scope_type = 'organization' AND ms.scope_id = $4) OR (ms.scope_type = 'user' AND ms.scope_id = $3))
+			  AND (ms.scope_type = 'global' OR (ms.scope_type = 'organization' AND ms.scope_id = $4) OR (ms.scope_type = 'user' AND ms.scope_id = $3))
 		)`, conversationID, serverID, userID, organizationID).Scan(&attached)
 	return attached, err
 }

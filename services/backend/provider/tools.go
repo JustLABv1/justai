@@ -36,6 +36,7 @@ type ToolChatOptions struct {
 	Messages []ToolMessage
 	Tools    []ToolDefinition
 	Model    string
+	OnUsage  UsageFunc
 }
 
 type ToolChatEvent struct {
@@ -167,8 +168,19 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 					} `json:"tool_calls"`
 				} `json:"delta"`
 			} `json:"choices"`
+			Usage *struct {
+				PromptTokens     int64 `json:"prompt_tokens"`
+				CompletionTokens int64 `json:"completion_tokens"`
+				TotalTokens      int64 `json:"total_tokens"`
+			} `json:"usage"`
 		}
-		if err := json.Unmarshal([]byte(line), &chunk); err != nil || len(chunk.Choices) == 0 {
+		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
+			continue
+		}
+		if chunk.Usage != nil && options.OnUsage != nil {
+			options.OnUsage(Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, TotalTokens: chunk.Usage.TotalTokens})
+		}
+		if len(chunk.Choices) == 0 {
 			continue
 		}
 		delta := chunk.Choices[0].Delta

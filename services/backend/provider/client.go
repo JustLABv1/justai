@@ -38,9 +38,20 @@ type Message struct {
 type ChatOptions struct {
 	Messages []Message
 	Model    string
+	OnUsage  UsageFunc
 }
 
 type DeltaFunc func(string) error
+
+// Usage is provider-reported token accounting. Providers are allowed to omit
+// it, so zero values mean "not supplied" rather than zero-cost execution.
+type Usage struct {
+	InputTokens  int64
+	OutputTokens int64
+	TotalTokens  int64
+}
+
+type UsageFunc func(Usage)
 
 func Embed(ctx context.Context, endpoint Endpoint, input string) ([]float64, error) {
 	if strings.TrimSpace(input) == "" {
@@ -142,9 +153,17 @@ func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, o
 					Content string `json:"content"`
 				} `json:"delta"`
 			} `json:"choices"`
+			Usage *struct {
+				PromptTokens     int64 `json:"prompt_tokens"`
+				CompletionTokens int64 `json:"completion_tokens"`
+				TotalTokens      int64 `json:"total_tokens"`
+			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 			continue
+		}
+		if chunk.Usage != nil && options.OnUsage != nil {
+			options.OnUsage(Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, TotalTokens: chunk.Usage.TotalTokens})
 		}
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
 			seenContent = true

@@ -216,7 +216,11 @@ export const api = {
   getBlob: (path: string) => requestBlob(path),
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
-  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  delete: <T>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method: "DELETE",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
   upload: <T>(path: string, body: FormData) =>
     request<T>(path, {
       method: "POST",
@@ -237,7 +241,13 @@ export const api = {
     }),
   getOrganizationId: () => organizationIdForRequest() || null,
   getAuthConfig: () =>
-    request<{ oidcEnabled: boolean; oidcLabel?: string }>(
+    request<{
+      oidcEnabled: boolean
+      oidcLabel?: string
+      loginEnabled?: boolean
+      signupEnabled?: boolean
+      maintenanceMessage?: string
+    }>(
       "/api/v1/auth/config"
     ),
   setOrganizationId: (organizationId: string | null) => {

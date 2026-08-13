@@ -118,7 +118,7 @@ func (a *App) putOrganizationAdminDefaults(c *gin.Context) {
 	}
 	for _, serverID := range serverIDs {
 		var valid bool
-		if err := tx.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM mcp_servers WHERE id = $1 AND scope_type = 'organization' AND scope_id = $2 AND enabled = TRUE)`, serverID, organizationID).Scan(&valid); err != nil {
+		if err := tx.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM mcp_servers WHERE id = $1 AND enabled = TRUE AND ((scope_type = 'global') OR (scope_type = 'organization' AND scope_id = $2)))`, serverID, organizationID).Scan(&valid); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
@@ -206,6 +206,7 @@ func (a *App) putGlobalAdminDefaults(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	a.writePlatformAudit(c, "platform.defaults.updated", "platform_defaults", nil, gin.H{"endpointChanged": true})
 	a.getGlobalAdminDefaults(c)
 }
 
@@ -306,21 +307,65 @@ func (a *App) getPlatformAnalytics(c *gin.Context) {
 }
 
 func (a *App) writeAnalytics(c *gin.Context, organizationID *uuid.UUID) {
-	days := 30
-	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil || value < 1 || value > 365 {
-			writeError(c, http.StatusBadRequest, fmt.Errorf("days must be between 1 and 365"))
+	start, end, err := analyticsRange(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	endpointID, err := parseAnalyticsEndpointID(c.Query("endpointId"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	model := strings.TrimSpace(c.Query("model"))
+	status := strings.ToLower(strings.TrimSpace(c.Query("status")))
+	if status != "" {
+		validStatuses := map[string]bool{"running": true, "requires-action": true, "complete": true, "error": true, "cancelled": true, "incomplete": true}
+		if !validStatuses[status] {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("status must be running, requires-action, complete, error, cancelled, or incomplete"))
 			return
 		}
-		days = value
 	}
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-	where := "started_at >= $1"
-	args := []any{cutoff}
+
+	// Build the same parameter list for the summary, endpoint breakdown, and
+	// time-series queries. The alias is intentionally supplied by each query so
+	// filters remain unambiguous when chat_runs is joined to endpoint_settings.
+	args := []any{start, end}
 	if organizationID != nil {
-		where += " AND organization_id = $2"
 		args = append(args, *organizationID)
+	}
+	if endpointID != nil {
+		args = append(args, *endpointID)
+	}
+	if model != "" {
+		args = append(args, model)
+	}
+	if status != "" {
+		args = append(args, status)
+	}
+	whereFor := func(alias string) string {
+		prefix := ""
+		if alias != "" {
+			prefix = alias + "."
+		}
+		parts := []string{prefix + "started_at >= $1", prefix + "started_at < $2"}
+		position := 3
+		if organizationID != nil {
+			parts = append(parts, prefix+fmt.Sprintf("organization_id = $%d", position))
+			position++
+		}
+		if endpointID != nil {
+			parts = append(parts, prefix+fmt.Sprintf("endpoint_id = $%d", position))
+			position++
+		}
+		if model != "" {
+			parts = append(parts, prefix+fmt.Sprintf("model = $%d", position))
+			position++
+		}
+		if status != "" {
+			parts = append(parts, prefix+fmt.Sprintf("status = $%d", position))
+		}
+		return strings.Join(parts, " AND ")
 	}
 	var summary struct {
 		Requests       int     `json:"requests"`
@@ -335,12 +380,12 @@ func (a *App) writeAnalytics(c *gin.Context, organizationID *uuid.UUID) {
 		TotalTokens    *int64  `json:"totalTokens"`
 		ToolCalls      int     `json:"toolCalls"`
 	}
-	query := `SELECT COUNT(*)::int, COUNT(*) FILTER (WHERE status = 'complete')::int, COUNT(*) FILTER (WHERE status = 'error')::int, COUNT(*) FILTER (WHERE status = 'cancelled')::int, COALESCE(AVG(EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000) FILTER (WHERE finished_at IS NOT NULL), 0), COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000) FILTER (WHERE finished_at IS NOT NULL), 0), COALESCE(AVG(EXTRACT(EPOCH FROM (first_token_at - started_at)) * 1000) FILTER (WHERE first_token_at IS NOT NULL), 0), SUM(input_tokens), SUM(output_tokens), SUM(total_tokens), COALESCE(SUM(tool_call_count), 0)::int FROM chat_runs WHERE ` + where
+	query := `SELECT COUNT(*)::int, COUNT(*) FILTER (WHERE status = 'complete')::int, COUNT(*) FILTER (WHERE status = 'error')::int, COUNT(*) FILTER (WHERE status = 'cancelled')::int, COALESCE(AVG(EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000) FILTER (WHERE finished_at IS NOT NULL), 0), COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000) FILTER (WHERE finished_at IS NOT NULL), 0), COALESCE(AVG(EXTRACT(EPOCH FROM (first_token_at - started_at)) * 1000) FILTER (WHERE first_token_at IS NOT NULL), 0), SUM(input_tokens), SUM(output_tokens), SUM(total_tokens), COALESCE(SUM(tool_call_count), 0)::int FROM chat_runs WHERE ` + whereFor("")
 	if err := a.DB.QueryRowContext(c, query, args...).Scan(&summary.Requests, &summary.Succeeded, &summary.Failed, &summary.Cancelled, &summary.AverageLatency, &summary.P95Latency, &summary.AverageTTFT, &summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens, &summary.ToolCalls); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	byEndpointQuery := `SELECT COALESCE(r.endpoint_id::text, ''), COALESCE(e.name, 'Unknown endpoint'), r.model, COUNT(*)::int, COUNT(*) FILTER (WHERE r.status IN ('error', 'incomplete'))::int, COALESCE(AVG(EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.finished_at IS NOT NULL), 0) FROM chat_runs r LEFT JOIN endpoint_settings e ON e.id = r.endpoint_id WHERE ` + strings.ReplaceAll(where, "started_at", "r.started_at") + ` GROUP BY r.endpoint_id, e.name, r.model ORDER BY COUNT(*) DESC`
+	byEndpointQuery := `SELECT COALESCE(r.endpoint_id::text, ''), COALESCE(e.name, 'Unknown endpoint'), r.model, COUNT(*)::int, COUNT(*) FILTER (WHERE r.status IN ('error', 'incomplete'))::int, COALESCE(AVG(EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.finished_at IS NOT NULL), 0) FROM chat_runs r LEFT JOIN endpoint_settings e ON e.id = r.endpoint_id WHERE ` + whereFor("r") + ` GROUP BY r.endpoint_id, e.name, r.model ORDER BY COUNT(*) DESC`
 	rows, err := a.DB.QueryContext(c, byEndpointQuery, args...)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -362,7 +407,7 @@ func (a *App) writeAnalytics(c *gin.Context, organizationID *uuid.UUID) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	timeSeriesQuery := `SELECT TO_CHAR(r.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), COUNT(*)::int, COUNT(*) FILTER (WHERE r.status = 'complete')::int, COUNT(*) FILTER (WHERE r.status IN ('error', 'incomplete'))::int, COUNT(*) FILTER (WHERE r.status = 'cancelled')::int, COALESCE(AVG(EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.finished_at IS NOT NULL), 0), COALESCE(SUM(r.tool_call_count), 0)::int FROM chat_runs r WHERE ` + strings.ReplaceAll(where, "started_at", "r.started_at") + ` GROUP BY 1 ORDER BY 1`
+	timeSeriesQuery := `SELECT TO_CHAR(r.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), COUNT(*)::int, COUNT(*) FILTER (WHERE r.status = 'complete')::int, COUNT(*) FILTER (WHERE r.status IN ('error', 'incomplete'))::int, COUNT(*) FILTER (WHERE r.status = 'cancelled')::int, COALESCE(AVG(EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.finished_at IS NOT NULL), 0), COALESCE(SUM(r.tool_call_count), 0)::int FROM chat_runs r WHERE ` + whereFor("r") + ` GROUP BY 1 ORDER BY 1`
 	timeRows, err := a.DB.QueryContext(c, timeSeriesQuery, args...)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -385,4 +430,61 @@ func (a *App) writeAnalytics(c *gin.Context, organizationID *uuid.UUID) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"summary": summary, "byEndpoint": byEndpoint, "timeSeries": timeSeries})
+}
+
+func analyticsRange(c *gin.Context) (time.Time, time.Time, error) {
+	now := time.Now().UTC()
+	start := now.Add(-30 * 24 * time.Hour)
+	end := now
+	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
+		days, err := strconv.Atoi(raw)
+		if err != nil || days < 1 || days > 365 {
+			return time.Time{}, time.Time{}, fmt.Errorf("days must be between 1 and 365")
+		}
+		start = now.Add(-time.Duration(days) * 24 * time.Hour)
+	}
+	if raw := strings.TrimSpace(c.Query("from")); raw != "" {
+		parsed, err := parseAnalyticsTime(raw, false)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid from date")
+		}
+		start = parsed
+	}
+	if raw := strings.TrimSpace(c.Query("to")); raw != "" {
+		parsed, err := parseAnalyticsTime(raw, true)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid to date")
+		}
+		end = parsed
+	}
+	if !start.Before(end) {
+		return time.Time{}, time.Time{}, fmt.Errorf("from must be before to")
+	}
+	return start, end, nil
+}
+
+func parseAnalyticsTime(value string, endOfDate bool) (time.Time, error) {
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed.UTC(), nil
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", value, time.UTC)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if endOfDate {
+		return parsed.Add(24 * time.Hour), nil
+	}
+	return parsed, nil
+}
+
+func parseAnalyticsEndpointID(value string) (*uuid.UUID, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid endpointId")
+	}
+	return &id, nil
 }

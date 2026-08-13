@@ -157,6 +157,9 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	}
 	requestMessages := parseAssistantUIMessages(request.Messages)
 	approval := findAssistantUIApproval(requestMessages)
+	if approval != nil && !a.featureEnabled(c, "mcp") {
+		return
+	}
 	latestUser := latestAssistantUserMessage(requestMessages)
 	if approval == nil && latestUser == nil {
 		// Never create an empty conversation or forward an empty message list to
@@ -191,7 +194,14 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	runStatus := "complete"
 	runToolCalls := 0
 	runID := uuid.Nil
-	if requestID := strings.TrimSpace(request.RequestID); requestID != "" {
+	// Every Assistant UI request gets a durable run record. The browser sends a
+	// stable per-turn id for idempotency; fall back to the server request id for
+	// older clients so analytics still includes those turns.
+	requestID := strings.TrimSpace(request.RequestID)
+	if requestID == "" {
+		requestID = middleware.GetRequestID(c)
+	}
+	if requestID != "" {
 		var duplicate bool
 		runID, duplicate, err = a.startChatRun(c, requestID, conversationID, principal.UserID, organizationID, endpointID, endpoint.ChatModel)
 		if err != nil {
@@ -213,20 +223,26 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	if approval == nil {
 		if latestUser != nil {
 			if err := a.persistAssistantUIUser(c, conversationID, *latestUser); err != nil {
+				runStatus = "error"
 				writeError(c, http.StatusInternalServerError, err)
 				return
 			}
 		}
 	}
 
-	indexing, err := a.conversationHasIndexingKnowledge(c, conversationID)
-	if err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
-	}
-	if indexing {
-		writeError(c, http.StatusConflict, fmt.Errorf("attached Knowledge is still indexing; detach it or wait for indexing to finish"))
-		return
+	knowledgeEnabled := a.platformCapabilityEnabled(c, "knowledge")
+	if knowledgeEnabled {
+		indexing, err := a.conversationHasIndexingKnowledge(c, conversationID)
+		if err != nil {
+			runStatus = "error"
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if indexing {
+			runStatus = "error"
+			writeError(c, http.StatusConflict, fmt.Errorf("attached Knowledge is still indexing; detach it or wait for indexing to finish"))
+			return
+		}
 	}
 
 	// The UI Message Stream is deliberately emitted directly from Go. This
@@ -261,7 +277,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			case "error":
 				runStatus = "error"
 			case "tool-approval-request":
-				runStatus = "incomplete"
+				runStatus = "requires-action"
 			}
 		}
 		payload, marshalErr := json.Marshal(value)
@@ -299,6 +315,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	}
 	textID := assistantMessageID + ":text"
 	if err := writeChunk(map[string]any{"type": "start", "messageId": assistantMessageID}); err != nil {
+		runStatus = "error"
 		return
 	}
 	defer finishStream()
@@ -321,18 +338,25 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			"type": "data-retrieval-status",
 			"data": map[string]any{"status": "started", "query": latestUser.Text},
 		})
-		var retrievalErr error
-		citations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6)
-		if retrievalErr != nil {
+		if !knowledgeEnabled {
 			_ = writeChunk(map[string]any{
 				"type": "data-retrieval-status",
-				"data": map[string]any{"status": "failed", "error": retrievalErr.Error()},
+				"data": map[string]any{"status": "disabled"},
 			})
 		} else {
-			_ = writeChunk(map[string]any{
-				"type": "data-retrieval-status",
-				"data": map[string]any{"status": "completed", "citationCount": len(citations)},
-			})
+			var retrievalErr error
+			citations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6)
+			if retrievalErr != nil {
+				_ = writeChunk(map[string]any{
+					"type": "data-retrieval-status",
+					"data": map[string]any{"status": "failed", "error": retrievalErr.Error()},
+				})
+			} else {
+				_ = writeChunk(map[string]any{
+					"type": "data-retrieval-status",
+					"data": map[string]any{"status": "completed", "citationCount": len(citations)},
+				})
+			}
 		}
 	}
 	for _, citation := range citations {
@@ -372,8 +396,12 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		outputParent, _ = a.conversationHead(c, conversationID)
 	}
 
-	toolDiscovery := a.discoverConversationTools(c, principal.UserID, organizationID, conversationID)
-	definitions, bindings := toolDiscovery.Definitions, toolDiscovery.Bindings
+	definitions := []provider.ToolDefinition{}
+	bindings := map[string]voiceToolBinding{}
+	if a.platformCapabilityEnabled(c, "mcp") {
+		toolDiscovery := a.discoverConversationTools(c, principal.UserID, organizationID, conversationID)
+		definitions, bindings = toolDiscovery.Definitions, toolDiscovery.Bindings
+	}
 	if len(definitions) > 0 && !provider.SupportsToolCalling(endpoint) {
 		definitions = nil
 	}
@@ -406,7 +434,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		if len(citations) > 0 {
 			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: citationPrompt(citations)}}, toolHistory...)
 		}
-		requiresAction, streamErr := a.streamAssistantUIWithTools(c, principal.UserID, organizationID, conversationID, &outputParent, endpoint, toolHistory, definitions, bindings, writeChunk, &response, assistantMessageID, textID, &toolParts)
+		requiresAction, streamErr := a.streamAssistantUIWithTools(c, principal.UserID, organizationID, conversationID, runID, &outputParent, endpoint, toolHistory, definitions, bindings, writeChunk, &response, assistantMessageID, textID, &toolParts)
 		if streamErr != nil {
 			persistIncomplete()
 			_ = writeChunk(map[string]any{"type": "error", "errorText": streamErr.Error()})
@@ -441,7 +469,13 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		if err := writeChunk(map[string]any{"type": "text-start", "id": textID}); err != nil {
 			return
 		}
-		streamErr := provider.StreamChat(c, endpoint, provider.ChatOptions{Messages: history, Model: endpoint.ChatModel}, func(delta string) error {
+		streamErr := provider.StreamChat(c, endpoint, provider.ChatOptions{
+			Messages: history,
+			Model:    endpoint.ChatModel,
+			OnUsage: func(usage provider.Usage) {
+				_ = a.recordChatRunUsage(context.Background(), runID, usage)
+			},
+		}, func(delta string) error {
 			response.WriteString(delta)
 			return writeChunk(map[string]any{"type": "text-delta", "id": textID, "delta": delta})
 		})
@@ -888,7 +922,7 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 	return &event, messageID, nil
 }
 
-func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizationID, conversationID uuid.UUID, parentID *any, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding, writeChunk func(any) error, response *strings.Builder, messageID, textID string, toolParts *[]map[string]any) (bool, error) {
+func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizationID, conversationID, runID uuid.UUID, parentID *any, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding, writeChunk func(any) error, response *strings.Builder, messageID, textID string, toolParts *[]map[string]any) (bool, error) {
 	toolMessages := append([]provider.ToolMessage(nil), history...)
 	textStarted := false
 	for round := 1; round <= 4; round++ {
@@ -899,7 +933,14 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 		}
 		var roundResponse strings.Builder
 		calls := []provider.ToolCall{}
-		err := provider.StreamChatWithTools(ctx, endpoint, provider.ToolChatOptions{Messages: toolMessages, Tools: definitions, Model: endpoint.ChatModel}, func(event provider.ToolChatEvent) error {
+		err := provider.StreamChatWithTools(ctx, endpoint, provider.ToolChatOptions{
+			Messages: toolMessages,
+			Tools:    definitions,
+			Model:    endpoint.ChatModel,
+			OnUsage: func(usage provider.Usage) {
+				_ = a.recordChatRunUsage(context.Background(), runID, usage)
+			},
+		}, func(event provider.ToolChatEvent) error {
 			if event.Delta == "" {
 				calls = append(calls, event.ToolCalls...)
 				return nil

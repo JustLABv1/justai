@@ -615,6 +615,10 @@ func (a *App) discoverConversationTools(ctx context.Context, userID, organizatio
 		Definitions: []provider.ToolDefinition{},
 		Bindings:    map[string]voiceToolBinding{},
 	}
+	if !a.platformCapabilityEnabled(ctx, "mcp") {
+		result.Errors = []string{"MCP is temporarily disabled by the platform administrator"}
+		return result
+	}
 	if conversationID == uuid.Nil {
 		result.Errors = []string{"MCP tools require an active conversation context"}
 		return result

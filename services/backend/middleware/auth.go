@@ -18,9 +18,10 @@ const (
 )
 
 type Principal struct {
-	UserID        uuid.UUID
-	Email         string
-	PlatformAdmin bool
+	UserID         uuid.UUID
+	Email          string
+	PlatformAdmin  bool
+	SessionVersion int
 }
 
 func RequireAuth(tokens *auth.TokenManager, db *sql.DB) gin.HandlerFunc {
@@ -45,13 +46,23 @@ func RequireAuth(tokens *auth.TokenManager, db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		var exists, platformAdmin bool
-		if err := db.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1), COALESCE((SELECT is_platform_admin FROM users WHERE id = $1), FALSE)`, userID).Scan(&exists, &platformAdmin); err != nil || !exists {
+		var status string
+		var sessionVersion int
+		if err := db.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1), COALESCE((SELECT is_platform_admin FROM users WHERE id = $1), FALSE), COALESCE((SELECT status FROM users WHERE id = $1), 'active'), COALESCE((SELECT session_version FROM users WHERE id = $1), 0)`, userID).Scan(&exists, &platformAdmin, &status, &sessionVersion); err != nil || !exists {
 			AbortError(c, http.StatusUnauthorized, "user_not_found", "user no longer exists")
+			return
+		}
+		if status == "suspended" {
+			AbortError(c, http.StatusForbidden, "user_suspended", "this account is suspended")
+			return
+		}
+		if claims.SessionVersion != sessionVersion {
+			AbortError(c, http.StatusUnauthorized, "session_revoked", "this session has been revoked")
 			return
 		}
 		// Resolve the current platform-admin flag from the database instead of
 		// trusting a potentially stale JWT claim after an access change.
-		c.Set(PrincipalKey, Principal{UserID: userID, Email: claims.Email, PlatformAdmin: platformAdmin})
+		c.Set(PrincipalKey, Principal{UserID: userID, Email: claims.Email, PlatformAdmin: platformAdmin, SessionVersion: sessionVersion})
 		c.Next()
 	}
 }
@@ -67,6 +78,17 @@ func RequireOrg(db *sql.DB) gin.HandlerFunc {
 		if err != nil {
 			AbortError(c, http.StatusForbidden, "organization_access_required", "organization access required")
 			return
+		}
+		if organizationID != uuid.Nil {
+			var status string
+			if err := db.QueryRowContext(c, `SELECT COALESCE(status, 'active') FROM organizations WHERE id = $1`, organizationID).Scan(&status); err != nil {
+				AbortError(c, http.StatusForbidden, "organization_access_required", "organization access required")
+				return
+			}
+			if status != "active" && !principal.PlatformAdmin {
+				AbortError(c, http.StatusServiceUnavailable, "organization_unavailable", "this workspace is currently unavailable")
+				return
+			}
 		}
 		c.Set(OrgIDKey, organizationID)
 		c.Set(OrgRoleKey, role)

@@ -16,6 +16,7 @@ import {
   Plus,
   RotateCcw,
   Settings2,
+  ShieldCheck,
   Trash2,
   UserRound,
 } from "lucide-react"
@@ -54,6 +55,7 @@ import type {
   TranscriptionSession,
   User,
   SettingsTab,
+  AdminTab,
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -92,7 +94,8 @@ type FocusWorkspaceSidebarProps = {
     view: ViewId,
     conversationId?: string | null,
     sessionId?: string | null,
-    settingsTab?: SettingsTab
+    settingsTab?: SettingsTab,
+    adminTab?: AdminTab
   ) => void
   onOrganizationSelect: (organizationId: string) => void
   onArchiveConversation: (conversationId: string, archived: boolean) => void
@@ -140,6 +143,9 @@ export function FocusWorkspaceSidebar({
   const [historyQuery, setHistoryQuery] = useState("")
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
   const historyView = activeView === "chat" || activeView === "transcription"
+  const navigation = user.platformAdmin
+    ? [...railNavigation, { id: "admin" as ViewId, label: "Platform admin", hint: "Global controls", icon: ShieldCheck }]
+    : railNavigation
   const historyVisible = historyView && historyOpen
   const sessionGroups = useMemo(
     () => groupByRecency(transcriptionSessions),
@@ -201,7 +207,7 @@ export function FocusWorkspaceSidebar({
           aria-label="Workspace navigation"
           className="flex flex-col items-center gap-1"
         >
-          {railNavigation.map((item) => {
+          {navigation.map((item) => {
             const Icon = item.icon
             const active = activeView === item.id
             return (
@@ -311,6 +317,12 @@ export function FocusWorkspaceSidebar({
               <Settings2 data-icon="inline-start" />
               Workspace settings
             </DropdownMenuItem>
+            {user.platformAdmin && (
+              <DropdownMenuItem onClick={() => onNavigate("admin")}>
+                <ShieldCheck data-icon="inline-start" />
+                Platform admin
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={onSignOut}>
               <LogOut data-icon="inline-start" />
               Sign out
