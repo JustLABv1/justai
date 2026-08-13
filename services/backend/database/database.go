@@ -32,15 +32,31 @@ func Open(ctx context.Context, databaseURL string) (*sql.DB, error) {
 }
 
 func RunMigrations(ctx context.Context, db *sql.DB) error {
-	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`); err != nil {
+	// Keep the advisory lock and all migration queries on one physical
+	// connection. Without this, two backend instances can both observe an
+	// unapplied migration and race its DDL/marker insert during a deploy.
+	connection, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	const migrationLockName = "justai.schema_migrations"
+	if _, err := connection.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, migrationLockName); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = connection.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, migrationLockName)
+	}()
+
+	if _, err := connection.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
 	var initialSchemaExists bool
-	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.users') IS NOT NULL`).Scan(&initialSchemaExists); err != nil {
+	if err := connection.QueryRowContext(ctx, `SELECT to_regclass('public.users') IS NOT NULL`).Scan(&initialSchemaExists); err != nil {
 		return err
 	}
 	if initialSchemaExists {
-		if _, err := db.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES ('001_initial.sql') ON CONFLICT (version) DO NOTHING`); err != nil {
+		if _, err := connection.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES ('001_initial.sql') ON CONFLICT (version) DO NOTHING`); err != nil {
 			return fmt.Errorf("recognize existing initial schema: %w", err)
 		}
 	}
@@ -54,7 +70,7 @@ func RunMigrations(ctx context.Context, db *sql.DB) error {
 		}
 		version := entry.Name()
 		var applied bool
-		if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, version).Scan(&applied); err != nil {
+		if err := connection.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, version).Scan(&applied); err != nil {
 			return err
 		}
 		if applied {
@@ -64,7 +80,7 @@ func RunMigrations(ctx context.Context, db *sql.DB) error {
 		if err != nil {
 			return err
 		}
-		transaction, err := db.BeginTx(ctx, nil)
+		transaction, err := connection.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}

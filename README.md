@@ -29,12 +29,12 @@ JustAI is the JustLAB workspace for routing chat, transcription, retrieval, and 
    pnpm dev
    ```
 
-Open [http://localhost:3000](http://localhost:3000). The workspace has a local preview fallback, but registration and persistence are enabled once the backend is running.
+Open [http://localhost:3000](http://localhost:3000). The production UI talks to the backend for authentication, persistence, retrieval, MCP, and transcription; it does not report successful work when the backend is unavailable.
 
 ## Product boundaries
 
 - Provider keys and MCP credentials are encrypted and stay in the Go backend.
 - Chat and transcription use short-lived WebSocket tickets rather than putting bearer tokens in socket URLs.
 - RAG sources are scoped to an organization or user. URL ingestion blocks private and loopback targets by default.
-- MCP uses outbound remote HTTP transports only. Tool names are allowlisted, mutating tool calls require explicit approval, and OAuth uses a backend-generated PKCE flow.
-- The RAG worker stores chunks in PostgreSQL with full-text retrieval and optional 1536-dimension embeddings from configured OpenAI-compatible, Ollama, or Gemini endpoints.
+- MCP uses outbound remote HTTP transports only. Tool names are allowlisted, tool calls require explicit approval by default, and only explicitly annotated read-only/non-destructive calls on trusted servers can run automatically. OAuth uses a backend-generated PKCE flow.
+- The RAG worker stores chunks in PostgreSQL with full-text retrieval and optional provider-dimension embeddings; unavailable embeddings are reported as an explicit lexical-only state.

@@ -1,0 +1,9 @@
+.git
+.github
+.pnpm-store
+graphify-out
+services/frontend/.next
+services/frontend/node_modules
+services/backend/data
+**/*.test.ts
+**/*_test.go

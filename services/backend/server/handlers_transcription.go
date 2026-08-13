@@ -226,17 +226,26 @@ func (a *App) deleteTranscriptionSession(c *gin.Context) {
 		writeError(c, http.StatusNotFound, err)
 		return
 	}
-	rows, _ := a.DB.QueryContext(c, `SELECT id FROM transcription_recordings WHERE session_id = $1`, id)
-	if rows != nil {
+	// Read recording ids before touching object storage, then close the query
+	// before issuing more database work. Keeping rows open while deleting files
+	// can exhaust the small production pool when a session has many recordings.
+	var recordingIDs []uuid.UUID
+	if rows, queryErr := a.DB.QueryContext(c, `SELECT id FROM transcription_recordings WHERE session_id = $1`, id); queryErr == nil {
 		for rows.Next() {
 			var recordingID uuid.UUID
 			if rows.Scan(&recordingID) == nil {
-				_ = a.Live.deleteRecording(c, recordingID)
+				recordingIDs = append(recordingIDs, recordingID)
 			}
 		}
 		_ = rows.Close()
 	}
+	for _, recordingID := range recordingIDs {
+		_ = a.Live.deleteRecording(c, recordingID)
+	}
 	a.Live.clearPCMForSession(id)
+	// Stop active capture/viewer sockets before deleting the session. This
+	// prevents a late websocket frame from recreating state after cleanup.
+	a.Live.closeSession(id)
 	_, err = a.DB.ExecContext(c, `DELETE FROM transcription_sessions WHERE id = $1 AND user_id = $2 AND organization_id = $3`, id, principal.UserID, organizationID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -273,6 +282,7 @@ func (a *App) stopTranscriptionSession(c *gin.Context) {
 		return
 	}
 	a.Live.broadcast(id, "transcription.session", ginData{"status": "completed", "endedAt": now})
+	a.Live.closeSession(id)
 	c.JSON(http.StatusOK, gin.H{"session": mustTranscriptionSession(c, a, id)})
 }
 
@@ -288,8 +298,34 @@ func (a *App) setTranscriptionSessionStatus(c *gin.Context, status string) {
 		writeError(c, http.StatusNotFound, err)
 		return
 	}
-	_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET status = $2, started_at = CASE WHEN $2 = 'live' THEN COALESCE(started_at, now()) ELSE started_at END, updated_at = now() WHERE id = $1 AND status NOT IN ('completed', 'processing')`, id, status)
+	if status != "paused" && status != "live" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported transcription session transition"))
+		return
+	}
+	transaction, err := a.DB.BeginTx(c, nil)
 	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer transaction.Rollback()
+	var currentStatus string
+	if err := transaction.QueryRowContext(c, `SELECT status FROM transcription_sessions WHERE id = $1 FOR UPDATE`, id).Scan(&currentStatus); err != nil {
+		writeError(c, http.StatusNotFound, fmt.Errorf("transcription session not found"))
+		return
+	}
+	if currentStatus == "completed" || currentStatus == "processing" || currentStatus == "failed" {
+		writeError(c, http.StatusConflict, fmt.Errorf("transcription session is no longer live"))
+		return
+	}
+	if status == "paused" && currentStatus != "live" && currentStatus != "paused" {
+		writeError(c, http.StatusConflict, fmt.Errorf("only a live transcription session can be paused"))
+		return
+	}
+	if _, err := transaction.ExecContext(c, `UPDATE transcription_sessions SET status = $2, started_at = CASE WHEN $2 = 'live' THEN COALESCE(started_at, now()) ELSE started_at END, updated_at = now() WHERE id = $1`, id, status); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := transaction.Commit(); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -417,14 +453,36 @@ func (a *App) setJoinRequestStatus(c *gin.Context, status string) {
 		return
 	}
 	defer transaction.Rollback()
+	var sessionStatus string
+	if err := transaction.QueryRowContext(c, `SELECT status FROM transcription_sessions WHERE id = $1 FOR UPDATE`, sessionID).Scan(&sessionStatus); err != nil {
+		writeError(c, http.StatusNotFound, fmt.Errorf("transcription session not found"))
+		return
+	}
+	if sessionStatus == "completed" || sessionStatus == "processing" {
+		writeError(c, http.StatusConflict, fmt.Errorf("transcription session is no longer accepting join requests"))
+		return
+	}
 	var currentStatus, sourceName, deviceLabel string
 	var sourceID uuid.NullUUID
-	if err := transaction.QueryRowContext(c, `SELECT status, source_name, device_label, source_id FROM transcription_join_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(&currentStatus, &sourceName, &deviceLabel, &sourceID); err != nil {
+	var requestExpiresAt time.Time
+	if err := transaction.QueryRowContext(c, `SELECT status, source_name, device_label, source_id, expires_at FROM transcription_join_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(&currentStatus, &sourceName, &deviceLabel, &sourceID, &requestExpiresAt); err != nil {
 		writeError(c, http.StatusNotFound, fmt.Errorf("join request not found"))
 		return
 	}
 	if currentStatus != "pending" {
 		c.JSON(http.StatusOK, gin.H{"status": currentStatus})
+		return
+	}
+	if !requestExpiresAt.After(time.Now()) {
+		if _, err := transaction.ExecContext(c, `UPDATE transcription_join_requests SET status = 'expired', updated_at = now() WHERE id = $1 AND status = 'pending'`, requestID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if err := transaction.Commit(); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		c.JSON(http.StatusGone, gin.H{"status": "expired"})
 		return
 	}
 	if status == "approved" && !sourceID.Valid {
@@ -475,12 +533,21 @@ func (a *App) renameTranscriptionSpeaker(c *gin.Context) {
 	if !decodeJSON(c, &request) {
 		return
 	}
-	_, err = a.DB.ExecContext(c, `UPDATE transcription_speakers SET display_name = $3, updated_at = now() WHERE id = $1 AND session_id = $2`, speakerID, sessionID, strings.TrimSpace(request.DisplayName))
+	displayName := strings.TrimSpace(request.DisplayName)
+	if displayName == "" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("display name is required"))
+		return
+	}
+	result, err := a.DB.ExecContext(c, `UPDATE transcription_speakers SET display_name = $3, updated_at = now() WHERE id = $1 AND session_id = $2`, speakerID, sessionID, displayName)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	a.Live.broadcast(sessionID, "transcription.speaker", ginData{"speakerId": speakerID, "displayName": strings.TrimSpace(request.DisplayName)})
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		writeError(c, http.StatusNotFound, fmt.Errorf("speaker not found"))
+		return
+	}
+	a.Live.broadcast(sessionID, "transcription.speaker", ginData{"speakerId": speakerID, "displayName": displayName})
 	c.Status(http.StatusNoContent)
 }
 
@@ -582,18 +649,60 @@ func (a *App) getTranscriptionJoinRequest(c *gin.Context) {
 	var sessionID uuid.UUID
 	var sourceID uuid.NullUUID
 	var expiresAt time.Time
-	err = a.DB.QueryRowContext(c, `SELECT request_hash, session_id, source_name, device_label, status, source_id, expires_at FROM transcription_join_requests WHERE id = $1`, requestID).Scan(&storedHash, &sessionID, &sourceName, &deviceLabel, &status, &sourceID, &expiresAt)
+	var grantHash sql.NullString
+	var encryptedGrant []byte
+	transaction, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer transaction.Rollback()
+	err = transaction.QueryRowContext(c, `SELECT request_hash, session_id, source_name, device_label, status, source_id, expires_at, grant_hash, grant_token_encrypted FROM transcription_join_requests WHERE id = $1 FOR UPDATE`, requestID).Scan(&storedHash, &sessionID, &sourceName, &deviceLabel, &status, &sourceID, &expiresAt, &grantHash, &encryptedGrant)
 	if err != nil || storedHash != hashToken(token) || expiresAt.Before(time.Now()) {
 		writeError(c, http.StatusUnauthorized, fmt.Errorf("invalid or expired poll token"))
 		return
 	}
 	result := ginData{"requestId": requestID, "sessionId": sessionID, "sourceName": sourceName, "deviceLabel": deviceLabel, "status": status, "sourceId": nullableUUIDValue(sourceID), "expiresAt": expiresAt}
 	if status == "approved" && sourceID.Valid {
-		grant, grantHash, err := auth.NewOpaqueToken()
-		if err == nil {
-			_, _ = a.DB.ExecContext(c, `UPDATE transcription_join_requests SET grant_hash = $2, updated_at = now() WHERE id = $1 AND status = 'approved'`, requestID, grantHash)
+		var sessionStatus string
+		if err := transaction.QueryRowContext(c, `SELECT status FROM transcription_sessions WHERE id = $1`, sessionID).Scan(&sessionStatus); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if sessionStatus == "completed" || sessionStatus == "processing" {
+			status = "expired"
+			result["status"] = status
+			_, _ = transaction.ExecContext(c, `UPDATE transcription_join_requests SET status = 'expired', grant_hash = NULL, grant_token_encrypted = NULL, updated_at = now() WHERE id = $1`, requestID)
+		} else {
+			var grant string
+			if len(encryptedGrant) > 0 {
+				grant, err = a.Secrets.Decrypt(encryptedGrant)
+				if err != nil {
+					writeError(c, http.StatusInternalServerError, fmt.Errorf("could not recover capture grant"))
+					return
+				}
+			} else {
+				grant, grantHashValue, tokenErr := auth.NewOpaqueToken()
+				if tokenErr != nil {
+					writeError(c, http.StatusInternalServerError, tokenErr)
+					return
+				}
+				encryptedGrant, err = a.Secrets.Encrypt(grant)
+				if err != nil {
+					writeError(c, http.StatusInternalServerError, err)
+					return
+				}
+				if _, err := transaction.ExecContext(c, `UPDATE transcription_join_requests SET grant_hash = $2, grant_token_encrypted = $3, updated_at = now() WHERE id = $1 AND status = 'approved'`, requestID, grantHashValue, encryptedGrant); err != nil {
+					writeError(c, http.StatusInternalServerError, err)
+					return
+				}
+			}
 			result["captureGrant"] = grant
 		}
+	}
+	if err := transaction.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
 	}
 	c.JSON(http.StatusOK, result)
 }
@@ -613,7 +722,7 @@ func (a *App) createCaptureWSTicket(c *gin.Context) {
 	defer transaction.Rollback()
 	var requestID, sessionID, sourceID, userID, organizationID uuid.UUID
 	var expiresAt time.Time
-	err = transaction.QueryRowContext(c, `SELECT jr.id, jr.session_id, jr.source_id, s.user_id, s.organization_id, jr.expires_at FROM transcription_join_requests jr JOIN transcription_sessions s ON s.id = jr.session_id WHERE jr.grant_hash = $1 AND jr.status = 'approved' AND jr.expires_at > now() FOR UPDATE`, grantHash).Scan(&requestID, &sessionID, &sourceID, &userID, &organizationID, &expiresAt)
+	err = transaction.QueryRowContext(c, `SELECT jr.id, jr.session_id, jr.source_id, s.user_id, s.organization_id, jr.expires_at FROM transcription_join_requests jr JOIN transcription_sessions s ON s.id = jr.session_id WHERE jr.grant_hash = $1 AND jr.status = 'approved' AND s.status IN ('waiting', 'live', 'paused') AND jr.expires_at > now() FOR UPDATE`, grantHash).Scan(&requestID, &sessionID, &sourceID, &userID, &organizationID, &expiresAt)
 	if err != nil {
 		writeError(c, http.StatusUnauthorized, fmt.Errorf("invalid or expired capture grant"))
 		return
@@ -624,7 +733,7 @@ func (a *App) createCaptureWSTicket(c *gin.Context) {
 		return
 	}
 	ticketExpires := time.Now().Add(2 * time.Minute)
-	if _, err := transaction.ExecContext(c, `UPDATE transcription_join_requests SET grant_hash = NULL, updated_at = now() WHERE id = $1`, requestID); err != nil {
+	if _, err := transaction.ExecContext(c, `UPDATE transcription_join_requests SET grant_hash = NULL, grant_token_encrypted = NULL, updated_at = now() WHERE id = $1`, requestID); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -642,7 +751,7 @@ func (a *App) createCaptureWSTicket(c *gin.Context) {
 func (a *App) transcriptionWebSocket(c *gin.Context) {
 	info, err := a.consumeTranscriptionTicket(c, c.Query("ticket"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		writeError(c, http.StatusUnauthorized, err)
 		return
 	}
 	connection, err := a.upgradeWebSocket(c)
@@ -681,9 +790,13 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 	}
 
 	var sessionEndpoint uuid.UUID
-	var language string
-	if err := a.DB.QueryRowContext(ctx, `SELECT transcription_endpoint_id, language FROM transcription_sessions WHERE id = $1`, info.SessionID).Scan(&sessionEndpoint, &language); err != nil {
+	var language, sessionStatus string
+	if err := a.DB.QueryRowContext(ctx, `SELECT transcription_endpoint_id, language, status FROM transcription_sessions WHERE id = $1`, info.SessionID).Scan(&sessionEndpoint, &language, &sessionStatus); err != nil {
 		_ = a.Live.send(client, "error", ginData{"message": "transcription session is not configured"})
+		return
+	}
+	if sessionStatus == "completed" || sessionStatus == "processing" {
+		_ = a.Live.send(client, "error", ginData{"message": "transcription session is no longer live"})
 		return
 	}
 	endpoint, err := a.providerEndpoint(ctx, sessionEndpoint)
@@ -718,6 +831,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 	voiceActive := false
 	lastVoiceAt := time.Time{}
 	const voiceHangover = 650 * time.Millisecond
+	lastStatusCheck := time.Now()
 	go func() {
 		defer close(providerDone)
 		for event := range stream.Events() {
@@ -792,6 +906,18 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			continue
 		}
 		if messageType != websocket.BinaryMessage {
+			continue
+		}
+		if time.Since(lastStatusCheck) >= time.Second {
+			if err := a.DB.QueryRowContext(ctx, `SELECT status FROM transcription_sessions WHERE id = $1`, info.SessionID).Scan(&sessionStatus); err != nil {
+				return
+			}
+			lastStatusCheck = time.Now()
+			if sessionStatus == "completed" || sessionStatus == "processing" {
+				return
+			}
+		}
+		if sessionStatus == "paused" {
 			continue
 		}
 		frame := parseAudioFrame(payload)
@@ -1130,9 +1256,14 @@ func (a *App) appendTranscriptionRecordingPart(c *gin.Context) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("recording not found"))
 		return
 	}
-	payload, err := io.ReadAll(io.LimitReader(c.Request.Body, 16*1024*1024))
+	const maxRecordingPartBytes = 16 * 1024 * 1024
+	payload, err := io.ReadAll(io.LimitReader(c.Request.Body, maxRecordingPartBytes+1))
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	if len(payload) > maxRecordingPartBytes {
+		writeError(c, http.StatusRequestEntityTooLarge, fmt.Errorf("recording parts are limited to 16 MB"))
 		return
 	}
 	if err := a.Live.appendRecording(c, recordingID, part, payload); err != nil {
@@ -1267,10 +1398,7 @@ func (a *App) resolveTranscriptionEndpoint(ctx context.Context, userID, organiza
 		if err != nil || !endpoint.Enabled {
 			return uuid.Nil, fmt.Errorf("endpoint not found")
 		}
-		var allowed bool
-		_ = json.Unmarshal(endpoint.Capabilities, &map[string]bool{})
-		allowed = endpointSupportsModel(endpoint, capability)
-		if !allowed {
+		if !endpointSupportsModel(endpoint, capability) {
 			return uuid.Nil, fmt.Errorf("endpoint does not support %s", capability)
 		}
 		if err := a.canUseEndpoint(endpoint, middleware.Principal{UserID: userID}, organizationID); err != nil {
@@ -1278,27 +1406,59 @@ func (a *App) resolveTranscriptionEndpoint(ctx context.Context, userID, organiza
 		}
 		return id, nil
 	}
-	var id uuid.UUID
-	if err := a.DB.QueryRowContext(ctx, `SELECT id FROM endpoint_settings WHERE enabled = TRUE AND ((scope_type = 'user' AND scope_id = $1) OR (scope_type = 'organization' AND scope_id = $2) OR scope_type = 'global') AND (capabilities ? $3 OR ($3 = 'transcription' AND (capabilities ? 'realtime-transcription' OR capabilities ? 'chunked-transcription')) OR provider_type IN ('openai', 'gemini')) ORDER BY CASE WHEN scope_type = 'user' THEN 1 WHEN scope_type = 'organization' THEN 2 ELSE 3 END, is_default DESC, created_at LIMIT 1`, userID, organizationID, capability).Scan(&id); err != nil {
+	rows, err := a.DB.QueryContext(ctx, `SELECT id, provider_type, capabilities FROM endpoint_settings WHERE enabled = TRUE AND ((scope_type = 'user' AND scope_id = $1) OR (scope_type = 'organization' AND scope_id = $2) OR scope_type = 'global') ORDER BY CASE WHEN scope_type = 'user' THEN 1 WHEN scope_type = 'organization' THEN 2 ELSE 3 END, is_default DESC, created_at`, userID, organizationID)
+	if err != nil {
 		return uuid.Nil, fmt.Errorf("no endpoint with %s capability is configured", capability)
 	}
-	return id, nil
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var providerType string
+		var capabilities []byte
+		if err := rows.Scan(&id, &providerType, &capabilities); err != nil {
+			return uuid.Nil, err
+		}
+		candidate := models.Endpoint{ProviderType: providerType, Capabilities: capabilities}
+		if endpointSupportsModel(candidate, capability) {
+			return id, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.Nil, fmt.Errorf("no endpoint with %s capability is configured", capability)
 }
 
 func endpointSupportsModel(endpoint models.Endpoint, capability string) bool {
 	var capabilities map[string]bool
-	if json.Unmarshal(endpoint.Capabilities, &capabilities) == nil && capabilities[capability] {
-		return true
+	if json.Unmarshal(endpoint.Capabilities, &capabilities) == nil {
+		if enabled, declared := capabilities[capability]; declared {
+			return enabled
+		}
 	}
 	if capability == "transcription" {
-		return capabilities["realtime-transcription"] || capabilities["chunked-transcription"] || capabilities["transcription"] || endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
+		if enabled := capabilities["chunked-transcription"]; enabled {
+			return true
+		}
+		if enabled := capabilities["realtime-transcription"]; enabled {
+			return true
+		}
+		if _, declared := capabilities["chunked-transcription"]; declared {
+			return false
+		}
+		if _, declared := capabilities["realtime-transcription"]; declared {
+			return false
+		}
+		return endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
 	}
 	return (capability == "realtime-transcription" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini")) || (capability == "diarization" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini")) || (capability == "tts" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "openai-compatible"))
 }
 
 func endpointSupports(endpoint provider.Endpoint, capability string) bool {
-	if endpoint.Capabilities != nil && endpoint.Capabilities[capability] {
-		return true
+	if endpoint.Capabilities != nil {
+		if enabled, declared := endpoint.Capabilities[capability]; declared {
+			return enabled
+		}
 	}
 	if capability == "transcription" {
 		return endpoint.Capabilities["realtime-transcription"] || endpoint.Capabilities["chunked-transcription"] || endpoint.Capabilities["transcription"] || endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
@@ -1316,23 +1476,31 @@ func endpointSupports(endpoint provider.Endpoint, capability string) bool {
 }
 
 func transcriptionMode(endpoint provider.Endpoint) string {
-	if endpoint.Capabilities != nil && endpoint.Capabilities["chunked-transcription"] {
+	if enabled, declared := endpoint.Capabilities["chunked-transcription"]; declared && enabled {
 		return "chunked"
 	}
 	// Older endpoint records used the generic "transcription" capability for
 	// both transport modes. Whisper models are HTTP transcription models in the
 	// common OpenAI-compatible serving stacks, so keep those existing records
 	// working without requiring a database edit.
-	if endpoint.ProviderType == "openai-compatible" && endpoint.Capabilities != nil && endpoint.Capabilities["transcription"] && strings.Contains(strings.ToLower(endpoint.TranscriptionModel), "whisper") {
+	if endpoint.ProviderType == "openai-compatible" && endpoint.Capabilities["transcription"] && strings.Contains(strings.ToLower(endpoint.TranscriptionModel), "whisper") {
 		return "chunked"
 	}
-	if endpoint.Capabilities != nil && endpoint.Capabilities["realtime-transcription"] {
+	if enabled, declared := endpoint.Capabilities["realtime-transcription"]; declared && enabled {
 		return "realtime"
 	}
 	// "transcription" was the original generic capability used by the
 	// endpoint form. Keep it as an HTTP/chunked alias for existing gateways.
-	if endpoint.Capabilities != nil && endpoint.Capabilities["transcription"] {
+	if enabled, declared := endpoint.Capabilities["transcription"]; declared && enabled {
 		return "chunked"
+	}
+	// An explicit false declaration is an opt-out, including for native
+	// providers whose older records used implicit capability defaults.
+	if enabled, declared := endpoint.Capabilities["transcription"]; declared && !enabled {
+		return ""
+	}
+	if enabled, declared := endpoint.Capabilities["realtime-transcription"]; declared && !enabled {
+		return ""
 	}
 	if endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini" {
 		return "realtime"

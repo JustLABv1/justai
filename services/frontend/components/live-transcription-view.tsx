@@ -103,7 +103,12 @@ export function LiveTranscriptionView({
 
   const viewerSocketRef = useRef<WebSocket | null>(null)
   const captureSocketRef = useRef<WebSocket | null>(null)
+  const connectViewerRef = useRef<
+    (id: string, reconnect?: boolean) => Promise<void>
+  >(() => Promise.resolve())
   const viewerAttemptRef = useRef(0)
+  const viewerReconnectTimerRef = useRef<number | null>(null)
+  const viewerReconnectAttemptsRef = useRef(0)
   const captureAttemptRef = useRef(0)
   const sessionLoadRef = useRef(0)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -117,23 +122,13 @@ export function LiveTranscriptionView({
   const levelTimerRef = useRef<number | null>(null)
   const transcriptionEndpoints = useMemo(
     () =>
-      endpoints.filter(
-        (endpoint) =>
-          endpoint.capabilities["realtime-transcription"] ||
-          endpoint.capabilities["chunked-transcription"] ||
-          endpoint.capabilities.transcription ||
-          endpoint.providerType === "openai" ||
-          endpoint.providerType === "gemini"
-      ),
+      endpoints.filter((endpoint) => endpointSupportsTranscription(endpoint)),
     [endpoints]
   )
   const diarizationEndpoints = useMemo(
     () =>
-      endpoints.filter(
-        (endpoint) =>
-          endpoint.capabilities.diarization ||
-          endpoint.providerType === "openai" ||
-          endpoint.providerType === "gemini"
+      endpoints.filter((endpoint) =>
+        endpointSupportsCapability(endpoint, "diarization")
       ),
     [endpoints]
   )
@@ -149,8 +144,16 @@ export function LiveTranscriptionView({
 
   const refreshDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return
-    const next = await navigator.mediaDevices.enumerateDevices()
-    setDevices(next.filter((device) => device.kind === "audioinput"))
+    try {
+      const next = await navigator.mediaDevices.enumerateDevices()
+      setDevices(next.filter((device) => device.kind === "audioinput"))
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Audio input devices could not be listed."
+      )
+    }
   }, [])
 
   const completeRecording = useCallback(
@@ -209,8 +212,13 @@ export function LiveTranscriptionView({
     setLevel(0)
   }, [completeRecording])
 
-  const closeViewer = useCallback(() => {
+  const closeViewer = useCallback((resetReconnect = true) => {
     viewerAttemptRef.current += 1
+    if (viewerReconnectTimerRef.current !== null) {
+      window.clearTimeout(viewerReconnectTimerRef.current)
+      viewerReconnectTimerRef.current = null
+    }
+    if (resetReconnect) viewerReconnectAttemptsRef.current = 0
     viewerSocketRef.current?.close()
     viewerSocketRef.current = null
   }, [])
@@ -257,6 +265,40 @@ export function LiveTranscriptionView({
             : current
         )
         onSessionsChanged()
+        return
+      }
+      if (event.type === "transcription.join-request") {
+        const requestId = String(data.requestId ?? "")
+        const status = String(data.status ?? "pending")
+        if (
+          !requestId ||
+          !["pending", "approved", "denied", "expired"].includes(status)
+        )
+          return
+        setJoinRequests((current) => {
+          const nextStatus = status as TranscriptionJoinRequest["status"]
+          const index = current.findIndex((request) => request.id === requestId)
+          if (index < 0 && nextStatus !== "pending") return current
+          if (index < 0) {
+            return [
+              {
+                id: requestId,
+                sourceName: String(data.sourceName ?? "Room microphone"),
+                deviceLabel: String(data.deviceLabel ?? ""),
+                status: nextStatus,
+                sourceId: null,
+                expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+                createdAt: new Date().toISOString(),
+              },
+              ...current,
+            ]
+          }
+          return current.map((request, requestIndex) =>
+            requestIndex === index
+              ? { ...request, status: nextStatus }
+              : request
+          )
+        })
         return
       }
       if (event.type === "transcription.source") {
@@ -372,8 +414,9 @@ export function LiveTranscriptionView({
   )
 
   const connectViewer = useCallback(
-    async (id: string) => {
-      closeViewer()
+    async (id: string, reconnect = false) => {
+      if (!reconnect) viewerReconnectAttemptsRef.current = 0
+      closeViewer(!reconnect)
       const attempt = viewerAttemptRef.current
       const ticketResponse = await api.post<{ ticket: string }>(
         "/api/v1/ws/tickets",
@@ -384,6 +427,8 @@ export function LiveTranscriptionView({
         socketURL("/api/v1/ws/transcription", ticketResponse.ticket)
       )
       viewerSocketRef.current = socket
+      let opened = false
+      let openTimer: number | null = null
       socket.onmessage = (message) => {
         if (viewerAttemptRef.current !== attempt) return
         try {
@@ -400,14 +445,45 @@ export function LiveTranscriptionView({
         }
       }
       await new Promise<void>((resolve, reject) => {
-        socket.onopen = () => resolve()
+        socket.onopen = () => {
+          opened = true
+          if (openTimer !== null) window.clearTimeout(openTimer)
+          setError("")
+          resolve()
+        }
         socket.onclose = () => {
+          if (openTimer !== null) window.clearTimeout(openTimer)
+          if (viewerSocketRef.current === socket) viewerSocketRef.current = null
           if (viewerAttemptRef.current !== attempt) {
             resolve()
             return
           }
+          if (opened) {
+            setError("The live transcription connection dropped; reconnecting…")
+            const retry = viewerReconnectAttemptsRef.current
+            if (retry < 5) {
+              viewerReconnectAttemptsRef.current = retry + 1
+              viewerReconnectTimerRef.current = window.setTimeout(
+                () => {
+                  viewerReconnectTimerRef.current = null
+                  if (viewerAttemptRef.current === attempt) {
+                    void connectViewerRef
+                      .current(id, true)
+                      .catch(() => undefined)
+                  }
+                },
+                Math.min(15_000, 1000 * 2 ** retry)
+              )
+            }
+          }
           reject(new Error("The live transcription connection closed."))
         }
+        openTimer = window.setTimeout(() => {
+          socket.close()
+          reject(
+            new Error("The live transcription socket took too long to connect.")
+          )
+        }, 15_000)
       })
       if (
         viewerAttemptRef.current !== attempt ||
@@ -420,6 +496,10 @@ export function LiveTranscriptionView({
     },
     [closeViewer, handleSocketEvent]
   )
+
+  useEffect(() => {
+    connectViewerRef.current = connectViewer
+  }, [connectViewer])
 
   const downsample = (
     input: Float32Array,
@@ -609,15 +689,36 @@ export function LiveTranscriptionView({
           setError("The microphone connection could not be established.")
         }
       }
+      let socketOpened = false
+      let rejectOpen: ((reason?: unknown) => void) | null = null
+      let openTimer: number | null = null
       await new Promise<void>((resolve, reject) => {
-        socket.onopen = () => resolve()
+        rejectOpen = reject
+        socket.onopen = () => {
+          socketOpened = true
+          rejectOpen = null
+          if (openTimer !== null) window.clearTimeout(openTimer)
+          resolve()
+        }
         socket.onclose = () => {
+          if (openTimer !== null) window.clearTimeout(openTimer)
+          if (captureSocketRef.current === socket) captureSocketRef.current = null
           if (captureAttemptRef.current !== attempt) {
             resolve()
             return
           }
+          if (!socketOpened) {
+            rejectOpen?.(
+              new Error("The microphone connection closed before connecting.")
+            )
+            return
+          }
           reject(new Error("The microphone connection closed."))
         }
+        openTimer = window.setTimeout(() => {
+          socket.close()
+          reject(new Error("The microphone socket took too long to connect."))
+        }, 15_000)
       })
       if (
         captureAttemptRef.current !== attempt ||
@@ -625,6 +726,13 @@ export function LiveTranscriptionView({
       ) {
         socket.close()
         return
+      }
+      socket.onclose = () => {
+        if (captureAttemptRef.current !== attempt) return
+        closeCapture()
+        setError(
+          "The microphone connection dropped. Restart the microphone to reconnect."
+        )
       }
       socket.send(
         JSON.stringify({
@@ -822,6 +930,7 @@ export function LiveTranscriptionView({
     if (!snapshot) return
     try {
       const action = snapshot.session.status === "paused" ? "resume" : "pause"
+      if (action === "pause") closeCapture()
       await api.post(
         `/api/v1/transcription/sessions/${snapshot.session.id}/${action}`
       )
@@ -836,6 +945,7 @@ export function LiveTranscriptionView({
             }
           : current
       )
+      if (action === "resume") await ensureCapture()
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -865,10 +975,18 @@ export function LiveTranscriptionView({
 
   const refreshJoinRequests = async () => {
     if (!snapshot) return
-    const result = await api.get<{ requests: TranscriptionJoinRequest[] }>(
-      `/api/v1/transcription/sessions/${snapshot.session.id}/join-requests`
-    )
-    setJoinRequests(result.requests)
+    try {
+      const result = await api.get<{ requests: TranscriptionJoinRequest[] }>(
+        `/api/v1/transcription/sessions/${snapshot.session.id}/join-requests`
+      )
+      setJoinRequests(result.requests)
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Join requests could not be refreshed."
+      )
+    }
   }
 
   const setJoinRequest = async (
@@ -876,10 +994,18 @@ export function LiveTranscriptionView({
     status: "approve" | "deny"
   ) => {
     if (!snapshot) return
-    await api.post(
-      `/api/v1/transcription/join-requests/${request.id}/${status}`
-    )
-    await refreshJoinRequests()
+    try {
+      await api.post(
+        `/api/v1/transcription/join-requests/${request.id}/${status}`
+      )
+      await refreshJoinRequests()
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The join request could not be updated."
+      )
+    }
   }
 
   const renameSpeaker = async (speakerId: string, displayName: string) => {
@@ -914,9 +1040,17 @@ export function LiveTranscriptionView({
 
   const copyJoinCode = async () => {
     if (!snapshot?.session.joinCode) return
-    await navigator.clipboard.writeText(snapshot.session.joinCode)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
+    try {
+      await navigator.clipboard.writeText(snapshot.session.joinCode)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The room code could not be copied."
+      )
+    }
   }
 
   const rotateJoinCode = async () => {
@@ -1210,10 +1344,9 @@ export function LiveTranscriptionView({
 }
 
 function transcriptionModeLabel(endpoint: Endpoint) {
-  const realtime = Boolean(
-    endpoint.capabilities["realtime-transcription"] ||
-    endpoint.providerType === "openai" ||
-    endpoint.providerType === "gemini"
+  const realtime = endpointSupportsCapability(
+    endpoint,
+    "realtime-transcription"
   )
   const whisperGateway =
     endpoint.providerType === "openai-compatible" &&
@@ -1224,4 +1357,35 @@ function transcriptionModeLabel(endpoint: Endpoint) {
   )
   if (chunked) return "HTTP chunks"
   return "Realtime"
+}
+
+function endpointSupportsTranscription(endpoint: Endpoint) {
+  const capabilities = endpoint.capabilities ?? {}
+  if (Object.prototype.hasOwnProperty.call(capabilities, "transcription")) {
+    return Boolean(capabilities.transcription)
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(capabilities, "chunked-transcription")
+  ) {
+    return Boolean(capabilities["chunked-transcription"])
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(capabilities, "realtime-transcription")
+  ) {
+    return Boolean(capabilities["realtime-transcription"])
+  }
+  return (
+    endpoint.providerType === "openai" || endpoint.providerType === "gemini"
+  )
+}
+
+function endpointSupportsCapability(endpoint: Endpoint, capability: string) {
+  const capabilities = endpoint.capabilities ?? {}
+  if (Object.prototype.hasOwnProperty.call(capabilities, capability)) {
+    return Boolean(capabilities[capability])
+  }
+  return (
+    (capability === "realtime-transcription" || capability === "diarization") &&
+    (endpoint.providerType === "openai" || endpoint.providerType === "gemini")
+  )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ArrowRight, KeyRound, ShieldCheck } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { api } from "@/lib/api"
+import { api, API_URL } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type AuthMode = "login" | "register"
@@ -32,6 +32,22 @@ export function LoginForm({
   const [displayName, setDisplayName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [oidcEnabled, setOidcEnabled] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void api
+      .getAuthConfig()
+      .then((config) => {
+        if (!cancelled) setOidcEnabled(config.oidcEnabled)
+      })
+      .catch(() => {
+        if (!cancelled) setOidcEnabled(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const isRegister = mode === "register"
 
@@ -63,7 +79,9 @@ export function LoginForm({
       )
       window.location.assign(safeNext(window.location.search))
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not authenticate")
+      setError(
+        caught instanceof Error ? caught.message : "Could not authenticate"
+      )
     } finally {
       setLoading(false)
     }
@@ -121,7 +139,9 @@ export function LoginForm({
                 <Input
                   id="password"
                   type="password"
-                  autoComplete={isRegister ? "new-password" : "current-password"}
+                  autoComplete={
+                    isRegister ? "new-password" : "current-password"
+                  }
                   placeholder="At least 8 characters"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
@@ -166,25 +186,29 @@ export function LoginForm({
                     : isRegister
                       ? "Create workspace"
                       : "Sign in"}
-                  {!loading && <ArrowRight data-icon="inline-end" aria-hidden="true" />}
+                  {!loading && (
+                    <ArrowRight data-icon="inline-end" aria-hidden="true" />
+                  )}
                 </Button>
               </Field>
 
-              <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
-                Or continue with
-              </FieldSeparator>
+              {oidcEnabled && (
+                <>
+                  <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
+                    Or continue with
+                  </FieldSeparator>
 
-              <Field>
-                {/* OIDC is an auth endpoint and must perform a full redirect. */}
-                {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                <a
-                  className={buttonVariants({ variant: "outline" })}
-                  href="/api/v1/auth/oidc/start"
-                >
-                  <KeyRound data-icon="inline-start" aria-hidden="true" />
-                  Continue with OIDC
-                </a>
-              </Field>
+                  <Field>
+                    <a
+                      className={buttonVariants({ variant: "outline" })}
+                      href={`${API_URL}/api/v1/auth/oidc/start?next=${encodeURIComponent(safeNext(typeof window === "undefined" ? "" : window.location.search))}`}
+                    >
+                      <KeyRound data-icon="inline-start" aria-hidden="true" />
+                      Continue with OIDC
+                    </a>
+                  </Field>
+                </>
+              )}
 
               <FieldDescription className="text-center">
                 {isRegister ? "Already have an account?" : "New to JustAI?"}{" "}
@@ -218,7 +242,14 @@ export function LoginForm({
 
 function safeNext(search: string) {
   const value = new URLSearchParams(search).get("next")
-  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+  if (
+    !value ||
+    value.includes("\\") ||
+    value.includes("\r") ||
+    value.includes("\n") ||
+    !value.startsWith("/") ||
+    value.startsWith("//")
+  ) {
     return "/"
   }
   return value

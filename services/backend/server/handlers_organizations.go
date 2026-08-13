@@ -195,14 +195,28 @@ func (a *App) updateOrganizationMember(c *gin.Context) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("member not found"))
 		return
 	}
+	principal, _ := middleware.GetPrincipal(c)
 	currentRole := middleware.GetOrganizationRole(c)
-	if currentRole != "owner" && (targetRole == "owner" || request.Role == "owner") {
+	if !principal.PlatformAdmin && currentRole != "owner" && (targetRole == "owner" || request.Role == "owner") {
 		writeError(c, http.StatusForbidden, fmt.Errorf("only an owner can manage owner access"))
 		return
 	}
 	if targetRole == "owner" && request.Role != "owner" {
+		// Lock the organization row before counting owners so two concurrent
+		// demotions cannot both observe the same last owner.
+		transaction, err := a.DB.BeginTx(c, nil)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		defer transaction.Rollback()
+		var lockedID uuid.UUID
+		if err := transaction.QueryRowContext(c, `SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, organizationID).Scan(&lockedID); err != nil {
+			writeError(c, http.StatusNotFound, fmt.Errorf("organization not found"))
+			return
+		}
 		var ownerCount int
-		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM organization_members WHERE organization_id = $1 AND role = 'owner'`, organizationID).Scan(&ownerCount); err != nil {
+		if err := transaction.QueryRowContext(c, `SELECT COUNT(*) FROM organization_members WHERE organization_id = $1 AND role = 'owner'`, organizationID).Scan(&ownerCount); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
@@ -210,6 +224,16 @@ func (a *App) updateOrganizationMember(c *gin.Context) {
 			writeError(c, http.StatusBadRequest, fmt.Errorf("an organization must always have an owner"))
 			return
 		}
+		if _, err := transaction.ExecContext(c, `UPDATE organization_members SET role = $3 WHERE organization_id = $1 AND user_id = $2`, organizationID, userID, request.Role); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if err := transaction.Commit(); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"id": userID, "role": request.Role})
+		return
 	}
 	if _, err := a.DB.ExecContext(c, `UPDATE organization_members SET role = $3 WHERE organization_id = $1 AND user_id = $2`, organizationID, userID, request.Role); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -238,7 +262,8 @@ func (a *App) removeOrganizationMember(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("owners must transfer ownership before leaving the workspace"))
 		return
 	}
-	if middleware.GetOrganizationRole(c) == "admin" && targetRole != "member" {
+	principal, _ := middleware.GetPrincipal(c)
+	if !principal.PlatformAdmin && middleware.GetOrganizationRole(c) == "admin" && targetRole != "member" {
 		writeError(c, http.StatusForbidden, fmt.Errorf("admins can only remove members"))
 		return
 	}

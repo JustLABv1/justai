@@ -1,10 +1,5 @@
 export type ViewId =
-  | "chat"
-  | "transcription"
-  | "endpoints"
-  | "knowledge"
-  | "mcp"
-  | "settings"
+  "chat" | "transcription" | "endpoints" | "knowledge" | "mcp" | "settings"
 
 export type User = {
   id: string
@@ -62,6 +57,8 @@ export type KnowledgeSource = {
   sourceUrl?: string
   mimeType?: string
   status: "queued" | "processing" | "ready" | "failed"
+  progress?: number
+  stage?: string
   error?: string
   createdAt: string
   updatedAt: string
@@ -77,15 +74,29 @@ export type MCPServer = {
   credentialConfigured: boolean
   enabled: boolean
   allowedTools: string[]
+  trustedReadOnly?: boolean
+  lastTestedAt?: string | null
+  lastError?: string
+  protocolVersion?: string
+  toolCount?: number
   createdAt: string
   updatedAt: string
 }
 
 export type Citation = {
-  sourceId: string
+  kind?: "knowledge" | "transcription"
+  resourceId?: string
+  sourceId?: string
   title: string
-  chunkIndex: number
+  chunkIndex?: number
+  locator?: string
   snippet: string
+}
+
+export type ConversationContext = {
+  knowledgeSources: KnowledgeSource[]
+  mcpServers: MCPServer[]
+  transcriptionSessions: TranscriptionSession[]
 }
 
 export type ChatToolEvent = {

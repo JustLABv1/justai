@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,13 +106,18 @@ func (m *TranscriptionManager) expireSessions(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	defer rows.Close()
+	var sessionIDs []uuid.UUID
 	for rows.Next() {
 		var sessionID uuid.UUID
 		if rows.Scan(&sessionID) == nil {
-			m.flushPCMForSession(sessionID)
-			m.broadcast(sessionID, "transcription.session", ginData{"status": "completed", "reason": "session limit reached"})
+			sessionIDs = append(sessionIDs, sessionID)
 		}
+	}
+	_ = rows.Close()
+	for _, sessionID := range sessionIDs {
+		m.flushPCMForSession(sessionID)
+		m.broadcast(sessionID, "transcription.session", ginData{"status": "completed", "reason": "session limit reached"})
+		m.closeSession(sessionID)
 	}
 }
 
@@ -139,7 +145,6 @@ func (m *TranscriptionManager) expireRecordings(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	defer rows.Close()
 	ids := make([]uuid.UUID, 0)
 	for rows.Next() {
 		var id uuid.UUID
@@ -147,6 +152,7 @@ func (m *TranscriptionManager) expireRecordings(ctx context.Context) {
 			ids = append(ids, id)
 		}
 	}
+	_ = rows.Close()
 	for _, id := range ids {
 		_ = m.deleteRecording(ctx, id)
 	}
@@ -179,11 +185,24 @@ func (m *TranscriptionManager) unregister(sessionID uuid.UUID, client *transcrip
 	}
 	hub.mu.Lock()
 	delete(hub.clients, client)
+	empty := len(hub.clients) == 0
 	hub.mu.Unlock()
+	if empty {
+		m.mu.Lock()
+		if current := m.hubs[sessionID]; current == hub {
+			delete(m.hubs, sessionID)
+		}
+		m.mu.Unlock()
+	}
 }
 
 func (m *TranscriptionManager) broadcast(sessionID uuid.UUID, eventType string, data any) {
-	hub := m.hub(sessionID)
+	m.mu.Lock()
+	hub := m.hubs[sessionID]
+	m.mu.Unlock()
+	if hub == nil {
+		return
+	}
 	hub.mu.Lock()
 	hub.sequence++
 	sequence := hub.sequence
@@ -195,6 +214,35 @@ func (m *TranscriptionManager) broadcast(sessionID uuid.UUID, eventType string, 
 	for _, client := range clients {
 		client.writeMu.Lock()
 		_ = client.connection.WriteJSON(models.SocketEnvelope{Type: eventType, Sequence: sequence, Data: data})
+		client.writeMu.Unlock()
+	}
+}
+
+// closeSession terminates every websocket attached to a session. A session
+// reaching a terminal state must not leave a capture connection streaming
+// audio into a provider after the UI has stopped it.
+func (m *TranscriptionManager) closeSession(sessionID uuid.UUID) {
+	m.mu.Lock()
+	hub := m.hubs[sessionID]
+	m.mu.Unlock()
+	if hub == nil {
+		return
+	}
+	hub.mu.Lock()
+	clients := make([]*transcriptionClient, 0, len(hub.clients))
+	for client := range hub.clients {
+		clients = append(clients, client)
+	}
+	hub.mu.Unlock()
+	deadline := time.Now().Add(time.Second)
+	for _, client := range clients {
+		if client.role == "transcription-viewer" {
+			// Viewers can keep the final transcript open after a room ends.
+			continue
+		}
+		client.writeMu.Lock()
+		_ = client.connection.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "session completed"), deadline)
+		_ = client.connection.Close()
 		client.writeMu.Unlock()
 	}
 }
@@ -330,6 +378,9 @@ func (m *TranscriptionManager) startRecording(ctx context.Context, sessionID, so
 	}
 	if mimeType == "" {
 		mimeType = "audio/webm;codecs=opus"
+	}
+	if len(mimeType) > 128 || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(mimeType)), "audio/") {
+		return models.TranscriptionRecording{}, fmt.Errorf("recordings must use an audio MIME type")
 	}
 	if driver == "local" {
 		if err := os.MkdirAll(m.Config.Transcription.LocalStoragePath, 0o700); err != nil {

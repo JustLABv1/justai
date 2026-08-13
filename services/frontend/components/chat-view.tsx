@@ -10,7 +10,7 @@ import {
   Wrench,
 } from "lucide-react"
 
-import Ai04, { type Ai04Action } from "@/components/ai-04"
+import Ai04, { type Ai04Action, type Ai04Submission } from "@/components/ai-04"
 import { VoiceMode } from "@/components/voice-mode"
 import { Badge } from "@/components/ui/badge"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
@@ -42,6 +42,7 @@ import type {
   Endpoint,
   User,
   ViewId,
+  ConversationContext,
 } from "@/lib/types"
 
 type SocketEnvelope = {
@@ -67,6 +68,7 @@ type Props = {
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
   onNavigate?: (view: ViewId) => void
+  onOpenHistory?: () => void
 }
 
 function parseToolEvent(content: string): ChatToolEvent | undefined {
@@ -155,30 +157,43 @@ function ToolCallCard({ toolCall }: { toolCall: ChatToolEvent }) {
         <div className="flex min-w-0 items-center gap-2">
           {toolCall.status === "running" ||
           toolCall.status === "awaiting_approval" ? (
-            <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin" />
+            <LoaderCircle
+              aria-hidden="true"
+              className="shrink-0 animate-spin"
+            />
           ) : toolCall.status === "completed" ? (
-            <CheckCircle2 aria-hidden="true" className="shrink-0 text-muted-foreground" />
+            <CheckCircle2
+              aria-hidden="true"
+              className="shrink-0 text-muted-foreground"
+            />
           ) : (
-            <CircleAlert aria-hidden="true" className="shrink-0 text-destructive" />
+            <CircleAlert
+              aria-hidden="true"
+              className="shrink-0 text-destructive"
+            />
           )}
-          <span className="min-w-0 truncate font-medium">{toolCall.toolName}</span>
+          <span className="min-w-0 truncate font-medium">
+            {toolCall.toolName}
+          </span>
           <Badge className="ml-auto shrink-0" variant={statusVariant}>
             {statusLabel}
           </Badge>
         </div>
-        <p className="truncate text-xs text-muted-foreground">{toolCall.serverName}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {toolCall.serverName}
+        </p>
         {toolCall.arguments && Object.keys(toolCall.arguments).length > 0 && (
-          <details className="min-w-0 max-w-full overflow-hidden rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
+          <details className="max-w-full min-w-0 overflow-hidden rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
             <summary className="cursor-pointer font-medium">Arguments</summary>
-            <pre className="mt-2 max-h-32 max-w-full overflow-auto whitespace-pre-wrap break-all text-muted-foreground">
+            <pre className="mt-2 max-h-32 max-w-full overflow-auto break-all whitespace-pre-wrap text-muted-foreground">
               {JSON.stringify(toolCall.arguments, null, 2)}
             </pre>
           </details>
         )}
         {toolCall.result && (
-          <details className="min-w-0 max-w-full overflow-hidden rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
+          <details className="max-w-full min-w-0 overflow-hidden rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
             <summary className="cursor-pointer font-medium">Result</summary>
-            <pre className="mt-2 max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-all text-muted-foreground">
+            <pre className="mt-2 max-h-40 max-w-full overflow-auto break-all whitespace-pre-wrap text-muted-foreground">
               {formatToolResult(toolCall.result)}
             </pre>
           </details>
@@ -201,6 +216,7 @@ export function ChatView({
   onConversationCreated,
   onConversationUpdated,
   onNavigate,
+  onOpenHistory,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -213,14 +229,27 @@ export function ChatView({
   const [toolApproval, setToolApproval] = useState<ToolApproval | null>(null)
   const [toolApprovalBusy, setToolApprovalBusy] = useState(false)
   const [toolNotice, setToolNotice] = useState("")
+  const [conversationContext, setConversationContext] =
+    useState<ConversationContext>({
+      knowledgeSources: [],
+      mcpServers: [],
+      transcriptionSessions: [],
+    })
   const socketRef = useRef<WebSocket | null>(null)
   const conversationIdRef = useRef<string | null>(conversationId)
   const createdConversationIdRef = useRef<string | null>(null)
   const assistantIdRef = useRef("")
   const requestRef = useRef(0)
+  const displayStreamingRef = useRef(false)
+  const bufferedResponseRef = useRef("")
+  const uploadedAttachmentKeysRef = useRef(new Set<string>())
 
+  const activeChatEndpoints = endpoints.filter(
+    (endpoint) => endpoint.enabled && endpoint.capabilities?.chat
+  )
   const activeEndpoint =
-    endpoints.find((endpoint) => endpoint.isDefault) ?? endpoints[0]
+    activeChatEndpoints.find((endpoint) => endpoint.isDefault) ??
+    activeChatEndpoints[0]
 
   useEffect(() => {
     return () => {
@@ -242,10 +271,16 @@ export function ChatView({
     if (conversationChanged) {
       socketRef.current?.close()
       socketRef.current = null
+      uploadedAttachmentKeysRef.current.clear()
       assistantIdRef.current = ""
       setToolApproval(null)
       setToolApprovalBusy(false)
       setToolNotice("")
+      setConversationContext({
+        knowledgeSources: [],
+        mcpServers: [],
+        transcriptionSessions: [],
+      })
     }
 
     queueMicrotask(() => {
@@ -262,6 +297,15 @@ export function ChatView({
         setHistoryLoading(false)
         return
       }
+
+      void api
+        .get<ConversationContext>(
+          `/api/v1/conversations/${nextConversationId}/context`
+        )
+        .then((result) => {
+          if (!cancelled) setConversationContext(result)
+        })
+        .catch(() => undefined)
 
       setHistoryLoading(true)
       void api
@@ -334,10 +378,14 @@ export function ChatView({
       if (envelope.type === "message.accepted") setConnectionState("Thinking")
       if (envelope.type === "message.delta") {
         setStreaming(true)
-        updateAssistant((message) => ({
-          ...message,
-          content: message.content + String(data.delta ?? ""),
-        }))
+        const delta = String(data.delta ?? "")
+        bufferedResponseRef.current += delta
+        if (displayStreamingRef.current) {
+          updateAssistant((message) => ({
+            ...message,
+            content: message.content + delta,
+          }))
+        }
       }
       if (envelope.type === "retrieval.completed") {
         updateAssistant((message) => ({
@@ -346,7 +394,9 @@ export function ChatView({
         }))
       }
       if (envelope.type === "tool.call") {
-        const messageId = String(data.messageId ?? `tool-${data.callId ?? Date.now()}`)
+        const messageId = String(
+          data.messageId ?? `tool-${data.callId ?? Date.now()}`
+        )
         setMessages((current) =>
           upsertToolMessage(current, messageId, socketToolEvent(data))
         )
@@ -369,9 +419,14 @@ export function ChatView({
       }
       if (envelope.type === "tools.ready") setToolNotice("")
       if (envelope.type === "tools.unavailable") {
-        setToolNotice(String(data.message ?? "MCP tools are unavailable for this endpoint."))
+        setToolNotice(
+          String(data.message ?? "MCP tools are unavailable for this endpoint.")
+        )
       }
-      if (envelope.type === "tool.updated" || envelope.type === "tool.completed") {
+      if (
+        envelope.type === "tool.updated" ||
+        envelope.type === "tool.completed"
+      ) {
         const messageId = String(data.messageId ?? "")
         if (messageId) {
           setMessages((current) =>
@@ -392,15 +447,26 @@ export function ChatView({
             ...message,
             content: data.content as string,
           }))
+        else if (!displayStreamingRef.current)
+          updateAssistant((message) => ({
+            ...message,
+            content: bufferedResponseRef.current,
+          }))
+        bufferedResponseRef.current = ""
+        assistantIdRef.current = ""
+        setActiveAssistantId("")
         notifyConversationUpdated()
       }
       if (envelope.type === "error") {
         setStreaming(false)
         setConnectionState("Needs attention")
         setChatError(String(data.message ?? "The model returned an error."))
+        setToolApproval(null)
+        setToolApprovalBusy(false)
         setMessages((current) =>
           current.filter((message) => message.id !== assistantIdRef.current)
         )
+        assistantIdRef.current = ""
         setActiveAssistantId("")
       }
     },
@@ -419,17 +485,60 @@ export function ChatView({
       kind: "chat",
     })
     const socket = new WebSocket(socketURL("/api/v1/ws/chat", response.ticket))
+    socketRef.current = socket
+    let socketOpened = false
+    let rejectOpen: ((reason?: unknown) => void) | null = null
+    let openTimer: number | null = null
     socket.onmessage = handleSocketMessage
-    socket.onclose = () => setConnectionState("Offline")
-    socket.onerror = () => setConnectionState("Needs attention")
+    socket.onclose = () => {
+      if (!socketOpened) {
+        if (openTimer !== null) window.clearTimeout(openTimer)
+        if (socketRef.current === socket) socketRef.current = null
+        rejectOpen?.(new Error("The chat socket closed before connecting"))
+        return
+      }
+      // Ignore an intentional close caused by switching conversations or
+      // unmounting. A live turn on an unexpected disconnect must be released
+      // so the composer cannot remain permanently blocked behind a dead socket.
+      if (socketRef.current !== socket) return
+      socketRef.current = null
+      setConnectionState("Offline")
+      setToolApproval(null)
+      setToolApprovalBusy(false)
+      if (assistantIdRef.current) {
+        setChatError(
+          "The chat connection dropped before the response completed. Try sending again."
+        )
+        setMessages((current) =>
+          current.filter((message) => message.id !== assistantIdRef.current)
+        )
+        assistantIdRef.current = ""
+        setActiveAssistantId("")
+      }
+      setStreaming(false)
+    }
+    socket.onerror = () => {
+      setConnectionState("Needs attention")
+      if (!socketOpened) rejectOpen?.(new Error("Could not connect to the chat socket"))
+    }
 
     await new Promise<void>((resolve, reject) => {
-      socket.onopen = () => resolve()
-      socket.onerror = () =>
-        reject(new Error("Could not connect to the chat socket"))
+      rejectOpen = reject
+      socket.onopen = () => {
+        socketOpened = true
+        rejectOpen = null
+        if (openTimer !== null) window.clearTimeout(openTimer)
+        resolve()
+      }
+      openTimer = window.setTimeout(() => {
+        socket.close()
+        reject(new Error("The chat socket took too long to connect"))
+      }, 15_000)
     })
 
-    socketRef.current = socket
+    if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) {
+      throw new Error("The chat connection was closed before the turn started")
+    }
     socket.send(
       JSON.stringify({
         type: "session.start",
@@ -443,9 +552,139 @@ export function ChatView({
     return socket
   }
 
+  async function ensureConversationForContext() {
+    let activeConversationId = conversationIdRef.current
+    if (activeConversationId) return activeConversationId
+    const response = await api.post<{ conversation: Conversation }>(
+      "/api/v1/conversations"
+    )
+    activeConversationId = response.conversation.id
+    conversationIdRef.current = activeConversationId
+    createdConversationIdRef.current = activeConversationId
+    handleConversationCreated(response.conversation)
+    return activeConversationId
+  }
+
+  async function addFileAttachments(
+    activeConversationId: string,
+    files: File[]
+  ) {
+    for (const file of files) {
+      const key = `${file.name}:${file.size}:${file.lastModified}`
+      if (uploadedAttachmentKeysRef.current.has(key)) continue
+      const body = new FormData()
+      body.append("file", file)
+      await api.upload(
+        `/api/v1/conversations/${activeConversationId}/attachments`,
+        body
+      )
+      uploadedAttachmentKeysRef.current.add(key)
+    }
+  }
+
+  async function sendSubmission(submission: Ai04Submission) {
+    const content = submission.prompt.trim()
+    if (!content && submission.files.length === 0) return
+    if (streaming) {
+      throw new Error(
+        "Wait for the current response to finish before sending another message."
+      )
+    }
+
+    try {
+      const activeConversationId = await ensureConversationForContext()
+      let activeContext = conversationContext
+      if (submission.files.length > 0) {
+        await addFileAttachments(activeConversationId, submission.files)
+      }
+      // Revalidate context immediately before execution. The inspector can
+      // attach or detach a resource in a sibling component while the chat
+      // view is mounted, so a stale local snapshot must never decide whether
+      // a turn is allowed to run.
+      activeContext = await api.get<ConversationContext>(
+        `/api/v1/conversations/${activeConversationId}/context`
+      )
+      setConversationContext(activeContext)
+      if (submission.files.length > 0) notifyConversationUpdated()
+      if (!content) return
+      if (
+        activeContext.knowledgeSources.some(
+          (source) =>
+            source.status === "queued" || source.status === "processing"
+        )
+      ) {
+        throw new Error(
+          "Your attached Knowledge is still indexing. Wait for it to finish or detach it before sending."
+        )
+      }
+      displayStreamingRef.current = submission.streaming
+      bufferedResponseRef.current = ""
+      await sendMessage(content)
+    } catch (caught) {
+      const error =
+        caught instanceof Error
+          ? caught
+          : new Error("The attachment could not be added.")
+      setChatError(error.message)
+      throw error
+    }
+  }
+
+  async function importURL(url: string, title?: string) {
+    try {
+      const id = await ensureConversationForContext()
+      const result = await api.post(
+        `/api/v1/conversations/${id}/attachments/url`,
+        { url, title }
+      )
+      void result
+      setConversationContext(
+        await api.get<ConversationContext>(
+          `/api/v1/conversations/${id}/context`
+        )
+      )
+      notifyConversationUpdated()
+    } catch (caught) {
+      const error =
+        caught instanceof Error
+          ? caught
+          : new Error("The URL could not be imported.")
+      setChatError(error.message)
+      throw error
+    }
+  }
+
+  async function importText(content: string, title?: string) {
+    try {
+      const id = await ensureConversationForContext()
+      await api.post(`/api/v1/conversations/${id}/attachments/text`, {
+        content,
+        title,
+      })
+      setConversationContext(
+        await api.get<ConversationContext>(
+          `/api/v1/conversations/${id}/context`
+        )
+      )
+      notifyConversationUpdated()
+    } catch (caught) {
+      const error =
+        caught instanceof Error
+          ? caught
+          : new Error("The clipboard text could not be imported.")
+      setChatError(error.message)
+      throw error
+    }
+  }
+
   async function sendMessage(content: string) {
     const prompt = content.trim()
-    if (!prompt || streaming) return
+    if (!prompt) return
+    if (streaming) {
+      throw new Error(
+        "Wait for the current response to finish before sending another message."
+      )
+    }
 
     const requestId = `request-${++requestRef.current}`
     const assistantId = `assistant-${requestId}`
@@ -495,12 +734,17 @@ export function ChatView({
       setMessages((current) =>
         current.filter((message) => message.id !== assistantIdRef.current)
       )
+      assistantIdRef.current = ""
       setActiveAssistantId("")
+      throw caught instanceof Error
+        ? caught
+        : new Error("The message could not be sent.")
     }
   }
 
   function decideTool(approved: boolean) {
-    if (!toolApproval || socketRef.current?.readyState !== WebSocket.OPEN) return
+    if (!toolApproval || socketRef.current?.readyState !== WebSocket.OPEN)
+      return
     setToolApprovalBusy(true)
     socketRef.current.send(
       JSON.stringify({
@@ -550,7 +794,10 @@ export function ChatView({
             <Ai04
               onAction={handleAction}
               onVoice={() => setVoiceOpen(true)}
-              onSubmit={(prompt) => void sendMessage(prompt)}
+              onHistory={onOpenHistory}
+              onImportText={(text, title) => importText(text, title)}
+              onImportUrl={(url, title) => importURL(url, title)}
+              onSubmit={(submission) => sendSubmission(submission)}
             />
           </div>
         </div>
@@ -635,12 +882,15 @@ export function ChatView({
                       ) : (
                         <Bubble
                           align={message.role === "user" ? "end" : "start"}
-                          variant={message.role === "user" ? "default" : "muted"}
+                          variant={
+                            message.role === "user" ? "default" : "muted"
+                          }
                         >
                           <BubbleContent>
                             {message.content ? (
                               <Markdown>{message.content}</Markdown>
-                            ) : streaming && message.id === activeAssistantId ? (
+                            ) : streaming &&
+                              message.id === activeAssistantId ? (
                               <Spinner />
                             ) : null}
                           </BubbleContent>
@@ -649,13 +899,31 @@ export function ChatView({
                       {!!message.citations?.length && (
                         <div className="flex flex-wrap gap-1.5 px-3">
                           {message.citations.map((citation) => (
-                            <Badge
-                              className="max-w-full truncate font-normal"
-                              key={`${citation.sourceId}-${citation.chunkIndex}`}
-                              variant="secondary"
+                            <details
+                              className="max-w-full rounded-md border bg-muted/40 px-2 py-1 text-xs"
+                              key={`${citation.resourceId ?? citation.sourceId ?? citation.title}-${citation.locator ?? citation.chunkIndex}`}
                             >
-                              {citation.title}
-                            </Badge>
+                              <summary className="max-w-full cursor-pointer truncate font-medium">
+                                {citation.kind === "transcription"
+                                  ? "Transcript"
+                                  : "Knowledge"}
+                                : {citation.title}
+                              </summary>
+                              <div className="mt-1 space-y-1 text-muted-foreground">
+                                {citation.locator && (
+                                  <p>Location: {citation.locator}</p>
+                                )}
+                                {citation.snippet && (
+                                  <p className="max-w-md whitespace-pre-wrap">
+                                    {citation.snippet}
+                                  </p>
+                                )}
+                                {citation.chunkIndex !== undefined &&
+                                  citation.kind !== "transcription" && (
+                                    <p>Chunk {citation.chunkIndex + 1}</p>
+                                  )}
+                              </div>
+                            </details>
                           ))}
                         </div>
                       )}
@@ -723,8 +991,11 @@ export function ChatView({
         )}
         <Ai04
           compact
+          onHistory={onOpenHistory}
+          onImportText={(text, title) => importText(text, title)}
+          onImportUrl={(url, title) => importURL(url, title)}
           onVoice={() => setVoiceOpen(true)}
-          onSubmit={(prompt) => void sendMessage(prompt)}
+          onSubmit={(submission) => sendSubmission(submission)}
         />
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
           {connectionState} · Responses use your connected JustAI endpoint.

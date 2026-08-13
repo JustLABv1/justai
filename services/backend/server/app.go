@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -44,10 +45,44 @@ func New(cfg config.Config, db *sql.DB) *App {
 
 func (a *App) Router() *gin.Engine {
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery(), middleware.CORS(a.Config.FrontendOrigins), middleware.RequestLog(a.DB))
-	router.GET("/api/v1/health", func(c *gin.Context) {
+	router.Use(gin.Recovery(), middleware.RequestID(), middleware.MaxBodyBytes(26*1024*1024), middleware.CORS(a.Config.FrontendOrigins), middleware.RequestLog(a.DB))
+	healthHandler := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "justai-backend"})
-	})
+	}
+	liveHandler := func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	}
+	readyHandler := func(c *gin.Context) {
+		if a.DB == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database is not configured"})
+			return
+		}
+		if err := a.DB.PingContext(c); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database unavailable"})
+			return
+		}
+		var migrated bool
+		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '007_mcp_tool_cache_marker.sql')`).Scan(&migrated); err != nil || !migrated {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
+			return
+		}
+		if a.RAG == nil || a.Live == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "background workers are unavailable"})
+			return
+		}
+		if _, err := exec.LookPath("pdftotext"); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "pdftotext is unavailable"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	}
+	router.GET("/api/v1/health", healthHandler)
+	router.GET("/api/v1/health/live", liveHandler)
+	router.GET("/api/v1/health/ready", readyHandler)
+	// Keep conventional root health paths available to load balancers while
+	// retaining the versioned paths used by the compose health checks.
+	router.GET("/health/live", liveHandler)
+	router.GET("/health/ready", readyHandler)
 
 	a.registerAuthRoutes(router)
 	transcriptionPublic := router.Group("/api/v1/transcription")
@@ -67,9 +102,9 @@ func (a *App) Router() *gin.Engine {
 	org := protected.Group("")
 	org.Use(middleware.RequireOrg(a.DB))
 	org.GET("/endpoints", a.listEndpoints)
-	org.POST("/endpoints", middleware.RequireOrgRole("owner", "admin"), a.createEndpoint)
-	org.PATCH("/endpoints/:id", middleware.RequireOrgRole("owner", "admin"), a.updateEndpoint)
-	org.DELETE("/endpoints/:id", middleware.RequireOrgRole("owner", "admin"), a.deleteEndpoint)
+	org.POST("/endpoints", a.createEndpoint)
+	org.PATCH("/endpoints/:id", a.updateEndpoint)
+	org.DELETE("/endpoints/:id", a.deleteEndpoint)
 	org.POST("/endpoints/:id/test", a.testEndpoint)
 	org.POST("/ws/tickets", a.createWSTicket)
 	org.POST("/voice/speech", a.synthesizeVoiceSpeech)
@@ -98,13 +133,22 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/knowledge/sources", a.createKnowledgeSource)
 	org.POST("/knowledge/sources/:id/reindex", a.reindexKnowledgeSource)
 	org.DELETE("/knowledge/sources/:id", a.deleteKnowledgeSource)
+	org.GET("/conversations/:id/context", a.getConversationContext)
+	org.POST("/conversations/:id/context/knowledge/:sourceId", a.attachConversationKnowledge)
+	org.DELETE("/conversations/:id/context/knowledge/:sourceId", a.detachConversationKnowledge)
+	org.POST("/conversations/:id/context/mcp/:serverId", a.attachConversationMCP)
+	org.DELETE("/conversations/:id/context/mcp/:serverId", a.detachConversationMCP)
+	org.POST("/conversations/:id/context/transcription/:sessionId", a.attachConversationTranscription)
+	org.DELETE("/conversations/:id/context/transcription/:sessionId", a.detachConversationTranscription)
+	org.POST("/conversations/:id/attachments", a.createConversationAttachment)
+	org.POST("/conversations/:id/attachments/url", a.createConversationURLAttachment)
+	org.POST("/conversations/:id/attachments/text", a.createConversationTextAttachment)
 	org.GET("/mcp/servers", a.listMCPServers)
-	org.POST("/mcp/servers", middleware.RequireOrgRole("owner", "admin"), a.createMCPServer)
-	org.PATCH("/mcp/servers/:id", middleware.RequireOrgRole("owner", "admin"), a.updateMCPServer)
-	org.DELETE("/mcp/servers/:id", middleware.RequireOrgRole("owner", "admin"), a.deleteMCPServer)
+	org.POST("/mcp/servers", a.createMCPServer)
+	org.PATCH("/mcp/servers/:id", a.updateMCPServer)
+	org.DELETE("/mcp/servers/:id", a.deleteMCPServer)
 	org.POST("/mcp/servers/:id/test", a.testMCPServer)
 	org.GET("/mcp/servers/:id/tools", a.listMCPTools)
-	org.POST("/mcp/servers/:id/tools/:tool/call", a.callMCPTool)
 	org.GET("/mcp/servers/:id/oauth/start", a.mcpOAuthStart)
 	org.GET("/conversations", a.listConversations)
 	org.POST("/conversations", a.createConversation)
@@ -131,6 +175,7 @@ func (a *App) registerAuthRoutes(router *gin.Engine) {
 	group.POST("/login", a.login)
 	group.GET("/oidc/start", a.oidcStart)
 	group.GET("/oidc/callback", a.oidcCallback)
+	group.GET("/config", a.authConfig)
 }
 
 func (a *App) issueSession(c *gin.Context, user models.User) error {
@@ -138,14 +183,29 @@ func (a *App) issueSession(c *gin.Context, user models.User) error {
 	if err != nil {
 		return err
 	}
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("justai_session", token, 12*60*60, "/", "", false, true)
+	a.setSessionCookie(c, token, 12*60*60)
 	organizations, err := a.organizationsFor(c, user.ID)
 	if err != nil {
 		return err
 	}
 	c.JSON(http.StatusOK, gin.H{"user": user, "organizations": organizations})
 	return nil
+}
+
+func (a *App) setSessionCookie(c *gin.Context, token string, maxAge int) {
+	c.SetSameSite(a.cookieSameSite())
+	c.SetCookie("justai_session", token, maxAge, "/", a.Config.CookieDomain, a.Config.SecureCookies, true)
+}
+
+func (a *App) cookieSameSite() http.SameSite {
+	switch strings.ToLower(strings.TrimSpace(a.Config.CookieSameSite)) {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "none":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteLaxMode
+	}
 }
 
 func (a *App) userByID(ctx context.Context, userID uuid.UUID) (models.User, error) {
@@ -175,35 +235,48 @@ func (a *App) me(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	user, err := a.userByID(c, principal.UserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	organizations, err := a.organizationsFor(c, user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": user, "organizations": organizations})
+}
+
+func (a *App) authConfig(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"oidcEnabled": a.Config.OIDCEnabled(), "oidcLabel": "Continue with OIDC"})
 }
 
 func (a *App) listOrganizations(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizations, err := a.organizationsFor(c, principal.UserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"organizations": organizations})
 }
 
 func (a *App) logout(c *gin.Context) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("justai_session", "", -1, "/", "", false, true)
+	a.setSessionCookie(c, "", -1)
 	c.Status(http.StatusNoContent)
 }
 
 func writeError(c *gin.Context, status int, err error) {
-	c.JSON(status, gin.H{"error": err.Error()})
+	message := err.Error()
+	c.JSON(status, gin.H{
+		"error":     message,
+		"message":   message,
+		"code":      normalizedHTTPCode(status),
+		"requestId": middleware.GetRequestID(c),
+	})
+}
+
+func normalizedHTTPCode(status int) string {
+	return strings.ToLower(strings.ReplaceAll(http.StatusText(status), " ", "_"))
 }
 
 func decodeJSON(c *gin.Context, target any) bool {

@@ -36,20 +36,22 @@ func RequireAuth(tokens *auth.TokenManager, db *sql.DB) gin.HandlerFunc {
 		}
 		claims, err := tokens.Parse(value)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			AbortError(c, http.StatusUnauthorized, "authentication_required", "authentication required")
 			return
 		}
 		userID, err := uuid.Parse(claims.Subject)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid session subject"})
+			AbortError(c, http.StatusUnauthorized, "invalid_session", "invalid session subject")
 			return
 		}
-		var exists bool
-		if err := db.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, userID).Scan(&exists); err != nil || !exists {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user no longer exists"})
+		var exists, platformAdmin bool
+		if err := db.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1), COALESCE((SELECT is_platform_admin FROM users WHERE id = $1), FALSE)`, userID).Scan(&exists, &platformAdmin); err != nil || !exists {
+			AbortError(c, http.StatusUnauthorized, "user_not_found", "user no longer exists")
 			return
 		}
-		c.Set(PrincipalKey, Principal{UserID: userID, Email: claims.Email, PlatformAdmin: claims.PlatformAdmin})
+		// Resolve the current platform-admin flag from the database instead of
+		// trusting a potentially stale JWT claim after an access change.
+		c.Set(PrincipalKey, Principal{UserID: userID, Email: claims.Email, PlatformAdmin: platformAdmin})
 		c.Next()
 	}
 }
@@ -58,12 +60,12 @@ func RequireOrg(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		principal, ok := GetPrincipal(c)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			AbortError(c, http.StatusUnauthorized, "authentication_required", "authentication required")
 			return
 		}
 		organizationID, role, err := ResolveOrganization(c, db, principal)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "organization access required"})
+			AbortError(c, http.StatusForbidden, "organization_access_required", "organization access required")
 			return
 		}
 		c.Set(OrgIDKey, organizationID)
@@ -76,7 +78,7 @@ func RequireOrgRole(roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, exists := c.Get(OrgRoleKey)
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "organization context required"})
+			AbortError(c, http.StatusForbidden, "organization_context_required", "organization context required")
 			return
 		}
 		roleValue, _ := role.(string)
@@ -90,7 +92,7 @@ func RequireOrgRole(roles ...string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient organization role"})
+		AbortError(c, http.StatusForbidden, "insufficient_role", "insufficient organization role")
 	}
 }
 

@@ -5,7 +5,11 @@ import (
 	"database/sql"
 	"flag"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +20,7 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	var configPath string
 	flag.StringVar(&configPath, "c", "", "path to a YAML config file")
 	flag.StringVar(&configPath, "config", "", "path to a YAML config file")
@@ -25,7 +30,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)
@@ -51,8 +57,22 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 	log.Printf("JustAI backend listening on %s", cfg.Address())
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- server.ListenAndServe()
+	}()
+	select {
+	case err := <-serverErr:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	case <-ctx.Done():
+		shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		cancel()
+		if err := server.Shutdown(shutdownContext); err != nil {
+			log.Printf("backend graceful shutdown failed: %v", err)
+		}
 	}
 }
 

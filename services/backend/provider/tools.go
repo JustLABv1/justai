@@ -48,6 +48,11 @@ type ToolChatEvent struct {
 // advertise the capability because not every gateway exposes function calls.
 func SupportsToolCalling(endpoint Endpoint) bool {
 	if endpoint.ProviderType == "openai" {
+		// Native OpenAI supports tools by default for legacy endpoint records,
+		// while an explicit false flag remains an intentional opt-out.
+		if enabled, declared := endpoint.Capabilities["tool-calling"]; declared {
+			return enabled
+		}
 		return true
 	}
 	return endpoint.ProviderType == "openai-compatible" && endpoint.Capabilities["tool-calling"]

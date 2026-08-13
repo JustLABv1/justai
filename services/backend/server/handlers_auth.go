@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -129,8 +130,16 @@ func (a *App) oidcStart(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("justai_oidc_state", state, 600, "/", "", false, true)
+	nonce, _, err := auth.NewOpaqueToken()
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.SetSameSite(a.cookieSameSite())
+	c.SetCookie("justai_oidc_state", state, 600, "/", a.Config.CookieDomain, a.Config.SecureCookies, true)
+	c.SetCookie("justai_oidc_nonce", nonce, 600, "/", a.Config.CookieDomain, a.Config.SecureCookies, true)
+	next := safeOIDCNext(c.Query("next"))
+	c.SetCookie("justai_oidc_next", next, 600, "/", a.Config.CookieDomain, a.Config.SecureCookies, true)
 	provider, err := oidc.NewProvider(c, a.Config.OIDC.Issuer)
 	if err != nil {
 		writeError(c, http.StatusBadGateway, err)
@@ -143,7 +152,7 @@ func (a *App) oidcStart(c *gin.Context) {
 		RedirectURL:  a.Config.OIDC.RedirectURL,
 		Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
 	}
-	c.Redirect(http.StatusFound, oauthConfig.AuthCodeURL(state))
+	c.Redirect(http.StatusFound, oauthConfig.AuthCodeURL(state, oauth2.SetAuthURLParam("nonce", nonce)))
 }
 
 func (a *App) oidcCallback(c *gin.Context) {
@@ -156,6 +165,9 @@ func (a *App) oidcCallback(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid OIDC state"))
 		return
 	}
+	next, _ := c.Cookie("justai_oidc_next")
+	next = safeOIDCNext(next)
+	nonce, _ := c.Cookie("justai_oidc_nonce")
 	provider, err := oidc.NewProvider(c, a.Config.OIDC.Issuer)
 	if err != nil {
 		writeError(c, http.StatusBadGateway, err)
@@ -181,8 +193,9 @@ func (a *App) oidcCallback(c *gin.Context) {
 		Subject string `json:"sub"`
 		Email   string `json:"email"`
 		Name    string `json:"name"`
+		Nonce   string `json:"nonce"`
 	}
-	if err := idToken.Claims(&claims); err != nil || claims.Subject == "" || claims.Email == "" {
+	if err := idToken.Claims(&claims); err != nil || claims.Subject == "" || claims.Email == "" || nonce == "" || claims.Nonce != nonce {
 		writeError(c, http.StatusBadGateway, fmt.Errorf("OIDC identity did not include sub and email"))
 		return
 	}
@@ -191,9 +204,29 @@ func (a *App) oidcCallback(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if err := a.issueSession(c, user); err != nil {
+	sessionToken, err := a.Tokens.Issue(user.ID, user.Email, user.PlatformAdmin)
+	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
+		return
 	}
+	a.setSessionCookie(c, sessionToken, 12*60*60)
+	c.SetCookie("justai_oidc_state", "", -1, "/", a.Config.CookieDomain, a.Config.SecureCookies, true)
+	c.SetCookie("justai_oidc_nonce", "", -1, "/", a.Config.CookieDomain, a.Config.SecureCookies, true)
+	c.SetCookie("justai_oidc_next", "", -1, "/", a.Config.CookieDomain, a.Config.SecureCookies, true)
+	frontend := "/"
+	if len(a.Config.FrontendOrigins) > 0 && a.Config.FrontendOrigins[0] != "*" {
+		frontend = strings.TrimRight(a.Config.FrontendOrigins[0], "/")
+	}
+	c.Redirect(http.StatusFound, frontend+next)
+}
+
+func safeOIDCNext(value string) string {
+	value = strings.TrimSpace(value)
+	parsed, err := url.Parse(value)
+	if err != nil || value == "" || strings.ContainsAny(value, "\\\r\n") || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || parsed.IsAbs() || parsed.Host != "" {
+		return "/"
+	}
+	return value
 }
 
 func (a *App) upsertOIDCUser(ctx context.Context, subject, email, name string) (models.User, error) {
@@ -213,8 +246,10 @@ func (a *App) upsertOIDCUser(ctx context.Context, subject, email, name string) (
 	var existingID uuid.UUID
 	err = transaction.QueryRowContext(ctx, `SELECT id FROM users WHERE email = $1`, strings.ToLower(email)).Scan(&existingID)
 	if err == nil {
-		user, err = a.userByID(ctx, existingID)
-		if err != nil {
+		// Read through the same transaction. Using the pool while this
+		// transaction is open can deadlock deployments configured with a small
+		// connection limit and could observe a partially committed identity.
+		if err := transaction.QueryRowContext(ctx, `SELECT id, email, display_name, is_platform_admin FROM users WHERE id = $1`, existingID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin); err != nil {
 			return models.User{}, err
 		}
 	} else if err == sql.ErrNoRows {

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"justai-backend/mcp"
 	"justai-backend/middleware"
 	"justai-backend/models"
 	"justai-backend/provider"
@@ -88,7 +89,7 @@ func (a *App) voiceWebSocket(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	ticket, err := a.consumeVoiceTicket(c.Request.Context(), c.Query("ticket"), principal.UserID)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		writeError(c, http.StatusUnauthorized, err)
 		return
 	}
 	connection, err := a.upgradeWebSocket(c)
@@ -287,7 +288,7 @@ func (a *App) startVoiceSession(ctx context.Context, connection *websocket.Conn,
 		"transcriptionEndpointId": transcriptionEndpointID,
 		"mode":                    mode,
 		"toolCalling":             provider.SupportsToolCalling(chatEndpoint),
-		"tts":                     chatEndpoint.ProviderType == "openai" || chatEndpoint.ProviderType == "openai-compatible",
+		"tts":                     endpointSupports(chatEndpoint, "tts"),
 	}})
 	return nil
 }
@@ -381,6 +382,19 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	requestID := "voice-" + uuid.NewString()
 	conversationID := state.conversationID
 	endpointID := state.endpointID
+	indexing, err := a.conversationHasIndexingKnowledge(ctx, conversationID)
+	if err != nil {
+		if ctx.Err() == nil {
+			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "conversation context could not be checked: " + err.Error()}})
+		}
+		return
+	}
+	if indexing {
+		if ctx.Err() == nil {
+			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "attached Knowledge is still indexing; detach it or wait for indexing to finish"}})
+		}
+		return
+	}
 	if _, err := a.DB.ExecContext(ctx, `INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', $2)`, conversationID, content); err != nil {
 		if ctx.Err() == nil {
 			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
@@ -395,7 +409,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	}
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
-	citations, err := a.searchKnowledge(ctx, organizationID, userID, content, 6)
+	citations, err := a.searchKnowledge(ctx, organizationID, userID, conversationID, content, 6)
 	if err != nil {
 		citations = nil
 	}
@@ -419,7 +433,8 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	}
 	var response strings.Builder
 	if provider.SupportsToolCalling(endpoint) {
-		definitions, bindings := a.loadVoiceTools(ctx, userID, organizationID)
+		discovery := a.discoverConversationTools(ctx, userID, organizationID, conversationID)
+		definitions, bindings := discovery.Definitions, discovery.Bindings
 		if len(definitions) > 0 {
 			toolMessages := voiceToolMessages(history)
 			toolRounds := 0
@@ -463,19 +478,37 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 							continue
 						}
 					}
-					approvalID, approved, approvalErr := a.awaitVoiceApproval(ctx, connection, state, userID, organizationID, requestID, binding, call, arguments, toolRounds)
-					if approvalErr != nil {
-						return
+					approvalID := ""
+					approved := true
+					if binding.RequiresApproval {
+						var approvalErr error
+						approvalID, approved, approvalErr = a.awaitVoiceApproval(ctx, connection, state, userID, organizationID, requestID, binding, call, arguments, toolRounds)
+						if approvalErr != nil {
+							_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": approvalErr.Error()}})
+							return
+						}
+					} else {
+						// Trusted execution is deliberately narrow: discovery only marks
+						// a binding as auto-approved when the server is trusted and the
+						// tool explicitly advertises read-only, non-destructive hints.
+						a.auditVoiceTool(ctx, userID, organizationID, "voice.mcp.auto_approved", binding.ServerID, map[string]any{
+							"conversationId": conversationID,
+							"serverId":       binding.ServerID,
+							"serverName":     binding.ServerName,
+							"tool":           binding.ToolName,
+							"arguments":      arguments,
+							"reason":         "trusted_read_only",
+						})
 					}
 					if !approved {
 						_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": "declined by user"}})
-						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The user declined this Home Assistant action."})
+						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The user declined this MCP tool call."})
 						continue
 					}
 					result, callErr := a.executeVoiceTool(ctx, userID, organizationID, conversationID, binding, arguments)
 					if callErr != nil {
 						_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": callErr.Error()}})
-						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The Home Assistant tool failed: " + callErr.Error()})
+						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The MCP tool failed: " + callErr.Error()})
 						continue
 					}
 					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": true}})
@@ -483,7 +516,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 				}
 			}
 			if lastHadTools && strings.TrimSpace(response.String()) == "" {
-				response.WriteString("I stopped after four Home Assistant actions to keep this turn safe.")
+				response.WriteString("I stopped after four MCP tool rounds to keep this turn safe.")
 				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": response.String()}})
 			}
 		} else {
@@ -522,17 +555,16 @@ func voiceToolMessages(history []provider.Message) []provider.ToolMessage {
 	return result
 }
 
-func (a *App) loadVoiceTools(ctx context.Context, userID, organizationID uuid.UUID) ([]provider.ToolDefinition, map[string]voiceToolBinding) {
-	discovery := a.discoverVoiceTools(ctx, userID, organizationID)
-	return discovery.Definitions, discovery.Bindings
-}
-
-func (a *App) discoverVoiceTools(ctx context.Context, userID, organizationID uuid.UUID) voiceToolDiscovery {
+func (a *App) discoverConversationTools(ctx context.Context, userID, organizationID, conversationID uuid.UUID) voiceToolDiscovery {
 	result := voiceToolDiscovery{
 		Definitions: []provider.ToolDefinition{},
 		Bindings:    map[string]voiceToolBinding{},
 	}
-	rows, err := a.DB.QueryContext(ctx, `SELECT id, name FROM mcp_servers WHERE enabled = TRUE AND ((scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2)) ORDER BY created_at`, organizationID, userID)
+	if conversationID == uuid.Nil {
+		result.Errors = []string{"MCP tools require an active conversation context"}
+		return result
+	}
+	rows, err := a.DB.QueryContext(ctx, `SELECT ms.id, ms.name FROM conversation_mcp_servers cms JOIN mcp_servers ms ON ms.id = cms.server_id WHERE cms.conversation_id = $1 AND ms.enabled = TRUE ORDER BY cms.created_at`, conversationID)
 	if err != nil {
 		result.Errors = []string{"could not load configured MCP servers: " + err.Error()}
 		return result
@@ -551,7 +583,20 @@ func (a *App) discoverVoiceTools(ctx context.Context, userID, organizationID uui
 			result.Errors = append(result.Errors, fmt.Sprintf("%s could not be loaded: %v", serverName, err))
 			continue
 		}
-		tools, err := server.ListTools(ctx)
+		tools, cached, cacheErr := a.cachedMCPTools(ctx, serverID)
+		if cacheErr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s tool cache could not be loaded: %v", serverName, cacheErr))
+			continue
+		}
+		if !cached {
+			mcp.Invalidate(server.ID)
+			tools, err = server.ListTools(ctx)
+			if err == nil {
+				if cacheErr := a.cacheMCPTools(ctx, serverID, tools); cacheErr != nil {
+					err = fmt.Errorf("MCP tools were discovered but could not be cached: %w", cacheErr)
+				}
+			}
+		}
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s tool discovery failed: %v", serverName, err))
 			continue
@@ -572,7 +617,7 @@ func (a *App) discoverVoiceTools(ctx context.Context, userID, organizationID uui
 				ServerName:       serverName,
 				ToolName:         tool.Name,
 				Definition:       definition,
-				RequiresApproval: !tool.Annotations.ReadOnlyHint || tool.Annotations.DestructiveHint,
+				RequiresApproval: !(server.TrustedReadOnly && tool.Annotations.ReadOnlyHintSet && tool.Annotations.ReadOnlyHint && tool.Annotations.DestructiveHintSet && !tool.Annotations.DestructiveHint),
 			}
 		}
 	}
@@ -632,6 +677,8 @@ func (a *App) awaitVoiceApproval(ctx context.Context, connection *websocket.Conn
 	state.pending[approvalID] = pending
 	state.pendingMu.Unlock()
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.approval_required", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "serverId": binding.ServerID, "serverName": binding.ServerName, "toolName": binding.ToolName, "arguments": arguments, "round": round}})
+	timeout := time.NewTimer(2 * time.Minute)
+	defer timeout.Stop()
 	select {
 	case approved := <-pending.Decision:
 		auditDetails := map[string]any{"conversationId": state.conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "approved": approved}
@@ -641,11 +688,27 @@ func (a *App) awaitVoiceApproval(ctx context.Context, connection *websocket.Conn
 		state.pendingMu.Lock()
 		delete(state.pending, approvalID)
 		state.pendingMu.Unlock()
+		auditDetails := map[string]any{"conversationId": state.conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "approved": false, "reason": ctx.Err().Error()}
+		a.auditVoiceTool(ctx, userID, organizationID, "voice.mcp.approval", binding.ServerID, auditDetails)
 		return approvalID, false, ctx.Err()
+	case <-timeout.C:
+		state.pendingMu.Lock()
+		delete(state.pending, approvalID)
+		state.pendingMu.Unlock()
+		auditDetails := map[string]any{"conversationId": state.conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "approved": false, "reason": "timeout"}
+		a.auditVoiceTool(ctx, userID, organizationID, "voice.mcp.approval", binding.ServerID, auditDetails)
+		return approvalID, false, fmt.Errorf("MCP approval timed out")
 	}
 }
 
 func (a *App) executeVoiceTool(ctx context.Context, userID, organizationID, conversationID uuid.UUID, binding voiceToolBinding, arguments map[string]any) (json.RawMessage, error) {
+	attached, err := a.conversationHasMCPServer(ctx, userID, organizationID, conversationID, binding.ServerID)
+	if err != nil {
+		return nil, err
+	}
+	if !attached {
+		return nil, fmt.Errorf("MCP server is no longer attached to this conversation")
+	}
 	server, err := a.loadMCPServer(ctx, binding.ServerID.String())
 	if err != nil {
 		a.auditVoiceTool(ctx, userID, organizationID, "voice.mcp.completed", binding.ServerID, map[string]any{
@@ -659,6 +722,13 @@ func (a *App) executeVoiceTool(ctx context.Context, userID, organizationID, conv
 		})
 		return nil, err
 	}
+	a.auditVoiceTool(ctx, userID, organizationID, "voice.mcp.execution", binding.ServerID, map[string]any{
+		"conversationId": conversationID,
+		"serverId":       binding.ServerID,
+		"serverName":     binding.ServerName,
+		"tool":           binding.ToolName,
+		"arguments":      arguments,
+	})
 	result, err := server.CallTool(ctx, binding.ToolName, arguments)
 	details := map[string]any{"conversationId": conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "success": err == nil}
 	if err != nil {
@@ -714,9 +784,13 @@ func (a *App) synthesizeVoiceSpeech(c *gin.Context) {
 		writeError(c, http.StatusBadGateway, err)
 		return
 	}
+	if !endpointSupports(endpoint, "tts") {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("endpoint does not support text to speech"))
+		return
+	}
 	data, contentType, err := provider.SynthesizeSpeech(c, endpoint, text, request.Voice)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "fallback": true})
+		writeError(c, http.StatusBadGateway, err)
 		return
 	}
 	c.Data(http.StatusOK, contentType, data)

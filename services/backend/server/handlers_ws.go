@@ -18,7 +18,6 @@ import (
 	"justai-backend/middleware"
 	"justai-backend/models"
 	"justai-backend/provider"
-	"justai-backend/rag"
 )
 
 type wsTicketRequest struct {
@@ -133,6 +132,17 @@ func (a *App) createWSTicket(c *gin.Context) {
 			writeError(c, http.StatusForbidden, err)
 			return
 		}
+		if request.Kind != "transcription-viewer" {
+			var sessionStatus string
+			if err := a.DB.QueryRowContext(c, `SELECT status FROM transcription_sessions WHERE id = $1`, parsedSession).Scan(&sessionStatus); err != nil {
+				writeError(c, http.StatusInternalServerError, err)
+				return
+			}
+			if sessionStatus == "completed" || sessionStatus == "processing" {
+				writeError(c, http.StatusConflict, fmt.Errorf("transcription session is no longer live"))
+				return
+			}
+		}
 		sessionID = parsedSession
 		if request.Kind == "transcription-capture" {
 			parsedSource, err := uuid.Parse(request.SourceID)
@@ -164,7 +174,7 @@ func (a *App) chatWebSocket(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, err := a.consumeTicket(c, c.Query("ticket"), "chat", principal.UserID)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		writeError(c, http.StatusUnauthorized, err)
 		return
 	}
 	connection, err := a.upgradeWebSocket(c)
@@ -332,6 +342,15 @@ func (a *App) runChatSocket(ctx *gin.Context, connection *websocket.Conn, userID
 }
 
 func (a *App) streamChatMessage(ctx context.Context, connection *websocket.Conn, state *chatState, userID, organizationID, endpointID, conversationID uuid.UUID, requestID, content string) {
+	indexing, err := a.conversationHasIndexingKnowledge(ctx, conversationID)
+	if err != nil {
+		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "conversation context could not be checked: " + err.Error()}})
+		return
+	}
+	if indexing {
+		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "attached Knowledge is still indexing; detach it or wait for indexing to finish"}})
+		return
+	}
 	if _, err := a.DB.ExecContext(ctx, `INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', $2)`, conversationID, content); err != nil {
 		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
 		return
@@ -346,7 +365,7 @@ func (a *App) streamChatMessage(ctx context.Context, connection *websocket.Conn,
 	}
 	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
 	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
-	citations, err := a.searchKnowledge(ctx, organizationID, userID, content, 6)
+	citations, err := a.searchKnowledge(ctx, organizationID, userID, conversationID, content, 6)
 	if err != nil {
 		citations = nil
 	}
@@ -366,7 +385,7 @@ func (a *App) streamChatMessage(ctx context.Context, connection *websocket.Conn,
 		return
 	}
 	var response strings.Builder
-	discovery := a.discoverVoiceTools(ctx, userID, organizationID)
+	discovery := a.discoverConversationTools(ctx, userID, organizationID, conversationID)
 	definitions, bindings := discovery.Definitions, discovery.Bindings
 	if len(definitions) > 0 {
 		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tools.ready", RequestID: requestID, Data: gin.H{"count": len(definitions)}})
@@ -413,11 +432,20 @@ func (a *App) streamChatMessage(ctx context.Context, connection *websocket.Conn,
 	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "message.completed", RequestID: requestID, Data: gin.H{"conversationId": conversationID, "content": assistantContent, "citations": citations}})
 }
 
-func (a *App) searchKnowledge(ctx context.Context, organizationID, userID uuid.UUID, query string, limit int) ([]models.Citation, error) {
-	if a.RAG != nil {
-		return a.RAG.Search(ctx, organizationID, userID, query, limit)
-	}
-	return rag.Search(ctx, a.DB, organizationID, userID, query, limit)
+func (a *App) conversationHasIndexingKnowledge(ctx context.Context, conversationID uuid.UUID) (bool, error) {
+	var indexing bool
+	err := a.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM conversation_knowledge_sources cks
+			JOIN knowledge_sources ks ON ks.id = cks.source_id
+			WHERE cks.conversation_id = $1 AND ks.status IN ('queued', 'processing')
+		)`, conversationID).Scan(&indexing)
+	return indexing, err
+}
+
+func (a *App) searchKnowledge(ctx context.Context, organizationID, userID, conversationID uuid.UUID, query string, limit int) ([]models.Citation, error) {
+	return a.RAG.SearchConversation(ctx, conversationID, query, limit)
 }
 
 func chatToolInstructions() string {
@@ -653,6 +681,15 @@ func (a *App) streamChatWithTools(ctx context.Context, connection *websocket.Con
 					_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
 					return approvalErr
 				}
+			} else {
+				a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.auto_approved", binding.ServerID, map[string]any{
+					"conversationId": conversationID,
+					"serverId":       binding.ServerID,
+					"serverName":     binding.ServerName,
+					"tool":           binding.ToolName,
+					"arguments":      arguments,
+					"reason":         "trusted_read_only",
+				})
 			}
 			if !approved {
 				event.Status = "declined"
@@ -700,6 +737,8 @@ func (a *App) awaitChatApproval(ctx context.Context, connection *websocket.Conn,
 	state.pending[approvalID] = pending
 	state.pendingMu.Unlock()
 	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.approval_required", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "messageId": messageID, "callId": call.ID, "serverId": binding.ServerID, "serverName": binding.ServerName, "toolName": binding.ToolName, "arguments": arguments, "round": round}})
+	timeout := time.NewTimer(2 * time.Minute)
+	defer timeout.Stop()
 	select {
 	case approved := <-pending.Decision:
 		state.pendingMu.Lock()
@@ -711,7 +750,14 @@ func (a *App) awaitChatApproval(ctx context.Context, connection *websocket.Conn,
 		state.pendingMu.Lock()
 		delete(state.pending, approvalID)
 		state.pendingMu.Unlock()
+		a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.approval", binding.ServerID, map[string]any{"conversationId": state.conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "approved": false, "reason": ctx.Err().Error()})
 		return approvalID, false, ctx.Err()
+	case <-timeout.C:
+		state.pendingMu.Lock()
+		delete(state.pending, approvalID)
+		state.pendingMu.Unlock()
+		a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.approval", binding.ServerID, map[string]any{"conversationId": state.conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "approved": false, "reason": "timeout"})
+		return approvalID, false, fmt.Errorf("MCP approval timed out")
 	}
 }
 
@@ -730,11 +776,25 @@ func decideChatApproval(state *chatState, approvalID string, approved bool) bool
 }
 
 func (a *App) executeChatMCPTool(ctx context.Context, userID, organizationID, conversationID uuid.UUID, binding voiceToolBinding, arguments map[string]any) (json.RawMessage, error) {
+	attached, err := a.conversationHasMCPServer(ctx, userID, organizationID, conversationID, binding.ServerID)
+	if err != nil {
+		return nil, err
+	}
+	if !attached {
+		return nil, fmt.Errorf("MCP server is no longer attached to this conversation")
+	}
 	server, err := a.loadMCPServer(ctx, binding.ServerID.String())
 	if err != nil {
 		a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.completed", binding.ServerID, map[string]any{"conversationId": conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "success": false, "error": err.Error()})
 		return nil, err
 	}
+	a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.execution", binding.ServerID, map[string]any{
+		"conversationId": conversationID,
+		"serverId":       binding.ServerID,
+		"serverName":     binding.ServerName,
+		"tool":           binding.ToolName,
+		"arguments":      arguments,
+	})
 	result, err := server.CallTool(ctx, binding.ToolName, arguments)
 	details := map[string]any{"conversationId": conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "success": err == nil}
 	if err != nil {
@@ -742,6 +802,22 @@ func (a *App) executeChatMCPTool(ctx context.Context, userID, organizationID, co
 	}
 	a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.completed", binding.ServerID, details)
 	return result, err
+}
+
+func (a *App) conversationHasMCPServer(ctx context.Context, userID, organizationID, conversationID, serverID uuid.UUID) (bool, error) {
+	var attached bool
+	err := a.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM conversation_mcp_servers cms
+			JOIN conversations c ON c.id = cms.conversation_id
+			JOIN mcp_servers ms ON ms.id = cms.server_id
+			WHERE cms.conversation_id = $1 AND cms.server_id = $2
+			  AND c.user_id = $3 AND c.organization_id = $4
+			  AND ms.enabled = TRUE
+			  AND ((ms.scope_type = 'organization' AND ms.scope_id = $4) OR (ms.scope_type = 'user' AND ms.scope_id = $3))
+		)`, conversationID, serverID, userID, organizationID).Scan(&attached)
+	return attached, err
 }
 
 func (a *App) ensureConversation(ctx context.Context, userID, organizationID uuid.UUID, rawID string) (uuid.UUID, error) {
@@ -792,7 +868,7 @@ func (a *App) resolveEndpoint(ctx context.Context, userID, organizationID uuid.U
 		}
 		var scopeType string
 		var scopeID sql.NullString
-		if err := a.DB.QueryRowContext(ctx, `SELECT scope_type, scope_id::text FROM endpoint_settings WHERE id = $1 AND enabled = TRUE`, id).Scan(&scopeType, &scopeID); err != nil {
+		if err := a.DB.QueryRowContext(ctx, `SELECT scope_type, scope_id::text FROM endpoint_settings WHERE id = $1 AND enabled = TRUE AND capabilities ? 'chat'`, id).Scan(&scopeType, &scopeID); err != nil {
 			return uuid.Nil, fmt.Errorf("endpoint not found")
 		}
 		if scopeType == "global" {
@@ -807,7 +883,7 @@ func (a *App) resolveEndpoint(ctx context.Context, userID, organizationID uuid.U
 		return uuid.Nil, fmt.Errorf("endpoint is outside the current scope")
 	}
 	var id uuid.UUID
-	if err := a.DB.QueryRowContext(ctx, `SELECT id FROM endpoint_settings WHERE enabled = TRUE AND ((scope_type = 'user' AND scope_id = $1) OR (scope_type = 'organization' AND scope_id = $2) OR scope_type = 'global') ORDER BY CASE WHEN scope_type = 'user' THEN 1 WHEN scope_type = 'organization' THEN 2 ELSE 3 END, is_default DESC, created_at LIMIT 1`, userID, organizationID).Scan(&id); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT id FROM endpoint_settings WHERE enabled = TRUE AND capabilities ? 'chat' AND ((scope_type = 'user' AND scope_id = $1) OR (scope_type = 'organization' AND scope_id = $2) OR scope_type = 'global') ORDER BY CASE WHEN scope_type = 'user' THEN 1 WHEN scope_type = 'organization' THEN 2 ELSE 3 END, is_default DESC, created_at LIMIT 1`, userID, organizationID).Scan(&id); err != nil {
 		return uuid.Nil, fmt.Errorf("no enabled chat endpoint is configured")
 	}
 	return id, nil

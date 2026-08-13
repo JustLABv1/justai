@@ -1,0 +1,340 @@
+.productionVariant {
+  display: flex;
+  min-width: 0;
+  min-height: calc(100svh - 4rem);
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.productionContent {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.sessionHeader {
+  display: flex;
+  min-height: 72px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklch, var(--background) 88%, transparent);
+  padding: 14px clamp(16px, 3vw, 32px);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.productionVariant .orbitCanvas {
+  --orbit-radius: min(18vw, 180px);
+}
+
+.orbitWorkspace {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) 252px;
+  gap: 16px;
+}
+
+.orbitCanvas {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: color-mix(in oklch, var(--card) 82%, var(--background));
+  box-shadow: var(--shadow-sm);
+  --orbit-radius: min(27vw, 248px);
+  min-height: 510px;
+}
+
+.orbitCanvas::before {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(color-mix(in oklch, var(--muted-foreground) 25%, transparent) 0.7px, transparent 0.7px);
+  background-size: 18px 18px;
+  content: "";
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.orbitTrack {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: calc(var(--orbit-radius) * 2);
+  height: calc(var(--orbit-radius) * 2);
+  transform: translate(-50%, -50%);
+  border: 1px solid color-mix(in oklch, var(--primary) 24%, var(--border));
+  border-radius: 50%;
+  opacity: 0.72;
+}
+
+.orbitTrack::before,
+.orbitTrack::after {
+  position: absolute;
+  inset: 10%;
+  border: 1px dashed color-mix(in oklch, var(--muted-foreground) 25%, transparent);
+  border-radius: 50%;
+  content: "";
+}
+
+.orbitTrack::after {
+  inset: 25%;
+  border-style: solid;
+  opacity: 0.45;
+}
+
+.orbitHint {
+  position: absolute;
+  top: 20px;
+  left: 22px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.orbitHintText {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.speakerNode {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  width: 148px;
+  height: 96px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  overflow: visible;
+  padding: 0;
+  transform: translate(-50%, -50%) rotate(var(--speaker-angle)) translateY(calc(-1 * var(--orbit-radius))) rotate(calc(-1 * var(--speaker-angle)));
+  transform-origin: center;
+  transition: transform 350ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.speakerNode:hover,
+.speakerNode:focus-visible {
+  background: transparent;
+}
+
+.speakerNodeActive {
+  z-index: 5;
+}
+
+.speakerNodeHalo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 62px;
+  height: 62px;
+  border: 1px solid color-mix(in oklch, var(--speaker-accent) 50%, transparent);
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.8);
+}
+
+.speakerNodeActive .speakerNodeHalo {
+  animation: speaker-halo 1.8s ease-out infinite;
+  opacity: 1;
+}
+
+@keyframes speaker-halo {
+  0% { opacity: 0.8; transform: translate(-50%, -50%) scale(0.9); }
+  75%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.65); }
+}
+
+.speakerAvatar {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 2px solid var(--background);
+  background: color-mix(in oklch, var(--speaker-accent) 28%, var(--muted));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--speaker-accent) 44%, var(--border));
+  transform: translate(-50%, -50%);
+  transition: transform 180ms ease-out, box-shadow 180ms ease-out;
+}
+
+.speakerNodeActive .speakerAvatar {
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px color-mix(in oklch, var(--speaker-accent) 76%, transparent), 0 0 30px color-mix(in oklch, var(--speaker-accent) 26%, transparent);
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+.speakerAvatar [data-slot="avatar-fallback"] {
+  background: color-mix(in oklch, var(--speaker-accent) 22%, var(--muted));
+  color: var(--foreground);
+}
+
+.speakerNodeLabel {
+  position: absolute;
+  top: calc(50% + 38px);
+  left: 50%;
+  max-width: 148px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--card) 92%, transparent);
+  padding: 5px 8px;
+  text-align: center;
+  box-shadow: var(--shadow-xs);
+  transform: translateX(-50%);
+}
+
+.listenCore {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  width: 168px;
+  height: 168px;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+}
+
+.listenCoreCompact { width: 128px; height: 128px; }
+
+.coreSurface {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  width: 116px;
+  height: 116px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid color-mix(in oklch, var(--speaker-accent) 52%, var(--border));
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 25%, color-mix(in oklch, var(--speaker-accent) 25%, var(--card)), var(--card) 68%);
+  box-shadow: 0 0 0 10px color-mix(in oklch, var(--speaker-accent) 8%, transparent), 0 16px 48px color-mix(in oklch, var(--speaker-accent) 15%, transparent);
+  text-align: center;
+  transition: border-color 200ms ease-out, box-shadow 200ms ease-out;
+}
+
+.listenCoreCompact .coreSurface { width: 88px; height: 88px; }
+.coreGlyph { display: flex; align-items: center; justify-content: center; color: var(--speaker-accent); }
+.coreGlyph svg { width: 22px; height: 22px; }
+
+.coreWave {
+  position: absolute;
+  inset: 19px;
+  border: 1px solid color-mix(in oklch, var(--speaker-accent) 44%, transparent);
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(0.72);
+}
+
+.listenCoreLive .coreWave { animation: core-wave 2.8s ease-out infinite; }
+.listenCoreLive .coreWave:nth-child(2) { animation-delay: 0.9s; }
+.listenCoreLive .coreWave:nth-child(3) { animation-delay: 1.8s; }
+.listenCorePaused .coreSurface { border-color: var(--border); box-shadow: 0 0 0 10px color-mix(in oklch, var(--muted) 35%, transparent); }
+
+@keyframes core-wave {
+  0% { opacity: 0.7; transform: scale(0.72); }
+  75%, 100% { opacity: 0; transform: scale(1.72); }
+}
+
+.orbitInspector {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.selectedSpeakerCard {
+  border-color: color-mix(in oklch, var(--speaker-accent) 35%, var(--border));
+  background: color-mix(in oklch, var(--speaker-accent) 7%, var(--card));
+}
+
+.transcriptTray {
+  position: relative;
+  z-index: 8;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(calc(42svh + 64px), 424px);
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: color-mix(in oklch, var(--card) 94%, var(--background));
+  box-shadow: var(--shadow-sm);
+}
+
+.transcriptTrayHeader { display: flex; flex-shrink: 0; min-height: 52px; align-items: center; gap: 4px; padding: 6px 8px; }
+.liveDot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--muted-foreground); }
+.liveDotActive { background: var(--primary); box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 14%, transparent); }
+
+.transcriptTrayBody {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  height: min(42svh, 360px);
+  max-height: min(42svh, 360px);
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  padding: 8px 12px 12px;
+}
+
+.transcriptLine { display: flex; width: 100%; min-width: 0; max-width: 100%; align-items: flex-start; gap: 9px; border-radius: 12px; padding: 9px 6px; }
+.transcriptLine p { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+.transcriptLine:hover { background: var(--muted); }
+
+.signalBars { display: inline-flex; height: 14px; align-items: end; gap: 2px; }
+.signalBars span { width: 3px; height: 5px; border-radius: 999px; background: var(--muted-foreground); opacity: 0.28; }
+.signalBars span:nth-child(2) { height: 7px; }
+.signalBars span:nth-child(3) { height: 9px; }
+.signalBars span:nth-child(4) { height: 11px; }
+.signalBars span:nth-child(5) { height: 14px; }
+.signalBars .signalBarActive { background: var(--speaker-accent); opacity: 1; }
+
+@media (max-width: 1180px) {
+  .orbitWorkspace { grid-template-columns: minmax(0, 1fr); }
+  .orbitInspector { display: none; }
+  .productionVariant .orbitCanvas { --orbit-radius: min(18vw, 165px); }
+}
+
+@media (max-width: 900px) {
+  .productionVariant .orbitCanvas { --orbit-radius: min(22vw, 190px); }
+}
+
+@media (max-width: 720px) {
+  .sessionHeader { min-height: 64px; padding-inline: 14px; }
+  .productionContent { padding: 10px 10px 14px; }
+  .orbitCanvas { --orbit-radius: min(34vw, 168px); min-height: 470px; }
+  .productionVariant .orbitCanvas { --orbit-radius: min(27vw, 150px); }
+  .speakerNode { width: 116px; }
+  .speakerAvatar { transform: translate(-50%, -50%) scale(0.88); }
+  .speakerNodeLabel { max-width: 116px; }
+  .transcriptTrayHeader { min-height: 48px; }
+  .transcriptTrayHeader > button:first-child > span:nth-of-type(3) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speakerNodeActive .speakerNodeHalo,
+  .listenCoreLive .coreWave { animation: none; }
+  .speakerNode,
+  .speakerAvatar,
+  .coreSurface { transition: none; }
+}

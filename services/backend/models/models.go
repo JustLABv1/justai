@@ -144,6 +144,8 @@ type KnowledgeSource struct {
 	MimeType   string    `json:"mimeType,omitempty"`
 	Status     string    `json:"status"`
 	Error      string    `json:"error,omitempty"`
+	Progress   int       `json:"progress,omitempty"`
+	Stage      string    `json:"stage,omitempty"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 }
@@ -158,15 +160,29 @@ type MCPServer struct {
 	CredentialConfigured bool            `json:"credentialConfigured"`
 	Enabled              bool            `json:"enabled"`
 	AllowedTools         json.RawMessage `json:"allowedTools"`
+	TrustedReadOnly      bool            `json:"trustedReadOnly"`
+	LastTestedAt         *time.Time      `json:"lastTestedAt,omitempty"`
+	LastError            string          `json:"lastError,omitempty"`
+	ProtocolVersion      string          `json:"protocolVersion,omitempty"`
+	ToolCount            int             `json:"toolCount"`
 	CreatedAt            time.Time       `json:"createdAt"`
 	UpdatedAt            time.Time       `json:"updatedAt"`
 }
 
 type Citation struct {
-	SourceID   uuid.UUID `json:"sourceId"`
+	Kind       string    `json:"kind,omitempty"`
+	ResourceID uuid.UUID `json:"resourceId,omitempty"`
+	SourceID   uuid.UUID `json:"sourceId,omitempty"`
 	Title      string    `json:"title"`
-	ChunkIndex int       `json:"chunkIndex"`
+	ChunkIndex int       `json:"chunkIndex,omitempty"`
+	Locator    string    `json:"locator,omitempty"`
 	Snippet    string    `json:"snippet"`
+}
+
+type ConversationContext struct {
+	KnowledgeSources      []KnowledgeSource      `json:"knowledgeSources"`
+	MCPServers            []MCPServer            `json:"mcpServers"`
+	TranscriptionSessions []TranscriptionSession `json:"transcriptionSessions"`
 }
 
 type SocketEnvelope struct {

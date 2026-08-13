@@ -4,22 +4,18 @@ import type { NextRequest } from "next/server"
 export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const isPublicTranscriptionJoin =
-    pathname === "/transcription/join" || pathname.startsWith("/transcription/join/")
+    pathname === "/transcription/join" ||
+    pathname.startsWith("/transcription/join/")
 
   if (isPublicTranscriptionJoin) {
     return NextResponse.next()
   }
 
-  if (request.cookies.has("justai_session")) {
-    return NextResponse.next()
-  }
-
-  const loginURL = new URL("/login", request.url)
-  loginURL.searchParams.set(
-    "next",
-    `${request.nextUrl.pathname}${request.nextUrl.search}`
-  )
-  return NextResponse.redirect(loginURL)
+  // The backend is the authentication source of truth. The frontend cannot
+  // safely infer validity from the presence of a cookie, especially when the
+  // API is deployed on another origin. Workspace performs `/auth/me` and
+  // redirects only after the backend confirms an unauthenticated session.
+  return NextResponse.next()
 }
 
 export const config = {

@@ -82,9 +82,22 @@ func TestLoadReturnsConfigFileErrors(t *testing.T) {
 	}
 }
 
+func TestProductionRejectsDevelopmentSecrets(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JUSTAI_ENV", "production")
+	t.Setenv("JUSTAI_DATABASE_URL", "postgres://justai")
+	t.Setenv("JUSTAI_JWT_SECRET", "replace-with-a-long-development-secret-value")
+	t.Setenv("JUSTAI_ENCRYPTION_KEY", "replace-with-a-long-development-encryption-key")
+	t.Setenv("JUSTAI_MCP_OAUTH_REDIRECT_URL", "https://app.example.com/api/v1/mcp/oauth/callback")
+	if _, err := Load(""); err == nil {
+		t.Fatal("expected development secrets to be rejected in production")
+	}
+}
+
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
+		"JUSTAI_ENV",
 		"JUSTAI_PORT",
 		"JUSTAI_DATABASE_URL",
 		"JUSTAI_JWT_SECRET",
@@ -97,6 +110,9 @@ func clearConfigEnv(t *testing.T) {
 		"JUSTAI_MCP_OAUTH_REDIRECT_URL",
 		"JUSTAI_ALLOW_PRIVATE_TARGETS",
 		"JUSTAI_DEV_SEED",
+		"JUSTAI_SECURE_COOKIES",
+		"JUSTAI_COOKIE_SAMESITE",
+		"JUSTAI_COOKIE_DOMAIN",
 	} {
 		t.Setenv(key, "")
 	}

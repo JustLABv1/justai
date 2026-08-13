@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +22,9 @@ type Config struct {
 	MCPOAuthRedirectURL string
 	AllowPrivate        bool
 	DevSeed             bool
+	SecureCookies       bool
+	CookieSameSite      string
+	CookieDomain        string
 	Transcription       TranscriptionConfig
 }
 
@@ -58,6 +62,9 @@ type fileConfig struct {
 	MCPOAuthRedirectURL string                  `yaml:"mcp_oauth_redirect_url"`
 	AllowPrivate        *bool                   `yaml:"allow_private_targets"`
 	DevSeed             *bool                   `yaml:"dev_seed"`
+	SecureCookies       *bool                   `yaml:"secure_cookies"`
+	CookieSameSite      string                  `yaml:"cookie_same_site"`
+	CookieDomain        string                  `yaml:"cookie_domain"`
 	Transcription       fileTranscriptionConfig `yaml:"transcription"`
 }
 
@@ -91,9 +98,43 @@ func Load(configPath string) (Config, error) {
 		return Config{}, err
 	}
 
-	jwtSecret := []byte(getenvOrFile("JUSTAI_JWT_SECRET", fileValues.JWTSecret, "justai-local-development-secret-change-me"))
-	encryptionKey := []byte(getenvOrFile("JUSTAI_ENCRYPTION_KEY", fileValues.EncryptionKey, "justai-local-encryption-key-change-me"))
+	environment := strings.ToLower(strings.TrimSpace(os.Getenv("JUSTAI_ENV")))
+	isProduction := environment == "production" || environment == "prod"
+	jwtValue := getenvOrFile("JUSTAI_JWT_SECRET", fileValues.JWTSecret, "justai-local-development-secret-change-me")
+	encryptionValue := getenvOrFile("JUSTAI_ENCRYPTION_KEY", fileValues.EncryptionKey, "justai-local-encryption-key-change-me")
+	if isProduction {
+		if isDevelopmentSecret(jwtValue) || len(jwtValue) < 32 {
+			return Config{}, fmt.Errorf("JUSTAI_JWT_SECRET must be a unique secret of at least 32 characters in production")
+		}
+		if isDevelopmentSecret(encryptionValue) || len(encryptionValue) < 16 {
+			return Config{}, fmt.Errorf("JUSTAI_ENCRYPTION_KEY must be a unique secret in production")
+		}
+	}
+	jwtSecret := []byte(jwtValue)
+	encryptionKey := []byte(encryptionValue)
 	encryptionSum := sha256.Sum256(encryptionKey)
+	secureCookies := getenvBoolOrFile("JUSTAI_SECURE_COOKIES", fileValues.SecureCookies, isProduction)
+	cookieSameSite := strings.ToLower(strings.TrimSpace(getenvOrFile("JUSTAI_COOKIE_SAMESITE", fileValues.CookieSameSite, "lax")))
+	if cookieSameSite != "lax" && cookieSameSite != "strict" && cookieSameSite != "none" {
+		return Config{}, fmt.Errorf("JUSTAI_COOKIE_SAMESITE must be lax, strict, or none")
+	}
+	if cookieSameSite == "none" && !secureCookies {
+		return Config{}, fmt.Errorf("SameSite=None cookies require secure cookies")
+	}
+	devSeed := getenvBoolOrFile("JUSTAI_DEV_SEED", fileValues.DevSeed, !isProduction)
+	if isProduction && devSeed {
+		return Config{}, fmt.Errorf("JUSTAI_DEV_SEED must be false in production")
+	}
+	if isProduction && !secureCookies {
+		return Config{}, fmt.Errorf("JUSTAI_SECURE_COOKIES must be true in production")
+	}
+	mcpOAuthRedirectURL := getenvOrFile("JUSTAI_MCP_OAUTH_REDIRECT_URL", fileValues.MCPOAuthRedirectURL, "http://localhost:8080/api/v1/mcp/oauth/callback")
+	if parsed, err := url.Parse(mcpOAuthRedirectURL); err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return Config{}, fmt.Errorf("JUSTAI_MCP_OAUTH_REDIRECT_URL must be an absolute http(s) URL")
+	}
+	if isProduction && mcpOAuthRedirectURL == "http://localhost:8080/api/v1/mcp/oauth/callback" {
+		return Config{}, fmt.Errorf("JUSTAI_MCP_OAUTH_REDIRECT_URL must be configured in production")
+	}
 	return Config{
 		Port:            getenvOrFile("JUSTAI_PORT", fileValues.Port, "8080"),
 		DatabaseURL:     getenvOrFile("JUSTAI_DATABASE_URL", fileValues.DatabaseURL, ""),
@@ -106,9 +147,12 @@ func Load(configPath string) (Config, error) {
 			ClientSecret: getenvOrFile("JUSTAI_OIDC_CLIENT_SECRET", fileValues.OIDC.ClientSecret, ""),
 			RedirectURL:  getenvOrFile("JUSTAI_OIDC_REDIRECT_URL", fileValues.OIDC.RedirectURL, ""),
 		},
-		MCPOAuthRedirectURL: getenvOrFile("JUSTAI_MCP_OAUTH_REDIRECT_URL", fileValues.MCPOAuthRedirectURL, "http://localhost:8080/api/v1/mcp/oauth/callback"),
+		MCPOAuthRedirectURL: mcpOAuthRedirectURL,
 		AllowPrivate:        getenvBoolOrFile("JUSTAI_ALLOW_PRIVATE_TARGETS", fileValues.AllowPrivate, false),
-		DevSeed:             getenvBoolOrFile("JUSTAI_DEV_SEED", fileValues.DevSeed, true),
+		DevSeed:             devSeed,
+		SecureCookies:       secureCookies,
+		CookieSameSite:      cookieSameSite,
+		CookieDomain:        getenvOrFile("JUSTAI_COOKIE_DOMAIN", fileValues.CookieDomain, ""),
 		Transcription:       transcriptionConfig(fileValues.Transcription),
 	}, nil
 }
@@ -216,6 +260,16 @@ func getenvBoolOrFile(key string, fileValue *bool, fallback bool) bool {
 		return *fileValue
 	}
 	return fallback
+}
+
+func isDevelopmentSecret(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for _, marker := range []string{"justai-local", "change-me", "replace-with", "development", "dev-secret", "test-secret"} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func splitCSV(value string) []string {

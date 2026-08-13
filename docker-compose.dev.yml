@@ -1,7 +1,6 @@
 services:
   justai-postgres:
     image: pgvector/pgvector:pg17
-    container_name: justai-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: justai
@@ -17,5 +16,48 @@ services:
       timeout: 5s
       retries: 12
 
+  justai-backend:
+    build:
+      context: .
+      target: backend
+    environment:
+      JUSTAI_ENV: development
+      JUSTAI_PORT: 8080
+      JUSTAI_DATABASE_URL: postgres://justai:justai@justai-postgres:5432/justai?sslmode=disable
+      JUSTAI_JWT_SECRET: justai-local-development-secret-change-me
+      JUSTAI_ENCRYPTION_KEY: justai-local-encryption-key-change-me
+      JUSTAI_FRONTEND_ORIGINS: http://localhost:3000
+      JUSTAI_DEV_SEED: "true"
+      JUSTAI_SECURE_COOKIES: "false"
+      JUSTAI_ALLOW_PRIVATE_TARGETS: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      justai-postgres:
+        condition: service_healthy
+    volumes:
+      - justai-backend-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/api/v1/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  justai-frontend:
+    build:
+      context: .
+      target: frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8080
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      justai-backend:
+        condition: service_healthy
+
 volumes:
   justai-postgres-data:
+  justai-backend-data:

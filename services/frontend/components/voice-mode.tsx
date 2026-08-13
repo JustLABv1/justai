@@ -63,16 +63,30 @@ type Props = {
 }
 
 function isTranscriptionEndpoint(endpoint: Endpoint) {
-  return Boolean(
-    endpoint.capabilities.transcription ||
-      endpoint.capabilities["realtime-transcription"] ||
-      endpoint.capabilities["chunked-transcription"] ||
-      endpoint.providerType === "openai" ||
-      endpoint.providerType === "gemini"
+  const capabilities = endpoint.capabilities ?? {}
+  if (Object.prototype.hasOwnProperty.call(capabilities, "transcription")) {
+    return Boolean(capabilities.transcription)
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(capabilities, "chunked-transcription")
+  ) {
+    return Boolean(capabilities["chunked-transcription"])
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(capabilities, "realtime-transcription")
+  ) {
+    return Boolean(capabilities["realtime-transcription"])
+  }
+  return (
+    endpoint.providerType === "openai" || endpoint.providerType === "gemini"
   )
 }
 
-function downsample(input: Float32Array, sourceRate: number, targetRate: number) {
+function downsample(
+  input: Float32Array,
+  sourceRate: number,
+  targetRate: number
+) {
   if (sourceRate === targetRate) return input
   const ratio = sourceRate / targetRate
   const length = Math.max(1, Math.round(input.length / ratio))
@@ -101,7 +115,11 @@ function encodePCM16(input: Float32Array) {
   const view = new DataView(buffer)
   input.forEach((value, index) => {
     const sample = Math.max(-1, Math.min(1, value))
-    view.setInt16(index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+    view.setInt16(
+      index * 2,
+      sample < 0 ? sample * 0x8000 : sample * 0x7fff,
+      true
+    )
   })
   return buffer
 }
@@ -174,10 +192,12 @@ export function VoiceMode({
   const outputFrameRef = useRef<number | null>(null)
   const outputObjectUrlRef = useRef<string | null>(null)
 
-  const chatEndpoint = useMemo(
-    () => endpoints.find((endpoint) => endpoint.isDefault) ?? endpoints[0],
-    [endpoints]
-  )
+  const chatEndpoint = useMemo(() => {
+    const chatEndpoints = endpoints.filter(
+      (endpoint) => endpoint.enabled && endpoint.capabilities?.chat
+    )
+    return chatEndpoints.find((endpoint) => endpoint.isDefault) ?? chatEndpoints[0]
+  }, [endpoints])
   const transcriptionEndpoint = useMemo(
     () => endpoints.find(isTranscriptionEndpoint),
     [endpoints]
@@ -189,7 +209,8 @@ export function VoiceMode({
 
   const sendEvent = useCallback((event: Record<string, unknown>) => {
     const socket = socketRef.current
-    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event))
+    if (socket?.readyState === WebSocket.OPEN)
+      socket.send(JSON.stringify(event))
   }, [])
 
   const stopOutput = useCallback(() => {
@@ -239,7 +260,8 @@ export function VoiceMode({
     audioRef.current = null
     speakingRef.current = false
     setOutputLevel(0)
-    if (sessionStartedRef.current && mountedRef.current) setActivity("listening")
+    if (sessionStartedRef.current && mountedRef.current)
+      setActivity("listening")
   }, [])
 
   const speakWithBrowser = useCallback(
@@ -253,7 +275,13 @@ export function VoiceMode({
       const startedAt = performance.now()
       const animate = (now: number) => {
         if (!speakingRef.current) return
-        setOutputLevel(0.25 + Math.min(0.55, 0.2 + Math.abs(Math.sin((now - startedAt) / 120)) * 0.4))
+        setOutputLevel(
+          0.25 +
+            Math.min(
+              0.55,
+              0.2 + Math.abs(Math.sin((now - startedAt) / 120)) * 0.4
+            )
+        )
         outputFrameRef.current = requestAnimationFrame(animate)
       }
       utterance.onstart = () => {
@@ -296,7 +324,9 @@ export function VoiceMode({
             const normalized = (value - 128) / 128
             total += normalized * normalized
           })
-          setOutputLevel(Math.min(1, Math.sqrt(total / levelBuffer.length) * 3.5))
+          setOutputLevel(
+            Math.min(1, Math.sqrt(total / levelBuffer.length) * 3.5)
+          )
           outputFrameRef.current = requestAnimationFrame(monitor)
         }
         audio.onplay = () => {
@@ -399,8 +429,8 @@ export function VoiceMode({
           setApproval({
             approvalId: String(data.approvalId ?? ""),
             callId: String(data.callId ?? ""),
-            serverName: String(data.serverName ?? "Home Assistant"),
-            toolName: String(data.toolName ?? "Home Assistant action"),
+            serverName: String(data.serverName ?? "MCP server"),
+            toolName: String(data.toolName ?? "MCP tool"),
             arguments: (data.arguments ?? {}) as Record<string, unknown>,
           })
           setActivity("awaiting approval")
@@ -420,7 +450,9 @@ export function VoiceMode({
           setActivity("listening")
           break
         case "error":
-          setError(String(data.message ?? "The voice session returned an error."))
+          setError(
+            String(data.message ?? "The voice session returned an error.")
+          )
           setApproval(null)
           setActivity("error")
           break
@@ -460,7 +492,8 @@ export function VoiceMode({
       let sequence = 0
       let voiceUntil = 0
       worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
-        if (socket.readyState !== WebSocket.OPEN || !sessionStartedRef.current) return
+        if (socket.readyState !== WebSocket.OPEN || !sessionStartedRef.current)
+          return
         const samples = downsample(event.data, context.sampleRate, 16000)
         const level = rms(samples)
         const now = performance.now()
@@ -478,10 +511,15 @@ export function VoiceMode({
           const normalized = (value - 128) / 128
           total += normalized * normalized
         })
-        const nextLevel = Math.min(1, Math.sqrt(total / levelBuffer.length) * 3.2)
+        const nextLevel = Math.min(
+          1,
+          Math.sqrt(total / levelBuffer.length) * 3.2
+        )
         setInputLevel(nextLevel)
         if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: "source.level", level: nextLevel }))
+          socket.send(
+            JSON.stringify({ type: "source.level", level: nextLevel })
+          )
         }
       }, 100)
       await context.resume()
@@ -532,23 +570,46 @@ export function VoiceMode({
       })
       const socket = new WebSocket(socketURL("/api/v1/ws/voice", ticket.ticket))
       socketRef.current = socket
+      let socketOpened = false
+      let rejectOpen: ((reason?: unknown) => void) | null = null
+      let openTimer: number | null = null
       socket.onmessage = handleSocketMessage
       socket.onerror = () => {
         if (mountedRef.current) {
           setError("The voice connection could not be established.")
           setActivity("error")
         }
+        if (!socketOpened) rejectOpen?.(new Error("Could not connect to the voice socket"))
       }
       socket.onclose = () => {
+        if (!socketOpened) {
+          if (openTimer !== null) window.clearTimeout(openTimer)
+          if (socketRef.current === socket) socketRef.current = null
+          rejectOpen?.(new Error("The voice socket closed before connecting"))
+          return
+        }
         if (mountedRef.current && sessionStartedRef.current) {
+          // Release the microphone and reset the composer after an unexpected
+          // disconnect; otherwise the dialog remains stuck in an active state
+          // with no socket available for another turn.
+          cleanup()
           setConnected(false)
           setError("The voice connection closed.")
           setActivity("error")
         }
       }
       await new Promise<void>((resolve, reject) => {
-        socket.onopen = () => resolve()
-        socket.onerror = () => reject(new Error("Could not connect to the voice socket"))
+        rejectOpen = reject
+        socket.onopen = () => {
+          socketOpened = true
+          rejectOpen = null
+          if (openTimer !== null) window.clearTimeout(openTimer)
+          resolve()
+        }
+        openTimer = window.setTimeout(() => {
+          socket.close()
+          reject(new Error("The voice socket took too long to connect"))
+        }, 15_000)
       })
       sessionStartedRef.current = true
       setSessionActive(true)
@@ -571,12 +632,17 @@ export function VoiceMode({
       cleanup()
       setActivity("error")
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "Voice Mode could not start."
+        caught instanceof Error ? caught.message : "Voice Mode could not start."
       )
     }
-  }, [chatEndpoint, cleanup, handleSocketMessage, onConversationCreated, startAudio, transcriptionEndpoint])
+  }, [
+    chatEndpoint,
+    cleanup,
+    handleSocketMessage,
+    onConversationCreated,
+    startAudio,
+    transcriptionEndpoint,
+  ])
 
   const closeSession = useCallback(() => {
     if (sessionStartedRef.current) {
@@ -590,7 +656,9 @@ export function VoiceMode({
   const decideApproval = useCallback(
     (approved: boolean) => {
       if (!approval || approval.deciding) return
-      setApproval((current) => (current ? { ...current, deciding: true } : current))
+      setApproval((current) =>
+        current ? { ...current, deciding: true } : current
+      )
       sendEvent({
         type: "tool.decision",
         data: { approvalId: approval.approvalId, approved },
@@ -610,7 +678,10 @@ export function VoiceMode({
 
   if (!open) return null
 
-  const visualEnergy = Math.min(2.4, 0.65 + inputLevel * 2.1 + outputLevel * 1.7)
+  const visualEnergy = Math.min(
+    2.4,
+    0.65 + inputLevel * 2.1 + outputLevel * 1.7
+  )
   const isActive = activity !== "idle" && activity !== "error"
 
   return (
@@ -632,7 +703,12 @@ export function VoiceMode({
             </p>
           </div>
         </div>
-        <Button aria-label="Close Voice Mode" onClick={closeSession} size="icon" variant="ghost">
+        <Button
+          aria-label="Close Voice Mode"
+          onClick={closeSession}
+          size="icon"
+          variant="ghost"
+        >
           <X aria-hidden="true" />
         </Button>
       </header>
@@ -640,11 +716,19 @@ export function VoiceMode({
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center px-4 py-6 sm:px-8 sm:py-10">
         <div className="flex w-full max-w-3xl flex-wrap items-center justify-center gap-2">
           <Badge variant={activity === "error" ? "destructive" : "secondary"}>
-            {activity === "speaking" ? <Volume2 aria-hidden="true" /> : <Mic aria-hidden="true" />}
+            {activity === "speaking" ? (
+              <Volume2 aria-hidden="true" />
+            ) : (
+              <Mic aria-hidden="true" />
+            )}
             {activityLabel(activity)}
           </Badge>
           {chatEndpoint && <Badge variant="outline">{chatEndpoint.name}</Badge>}
-          {transcriptionEndpoint && <Badge variant="outline">{transcriptionEndpoint.name} · input</Badge>}
+          {transcriptionEndpoint && (
+            <Badge variant="outline">
+              {transcriptionEndpoint.name} · input
+            </Badge>
+          )}
         </div>
 
         <div className="relative my-5 flex aspect-square w-full max-w-[min(76vw,34rem)] items-center justify-center overflow-hidden rounded-full border bg-muted/20 shadow-2xl shadow-primary/10 sm:my-8">
@@ -656,7 +740,9 @@ export function VoiceMode({
             count={isActive ? 5 : 3}
             glow={2.2 + outputLevel * 2}
             intensity={0.48 + inputLevel * 0.55 + outputLevel * 0.55}
-            opacity={0.72 + Math.min(0.25, inputLevel * 0.2 + outputLevel * 0.2)}
+            opacity={
+              0.72 + Math.min(0.25, inputLevel * 0.2 + outputLevel * 0.2)
+            }
             speed={0.35 + inputLevel * 0.45 + outputLevel * 0.65}
             thickness={0.65 + outputLevel * 0.35}
           />
@@ -680,12 +766,19 @@ export function VoiceMode({
             <CardHeader className="pb-2">
               <CardDescription>You</CardDescription>
               <CardTitle className="text-sm font-normal text-foreground">
-                {partialTranscript || lastTranscript || (isActive ? "Listening for your next request…" : "Start when you are ready.")}
+                {partialTranscript ||
+                  lastTranscript ||
+                  (isActive
+                    ? "Listening for your next request…"
+                    : "Start when you are ready.")}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="h-1 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-primary transition-[width] duration-100" style={{ width: `${Math.round(inputLevel * 100)}%` }} />
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-100"
+                  style={{ width: `${Math.round(inputLevel * 100)}%` }}
+                />
               </div>
             </CardContent>
           </Card>
@@ -693,12 +786,18 @@ export function VoiceMode({
             <CardHeader className="pb-2">
               <CardDescription>JustAI</CardDescription>
               <CardTitle className="text-sm font-normal text-foreground">
-                {assistantText || (isActive ? "I’ll respond here and read the answer aloud." : "Your answer will appear here.")}
+                {assistantText ||
+                  (isActive
+                    ? "I’ll respond here and read the answer aloud."
+                    : "Your answer will appear here.")}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="h-1 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-secondary-foreground transition-[width] duration-100" style={{ width: `${Math.round(outputLevel * 100)}%` }} />
+                <div
+                  className="h-full rounded-full bg-secondary-foreground transition-[width] duration-100"
+                  style={{ width: `${Math.round(outputLevel * 100)}%` }}
+                />
               </div>
             </CardContent>
           </Card>
@@ -709,10 +808,14 @@ export function VoiceMode({
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-sm">
                 <ShieldCheck className="text-primary" size={17} />
-                Approve Home Assistant action?
+                Approve MCP action?
               </CardTitle>
               <CardDescription>
-                {approval.serverName} wants to run <span className="font-medium text-foreground">{approval.toolName}</span>. Voice approval alone is not enough; choose an action below.
+                {approval.serverName} wants to run{" "}
+                <span className="font-medium text-foreground">
+                  {approval.toolName}
+                </span>
+                . Voice approval alone is not enough; choose an action below.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -721,12 +824,23 @@ export function VoiceMode({
               </pre>
             </CardContent>
             <CardFooter className="gap-2">
-              <Button disabled={approval.deciding} onClick={() => decideApproval(false)} variant="outline">
+              <Button
+                disabled={approval.deciding}
+                onClick={() => decideApproval(false)}
+                variant="outline"
+              >
                 <XCircle aria-hidden="true" />
                 Decline
               </Button>
-              <Button disabled={approval.deciding} onClick={() => decideApproval(true)}>
-                {approval.deciding ? <Loader2 className="animate-spin" /> : <Check aria-hidden="true" />}
+              <Button
+                disabled={approval.deciding}
+                onClick={() => decideApproval(true)}
+              >
+                {approval.deciding ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <Check aria-hidden="true" />
+                )}
                 Approve action
               </Button>
             </CardFooter>
@@ -743,19 +857,33 @@ export function VoiceMode({
 
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           {!sessionActive ? (
-            <Button className="min-w-40" onClick={() => void startSession()} size="lg">
+            <Button
+              className="min-w-40"
+              onClick={() => void startSession()}
+              size="lg"
+            >
               <Mic aria-hidden="true" />
               Start listening
             </Button>
           ) : (
-            <Button className={cn("min-w-40", activity === "speaking" && "border-primary")} onClick={closeSession} size="lg" variant="outline">
+            <Button
+              className={cn(
+                "min-w-40",
+                activity === "speaking" && "border-primary"
+              )}
+              onClick={closeSession}
+              size="lg"
+              variant="outline"
+            >
               <X aria-hidden="true" />
               End Voice Mode
             </Button>
           )}
         </div>
         <p className="mt-3 max-w-xl text-center text-xs text-muted-foreground">
-          Microphone audio is streamed for transcription only and is not stored. Every Home Assistant action pauses here for your explicit approval.
+          Microphone audio is streamed for transcription only and is not stored.
+          Every MCP action pauses here for your explicit approval unless the
+          server is explicitly trusted for read-only tools.
         </p>
       </main>
     </div>
