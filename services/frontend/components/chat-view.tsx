@@ -10,6 +10,7 @@ import {
 } from "react"
 import {
   ArrowUp,
+  Check,
   ChevronDown,
   Copy,
   FileText,
@@ -59,12 +60,19 @@ import { VoiceControl } from "@/components/assistant-ui/voice"
 import { createJustAIVoiceAdapter } from "@/components/assistant-ui/voice-adapter"
 import { BrandMark } from "@/components/brand-mark"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { api, API_URL } from "@/lib/api"
 import type {
   Conversation,
   ConversationContext,
   Endpoint,
-  User,
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -72,8 +80,6 @@ import { cn } from "@/lib/utils"
 type Props = {
   conversationId: string | null
   endpoints: Endpoint[]
-  user: Pick<User, "displayName" | "email">
-  userInitials: string
   onEnsureConversation?: () => Promise<string>
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
@@ -504,59 +510,144 @@ function AssistantMessage() {
   )
 }
 
-function EmptyThread({
-  user,
-  onOpenHistory,
-}: {
-  user: Pick<User, "displayName" | "email">
-  onOpenHistory?: () => void
-}) {
+function EmptyThread({ children }: { children?: ReactNode }) {
   return (
     <ThreadPrimitive.Empty>
-      <div className="flex min-h-[min(60vh,38rem)] flex-col items-center justify-center px-6 py-12 text-center">
-        <BrandMark className="mb-5 size-14 rounded-full" priority />
-        <p className="text-xs font-medium tracking-[0.2em] text-muted-foreground uppercase">
-          JustAI
-        </p>
-        <h1 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
-          What can I help you figure out?
-        </h1>
-        <p className="mt-3 max-w-lg text-sm text-muted-foreground">
-          Ask about your connected knowledge, MCP tools, or anything you are
-          working through today.
-        </p>
-        <div className="mt-8 grid w-full max-w-2xl gap-2 sm:grid-cols-2">
-          {[
-            "Summarize my attached knowledge",
-            "Find the latest relevant information",
-            "Help me plan the next steps",
-            "What can my connected tools do?",
-          ].map((prompt) => (
-            <ThreadPrimitive.Suggestion
-              key={prompt}
-              className="rounded-2xl border bg-background px-4 py-3 text-left text-sm transition-colors hover:bg-muted"
-              prompt={prompt}
-              send
-            >
-              {prompt}
-            </ThreadPrimitive.Suggestion>
-          ))}
+      <div className="flex min-h-[calc(100svh-8rem)] flex-col items-center justify-center px-5 py-12 text-center">
+        <div className="mb-6 flex items-center gap-3">
+          <BrandMark className="size-12 rounded-full" priority />
+          <span className="text-2xl font-semibold tracking-[-0.04em]">
+            JustAI
+          </span>
         </div>
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
-          <span>Signed in as {user.displayName || user.email}</span>
-          {onOpenHistory && (
-            <Button
-              className="h-7 gap-1.5 rounded-full px-2.5 text-xs"
-              onClick={onOpenHistory}
-              size="sm"
-              variant="ghost"
-            >
-              <History className="size-3.5" /> History
-            </Button>
-          )}
-        </div>
+        {children}
       </div>
     </ThreadPrimitive.Empty>
+  )
+}
+
+function ModelEndpointPicker({
+  endpoints,
+  endpointId,
+  onEndpointChange,
+  models,
+  modelId,
+  modelDiscoveryLoading,
+  onModelChange,
+  compact,
+}: {
+  endpoints: Endpoint[]
+  endpointId: string
+  onEndpointChange: (id: string) => void
+  models: DiscoveredChatModel[]
+  modelId: string
+  modelDiscoveryLoading?: boolean
+  onModelChange: (id: string) => void
+  compact: boolean
+}) {
+  const endpoint = endpoints.find((item) => item.id === endpointId)
+  const selectedModel = models.find((model) => model.id === modelId)
+  const endpointLabel = endpoint?.name ?? "Select endpoint"
+  const modelLabel = selectedModel?.name || modelId || "Select model"
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            aria-label="Select LLM endpoint and chat model"
+            className={cn(
+              "h-9 max-w-56 min-w-0 justify-start gap-1.5 rounded-full border-0 bg-transparent px-2 text-xs font-normal text-foreground hover:bg-muted/70",
+              compact && "max-w-40 px-1.5"
+            )}
+            size="sm"
+            type="button"
+            variant="ghost"
+          />
+        }
+      >
+        <span className="max-w-24 truncate text-muted-foreground">
+          {endpointLabel}
+        </span>
+        <span className="text-muted-foreground/60">·</span>
+        <span className="max-w-28 truncate">{modelLabel}</span>
+        <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-80">
+        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+          LLM endpoint
+        </div>
+        <DropdownMenuGroup>
+          {endpoints.map((item) => (
+            <DropdownMenuItem
+              className="items-start py-2"
+              key={item.id}
+              onClick={() => onEndpointChange(item.id)}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium">
+                  {item.name}
+                </span>
+                <span className="block truncate text-[11px] text-muted-foreground">
+                  {item.providerType} · {item.chatModel || "No default model"}
+                </span>
+              </span>
+              <Check
+                className={cn(
+                  "mt-0.5 size-3.5 shrink-0",
+                  item.id === endpointId ? "opacity-100" : "opacity-0"
+                )}
+              />
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+          Chat model
+          {modelDiscoveryLoading && (
+            <span className="ml-2 font-normal text-muted-foreground">
+              Discovering…
+            </span>
+          )}
+        </div>
+        <DropdownMenuGroup>
+          {models.length > 0 ? (
+            models.map((model) => (
+              <DropdownMenuItem
+                className="items-start py-2"
+                key={model.id}
+                onClick={() => onModelChange(model.id)}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium">
+                    {model.name && model.name !== model.id
+                      ? model.name
+                      : model.id}
+                  </span>
+                  {model.name && model.name !== model.id && (
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {model.id}
+                    </span>
+                  )}
+                </span>
+                <Check
+                  className={cn(
+                    "mt-0.5 size-3.5 shrink-0",
+                    model.id === modelId ? "opacity-100" : "opacity-0"
+                  )}
+                />
+              </DropdownMenuItem>
+            ))
+          ) : (
+            <p className="px-2 py-2 text-xs text-muted-foreground">
+              {modelDiscoveryLoading
+                ? "Discovering models for this endpoint…"
+                : "No discovered models. Configure one in Settings."}
+            </p>
+          )}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -568,8 +659,8 @@ function Composer({
   modelId,
   modelDiscoveryLoading,
   onModelChange,
+  compact = false,
   onOpenHistory,
-  onOpenContext,
   conversationContext,
   toolApproval,
   onImportURL,
@@ -582,8 +673,8 @@ function Composer({
   modelId: string
   modelDiscoveryLoading?: boolean
   onModelChange: (id: string) => void
+  compact?: boolean
   onOpenHistory?: () => void
-  onOpenContext?: () => void
   conversationContext: ConversationContext
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
   onImportURL: () => void | Promise<void>
@@ -646,7 +737,12 @@ function Composer({
   }, [conversationContext])
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-3 pt-2 pb-3 sm:px-5 sm:pb-5">
+    <div
+      className={cn(
+        "mx-auto w-full max-w-3xl px-3 pt-2 pb-3 sm:px-5 sm:pb-5",
+        compact && "px-0 py-0"
+      )}
+    >
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerPrimitive.Unstable_TriggerPopover
           adapter={contextTriggerAdapter}
@@ -689,7 +785,14 @@ function Composer({
             }
           </ComposerPrimitive.Unstable_TriggerPopoverItems>
         </ComposerPrimitive.Unstable_TriggerPopover>
-        <ComposerPrimitive.Root className="relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <ComposerPrimitive.Root
+          className={cn(
+            "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
+            compact &&
+              "flex items-center gap-1 overflow-hidden rounded-full bg-muted/30 p-1.5 ring-border/60"
+          )}
+          data-running={isThreadRunning}
+        >
           <ComposerPrimitive.Attachments>
             {({ attachment }) => (
               <AttachmentPrimitive.Root className="mx-1 mb-1 flex items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs">
@@ -710,14 +813,29 @@ function Composer({
               </AttachmentPrimitive.Root>
             )}
           </ComposerPrimitive.Attachments>
-          <ContextDisplay context={conversationContext} />
+          {!compact && <ContextDisplay context={conversationContext} />}
           <ComposerPrimitive.Input
-            className="max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
-            placeholder="Message JustAI…"
+            className={cn(
+              "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground",
+              compact && "order-2 min-h-10 min-w-0 flex-1 px-2 py-1.5"
+            )}
+            placeholder={
+              compact ? "What do you want to know?" : "Message JustAI…"
+            }
             submitMode="enter"
           />
-          <div className="flex items-center justify-between gap-2 px-1">
-            <div className="flex min-w-0 items-center gap-1">
+          <div
+            className={cn(
+              "flex items-center justify-between gap-2 px-1",
+              compact && "contents"
+            )}
+          >
+            <div
+              className={cn(
+                "flex min-w-0 items-center gap-1",
+                compact && "order-1"
+              )}
+            >
               <ComposerPrimitive.AddAttachment
                 aria-label="Attach a file"
                 className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -727,7 +845,10 @@ function Composer({
               </ComposerPrimitive.AddAttachment>
               <Button
                 aria-label="Import a URL"
-                className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                className={cn(
+                  "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
+                  compact && "hidden"
+                )}
                 onClick={() => void onImportURL()}
                 size="icon"
                 type="button"
@@ -737,7 +858,10 @@ function Composer({
               </Button>
               <Button
                 aria-label="Import text"
-                className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                className={cn(
+                  "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
+                  compact && "hidden"
+                )}
                 onClick={() => void onImportText()}
                 size="icon"
                 type="button"
@@ -747,59 +871,23 @@ function Composer({
               </Button>
               <ComposerPrimitive.Dictate
                 aria-label="Dictate message"
-                className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                className={cn(
+                  "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
+                  compact && "hidden"
+                )}
               >
                 <Mic className="size-4" />
               </ComposerPrimitive.Dictate>
-              <VoiceControl toolApproval={toolApproval} />
-              <label className="ml-1 hidden items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground sm:flex">
-                <span className="sr-only">Model endpoint</span>
-                <select
-                  aria-label="Model endpoint"
-                  className="max-w-36 bg-transparent text-xs text-foreground outline-none"
-                  onChange={(event) => onEndpointChange(event.target.value)}
-                  value={endpointId}
-                >
-                  {endpoints.map((endpoint) => (
-                    <option key={endpoint.id} value={endpoint.id}>
-                      {endpoint.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="size-3" />
-              </label>
-              <label className="hidden min-w-0 items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground sm:flex">
-                <span className="sr-only">Chat model</span>
-                <select
-                  aria-busy={modelDiscoveryLoading || undefined}
-                  aria-label="Chat model"
-                  className="max-w-[min(12rem,30vw)] bg-transparent text-xs text-foreground outline-none"
-                  disabled={
-                    modelDiscoveryLoading && models.length === 0 && !modelId
-                  }
-                  onChange={(event) => onModelChange(event.target.value)}
-                  value={modelId}
-                >
-                  {models.length > 0 ? (
-                    models.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name && model.name !== model.id
-                          ? `${model.name} · ${model.id}`
-                          : model.id}
-                      </option>
-                    ))
-                  ) : modelId ? (
-                    <option value={modelId}>{modelId}</option>
-                  ) : (
-                    <option value="">
-                      {modelDiscoveryLoading
-                        ? "Discovering models…"
-                        : "No model configured"}
-                    </option>
-                  )}
-                </select>
-                <ChevronDown className="size-3 shrink-0" />
-              </label>
+              <ModelEndpointPicker
+                compact={compact}
+                endpointId={endpointId}
+                endpoints={endpoints}
+                modelDiscoveryLoading={modelDiscoveryLoading}
+                modelId={modelId}
+                models={models}
+                onEndpointChange={onEndpointChange}
+                onModelChange={onModelChange}
+              />
               {onOpenHistory && (
                 <Button
                   aria-label="Open conversation history"
@@ -812,20 +900,14 @@ function Composer({
                   <History className="size-4" />
                 </Button>
               )}
-              {onOpenContext && (
-                <Button
-                  aria-label="Open conversation context"
-                  className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  onClick={onOpenContext}
-                  size="icon-sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  <PanelRightOpen className="size-4" />
-                </Button>
-              )}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="order-3 flex shrink-0 items-center gap-1">
+              <VoiceControl
+                className="shrink-0"
+                compact
+                hideIcon
+                toolApproval={toolApproval}
+              />
               {isThreadRunning ? (
                 <ComposerPrimitive.Cancel
                   aria-label="Cancel response"
@@ -836,7 +918,7 @@ function Composer({
               ) : (
                 <ComposerPrimitive.Send
                   aria-label="Send message"
-                  className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/85 disabled:opacity-40"
+                  className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
                 >
                   <ArrowUp className="size-4" />
                 </ComposerPrimitive.Send>
@@ -845,10 +927,54 @@ function Composer({
           </div>
         </ComposerPrimitive.Root>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-      <p className="mt-2 text-center text-[11px] text-muted-foreground">
-        JustAI can make mistakes. Verify important information.
-      </p>
+      {!compact && (
+        <p className="mt-2 text-center text-[11px] text-muted-foreground">
+          JustAI can make mistakes. Verify important information.
+        </p>
+      )}
     </div>
+  )
+}
+
+type AssistantThreadLayoutProps = {
+  composerProps: Parameters<typeof Composer>[0]
+}
+
+function AssistantThreadLayout({ composerProps }: AssistantThreadLayoutProps) {
+  const isEmpty = useAuiState((state) => state.thread.messages.length === 0)
+  const composer = <Composer {...composerProps} compact={isEmpty} />
+
+  return (
+    <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <ThreadPrimitive.Viewport
+        className="relative min-h-0 flex-1 overflow-y-auto"
+        turnAnchor="top"
+        scrollToBottomOnInitialize
+      >
+        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-3 sm:px-8 lg:px-12">
+          <EmptyThread>
+            {isEmpty && <div className="mt-4 w-full max-w-3xl">{composer}</div>}
+          </EmptyThread>
+          <ThreadPrimitive.Messages
+            components={{
+              UserMessage,
+              AssistantMessage,
+            }}
+          />
+          <ThreadPrimitive.ScrollToBottom
+            className="sticky bottom-4 ml-auto rounded-full border bg-background/90 p-2 shadow-sm"
+            aria-label="Jump to latest message"
+          >
+            ↓
+          </ThreadPrimitive.ScrollToBottom>
+        </div>
+        {!isEmpty && (
+          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-5 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+            {composer}
+          </ThreadPrimitive.ViewportFooter>
+        )}
+      </ThreadPrimitive.Viewport>
+    </ThreadPrimitive.Root>
   )
 }
 
@@ -857,7 +983,6 @@ function AssistantChatSurface({
   initialMessages,
   endpoints,
   activeEndpoint,
-  user,
   onEnsureConversation,
   onUpload,
   onImportURL,
@@ -865,14 +990,12 @@ function AssistantChatSurface({
   onConversationCreated,
   onConversationUpdated,
   onOpenHistory,
-  onOpenContext,
   conversationContext,
 }: {
   conversationId: string | null
   initialMessages: UIMessage[]
   endpoints: Endpoint[]
   activeEndpoint?: Endpoint
-  user: Pick<User, "displayName" | "email">
   onEnsureConversation: () => Promise<string>
   onUpload: (file: File) => Promise<void>
   onImportURL: () => void | Promise<void>
@@ -880,7 +1003,6 @@ function AssistantChatSurface({
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
   onOpenHistory?: () => void
-  onOpenContext?: () => void
   conversationContext: ConversationContext
 }) {
   const [endpointId, setEndpointId] = useState(activeEndpoint?.id ?? "")
@@ -1070,51 +1192,26 @@ function AssistantChatSurface({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-        <ThreadPrimitive.Viewport
-          className="min-h-0 flex-1 overflow-y-auto"
-          turnAnchor="top"
-          scrollToBottomOnInitialize
-        >
-          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 sm:px-8 lg:px-12">
-            <EmptyThread onOpenHistory={onOpenHistory} user={user} />
-            <ThreadPrimitive.Messages
-              components={{
-                UserMessage,
-                AssistantMessage,
-              }}
-            />
-            <ThreadPrimitive.ScrollToBottom
-              className="sticky bottom-4 ml-auto rounded-full border bg-background/90 p-2 shadow-sm"
-              aria-label="Jump to latest message"
-            >
-              ↓
-            </ThreadPrimitive.ScrollToBottom>
-          </div>
-          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 shrink-0 border-t border-border/70 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-            <Composer
-              conversationContext={conversationContext}
-              endpointId={selectedEndpointId}
-              endpoints={endpoints}
-              models={availableModels}
-              modelDiscoveryLoading={modelDiscoveryLoading}
-              modelId={selectedModel}
-              onImportText={onImportText}
-              onImportURL={onImportURL}
-              onEndpointChange={setEndpointId}
-              onModelChange={(model) =>
-                setModelByEndpoint((current) => ({
-                  ...current,
-                  [selectedEndpointId]: model,
-                }))
-              }
-              onOpenHistory={onOpenHistory}
-              onOpenContext={onOpenContext}
-              toolApproval={voiceApproval}
-            />
-          </ThreadPrimitive.ViewportFooter>
-        </ThreadPrimitive.Viewport>
-      </ThreadPrimitive.Root>
+      <AssistantThreadLayout
+        composerProps={{
+          conversationContext,
+          endpointId: selectedEndpointId,
+          endpoints,
+          models: availableModels,
+          modelDiscoveryLoading,
+          modelId: selectedModel,
+          onImportText,
+          onImportURL,
+          onEndpointChange: setEndpointId,
+          onModelChange: (model) =>
+            setModelByEndpoint((current) => ({
+              ...current,
+              [selectedEndpointId]: model,
+            })),
+          onOpenHistory,
+          toolApproval: voiceApproval,
+        }}
+      />
     </AssistantRuntimeProvider>
   )
 }
@@ -1122,7 +1219,6 @@ function AssistantChatSurface({
 export function ChatView({
   conversationId,
   endpoints,
-  user,
   onConversationCreated,
   onConversationUpdated,
   onEnsureConversation,
@@ -1299,7 +1395,20 @@ export function ChatView({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {onOpenContext && (
+        <Button
+          aria-label="Open conversation context"
+          className="absolute top-3 right-3 z-30 h-8 gap-1.5 rounded-full border bg-background/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground"
+          onClick={onOpenContext}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <PanelRightOpen className="size-3.5" />
+          Context
+        </Button>
+      )}
       <AssistantChatSurface
         key={surfaceKey}
         activeEndpoint={activeEndpoint}
@@ -1312,10 +1421,8 @@ export function ChatView({
         onImportText={importText}
         onImportURL={importURL}
         onOpenHistory={onOpenHistory}
-        onOpenContext={onOpenContext}
         onUpload={uploadFile}
         conversationContext={conversationContext}
-        user={user}
       />
       <span className="sr-only">
         {conversationContext.knowledgeSources.length} knowledge sources,{" "}
