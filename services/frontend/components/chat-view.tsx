@@ -1113,13 +1113,13 @@ function AssistantChatSurface({
           endpointId: selectedEndpointId,
           model: selectedModel,
         }),
-        prepareSendMessagesRequest: async ({ body }) => {
+        prepareSendMessagesRequest: async ({ body, messages }) => {
           const id = await onEnsureConversation()
-          const messages = Array.isArray(body?.messages) ? body.messages : []
-          const latestUser = [...messages]
+          const requestMessages = Array.isArray(messages) ? messages : []
+          const latestUser = [...requestMessages]
             .reverse()
             .find((message) => message?.role === "user")
-          const latestMessage = messages.at(-1)
+          const latestMessage = requestMessages.at(-1)
           const requestId =
             latestMessage?.role === "assistant" &&
             typeof latestMessage.id === "string"
@@ -1130,6 +1130,12 @@ function AssistantChatSurface({
           return {
             body: {
               ...(body ?? {}),
+              // AssistantChatTransport keeps messages outside its resolved
+              // body. Copy them explicitly when returning a prepared body;
+              // otherwise the backend receives an empty history on the first
+              // turn and some OpenAI-compatible gateways fail with an opaque
+              // "list index out of range" error.
+              messages: requestMessages,
               conversationId: id,
               endpointId: selectedEndpointId,
               model: selectedModel,

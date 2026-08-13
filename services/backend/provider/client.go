@@ -127,6 +127,7 @@ func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, o
 	}
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	seenContent := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || line == "data: [DONE]" {
@@ -146,12 +147,19 @@ func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, o
 			continue
 		}
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+			seenContent = true
 			if err := onDelta(chunk.Choices[0].Delta.Content); err != nil {
 				return err
 			}
 		}
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if !seenContent {
+		return fmt.Errorf("provider returned no chat content")
+	}
+	return nil
 }
 
 func embedOpenAI(ctx context.Context, endpoint Endpoint, input string) ([]float64, error) {

@@ -155,6 +155,17 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	if !decodeJSON(c, &request) {
 		return
 	}
+	requestMessages := parseAssistantUIMessages(request.Messages)
+	approval := findAssistantUIApproval(requestMessages)
+	latestUser := latestAssistantUserMessage(requestMessages)
+	if approval == nil && latestUser == nil {
+		// Never create an empty conversation or forward an empty message list to
+		// an OpenAI-compatible gateway. vLLM/LiteLLM commonly reports this as the
+		// misleading "list index out of range" error instead of identifying the
+		// malformed request.
+		writeError(c, http.StatusBadRequest, fmt.Errorf("a non-empty user message is required"))
+		return
+	}
 	conversationID, err := a.ensureConversation(c, principal.UserID, organizationID, request.ConversationID)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
@@ -199,9 +210,6 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		}()
 	}
 
-	requestMessages := parseAssistantUIMessages(request.Messages)
-	approval := findAssistantUIApproval(requestMessages)
-	latestUser := latestAssistantUserMessage(requestMessages)
 	if approval == nil {
 		if latestUser != nil {
 			if err := a.persistAssistantUIUser(c, conversationID, *latestUser); err != nil {
@@ -549,7 +557,7 @@ func (a *App) persistAssistantUIUser(ctx context.Context, conversationID uuid.UU
 	}
 	_, err = a.DB.ExecContext(ctx, `
 		INSERT INTO messages (conversation_id, role, content, format, ui_message, parent_id, run_status, updated_at)
-		VALUES ($1, 'user', $2, 'ai-sdk-ui', jsonb_build_object('id', $3, 'role', 'user', 'parts', jsonb_build_array(jsonb_build_object('type', 'text', 'text', $2))), $4, 'complete', now())
+		VALUES ($1, 'user', $2::text, 'ai-sdk-ui', jsonb_build_object('id', $3::text, 'role', 'user', 'parts', jsonb_build_array(jsonb_build_object('type', 'text', 'text', $2::text))), $4::uuid, 'complete', now())
 	`, conversationID, message.Text, message.ID, parentID)
 	if err != nil {
 		return err
@@ -578,7 +586,7 @@ func (a *App) persistAssistantUITextMessage(ctx context.Context, conversationID 
 	}
 	_, err = a.DB.ExecContext(ctx, `
 		INSERT INTO messages (id, conversation_id, role, content, citations, format, ui_message, parent_id, run_status, updated_at)
-		VALUES ($1, $2, $3, $4, $5, 'ai-sdk-ui', $6, $7, 'complete', now())
+		VALUES ($1, $2, $3, $4, $5, 'ai-sdk-ui', $6, $7::uuid, 'complete', now())
 	`, messageID, conversationID, role, content, jsonRaw(citations), payload, parentID)
 	return messageID, err
 }
@@ -726,7 +734,7 @@ func (a *App) persistAssistantUIAssistantAtPartsStatus(ctx context.Context, conv
 	}
 	_, err = a.DB.ExecContext(ctx, `
 		INSERT INTO messages (id, conversation_id, role, content, citations, format, ui_message, parent_id, run_status, updated_at)
-		VALUES ($1, $2, 'assistant', $3, $4, 'ai-sdk-ui', $5, $6, $7, now())
+		VALUES ($1, $2, 'assistant', $3, $4, 'ai-sdk-ui', $5, $6::uuid, $7, now())
 		ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, citations = EXCLUDED.citations, format = EXCLUDED.format, ui_message = EXCLUDED.ui_message, parent_id = EXCLUDED.parent_id, run_status = EXCLUDED.run_status, updated_at = now()
 	`, messageID, conversationID, content, jsonRaw(citations), raw, parentID, firstAssistantUIString(runStatus, "complete"))
 	return err
@@ -1361,7 +1369,7 @@ func (a *App) upsertAssistantMessage(c *gin.Context) {
 	}
 	_, err = a.DB.ExecContext(c, `
 		INSERT INTO messages AS existing (id, conversation_id, role, content, format, ui_message, parent_id, run_status, updated_at)
-		VALUES ($1, $2, $3, $4, 'ai-sdk-ui', $5, $6, $7, now())
+		VALUES ($1, $2, $3, $4, 'ai-sdk-ui', $5, $6::uuid, $7, now())
 		ON CONFLICT (id) DO UPDATE SET
 			role = EXCLUDED.role,
 			content = EXCLUDED.content,

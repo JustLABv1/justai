@@ -334,7 +334,7 @@ func (a *App) persistChatToolEventAt(ctx context.Context, conversationID uuid.UU
 	}
 	if _, err := a.DB.ExecContext(ctx, `
 		INSERT INTO messages (id, conversation_id, role, content, format, ui_message, parent_id, run_status, updated_at)
-		VALUES ($1, $2, 'tool', $3, 'ai-sdk-ui', $4, $5, $6, now())
+		VALUES ($1, $2, 'tool', $3, 'ai-sdk-ui', $4, $5::uuid, $6, now())
 	`, messageID, conversationID, string(content), uiMessage, parentID, assistantUIRunStatusForTool(event)); err != nil {
 		return uuid.Nil
 	}
