@@ -41,6 +41,8 @@ type DeleteTarget =
   | { kind: "conversation"; id: string; title: string }
   | { kind: "transcription"; id: string; title: string }
 
+const HISTORY_OPEN_STORAGE_KEY = "justai.chat-history-open"
+
 export function Workspace() {
   const pathname = usePathname()
   const router = useRouter()
@@ -76,6 +78,7 @@ export function Workspace() {
   const [createTranscriptionRequested, setCreateTranscriptionRequested] =
     useState(false)
   const [historyOpen, setHistoryOpen] = useState(true)
+  const [historyPreferenceLoaded, setHistoryPreferenceLoaded] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
   const [pendingConversationId, setPendingConversationId] = useState<
     string | null
@@ -84,6 +87,25 @@ export function Workspace() {
   const activeConversationRef = useRef<string | null>(requestedConversationId)
   const pendingConversationIdRef = useRef<string | null>(null)
   const hydratedConversationRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const stored = window.localStorage.getItem(HISTORY_OPEN_STORAGE_KEY)
+      if (stored !== null) {
+        setHistoryOpen(stored !== "false")
+      }
+      setHistoryPreferenceLoaded(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!historyPreferenceLoaded) return
+    window.localStorage.setItem(
+      HISTORY_OPEN_STORAGE_KEY,
+      historyOpen ? "true" : "false"
+    )
+  }, [historyOpen, historyPreferenceLoaded])
 
   const redirectToLogin = useCallback(() => {
     const next = `${window.location.pathname}${window.location.search}`

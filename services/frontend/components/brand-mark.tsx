@@ -18,19 +18,19 @@ export function BrandMark({ className, priority = false }: BrandMarkProps) {
     >
       <Image
         alt=""
-        className="object-cover dark:hidden"
+        className="object-contain dark:hidden"
+        fill
+        priority={priority}
+        sizes="40px"
+        src="/images/logos/logo-dark.png"
+      />
+      <Image
+        alt=""
+        className="hidden object-contain dark:block"
         fill
         priority={priority}
         sizes="40px"
         src="/images/logos/logo-light.png"
-      />
-      <Image
-        alt=""
-        className="hidden scale-[1.12] object-cover dark:block"
-        fill
-        priority={priority}
-        sizes="40px"
-        src="/images/logos/logo-app-dark.png"
       />
     </span>
   )

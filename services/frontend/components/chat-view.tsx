@@ -803,14 +803,16 @@ function ScrollToLatest() {
 function EmptyThread({ children }: { children?: ReactNode }) {
   return (
     <ThreadPrimitive.Empty>
-      <div className="flex min-h-[calc(100svh-8rem)] flex-col items-center justify-center px-5 py-12 text-center">
-        <div className="mb-6 flex items-center gap-3">
-          <BrandMark className="size-12 rounded-full" priority />
-          <span className="text-2xl font-semibold tracking-[-0.04em]">
-            JustAI
-          </span>
+      <div className="flex min-h-[calc(100svh-8rem)] w-full flex-col items-center justify-center px-5 py-12 text-center">
+        <div className="flex w-full max-w-3xl flex-col items-center">
+          <div className="mb-6 flex w-full items-center justify-center gap-3">
+            <BrandMark className="size-12 rounded-full" priority />
+            <span className="text-2xl font-semibold tracking-[-0.04em]">
+              JustAI
+            </span>
+          </div>
+          {children}
         </div>
-        {children}
       </div>
     </ThreadPrimitive.Empty>
   )
@@ -1106,8 +1108,8 @@ function Composer({
           {!compact && <ContextDisplay context={conversationContext} />}
           <ComposerPrimitive.Input
             className={cn(
-              "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground",
-              compact && "order-2 min-h-10 min-w-0 flex-1 px-2 py-1.5"
+              "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
+              compact && "order-2 min-h-10 min-w-0 flex-1 px-2 py-2 leading-6"
             )}
             placeholder={
               compact ? "What do you want to know?" : "Message JustAI…"
@@ -1269,7 +1271,7 @@ function AssistantThreadLayout({
       >
         <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-3 sm:px-8 lg:px-12">
           <EmptyThread>
-            {isEmpty && <div className="mt-4 w-full max-w-3xl">{composer}</div>}
+            {isEmpty && <div className="mt-4 w-full">{composer}</div>}
           </EmptyThread>
           {!isEmpty && (
             <div className="mt-auto">

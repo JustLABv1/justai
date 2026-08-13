@@ -196,18 +196,6 @@ export function FocusWorkspaceSidebar({
         >
           <Plus data-icon="inline-start" />
         </Button>
-        {!historyVisible && historyView && (
-          <Button
-            aria-label="Open chat history"
-            className="size-9 rounded-xl text-muted-foreground"
-            onClick={() => onHistoryOpenChange(true)}
-            size="icon"
-            title="Open chat history"
-            variant="ghost"
-          >
-            <PanelLeftOpen data-icon="inline-start" />
-          </Button>
-        )}
 
         <nav
           aria-label="Workspace navigation"
@@ -259,6 +247,18 @@ export function FocusWorkspaceSidebar({
         </nav>
 
         <div className="min-h-0 flex-1" />
+        {!historyVisible && historyView && (
+          <Button
+            aria-label="Open chat history"
+            className="size-9 rounded-xl text-muted-foreground"
+            onClick={() => onHistoryOpenChange(true)}
+            size="icon"
+            title="Open chat history"
+            variant="ghost"
+          >
+            <PanelLeftOpen data-icon="inline-start" />
+          </Button>
+        )}
         <Button
           aria-label="Docs and guides"
           nativeButton={false}
