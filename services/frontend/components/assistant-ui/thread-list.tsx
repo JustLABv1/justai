@@ -4,6 +4,7 @@ import {
   Archive,
   ArchiveRestore,
   ChevronDown,
+  MoreHorizontal,
   Pencil,
   Trash2,
 } from "lucide-react"
@@ -30,6 +31,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import type { Conversation } from "@/lib/types"
 import { API_URL, api } from "@/lib/api"
 
@@ -75,11 +82,13 @@ function useThreadListChatRuntime() {
 
 function AssistantThreadItem({
   archived,
+  onArchive,
   onDelete,
   onRequestRename,
   thread,
 }: {
   archived: boolean
+  onArchive: (threadId: string) => void
   onDelete: (threadId: string) => void
   onRequestRename: (threadId: string, title: string) => void
   thread: { id: string; title?: string; custom?: Record<string, unknown> }
@@ -102,57 +111,44 @@ function AssistantThreadItem({
           </span>
         </span>
       </ThreadListItemPrimitive.Trigger>
-      <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-        <Button
-          aria-label={`Rename ${thread.title || "conversation"}`}
-          className="size-7 rounded-full px-0"
-          onClick={(event) => {
-            event.stopPropagation()
-            onRequestRename(thread.id, thread.title || "")
-          }}
-          size="icon-xs"
-          title="Rename"
-          type="button"
-          variant="ghost"
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              aria-label={`Actions for ${thread.title || "conversation"}`}
+              className="absolute top-1/2 right-1 size-7 -translate-y-1/2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+              size="icon-xs"
+              title={`Actions for ${thread.title || "conversation"}`}
+              variant="ghost"
+            />
+          }
         >
-          <Pencil className="size-3.5" />
-        </Button>
-        {archived ? (
-          <ThreadListItemPrimitive.Unarchive
-            aria-label={`Restore ${thread.title || "conversation"}`}
-            className="size-7 rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            title="Restore"
+          <MoreHorizontal aria-hidden="true" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem
+            onClick={() => onRequestRename(thread.id, thread.title || "")}
           >
-            <ArchiveRestore className="size-3.5" />
-          </ThreadListItemPrimitive.Unarchive>
-        ) : (
-          <ThreadListItemPrimitive.Archive
-            aria-label={`Archive ${thread.title || "conversation"}`}
-            className="size-7 rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            title="Archive"
+            <Pencil data-icon="inline-start" />
+            Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onArchive(thread.id)}>
+            {archived ? (
+              <ArchiveRestore data-icon="inline-start" />
+            ) : (
+              <Archive data-icon="inline-start" />
+            )}
+            {archived ? "Restore" : "Archive"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => onDelete(thread.id)}
+            variant="destructive"
           >
-            <Archive className="size-3.5" />
-          </ThreadListItemPrimitive.Archive>
-        )}
-        {/*
-         * The built-in delete primitive removes a thread optimistically before
-         * the workspace confirmation dialog can be answered. Keep deletion
-         * under the parent confirmation flow instead.
-         */}
-        <Button
-          aria-label={`Delete ${thread.title || "conversation"}`}
-          className="size-7 rounded-full p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-          onClick={(event) => {
-            event.stopPropagation()
-            onDelete(thread.id)
-          }}
-          title="Delete"
-          type="button"
-          variant="ghost"
-        >
-          <Trash2 className="size-3.5" />
-        </Button>
-      </div>
+            <Trash2 data-icon="inline-start" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </ThreadListItemPrimitive.Root>
   )
 }
@@ -292,6 +288,7 @@ export function AssistantThreadList({
             {({ threadListItem }) => (
               <AssistantThreadItem
                 archived={false}
+                onArchive={(threadId) => onArchive(threadId, true)}
                 onDelete={(threadId) => {
                   const conversation = allConversations.find(
                     (item) => item.id === threadId
@@ -327,6 +324,7 @@ export function AssistantThreadList({
                     {({ threadListItem }) => (
                       <AssistantThreadItem
                         archived
+                        onArchive={(threadId) => onArchive(threadId, false)}
                         onDelete={(threadId) => {
                           const conversation = allConversations.find(
                             (item) => item.id === threadId

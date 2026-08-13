@@ -401,25 +401,37 @@ export function FocusWorkspaceSidebar({
           </Alert>
         )}
 
-        <Button
-          className="w-full shrink-0 justify-start"
-          onClick={() => onNavigate("chat")}
-        >
-          <Plus data-icon="inline-start" />
-          New chat
-        </Button>
+        {activeView === "transcription" ? (
+          <Button
+            className="w-full shrink-0 justify-start"
+            onClick={onNewTranscriptionSession}
+          >
+            <Plus data-icon="inline-start" />
+            New room
+          </Button>
+        ) : (
+          <>
+            <Button
+              className="w-full shrink-0 justify-start"
+              onClick={() => onNavigate("chat")}
+            >
+              <Plus data-icon="inline-start" />
+              New chat
+            </Button>
 
-        <AssistantThreadList
-          activeConversationId={activeConversationId}
-          archivedConversations={archivedConversations}
-          conversations={conversations}
-          historyQuery={historyQuery}
-          onArchive={onArchiveConversation}
-          onDelete={onDeleteConversation}
-          onHistoryQueryChange={setHistoryQuery}
-          onRename={onRenameConversation}
-          onSelect={(id) => onNavigate("chat", id)}
-        />
+            <AssistantThreadList
+              activeConversationId={activeConversationId}
+              archivedConversations={archivedConversations}
+              conversations={conversations}
+              historyQuery={historyQuery}
+              onArchive={onArchiveConversation}
+              onDelete={onDeleteConversation}
+              onHistoryQueryChange={setHistoryQuery}
+              onRename={onRenameConversation}
+              onSelect={(id) => onNavigate("chat", id)}
+            />
+          </>
+        )}
 
         {activeView === "transcription" && (
           <TranscriptionHistoryPanel
@@ -429,7 +441,6 @@ export function FocusWorkspaceSidebar({
             archivedOpen={archivedSessionsOpen}
             onArchive={onArchiveSession}
             onDelete={onDeleteSession}
-            onNewSession={onNewTranscriptionSession}
             onSelect={(id) => onNavigate("transcription", null, id)}
             sessionGroups={sessionGroups}
             setArchivedOpen={setArchivedSessionsOpen}
@@ -447,7 +458,6 @@ function TranscriptionHistoryPanel({
   archivedOpen,
   onArchive,
   onDelete,
-  onNewSession,
   onSelect,
   sessionGroups,
   setArchivedOpen,
@@ -458,30 +468,13 @@ function TranscriptionHistoryPanel({
   archivedOpen: boolean
   onArchive: (id: string, archived: boolean) => void
   onDelete: (session: TranscriptionSession) => void
-  onNewSession: () => void
   onSelect: (id: string) => void
   sessionGroups: RecencyGroup<TranscriptionSession>[]
   setArchivedOpen: (open: boolean) => void
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-xs font-semibold">Recent sessions</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Select a room to view its transcript
-          </p>
-        </div>
-        <Button
-          aria-label="New live transcription session"
-          onClick={onNewSession}
-          size="icon-sm"
-          title="New live transcription session"
-          variant="ghost"
-        >
-          <Plus data-icon="inline-start" />
-        </Button>
-      </div>
+      <p className="text-xs font-semibold">Recent sessions</p>
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {sessionGroups.length > 0 ? (
           <div className="flex flex-col gap-4 pt-1">
