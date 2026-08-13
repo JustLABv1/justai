@@ -74,7 +74,7 @@ export function Workspace() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [createTranscriptionRequested, setCreateTranscriptionRequested] =
     useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(true)
   const [contextOpen, setContextOpen] = useState(false)
   const conversationCreationRef = useRef<Promise<string> | null>(null)
   const activeConversationRef = useRef<string | null>(requestedConversationId)
@@ -631,7 +631,8 @@ export function Workspace() {
                 }}
                 onNavigate={(view) => navigate(view, null)}
                 onOpenHistory={() => setHistoryOpen(true)}
-                onOpenContext={() => setContextOpen(true)}
+                onOpenContext={() => setContextOpen((current) => !current)}
+                contextOpen={contextOpen}
               />
             )}
             {activeView === "transcription" && (

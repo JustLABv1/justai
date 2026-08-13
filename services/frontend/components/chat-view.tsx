@@ -17,6 +17,7 @@ import {
   History,
   Link,
   Mic,
+  PanelRightClose,
   Paperclip,
   PanelRightOpen,
   Pencil,
@@ -86,6 +87,7 @@ type Props = {
   onNavigate?: (view: ViewId) => void
   onOpenHistory?: () => void
   onOpenContext?: () => void
+  contextOpen?: boolean
 }
 
 type AssistantHistoryResponse = {
@@ -878,16 +880,6 @@ function Composer({
               >
                 <Mic className="size-4" />
               </ComposerPrimitive.Dictate>
-              <ModelEndpointPicker
-                compact={compact}
-                endpointId={endpointId}
-                endpoints={endpoints}
-                modelDiscoveryLoading={modelDiscoveryLoading}
-                modelId={modelId}
-                models={models}
-                onEndpointChange={onEndpointChange}
-                onModelChange={onModelChange}
-              />
               {onOpenHistory && (
                 <Button
                   aria-label="Open conversation history"
@@ -902,6 +894,16 @@ function Composer({
               )}
             </div>
             <div className="order-3 flex shrink-0 items-center gap-1">
+              <ModelEndpointPicker
+                compact={compact}
+                endpointId={endpointId}
+                endpoints={endpoints}
+                modelDiscoveryLoading={modelDiscoveryLoading}
+                modelId={modelId}
+                models={models}
+                onEndpointChange={onEndpointChange}
+                onModelChange={onModelChange}
+              />
               <VoiceControl
                 className="shrink-0"
                 compact
@@ -961,12 +963,14 @@ function AssistantThreadLayout({ composerProps }: AssistantThreadLayoutProps) {
               AssistantMessage,
             }}
           />
-          <ThreadPrimitive.ScrollToBottom
-            className="sticky bottom-4 ml-auto rounded-full border bg-background/90 p-2 shadow-sm"
-            aria-label="Jump to latest message"
-          >
-            ↓
-          </ThreadPrimitive.ScrollToBottom>
+          {!isEmpty && (
+            <ThreadPrimitive.ScrollToBottom
+              className="sticky bottom-4 ml-auto rounded-full border bg-background/90 p-2 shadow-sm"
+              aria-label="Jump to latest message"
+            >
+              ↓
+            </ThreadPrimitive.ScrollToBottom>
+          )}
         </div>
         {!isEmpty && (
           <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-5 backdrop-blur supports-[backdrop-filter]:bg-background/75">
@@ -1224,6 +1228,7 @@ export function ChatView({
   onEnsureConversation,
   onOpenHistory,
   onOpenContext,
+  contextOpen = false,
 }: Props) {
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
@@ -1398,14 +1403,23 @@ export function ChatView({
     <div className="relative flex min-h-0 flex-1 flex-col">
       {onOpenContext && (
         <Button
-          aria-label="Open conversation context"
+          aria-expanded={contextOpen}
+          aria-label={
+            contextOpen
+              ? "Close conversation context"
+              : "Open conversation context"
+          }
           className="absolute top-3 right-3 z-30 h-8 gap-1.5 rounded-full border bg-background/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground"
           onClick={onOpenContext}
           size="sm"
           type="button"
           variant="ghost"
         >
-          <PanelRightOpen className="size-3.5" />
+          {contextOpen ? (
+            <PanelRightClose className="size-3.5" />
+          ) : (
+            <PanelRightOpen className="size-3.5" />
+          )}
           Context
         </Button>
       )}

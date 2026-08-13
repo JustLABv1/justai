@@ -173,10 +173,10 @@ export function FocusWorkspaceSidebar({
   return (
     <aside
       className={cn(
-        "flex h-svh shrink-0 overflow-hidden border-r border-border bg-background transition-[width] duration-200 ease-out md:w-[352px]",
+        "flex h-svh shrink-0 overflow-hidden border-r border-border bg-background transition-[width] duration-200 ease-out",
         historyOpen
           ? "w-[352px] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:shadow-lg"
-          : "w-16"
+          : "w-16 md:w-16"
       )}
       data-history-open={historyOpen}
     >
@@ -194,7 +194,7 @@ export function FocusWorkspaceSidebar({
         {!historyOpen && (
           <Button
             aria-label="Open chat history"
-            className="size-9 rounded-xl text-muted-foreground md:hidden"
+            className="size-9 rounded-xl text-muted-foreground"
             onClick={() => onHistoryOpenChange(true)}
             size="icon"
             title="Open chat history"
@@ -310,8 +310,8 @@ export function FocusWorkspaceSidebar({
 
       <div
         className={cn(
-          "hidden w-[288px] min-w-0 flex-col gap-3 overflow-hidden p-4 md:flex",
-          historyOpen && "max-md:flex"
+          "w-[288px] min-w-0 flex-col gap-3 overflow-hidden p-4",
+          historyOpen ? "flex" : "hidden"
         )}
       >
         <div className="flex items-center justify-between gap-3">
@@ -328,10 +328,10 @@ export function FocusWorkspaceSidebar({
             </h2>
           </div>
           <Button
-            aria-label="Close sessions"
+            aria-label="Collapse chat history"
             onClick={() => onHistoryOpenChange(false)}
             size="icon-sm"
-            title="Close sessions"
+            title="Collapse chat history"
             variant="ghost"
           >
             <PanelLeftClose data-icon="inline-start" />

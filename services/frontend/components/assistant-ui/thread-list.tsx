@@ -210,17 +210,6 @@ export function AssistantThreadList({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadListPrimitive.Root className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <p className="text-xs font-semibold">Recent conversations</p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              Search, archive, or reopen a chat
-            </p>
-          </div>
-          <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground">
-            {conversations.length}
-          </span>
-        </div>
         <Input
           aria-label="Search chat history"
           className="h-9 shrink-0"
