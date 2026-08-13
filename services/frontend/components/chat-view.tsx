@@ -805,7 +805,7 @@ function EmptyThread({ children }: { children?: ReactNode }) {
     <ThreadPrimitive.Empty>
       <div className="flex min-h-[calc(100svh-8rem)] w-full flex-col items-center justify-center px-5 py-12 text-center">
         <div className="flex w-full max-w-3xl flex-col items-center">
-          <div className="mb-6 flex w-full items-center justify-center gap-3">
+          <div className="mb-3 flex w-full items-center justify-center gap-3">
             <BrandMark className="size-12 rounded-full" priority />
             <span className="text-2xl font-semibold tracking-[-0.04em]">
               JustAI
@@ -973,6 +973,9 @@ function Composer({
   onImportText: () => void | Promise<void>
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+  const hasAttachments = useAuiState(
+    (state) => state.composer.attachments.length > 0
+  )
   const contextTriggerAdapter = useMemo(() => {
     const groups = [
       {
@@ -1081,30 +1084,41 @@ function Composer({
           className={cn(
             "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
             compact &&
-              "flex items-center gap-1 overflow-hidden rounded-full bg-muted/30 p-1.5 ring-border/60"
+              "flex flex-wrap items-center gap-2 overflow-hidden rounded-[1.75rem] bg-muted/30 p-2 ring-border/60"
           )}
           data-running={isThreadRunning}
         >
-          <ComposerPrimitive.Attachments>
-            {({ attachment }) => (
-              <AttachmentPrimitive.Root className="mx-1 mb-1 flex items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs">
-                <AttachmentPrimitive.Name />
-                <span className="text-muted-foreground">
-                  {attachment.status.type === "running"
-                    ? `${Math.round(attachment.status.progress * 100)}%`
-                    : attachment.status.type === "complete"
-                      ? "Ready"
-                      : "Pending"}
-                </span>
-                <AttachmentPrimitive.Remove
-                  aria-label={`Remove ${attachment.name}`}
-                  className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </AttachmentPrimitive.Remove>
-              </AttachmentPrimitive.Root>
-            )}
-          </ComposerPrimitive.Attachments>
+          {hasAttachments && (
+            <div
+              className={cn(
+                "flex w-full flex-wrap items-center gap-2 px-2 pt-1 pb-0.5",
+                compact && "order-first basis-full"
+              )}
+            >
+              <ComposerPrimitive.Attachments>
+                {({ attachment }) => (
+                  <AttachmentPrimitive.Root className="flex max-w-full items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs">
+                    <span className="max-w-52 truncate">
+                      <AttachmentPrimitive.Name />
+                    </span>
+                    <span className="shrink-0 text-muted-foreground">
+                      {attachment.status.type === "running"
+                        ? `${Math.round(attachment.status.progress * 100)}%`
+                        : attachment.status.type === "complete"
+                          ? "Ready"
+                          : "Pending"}
+                    </span>
+                    <AttachmentPrimitive.Remove
+                      aria-label={`Remove ${attachment.name}`}
+                      className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="size-3.5" />
+                    </AttachmentPrimitive.Remove>
+                  </AttachmentPrimitive.Root>
+                )}
+              </ComposerPrimitive.Attachments>
+            </div>
+          )}
           {!compact && <ContextDisplay context={conversationContext} />}
           <ComposerPrimitive.Input
             className={cn(
@@ -1271,7 +1285,7 @@ function AssistantThreadLayout({
       >
         <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-3 sm:px-8 lg:px-12">
           <EmptyThread>
-            {isEmpty && <div className="mt-4 w-full">{composer}</div>}
+            {isEmpty && <div className="mt-2 w-full">{composer}</div>}
           </EmptyThread>
           {!isEmpty && (
             <div className="mt-auto">
