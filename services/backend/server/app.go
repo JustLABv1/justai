@@ -62,7 +62,7 @@ func (a *App) Router() *gin.Engine {
 			return
 		}
 		var migrated bool
-		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '007_mcp_tool_cache_marker.sql')`).Scan(&migrated); err != nil || !migrated {
+		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '008_assistant_ui.sql')`).Scan(&migrated); err != nil || !migrated {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
@@ -106,6 +106,7 @@ func (a *App) Router() *gin.Engine {
 	org.PATCH("/endpoints/:id", a.updateEndpoint)
 	org.DELETE("/endpoints/:id", a.deleteEndpoint)
 	org.POST("/endpoints/:id/test", a.testEndpoint)
+	org.GET("/endpoints/:id/models", a.discoverEndpointModels)
 	org.POST("/ws/tickets", a.createWSTicket)
 	org.POST("/voice/speech", a.synthesizeVoiceSpeech)
 	org.GET("/transcription/sessions", a.listTranscriptionSessions)
@@ -155,8 +156,10 @@ func (a *App) Router() *gin.Engine {
 	org.PATCH("/conversations/:id", a.updateConversation)
 	org.DELETE("/conversations/:id", a.deleteConversation)
 	org.GET("/conversations/:id/messages", a.listConversationMessages)
+	org.PUT("/conversations/:id/messages/:messageId", a.upsertAssistantMessage)
+	org.PATCH("/conversations/:id/messages/:messageId", a.updateAssistantMessage)
+	org.POST("/chat", a.assistantUIChat)
 
-	protected.GET("/ws/chat", a.chatWebSocket)
 	protected.GET("/ws/voice", a.voiceWebSocket)
 	router.GET("/api/v1/ws/transcription", a.transcriptionWebSocket)
 	organizationRoutes := protected.Group("/organizations/:id")

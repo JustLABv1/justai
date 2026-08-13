@@ -33,7 +33,7 @@ func TestRunMigrationsIntegration(t *testing.T) {
 	}
 
 	checks := map[string]string{
-		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '007_mcp_tool_cache_marker.sql')`,
+		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '008_assistant_ui.sql')`,
 		"conversation knowledge context":       `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'conversation_knowledge_sources')`,
 		"one active ingestion job index":       `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'ingestion_jobs_one_active_per_source_idx')`,
 		"encrypted transcription grant column": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'transcription_join_requests' AND column_name = 'grant_token_encrypted')`,

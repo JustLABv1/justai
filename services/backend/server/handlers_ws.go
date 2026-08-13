@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,61 +26,19 @@ type wsTicketRequest struct {
 	ConversationID string `json:"conversationId"`
 }
 
-type chatEvent struct {
-	Type      string          `json:"type"`
-	RequestID string          `json:"requestId"`
-	Data      json.RawMessage `json:"data"`
-}
-
-type sessionStartData struct {
-	ConversationID string `json:"conversationId"`
-	EndpointID     string `json:"endpointId"`
-}
-
-type messageSendData struct {
-	ConversationID string `json:"conversationId"`
-	EndpointID     string `json:"endpointId"`
-	Content        string `json:"content"`
-}
-
-type chatToolDecisionData struct {
-	ApprovalID string `json:"approvalId"`
-	Approved   bool   `json:"approved"`
-}
-
-type chatToolApproval struct {
-	ID         string
-	ServerID   uuid.UUID
-	ServerName string
-	ToolName   string
-	CallID     string
-	Arguments  map[string]any
-	Decision   chan bool
-}
-
 type chatToolEvent struct {
-	Kind       string         `json:"kind"`
-	Status     string         `json:"status"`
-	Round      int            `json:"round,omitempty"`
-	ServerID   uuid.UUID      `json:"serverId"`
-	ServerName string         `json:"serverName"`
-	ToolName   string         `json:"toolName"`
-	CallID     string         `json:"callId"`
-	ApprovalID string         `json:"approvalId,omitempty"`
-	Arguments  map[string]any `json:"arguments,omitempty"`
-	Result     string         `json:"result,omitempty"`
-	Error      string         `json:"error,omitempty"`
-}
-
-type chatState struct {
-	conversationID uuid.UUID
-	endpointID     uuid.UUID
-	sequence       int64
-	writeMu        sync.Mutex
-	streamMu       sync.Mutex
-	cancelStream   context.CancelFunc
-	pendingMu      sync.Mutex
-	pending        map[string]*chatToolApproval
+	Kind          string         `json:"kind"`
+	Status        string         `json:"status"`
+	Round         int            `json:"round,omitempty"`
+	ServerID      uuid.UUID      `json:"serverId"`
+	ServerName    string         `json:"serverName"`
+	ToolName      string         `json:"toolName"`
+	CallID        string         `json:"callId"`
+	ApprovalID    string         `json:"approvalId,omitempty"`
+	Arguments     map[string]any `json:"arguments,omitempty"`
+	Result        string         `json:"result,omitempty"`
+	ResultPreview string         `json:"resultPreview,omitempty"`
+	Error         string         `json:"error,omitempty"`
 }
 
 var websocketUpgrader = websocket.Upgrader{
@@ -89,12 +46,29 @@ var websocketUpgrader = websocket.Upgrader{
 	WriteBufferSize: 16 * 1024,
 }
 
+func (a *App) upgradeWebSocket(c *gin.Context) (*websocket.Conn, error) {
+	upgrader := websocketUpgrader
+	upgrader.CheckOrigin = func(request *http.Request) bool {
+		origin := request.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		for _, allowed := range a.Config.FrontendOrigins {
+			if allowed == "*" || allowed == origin {
+				return true
+			}
+		}
+		return false
+	}
+	return upgrader.Upgrade(c.Writer, c.Request, nil)
+}
+
 func (a *App) createWSTicket(c *gin.Context) {
 	var request wsTicketRequest
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if request.Kind != "chat" && request.Kind != "voice" && request.Kind != "transcription" && request.Kind != "transcription-viewer" && request.Kind != "transcription-capture" {
+	if request.Kind != "voice" && request.Kind != "transcription" && request.Kind != "transcription-viewer" && request.Kind != "transcription-capture" {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported websocket ticket kind"))
 		return
 	}
@@ -170,268 +144,6 @@ func (a *App) createWSTicket(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"ticket": value, "expiresAt": expiresAt, "kind": request.Kind})
 }
 
-func (a *App) chatWebSocket(c *gin.Context) {
-	principal, _ := middleware.GetPrincipal(c)
-	organizationID, err := a.consumeTicket(c, c.Query("ticket"), "chat", principal.UserID)
-	if err != nil {
-		writeError(c, http.StatusUnauthorized, err)
-		return
-	}
-	connection, err := a.upgradeWebSocket(c)
-	if err != nil {
-		return
-	}
-	defer connection.Close()
-	a.runChatSocket(c, connection, principal.UserID, organizationID)
-}
-
-func (a *App) upgradeWebSocket(c *gin.Context) (*websocket.Conn, error) {
-	upgrader := websocketUpgrader
-	upgrader.CheckOrigin = func(request *http.Request) bool {
-		origin := request.Header.Get("Origin")
-		if origin == "" {
-			return true
-		}
-		for _, allowed := range a.Config.FrontendOrigins {
-			if allowed == "*" || allowed == origin {
-				return true
-			}
-		}
-		return false
-	}
-	return upgrader.Upgrade(c.Writer, c.Request, nil)
-}
-
-func (a *App) consumeTicket(ctx context.Context, value, kind string, userID uuid.UUID) (uuid.UUID, error) {
-	if value == "" {
-		return uuid.Nil, fmt.Errorf("websocket ticket is required")
-	}
-	hash := hashToken(value)
-	var organizationID uuid.UUID
-	var ticketUser uuid.UUID
-	transaction, err := a.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	defer transaction.Rollback()
-	err = transaction.QueryRowContext(ctx, `SELECT organization_id, user_id FROM ws_tickets WHERE token_hash = $1 AND kind = $2 AND expires_at > now() AND used_at IS NULL FOR UPDATE`, hash, kind).Scan(&organizationID, &ticketUser)
-	if err != nil || ticketUser != userID {
-		return uuid.Nil, fmt.Errorf("invalid or expired websocket ticket")
-	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE ws_tickets SET used_at = now() WHERE token_hash = $1`, hash); err != nil {
-		return uuid.Nil, err
-	}
-	if err := transaction.Commit(); err != nil {
-		return uuid.Nil, err
-	}
-	return organizationID, nil
-}
-
-func (a *App) runChatSocket(ctx *gin.Context, connection *websocket.Conn, userID, organizationID uuid.UUID) {
-	state := &chatState{pending: map[string]*chatToolApproval{}}
-	socketContext, cancelSocket := context.WithCancel(ctx)
-	defer cancelSocket()
-	for {
-		messageType, payload, err := connection.ReadMessage()
-		if err != nil {
-			return
-		}
-		if messageType != websocket.TextMessage {
-			_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "chat messages must be JSON text"}})
-			continue
-		}
-		var event chatEvent
-		if err := json.Unmarshal(payload, &event); err != nil {
-			_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "invalid chat event"}})
-			continue
-		}
-		switch event.Type {
-		case "session.start":
-			var data sessionStartData
-			if err := json.Unmarshal(event.Data, &data); err != nil {
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "invalid session.start payload"}})
-				continue
-			}
-			conversationID, err := a.ensureConversation(ctx, userID, organizationID, data.ConversationID)
-			if err != nil {
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": err.Error()}})
-				continue
-			}
-			endpointID, err := a.resolveEndpoint(ctx, userID, organizationID, data.EndpointID)
-			if err != nil {
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": err.Error()}})
-				continue
-			}
-			state.conversationID, state.endpointID = conversationID, endpointID
-			_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "session.ready", RequestID: event.RequestID, Data: gin.H{"conversationId": conversationID, "endpointId": endpointID}})
-		case "message.send":
-			var data messageSendData
-			if err := json.Unmarshal(event.Data, &data); err != nil || strings.TrimSpace(data.Content) == "" {
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "message content is required"}})
-				continue
-			}
-			conversationID := state.conversationID
-			if data.ConversationID != "" {
-				conversationID, err = a.ensureConversation(ctx, userID, organizationID, data.ConversationID)
-				if err != nil {
-					_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": err.Error()}})
-					continue
-				}
-			}
-			if conversationID == uuid.Nil {
-				conversationID, err = a.ensureConversation(ctx, userID, organizationID, "")
-				if err != nil {
-					_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": err.Error()}})
-					continue
-				}
-				state.conversationID = conversationID
-			}
-			state.conversationID = conversationID
-			endpointID := state.endpointID
-			if data.EndpointID != "" {
-				endpointID, err = a.resolveEndpoint(ctx, userID, organizationID, data.EndpointID)
-				if err != nil {
-					_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": err.Error()}})
-					continue
-				}
-				state.endpointID = endpointID
-			}
-			state.streamMu.Lock()
-			if state.cancelStream != nil {
-				state.streamMu.Unlock()
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "a response is already streaming"}})
-				continue
-			}
-			streamContext, cancelStream := context.WithCancel(socketContext)
-			state.cancelStream = cancelStream
-			state.streamMu.Unlock()
-			go func() {
-				defer func() {
-					state.streamMu.Lock()
-					state.cancelStream = nil
-					state.streamMu.Unlock()
-				}()
-				a.streamChatMessage(streamContext, connection, state, userID, organizationID, endpointID, conversationID, event.RequestID, strings.TrimSpace(data.Content))
-			}()
-		case "tool.approve", "tool.reject", "tool.decision":
-			var data chatToolDecisionData
-			if err := json.Unmarshal(event.Data, &data); err != nil || data.ApprovalID == "" {
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "approvalId is required"}})
-				continue
-			}
-			if event.Type == "tool.reject" {
-				data.Approved = false
-			}
-			if !decideChatApproval(state, data.ApprovalID, data.Approved) {
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "approval is no longer pending"}})
-			}
-		case "cancel":
-			state.streamMu.Lock()
-			cancelStream := state.cancelStream
-			state.streamMu.Unlock()
-			if cancelStream == nil {
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "cancelled", RequestID: event.RequestID, Data: gin.H{"message": "No active stream"}})
-			} else {
-				cancelStream()
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "cancelled", RequestID: event.RequestID, Data: gin.H{"message": "Response cancelled"}})
-			}
-		default:
-			_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "unsupported chat event: " + event.Type}})
-		}
-	}
-}
-
-func (a *App) streamChatMessage(ctx context.Context, connection *websocket.Conn, state *chatState, userID, organizationID, endpointID, conversationID uuid.UUID, requestID, content string) {
-	indexing, err := a.conversationHasIndexingKnowledge(ctx, conversationID)
-	if err != nil {
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "conversation context could not be checked: " + err.Error()}})
-		return
-	}
-	if indexing {
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "attached Knowledge is still indexing; detach it or wait for indexing to finish"}})
-		return
-	}
-	if _, err := a.DB.ExecContext(ctx, `INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', $2)`, conversationID, content); err != nil {
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
-		return
-	}
-	if _, err := a.DB.ExecContext(ctx, `
-		UPDATE conversations
-		SET title = CASE WHEN title = $2 THEN $3 ELSE title END, updated_at = now()
-		WHERE id = $1
-	`, conversationID, defaultConversationTitle, conversationTitle(content)); err != nil {
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
-		return
-	}
-	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
-	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
-	citations, err := a.searchKnowledge(ctx, organizationID, userID, conversationID, content, 6)
-	if err != nil {
-		citations = nil
-	}
-	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "retrieval.completed", RequestID: requestID, Data: gin.H{"citations": citations}})
-
-	history, err := a.conversationHistory(ctx, conversationID)
-	if err != nil {
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
-		return
-	}
-	if len(citations) > 0 {
-		history = append([]provider.Message{{Role: "system", Content: citationPrompt(citations)}}, history...)
-	}
-	endpoint, err := a.providerEndpoint(ctx, endpointID)
-	if err != nil {
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "endpoint could not be loaded: " + err.Error()}})
-		return
-	}
-	var response strings.Builder
-	discovery := a.discoverConversationTools(ctx, userID, organizationID, conversationID)
-	definitions, bindings := discovery.Definitions, discovery.Bindings
-	if len(definitions) > 0 {
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tools.ready", RequestID: requestID, Data: gin.H{"count": len(definitions)}})
-	} else if discovery.ServerCount > 0 || len(discovery.Errors) > 0 {
-		message := "MCP servers are configured, but no tools were discovered."
-		if len(discovery.Errors) > 0 {
-			message += " " + strings.Join(discovery.Errors, "; ")
-		}
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tools.unavailable", RequestID: requestID, Data: gin.H{"message": message}})
-	}
-	if len(definitions) > 0 && provider.SupportsToolCalling(endpoint) {
-		toolHistory, historyErr := a.conversationToolHistory(ctx, conversationID)
-		if historyErr != nil {
-			_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": historyErr.Error()}})
-			return
-		}
-		toolHistory = append([]provider.ToolMessage{{Role: "system", Content: chatToolInstructions()}}, toolHistory...)
-		if len(citations) > 0 {
-			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: citationPrompt(citations)}}, toolHistory...)
-		}
-		err = a.streamChatWithTools(ctx, connection, state, userID, organizationID, conversationID, requestID, endpoint, toolHistory, definitions, bindings, &response)
-	} else {
-		if len(definitions) > 0 {
-			_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tools.unavailable", RequestID: requestID, Data: gin.H{"count": len(definitions), "message": "MCP tools are connected, but this endpoint does not have tool calling enabled. Enable the tool-calling capability for the selected endpoint."}})
-		}
-		err = provider.StreamChat(ctx, endpoint, provider.ChatOptions{Messages: history}, func(delta string) error {
-			response.WriteString(delta)
-			return a.sendSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": delta}})
-		})
-	}
-	if err != nil {
-		if ctx.Err() != nil {
-			return
-		}
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
-		return
-	}
-	assistantContent := response.String()
-	if _, err := a.DB.ExecContext(ctx, `INSERT INTO messages (conversation_id, role, content, citations) VALUES ($1, 'assistant', $2, $3)`, conversationID, assistantContent, jsonRaw(citations)); err != nil {
-		_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
-		return
-	}
-	_, _ = a.DB.ExecContext(ctx, `UPDATE conversations SET endpoint_id = $2, updated_at = now() WHERE id = $1`, conversationID, endpointID)
-	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "message.completed", RequestID: requestID, Data: gin.H{"conversationId": conversationID, "content": assistantContent, "citations": citations}})
-}
-
 func (a *App) conversationHasIndexingKnowledge(ctx context.Context, conversationID uuid.UUID) (bool, error) {
 	var indexing bool
 	err := a.DB.QueryRowContext(ctx, `
@@ -476,6 +188,48 @@ func (a *App) conversationToolHistory(ctx context.Context, conversationID uuid.U
 		return nil, err
 	}
 	return buildConversationToolHistory(stored), nil
+}
+
+func (a *App) conversationToolHistoryFromHead(ctx context.Context, conversationID, headID uuid.UUID) ([]provider.ToolMessage, error) {
+	stored, err := a.conversationBranchMessages(ctx, conversationID, headID)
+	if err != nil {
+		return nil, err
+	}
+	return buildConversationToolHistory(stored), nil
+}
+
+func (a *App) conversationBranchMessages(ctx context.Context, conversationID, headID uuid.UUID) ([]storedChatMessage, error) {
+	if headID == uuid.Nil {
+		return []storedChatMessage{}, nil
+	}
+	rows, err := a.DB.QueryContext(ctx, `
+		WITH RECURSIVE branch AS (
+			SELECT id, parent_id, role, content, created_at
+			FROM messages
+			WHERE conversation_id = $1 AND id = $2
+			UNION ALL
+			SELECT message.id, message.parent_id, message.role, message.content, message.created_at
+			FROM messages message
+			JOIN branch current ON current.parent_id = message.id
+			WHERE message.conversation_id = $1
+		)
+		SELECT role, content
+		FROM branch
+		ORDER BY created_at ASC, id ASC
+	`, conversationID, headID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	stored := []storedChatMessage{}
+	for rows.Next() {
+		var item storedChatMessage
+		if err := rows.Scan(&item.Role, &item.Content); err != nil {
+			return nil, err
+		}
+		stored = append(stored, item)
+	}
+	return stored, rows.Err()
 }
 
 func buildConversationToolHistory(stored []storedChatMessage) []provider.ToolMessage {
@@ -561,12 +315,27 @@ func parseChatToolEvent(content string) (chatToolEvent, bool) {
 }
 
 func (a *App) persistChatToolEvent(ctx context.Context, conversationID uuid.UUID, event chatToolEvent) uuid.UUID {
+	parentID, err := a.conversationHead(ctx, conversationID)
+	if err != nil {
+		return uuid.Nil
+	}
+	return a.persistChatToolEventAt(ctx, conversationID, parentID, event)
+}
+
+func (a *App) persistChatToolEventAt(ctx context.Context, conversationID uuid.UUID, parentID any, event chatToolEvent) uuid.UUID {
 	content, err := json.Marshal(event)
 	if err != nil {
 		return uuid.Nil
 	}
-	var messageID uuid.UUID
-	if err := a.DB.QueryRowContext(ctx, `INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'tool', $2) RETURNING id`, conversationID, string(content)).Scan(&messageID); err != nil {
+	messageID := uuid.New()
+	uiMessage, err := json.Marshal(assistantUIToolMessage(messageID, event))
+	if err != nil {
+		return uuid.Nil
+	}
+	if _, err := a.DB.ExecContext(ctx, `
+		INSERT INTO messages (id, conversation_id, role, content, format, ui_message, parent_id, run_status, updated_at)
+		VALUES ($1, $2, 'tool', $3, 'ai-sdk-ui', $4, $5, $6, now())
+	`, messageID, conversationID, string(content), uiMessage, parentID, assistantUIRunStatusForTool(event)); err != nil {
 		return uuid.Nil
 	}
 	return messageID
@@ -580,7 +349,26 @@ func (a *App) updateChatToolEvent(ctx context.Context, conversationID, messageID
 	if err != nil {
 		return
 	}
-	_, _ = a.DB.ExecContext(ctx, `UPDATE messages SET content = $3 WHERE id = $1 AND conversation_id = $2 AND role = 'tool'`, messageID, conversationID, string(content))
+	uiMessage, err := json.Marshal(assistantUIToolMessage(messageID, event))
+	if err != nil {
+		return
+	}
+	_, _ = a.DB.ExecContext(ctx, `
+		UPDATE messages
+		SET content = $3, format = 'ai-sdk-ui', ui_message = $4, run_status = $5, updated_at = now()
+		WHERE id = $1 AND conversation_id = $2 AND role = 'tool'
+	`, messageID, conversationID, string(content), uiMessage, assistantUIRunStatusForTool(event))
+}
+
+func assistantUIRunStatusForTool(event chatToolEvent) string {
+	switch event.Status {
+	case "awaiting_approval":
+		return "requires-action"
+	case "running":
+		return "running"
+	default:
+		return "complete"
+	}
 }
 
 func chatToolEventData(messageID uuid.UUID, event chatToolEvent) gin.H {
@@ -599,8 +387,8 @@ func chatToolEventData(messageID uuid.UUID, event chatToolEvent) gin.H {
 	if event.Arguments != nil {
 		data["arguments"] = event.Arguments
 	}
-	if event.Result != "" {
-		data["result"] = event.Result
+	if event.Result != "" || event.ResultPreview != "" {
+		data["result"] = firstNonEmptyChatToolString(event.ResultPreview, event.Result)
 	}
 	if event.Error != "" {
 		data["error"] = event.Error
@@ -617,162 +405,13 @@ func toolResultPreview(result json.RawMessage) string {
 	return string(value[:maxRunes]) + "…"
 }
 
-func (a *App) streamChatWithTools(ctx context.Context, connection *websocket.Conn, state *chatState, userID, organizationID, conversationID uuid.UUID, requestID string, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding, response *strings.Builder) error {
-	toolMessages := append([]provider.ToolMessage(nil), history...)
-	for round := 1; round <= 4; round++ {
-		var roundResponse strings.Builder
-		calls := []provider.ToolCall{}
-		err := provider.StreamChatWithTools(ctx, endpoint, provider.ToolChatOptions{Messages: toolMessages, Tools: definitions, Model: endpoint.ChatModel}, func(event provider.ToolChatEvent) error {
-			if event.Delta != "" {
-				roundResponse.WriteString(event.Delta)
-				response.WriteString(event.Delta)
-				return a.sendSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": event.Delta}})
-			}
-			if len(event.ToolCalls) > 0 {
-				calls = append(calls, event.ToolCalls...)
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		if len(calls) == 0 {
-			return nil
-		}
-
-		toolMessages = append(toolMessages, provider.ToolMessage{Role: "assistant", Content: roundResponse.String(), ToolCalls: calls})
-		for _, call := range calls {
-			arguments := map[string]any{}
-			if strings.TrimSpace(call.Arguments) != "" {
-				if err := json.Unmarshal([]byte(call.Arguments), &arguments); err != nil {
-					event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: round, ServerName: "MCP server", ToolName: call.Name, CallID: call.ID, Error: "The MCP tool arguments were invalid JSON."}
-					messageID := a.persistChatToolEvent(ctx, conversationID, event)
-					_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.call", RequestID: requestID, Data: chatToolEventData(messageID, event)})
-					toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The MCP tool arguments were invalid JSON."})
-					continue
-				}
-			}
-			binding, exists := bindings[call.Name]
-			if !exists {
-				event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: round, ServerName: "MCP server", ToolName: call.Name, CallID: call.ID, Arguments: arguments, Error: "The requested MCP tool is not available."}
-				messageID := a.persistChatToolEvent(ctx, conversationID, event)
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.call", RequestID: requestID, Data: chatToolEventData(messageID, event)})
-				toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The requested MCP tool is not available."})
-				continue
-			}
-
-			event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, CallID: call.ID, Arguments: arguments}
-			if binding.RequiresApproval {
-				event.Status = "awaiting_approval"
-			}
-			messageID := a.persistChatToolEvent(ctx, conversationID, event)
-			_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.call", RequestID: requestID, Data: chatToolEventData(messageID, event)})
-
-			approved := true
-			approvalID := ""
-			var approvalErr error
-			if binding.RequiresApproval {
-				approvalID, approved, approvalErr = a.awaitChatApproval(ctx, connection, state, userID, organizationID, requestID, messageID, binding, call, arguments, round)
-				event.ApprovalID = approvalID
-				if approvalErr != nil {
-					event.Status = "failed"
-					event.Error = approvalErr.Error()
-					a.updateChatToolEvent(ctx, conversationID, messageID, event)
-					_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
-					return approvalErr
-				}
-			} else {
-				a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.auto_approved", binding.ServerID, map[string]any{
-					"conversationId": conversationID,
-					"serverId":       binding.ServerID,
-					"serverName":     binding.ServerName,
-					"tool":           binding.ToolName,
-					"arguments":      arguments,
-					"reason":         "trusted_read_only",
-				})
-			}
-			if !approved {
-				event.Status = "declined"
-				event.Error = "declined by user"
-				a.updateChatToolEvent(ctx, conversationID, messageID, event)
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
-				toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The user declined this MCP tool call."})
-				continue
-			}
-			if binding.RequiresApproval {
-				event.Status = "running"
-				a.updateChatToolEvent(ctx, conversationID, messageID, event)
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.updated", RequestID: requestID, Data: chatToolEventData(messageID, event)})
-			}
-
-			result, callErr := a.executeChatMCPTool(ctx, userID, organizationID, conversationID, binding, arguments)
-			if callErr != nil {
-				event.Status = "failed"
-				event.Error = callErr.Error()
-				a.updateChatToolEvent(ctx, conversationID, messageID, event)
-				_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
-				toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The MCP tool failed: " + callErr.Error()})
-				continue
-			}
-			event.Status = "completed"
-			event.Result = toolResultPreview(result)
-			a.updateChatToolEvent(ctx, conversationID, messageID, event)
-			_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
-			toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: string(result)})
-		}
-		if round == 4 {
-			message := "\n\nI stopped after four MCP tool rounds to keep this turn bounded."
-			response.WriteString(message)
-			_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
-			return nil
+func firstNonEmptyChatToolString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
 		}
 	}
-	return nil
-}
-
-func (a *App) awaitChatApproval(ctx context.Context, connection *websocket.Conn, state *chatState, userID, organizationID uuid.UUID, requestID string, messageID uuid.UUID, binding voiceToolBinding, call provider.ToolCall, arguments map[string]any, round int) (string, bool, error) {
-	approvalID := uuid.NewString()
-	pending := &chatToolApproval{ID: approvalID, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, CallID: call.ID, Arguments: arguments, Decision: make(chan bool, 1)}
-	state.pendingMu.Lock()
-	state.pending[approvalID] = pending
-	state.pendingMu.Unlock()
-	_ = a.sendSocket(connection, state, models.SocketEnvelope{Type: "tool.approval_required", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "messageId": messageID, "callId": call.ID, "serverId": binding.ServerID, "serverName": binding.ServerName, "toolName": binding.ToolName, "arguments": arguments, "round": round}})
-	timeout := time.NewTimer(2 * time.Minute)
-	defer timeout.Stop()
-	select {
-	case approved := <-pending.Decision:
-		state.pendingMu.Lock()
-		delete(state.pending, approvalID)
-		state.pendingMu.Unlock()
-		a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.approval", binding.ServerID, map[string]any{"conversationId": state.conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "approved": approved})
-		return approvalID, approved, nil
-	case <-ctx.Done():
-		state.pendingMu.Lock()
-		delete(state.pending, approvalID)
-		state.pendingMu.Unlock()
-		a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.approval", binding.ServerID, map[string]any{"conversationId": state.conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "approved": false, "reason": ctx.Err().Error()})
-		return approvalID, false, ctx.Err()
-	case <-timeout.C:
-		state.pendingMu.Lock()
-		delete(state.pending, approvalID)
-		state.pendingMu.Unlock()
-		a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.approval", binding.ServerID, map[string]any{"conversationId": state.conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "approved": false, "reason": "timeout"})
-		return approvalID, false, fmt.Errorf("MCP approval timed out")
-	}
-}
-
-func decideChatApproval(state *chatState, approvalID string, approved bool) bool {
-	state.pendingMu.Lock()
-	pending, ok := state.pending[approvalID]
-	if ok {
-		delete(state.pending, approvalID)
-	}
-	state.pendingMu.Unlock()
-	if !ok {
-		return false
-	}
-	pending.Decision <- approved
-	return true
+	return ""
 }
 
 func (a *App) executeChatMCPTool(ctx context.Context, userID, organizationID, conversationID uuid.UUID, binding voiceToolBinding, arguments map[string]any) (json.RawMessage, error) {
@@ -860,6 +499,20 @@ func (a *App) conversationHistory(ctx context.Context, conversationID uuid.UUID)
 	return result, rows.Err()
 }
 
+func (a *App) conversationHistoryFromHead(ctx context.Context, conversationID, headID uuid.UUID) ([]provider.Message, error) {
+	stored, err := a.conversationBranchMessages(ctx, conversationID, headID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]provider.Message, 0, len(stored))
+	for _, item := range stored {
+		if item.Role == "user" || item.Role == "assistant" {
+			result = append(result, provider.Message{Role: item.Role, Content: item.Content})
+		}
+	}
+	return result, nil
+}
+
 func (a *App) resolveEndpoint(ctx context.Context, userID, organizationID uuid.UUID, rawID string) (uuid.UUID, error) {
 	if rawID != "" {
 		id, err := uuid.Parse(rawID)
@@ -887,14 +540,6 @@ func (a *App) resolveEndpoint(ctx context.Context, userID, organizationID uuid.U
 		return uuid.Nil, fmt.Errorf("no enabled chat endpoint is configured")
 	}
 	return id, nil
-}
-
-func (a *App) sendSocket(connection *websocket.Conn, state *chatState, envelope models.SocketEnvelope) error {
-	state.writeMu.Lock()
-	defer state.writeMu.Unlock()
-	state.sequence++
-	envelope.Sequence = state.sequence
-	return connection.WriteJSON(envelope)
 }
 
 func citationPrompt(citations []models.Citation) string {

@@ -12,9 +12,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/react": "^4.0.65",
+    "@assistant-ui/react": "^0.15.14",
+    "@assistant-ui/react-ai-sdk": "^1.4.5",
+    "@assistant-ui/react-markdown": "^0.14.10",
     "@base-ui/react": "^1.6.0",
     "@shadcn/react": "^0.2.1",
     "@tabler/icons-react": "^3.46.0",
+    "ai": "^7.0.62",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -24,7 +29,6 @@
     "ogl": "^1.0.11",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.12.2",
     "remark-gfm": "^4.0.1",
     "shadcn": "^4.16.1",

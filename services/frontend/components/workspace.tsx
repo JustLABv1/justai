@@ -374,6 +374,23 @@ export function Workspace() {
     [navigate, refreshConversations, requestedConversationId]
   )
 
+  const handleRenameConversation = useCallback(
+    async (conversationId: string, title: string) => {
+      setActionError("")
+      try {
+        await api.patch(`/api/v1/conversations/${conversationId}`, { title })
+        await refreshConversations()
+      } catch (caught) {
+        setActionError(
+          caught instanceof Error
+            ? caught.message
+            : "The conversation could not be renamed."
+        )
+      }
+    },
+    [refreshConversations]
+  )
+
   const handleDeleteConversation = useCallback((conversation: Conversation) => {
     setDeleteTarget({
       kind: "conversation",
@@ -514,6 +531,7 @@ export function Workspace() {
           onArchiveSession={handleArchiveSession}
           onDeleteConversation={handleDeleteConversation}
           onDeleteSession={handleDeleteSession}
+          onRenameConversation={handleRenameConversation}
           onNewTranscriptionSession={handleNewTranscriptionSession}
           onNavigate={(view, conversationId = null, sessionId = null) =>
             navigate(view, conversationId, false, sessionId)

@@ -17,13 +17,13 @@ import {
   Plug,
   Plus,
   RotateCcw,
-  Search,
   Settings2,
   Trash2,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import { BrandMark } from "@/components/brand-mark"
+import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { ThemeSwitcher } from "@/components/theme-switcher"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -49,7 +49,6 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
 import type {
   Conversation,
   Organization,
@@ -110,6 +109,7 @@ type FocusWorkspaceSidebarProps = {
   onOrganizationSelect: (organizationId: string) => void
   onArchiveConversation: (conversationId: string, archived: boolean) => void
   onDeleteConversation: (conversation: Conversation) => void
+  onRenameConversation: (conversationId: string, title: string) => void | Promise<void>
   onArchiveSession: (sessionId: string, archived: boolean) => void
   onDeleteSession: (session: TranscriptionSession) => void
   onNewTranscriptionSession: () => void
@@ -140,39 +140,14 @@ export function FocusWorkspaceSidebar({
   onOrganizationSelect,
   onArchiveConversation,
   onDeleteConversation,
+  onRenameConversation,
   onArchiveSession,
   onDeleteSession,
   onNewTranscriptionSession,
   onSignOut,
 }: FocusWorkspaceSidebarProps) {
   const [historyQuery, setHistoryQuery] = useState("")
-  const [archivedOpen, setArchivedOpen] = useState(false)
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
-
-  const filteredConversations = useMemo(() => {
-    const query = historyQuery.trim().toLocaleLowerCase()
-    if (!query) return conversations
-    return conversations.filter((conversation) =>
-      conversation.title.toLocaleLowerCase().includes(query)
-    )
-  }, [conversations, historyQuery])
-
-  const filteredArchivedConversations = useMemo(() => {
-    const query = historyQuery.trim().toLocaleLowerCase()
-    if (!query) return archivedConversations
-    return archivedConversations.filter((conversation) =>
-      conversation.title.toLocaleLowerCase().includes(query)
-    )
-  }, [archivedConversations, historyQuery])
-
-  const conversationGroups = useMemo(
-    () => groupByRecency(filteredConversations),
-    [filteredConversations]
-  )
-  const archivedConversationGroups = useMemo(
-    () => groupByRecency(filteredArchivedConversations),
-    [filteredArchivedConversations]
-  )
   const sessionGroups = useMemo(
     () => groupByRecency(transcriptionSessions),
     [transcriptionSessions]
@@ -426,18 +401,16 @@ export function FocusWorkspaceSidebar({
           </Button>
 
           {activeView === "chat" && (
-            <ChatHistoryPanel
+            <AssistantThreadList
               activeConversationId={activeConversationId}
-              archivedConversationGroups={archivedConversationGroups}
               archivedConversations={archivedConversations}
-              archivedOpen={archivedOpen}
-              conversationGroups={conversationGroups}
+              conversations={conversations}
               historyQuery={historyQuery}
               onArchive={onArchiveConversation}
               onDelete={onDeleteConversation}
               onHistoryQueryChange={setHistoryQuery}
+              onRename={onRenameConversation}
               onSelect={(id) => onNavigate("chat", id)}
-              setArchivedOpen={setArchivedOpen}
             />
           )}
 
@@ -469,136 +442,6 @@ export function FocusWorkspaceSidebar({
         </div>
       )}
     </aside>
-  )
-}
-
-function ChatHistoryPanel({
-  activeConversationId,
-  archivedConversationGroups,
-  archivedConversations,
-  archivedOpen,
-  conversationGroups,
-  historyQuery,
-  onArchive,
-  onDelete,
-  onHistoryQueryChange,
-  onSelect,
-  setArchivedOpen,
-}: {
-  activeConversationId: string | null
-  archivedConversationGroups: RecencyGroup<Conversation>[]
-  archivedConversations: Conversation[]
-  archivedOpen: boolean
-  conversationGroups: RecencyGroup<Conversation>[]
-  historyQuery: string
-  onArchive: (id: string, archived: boolean) => void
-  onDelete: (conversation: Conversation) => void
-  onHistoryQueryChange: (value: string) => void
-  onSelect: (id: string) => void
-  setArchivedOpen: (open: boolean) => void
-}) {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-xs font-semibold">Recent conversations</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Search, archive, or reopen a chat
-          </p>
-        </div>
-        <Badge variant="secondary">
-          {conversationGroups.reduce(
-            (count, group) => count + group.items.length,
-            0
-          )}
-        </Badge>
-      </div>
-      <div className="relative shrink-0">
-        <Search
-          aria-hidden="true"
-          className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-        />
-        <Input
-          aria-label="Search chat history"
-          className="h-9 pl-8"
-          onChange={(event) => onHistoryQueryChange(event.target.value)}
-          placeholder="Search chats"
-          type="search"
-          value={historyQuery}
-        />
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {conversationGroups.length > 0 ? (
-          <div className="flex flex-col gap-4 pt-1">
-            {conversationGroups.map((group) => (
-              <ConversationGroup
-                activeConversationId={activeConversationId}
-                group={group}
-                key={group.label}
-                onArchive={onArchive}
-                onDelete={onDelete}
-                onSelect={onSelect}
-              />
-            ))}
-          </div>
-        ) : (
-          <Empty className="min-h-0 rounded-lg border-0 p-4">
-            <EmptyHeader>
-              <EmptyTitle>
-                {historyQuery ? "No chats found" : "No chats yet"}
-              </EmptyTitle>
-              <EmptyDescription>
-                {historyQuery
-                  ? "Try a different search."
-                  : "Start a new chat to create one."}
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        )}
-
-        {archivedConversations.length > 0 && (
-          <Collapsible onOpenChange={setArchivedOpen} open={archivedOpen}>
-            <CollapsibleTrigger
-              render={
-                <Button
-                  className="mt-4 w-full justify-start"
-                  size="sm"
-                  variant="ghost"
-                />
-              }
-            >
-              <Archive data-icon="inline-start" />
-              Archived
-              <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
-                {archivedConversations.length}
-              </span>
-              {archivedOpen ? <ChevronDown /> : <ChevronRight />}
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pt-2">
-              {archivedConversationGroups.length > 0 ? (
-                <div className="flex flex-col gap-4">
-                  {archivedConversationGroups.map((group) => (
-                    <ConversationGroup
-                      activeConversationId={activeConversationId}
-                      archived
-                      group={group}
-                      key={group.label}
-                      onArchive={onArchive}
-                      onDelete={onDelete}
-                      onSelect={onSelect}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <p className="px-2 py-2 text-xs text-muted-foreground">
-                  No archived chats match your search.
-                </p>
-              )}
-            </CollapsibleContent>
-          </Collapsible>
-        )}
-      </div>
-    </div>
   )
 }
 
@@ -705,125 +548,6 @@ function TranscriptionHistoryPanel({
           </Collapsible>
         )}
       </div>
-    </div>
-  )
-}
-
-function ConversationGroup({
-  activeConversationId,
-  archived = false,
-  group,
-  onArchive,
-  onDelete,
-  onSelect,
-}: {
-  activeConversationId: string | null
-  archived?: boolean
-  group: RecencyGroup<Conversation>
-  onArchive: (id: string, archived: boolean) => void
-  onDelete: (conversation: Conversation) => void
-  onSelect: (id: string) => void
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="px-2 text-[11px] font-medium text-muted-foreground">
-        {group.label}
-      </p>
-      <div className="flex flex-col gap-1">
-        {group.items.map((conversation) => (
-          <ConversationRow
-            active={activeConversationId === conversation.id}
-            archived={archived}
-            conversation={conversation}
-            key={conversation.id}
-            onArchive={onArchive}
-            onDelete={onDelete}
-            onSelect={onSelect}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ConversationRow({
-  active,
-  archived,
-  conversation,
-  onArchive,
-  onDelete,
-  onSelect,
-}: {
-  active: boolean
-  archived: boolean
-  conversation: Conversation
-  onArchive: (id: string, archived: boolean) => void
-  onDelete: (conversation: Conversation) => void
-  onSelect: (id: string) => void
-}) {
-  return (
-    <div className="group relative">
-      <Button
-        aria-current={active ? "page" : undefined}
-        className={cn(
-          "h-auto min-h-12 w-full justify-start gap-2 pr-9 text-left",
-          active && "bg-accent text-accent-foreground"
-        )}
-        onClick={() => onSelect(conversation.id)}
-        title={`${conversation.title} · ${conversation.messageCount} message${conversation.messageCount === 1 ? "" : "s"}`}
-        variant="ghost"
-      >
-        <span
-          className={cn(
-            "size-1.5 shrink-0 rounded-full",
-            active ? "bg-primary" : "bg-border"
-          )}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-medium">
-            {conversation.title}
-          </span>
-          <span className="block truncate text-[11px] font-normal text-muted-foreground">
-            {conversation.messageCount} message
-            {conversation.messageCount === 1 ? "" : "s"} ·{" "}
-            {formatItemTime(conversation.updatedAt)}
-          </span>
-        </span>
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              aria-label={`Actions for ${conversation.title}`}
-              className="absolute top-1/2 right-1 size-7 -translate-y-1/2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-              size="icon-xs"
-              title={`Actions for ${conversation.title}`}
-              variant="ghost"
-            />
-          }
-        >
-          <MoreHorizontal aria-hidden="true" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuItem
-            onClick={() => onArchive(conversation.id, !archived)}
-          >
-            {archived ? (
-              <RotateCcw data-icon="inline-start" />
-            ) : (
-              <Archive data-icon="inline-start" />
-            )}
-            {archived ? "Restore" : "Archive"}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => onDelete(conversation)}
-            variant="destructive"
-          >
-            <Trash2 data-icon="inline-start" />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </div>
   )
 }

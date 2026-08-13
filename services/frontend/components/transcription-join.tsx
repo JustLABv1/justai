@@ -20,7 +20,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { ListeningOrb } from "@/components/listening-orb"
+import { VoiceOrb } from "@/components/assistant-ui/voice"
 import { Spinner } from "@/components/ui/spinner"
 import { api, socketURL } from "@/lib/api"
 
@@ -385,10 +385,10 @@ export function TranscriptionJoin() {
           )}
           {state === "connected" && (
             <div className="flex flex-col items-center gap-4 py-8 text-center">
-              <ListeningOrb
-                className="max-w-[15rem]"
-                level={level}
+              <VoiceOrb
+                className="size-40"
                 state={level > 0.12 ? "speaking" : "listening"}
+                volume={level}
               />
               <div>
                 <p className="font-medium">{sourceName || "Room microphone"}</p>

@@ -27,6 +27,7 @@ import {
   type RoomSpeaker,
   type RoomTranscriptLine,
 } from "@/components/live-transcription-primitives"
+import { VoiceOrb } from "@/components/assistant-ui/voice"
 import orbitStyles from "@/components/live-transcription.module.css"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -323,6 +324,18 @@ export function LiveTranscriptionOrbit({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <VoiceOrb
+            className="shrink-0 shadow-[0_0_30px_rgba(99,102,241,0.18)]"
+            compact
+            state={
+              !capturing || snapshot.session.status === "paused"
+                ? "idle"
+                : level >= 0.08
+                  ? "speaking"
+                  : "listening"
+            }
+            volume={capturing ? level : 0}
+          />
           <Badge className="hidden sm:inline-flex" variant="secondary">
             <Users data-icon="inline-start" /> {snapshot.sources.length} sources
           </Badge>

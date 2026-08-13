@@ -395,7 +395,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 		}
 		return
 	}
-	if _, err := a.DB.ExecContext(ctx, `INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'user', $2)`, conversationID, content); err != nil {
+	if _, err := a.persistAssistantUITextMessage(ctx, conversationID, "user", content, nil); err != nil {
 		if ctx.Err() == nil {
 			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
 		}
@@ -436,7 +436,18 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 		discovery := a.discoverConversationTools(ctx, userID, organizationID, conversationID)
 		definitions, bindings := discovery.Definitions, discovery.Bindings
 		if len(definitions) > 0 {
-			toolMessages := voiceToolMessages(history)
+			toolHistory, historyErr := a.conversationToolHistory(ctx, conversationID)
+			if historyErr != nil {
+				if ctx.Err() == nil {
+					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": historyErr.Error()}})
+				}
+				return
+			}
+			toolMessages := toolHistory
+			toolMessages = append([]provider.ToolMessage{{Role: "system", Content: chatToolInstructions()}}, toolMessages...)
+			if len(citations) > 0 {
+				toolMessages = append([]provider.ToolMessage{{Role: "system", Content: citationPrompt(citations)}}, toolMessages...)
+			}
 			toolRounds := 0
 			lastHadTools := false
 			for toolRounds < 4 {
@@ -468,22 +479,39 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 				for _, call := range calls {
 					binding, exists := bindings[call.Name]
 					if !exists {
+						event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: toolRounds, ServerName: "MCP server", ToolName: call.Name, CallID: call.ID, Error: "The requested MCP tool is not available."}
+						messageID := a.persistChatToolEvent(ctx, conversationID, event)
 						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The requested tool is not allowlisted."})
+						if messageID != uuid.Nil {
+							_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
+						}
 						continue
 					}
 					arguments := map[string]any{}
 					if strings.TrimSpace(call.Arguments) != "" {
 						if err := json.Unmarshal([]byte(call.Arguments), &arguments); err != nil {
+							event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, CallID: call.ID, Error: "The tool arguments were invalid JSON."}
+							messageID := a.persistChatToolEvent(ctx, conversationID, event)
 							toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The tool arguments were invalid JSON."})
+							if messageID != uuid.Nil {
+								_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
+							}
 							continue
 						}
 					}
+					event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, CallID: call.ID, Arguments: arguments}
+					messageID := a.persistChatToolEvent(ctx, conversationID, event)
 					approvalID := ""
 					approved := true
 					if binding.RequiresApproval {
+						event.Status = "awaiting_approval"
 						var approvalErr error
-						approvalID, approved, approvalErr = a.awaitVoiceApproval(ctx, connection, state, userID, organizationID, requestID, binding, call, arguments, toolRounds)
+						approvalID, approved, approvalErr = a.awaitVoiceApproval(ctx, connection, state, userID, organizationID, requestID, messageID, &event, binding, call, arguments, toolRounds)
+						event.ApprovalID = approvalID
 						if approvalErr != nil {
+							event.Status = "failed"
+							event.Error = approvalErr.Error()
+							a.updateChatToolEvent(ctx, conversationID, messageID, event)
 							_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": approvalErr.Error()}})
 							return
 						}
@@ -501,16 +529,31 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 						})
 					}
 					if !approved {
+						event.Status = "declined"
+						event.ApprovalID = approvalID
+						event.Error = "declined by user"
+						a.updateChatToolEvent(ctx, conversationID, messageID, event)
 						_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": "declined by user"}})
 						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The user declined this MCP tool call."})
 						continue
 					}
+					event.Status = "running"
+					event.ApprovalID = approvalID
+					a.updateChatToolEvent(ctx, conversationID, messageID, event)
 					result, callErr := a.executeVoiceTool(ctx, userID, organizationID, conversationID, binding, arguments)
 					if callErr != nil {
+						event.Status = "failed"
+						event.Error = callErr.Error()
+						a.updateChatToolEvent(ctx, conversationID, messageID, event)
 						_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": callErr.Error()}})
 						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The MCP tool failed: " + callErr.Error()})
 						continue
 					}
+					event.Status = "completed"
+					event.Result = string(result)
+					event.ResultPreview = toolResultPreview(result)
+					event.Error = ""
+					a.updateChatToolEvent(ctx, conversationID, messageID, event)
 					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": true}})
 					toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: string(result)})
 				}
@@ -532,7 +575,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	if assistantContent == "" {
 		assistantContent = "I couldn't produce a response for that request."
 	}
-	if _, err := a.DB.ExecContext(ctx, `INSERT INTO messages (conversation_id, role, content, citations) VALUES ($1, 'assistant', $2, $3)`, conversationID, assistantContent, jsonRaw(citations)); err != nil {
+	if _, err := a.persistAssistantUITextMessage(ctx, conversationID, "assistant", assistantContent, citations); err != nil {
 		_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
 		return
 	}
@@ -670,8 +713,11 @@ func normalizeVoiceToolPart(value string) string {
 	return strings.Trim(builder.String(), "_")
 }
 
-func (a *App) awaitVoiceApproval(ctx context.Context, connection *websocket.Conn, state *voiceState, userID, organizationID uuid.UUID, requestID string, binding voiceToolBinding, call provider.ToolCall, arguments map[string]any, round int) (string, bool, error) {
+func (a *App) awaitVoiceApproval(ctx context.Context, connection *websocket.Conn, state *voiceState, userID, organizationID uuid.UUID, requestID string, messageID uuid.UUID, event *chatToolEvent, binding voiceToolBinding, call provider.ToolCall, arguments map[string]any, round int) (string, bool, error) {
 	approvalID := uuid.NewString()
+	event.ApprovalID = approvalID
+	event.Status = "awaiting_approval"
+	a.updateChatToolEvent(ctx, state.conversationID, messageID, *event)
 	pending := &voiceApproval{ID: approvalID, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, CallID: call.ID, Arguments: arguments, Decision: make(chan bool, 1)}
 	state.pendingMu.Lock()
 	state.pending[approvalID] = pending

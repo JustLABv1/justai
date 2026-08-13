@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
 const REQUEST_TIMEOUT_MS = 30_000
 
 let selectedOrganizationId = ""
@@ -204,6 +204,8 @@ export const api = {
       method: "POST",
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
+  put: <T>(path: string, body: unknown) =>
+    request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   getBlob: (path: string) => requestBlob(path),
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
@@ -254,5 +256,3 @@ export function socketURL(path: string, ticket: string) {
   httpURL.search = `?ticket=${encodeURIComponent(ticket)}`
   return httpURL.toString()
 }
-
-export { API_URL }

@@ -104,21 +104,47 @@ func (a *App) updateConversation(c *gin.Context) {
 		return
 	}
 	var request struct {
-		Archived *bool `json:"archived"`
+		Archived *bool   `json:"archived"`
+		Title    *string `json:"title"`
 	}
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if request.Archived == nil {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("archived is required"))
+	if request.Archived == nil && request.Title == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("title or archived is required"))
 		return
 	}
-	result, err := a.DB.ExecContext(c, `
-		UPDATE conversations
-		SET archived_at = CASE WHEN $4 THEN COALESCE(archived_at, now()) ELSE NULL END,
-		    updated_at = now()
-		WHERE id = $1 AND user_id = $2 AND organization_id = $3
-	`, conversationID, principal.UserID, organizationID, *request.Archived)
+	title := ""
+	if request.Title != nil {
+		title = strings.TrimSpace(*request.Title)
+		if title == "" || utf8.RuneCountInString(title) > 160 {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("title must be between 1 and 160 characters"))
+			return
+		}
+	}
+	var result sql.Result
+	if request.Title != nil && request.Archived == nil {
+		result, err = a.DB.ExecContext(c, `
+			UPDATE conversations
+			SET title = $4, updated_at = now()
+			WHERE id = $1 AND user_id = $2 AND organization_id = $3
+		`, conversationID, principal.UserID, organizationID, title)
+	} else if request.Title == nil && request.Archived != nil {
+		result, err = a.DB.ExecContext(c, `
+			UPDATE conversations
+			SET archived_at = CASE WHEN $4 THEN COALESCE(archived_at, now()) ELSE NULL END,
+			    updated_at = now()
+			WHERE id = $1 AND user_id = $2 AND organization_id = $3
+		`, conversationID, principal.UserID, organizationID, *request.Archived)
+	} else {
+		result, err = a.DB.ExecContext(c, `
+			UPDATE conversations
+			SET title = $4,
+			    archived_at = CASE WHEN $5 THEN COALESCE(archived_at, now()) ELSE NULL END,
+			    updated_at = now()
+			WHERE id = $1 AND user_id = $2 AND organization_id = $3
+		`, conversationID, principal.UserID, organizationID, title, *request.Archived)
+	}
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -154,6 +180,10 @@ func (a *App) deleteConversation(c *gin.Context) {
 }
 
 func (a *App) listConversationMessages(c *gin.Context) {
+	if c.Query("format") == "assistant-ui" {
+		a.listAssistantUIMessages(c)
+		return
+	}
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
 	conversationID, err := uuid.Parse(c.Param("id"))

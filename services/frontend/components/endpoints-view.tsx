@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   CheckCircle2,
   CircleAlert,
@@ -9,6 +9,7 @@ import {
   Pencil,
   Plus,
   Radio,
+  RefreshCw,
   Server,
   Sparkles,
   Trash2,
@@ -76,6 +77,12 @@ type EndpointForm = {
   credential: string
   enabled: boolean
   isDefault: boolean
+}
+
+type DiscoveredChatModel = {
+  id: string
+  name?: string
+  ownedBy?: string
 }
 
 const defaults: EndpointForm = {
@@ -147,6 +154,11 @@ export function EndpointsView({
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState("")
   const [notice, setNotice] = useState("")
+  const [discoveredModels, setDiscoveredModels] = useState<
+    DiscoveredChatModel[]
+  >([])
+  const [discoveringModels, setDiscoveringModels] = useState(false)
+  const discoveryRequestRef = useRef(0)
   const [capabilityMatrix, setCapabilityMatrix] = useState<
     Record<string, string[]>
   >({})
@@ -206,10 +218,14 @@ export function EndpointsView({
       diarization: nativeTranscription,
       toolCalling: provider === "openai",
     }))
+    setDiscoveredModels([])
   }
 
   function resetEditor() {
+    discoveryRequestRef.current += 1
     setEditingEndpoint(null)
+    setDiscoveredModels([])
+    setDiscoveringModels(false)
     setForm({
       ...defaults,
       scopeType: canManageOrganization ? defaults.scopeType : "user",
@@ -255,6 +271,44 @@ export function EndpointsView({
     })
     setNotice("")
     setOpen(true)
+    if (endpoint.enabled) void discoverModels(endpoint.id)
+  }
+
+  async function discoverModels(endpointId: string) {
+    const requestId = ++discoveryRequestRef.current
+    setDiscoveringModels(true)
+    setNotice("")
+    try {
+      const result = await api.get<{
+        models?: DiscoveredChatModel[]
+        configuredModel?: string
+      }>(`/api/v1/endpoints/${endpointId}/models`)
+      if (requestId !== discoveryRequestRef.current) return
+      const models = (result.models ?? []).filter((model) => model.id?.trim())
+      setDiscoveredModels(models)
+      if (models.length > 0) {
+        setForm((current) => ({
+          ...current,
+          chatModel:
+            current.chatModel || result.configuredModel || models[0].id,
+        }))
+      } else {
+        setNotice(
+          "The endpoint returned no models. You can enter a model ID manually."
+        )
+      }
+    } catch (caught) {
+      if (requestId !== discoveryRequestRef.current) return
+      setDiscoveredModels([])
+      setNotice(
+        caught instanceof Error
+          ? `Model discovery failed: ${caught.message}`
+          : "Model discovery failed. Enter a model ID manually."
+      )
+    } finally {
+      if (requestId !== discoveryRequestRef.current) return
+      setDiscoveringModels(false)
+    }
   }
 
   function closeEditor() {
@@ -685,6 +739,88 @@ export function EndpointsView({
                   />
                   <FieldDescription>
                     {providerDetails[form.providerType]?.description}
+                  </FieldDescription>
+                </Field>
+                <Field>
+                  <div className="flex items-center justify-between gap-3">
+                    <FieldLabel htmlFor="endpoint-chat-model">
+                      Chat model
+                    </FieldLabel>
+                    {editingEndpoint && (
+                      <Button
+                        className="h-7 gap-1.5 px-2.5 text-xs"
+                        disabled={discoveringModels}
+                        onClick={() => void discoverModels(editingEndpoint.id)}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        <RefreshCw
+                          className={discoveringModels ? "animate-spin" : ""}
+                          data-icon="inline-start"
+                          aria-hidden="true"
+                        />
+                        {discoveringModels ? "Discovering…" : "Discover models"}
+                      </Button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Input
+                      id="endpoint-chat-model"
+                      list="endpoint-chat-model-options"
+                      className={discoveredModels.length > 0 ? "pr-9" : undefined}
+                      value={form.chatModel}
+                      onChange={(event) =>
+                        update("chatModel", event.target.value)
+                      }
+                      placeholder="e.g. gemma-3-27b-it or gpt-4o-mini"
+                    />
+                    {discoveredModels.length > 0 && (
+                      <Select
+                        value={
+                          discoveredModels.some(
+                            (model) => model.id === form.chatModel
+                          )
+                            ? form.chatModel
+                            : undefined
+                        }
+                        onValueChange={(value) =>
+                          update("chatModel", value ?? "")
+                        }
+                      >
+                        <SelectTrigger
+                          aria-label="Choose a discovered chat model"
+                          className="absolute top-1 right-1 size-6 min-w-6 border-0 bg-transparent p-0.5 shadow-none hover:bg-muted [&_svg]:size-3"
+                        >
+                          <span className="sr-only">
+                            Choose a discovered chat model
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent className="w-[min(32rem,calc(100vw-2rem))]">
+                          {discoveredModels.map((model) => (
+                            <SelectItem key={model.id} value={model.id}>
+                              {model.name && model.name !== model.id
+                                ? `${model.name} · ${model.id}`
+                                : model.id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {discoveredModels.length > 0 && (
+                      <datalist id="endpoint-chat-model-options">
+                        {discoveredModels.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.name ?? model.id}
+                          </option>
+                        ))}
+                      </datalist>
+                    )}
+                  </div>
+                  <FieldDescription>
+                    This is the default chat model for the endpoint. Discovery
+                    uses the provider catalog when available; manual model IDs
+                    work with compatible gateways too.
                   </FieldDescription>
                 </Field>
                 {supports(form.providerType, "embeddings") && (
