@@ -62,3 +62,29 @@ func TestMCPToolAllowlistTreatsEmptyAsAll(t *testing.T) {
 		t.Fatal("a non-allowlisted tool should be rejected")
 	}
 }
+
+func TestFindMCPBindingMatchesRawToolNameAndServer(t *testing.T) {
+	serverID := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
+	otherServerID := uuid.MustParse("abcdefab-cdef-abcd-efab-cdefabcdefab")
+	bindings := map[string]voiceToolBinding{
+		"mcp_12345678_search_plain_docs": {
+			ServerID: serverID,
+			ToolName: "search_plain_docs",
+		},
+		"mcp_abcdefab_search_plain_docs": {
+			ServerID: otherServerID,
+			ToolName: "search_plain_docs",
+		},
+	}
+
+	found, ok := findMCPBinding(bindings, serverID, "search_plain_docs")
+	if !ok || found.ServerID != serverID {
+		t.Fatalf("expected the binding for %s, got %+v (ok=%v)", serverID, found, ok)
+	}
+	if _, ok := findMCPBinding(bindings, serverID, "missing_tool"); ok {
+		t.Fatal("an unknown MCP tool should not resolve")
+	}
+	if _, ok := findMCPBinding(bindings, uuid.New(), "search_plain_docs"); ok {
+		t.Fatal("a tool on another server should not resolve")
+	}
+}

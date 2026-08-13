@@ -109,7 +109,7 @@ func (a *App) mcpOAuthCallback(c *gin.Context) {
 		return
 	}
 	defer transaction.Rollback()
-	if err := transaction.QueryRowContext(c, `SELECT s.id, s.oauth_token_url, s.oauth_client_id, s.endpoint_url, os.code_verifier FROM mcp_oauth_states os JOIN mcp_servers s ON s.id = os.server_id WHERE os.state = $1 AND os.user_id = $2 AND os.expires_at > now() FOR UPDATE`, state, principal.UserID).Scan(&serverID, &tokenURL, &clientID, &resource, &verifier); err != nil {
+	if err := transaction.QueryRowContext(c, `SELECT s.id, COALESCE(s.oauth_token_url, ''), COALESCE(s.oauth_client_id, ''), s.endpoint_url, os.code_verifier FROM mcp_oauth_states os JOIN mcp_servers s ON s.id = os.server_id WHERE os.state = $1 AND os.user_id = $2 AND os.expires_at > now() FOR UPDATE`, state, principal.UserID).Scan(&serverID, &tokenURL, &clientID, &resource, &verifier); err != nil {
 		a.redirectOAuthResult(c, "error")
 		return
 	}

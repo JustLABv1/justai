@@ -386,8 +386,10 @@ export function WorkspaceContext({
             <ContextEmpty icon={Plug} text="No MCP servers connected." />
           )}
           <div className="rounded-lg border border-dashed p-3 text-xs leading-relaxed text-muted-foreground">
-            Tool calls and their bounded results stay attached to the relevant
-            chat turn.
+            Organization-default MCP servers are attached to new chats
+            automatically. Other connected servers stay opt-in for this
+            conversation. Tool calls and their bounded results stay attached
+            to the relevant chat turn.
           </div>
           <Button
             className="mt-1 w-full"

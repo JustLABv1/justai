@@ -676,6 +676,18 @@ func mcpToolAllowed(allowed map[string]bool, toolName string) bool {
 	return len(allowed) == 0 || allowed[toolName]
 }
 
+// findMCPBinding resolves a persisted raw MCP tool name to its provider
+// binding. The discovery map is keyed by the provider-safe name sent to the
+// model, whereas chat and voice history store the original MCP name.
+func findMCPBinding(bindings map[string]voiceToolBinding, serverID uuid.UUID, toolName string) (voiceToolBinding, bool) {
+	for _, binding := range bindings {
+		if binding.ServerID == serverID && binding.ToolName == toolName {
+			return binding, true
+		}
+	}
+	return voiceToolBinding{}, false
+}
+
 func voiceToolName(serverID uuid.UUID, toolName string, existing map[string]voiceToolBinding) string {
 	serverPart := normalizeVoiceToolPart(serverID.String())
 	if len(serverPart) > 8 {

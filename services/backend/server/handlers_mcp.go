@@ -377,7 +377,7 @@ func (a *App) loadMCPServer(ctx context.Context, rawID string) (mcp.Server, erro
 	var refreshCredential []byte
 	var expiresAt sql.NullTime
 	var allowed []byte
-	if err := a.DB.QueryRowContext(ctx, `SELECT id, endpoint_url, auth_type, encrypted_credential, oauth_refresh_credential, oauth_token_url, COALESCE(oauth_client_id, ''), oauth_expires_at, allowed_tools, trusted_read_only, COALESCE(protocol_version, '') FROM mcp_servers WHERE id = $1 AND enabled = TRUE`, id).Scan(&server.ID, &server.EndpointURL, &server.AuthType, &credential, &refreshCredential, &server.OAuthTokenURL, &server.OAuthClientID, &expiresAt, &allowed, &server.TrustedReadOnly, &server.ProtocolVersion); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT id, endpoint_url, auth_type, encrypted_credential, oauth_refresh_credential, COALESCE(oauth_token_url, ''), COALESCE(oauth_client_id, ''), oauth_expires_at, allowed_tools, trusted_read_only, COALESCE(protocol_version, '') FROM mcp_servers WHERE id = $1 AND enabled = TRUE`, id).Scan(&server.ID, &server.EndpointURL, &server.AuthType, &credential, &refreshCredential, &server.OAuthTokenURL, &server.OAuthClientID, &expiresAt, &allowed, &server.TrustedReadOnly, &server.ProtocolVersion); err != nil {
 		return server, err
 	}
 	if len(credential) > 0 {

@@ -860,7 +860,12 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 		return &event, messageID, nil
 	}
 	bindings := a.discoverConversationTools(ctx, userID, organizationID, conversationID).Bindings
-	binding, ok := bindings[event.ToolName]
+	// Discovery uses provider-safe names as map keys (for example,
+	// mcp_<server>_<tool>), while chat events intentionally persist the raw
+	// MCP tool name so the history remains readable and stable. Resolve the
+	// pending tool by both its attached server and raw MCP name rather than
+	// treating the raw name as a provider name.
+	binding, ok := findMCPBinding(bindings, event.ServerID, event.ToolName)
 	if !ok {
 		return nil, uuid.Nil, fmt.Errorf("the requested MCP tool is no longer available")
 	}
