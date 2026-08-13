@@ -953,26 +953,35 @@ function AssistantThreadLayout({ composerProps }: AssistantThreadLayoutProps) {
     <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <ThreadPrimitive.Viewport
         className="relative min-h-0 flex-1 overflow-y-auto"
-        turnAnchor="top"
+        // Keep the latest turn at the bottom, like a conventional chat. The
+        // top-anchor mode intentionally places newly submitted user messages
+        // at the top of the viewport and disables the runtime's normal
+        // bottom auto-scroll behavior.
+        turnAnchor="bottom"
+        autoScroll
         scrollToBottomOnInitialize
+        scrollToBottomOnRunStart
+        scrollToBottomOnThreadSwitch
       >
         <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-3 sm:px-8 lg:px-12">
           <EmptyThread>
             {isEmpty && <div className="mt-4 w-full max-w-3xl">{composer}</div>}
           </EmptyThread>
-          <ThreadPrimitive.Messages
-            components={{
-              UserMessage,
-              AssistantMessage,
-            }}
-          />
           {!isEmpty && (
-            <ThreadPrimitive.ScrollToBottom
-              className="sticky bottom-4 ml-auto rounded-full border bg-background/90 p-2 shadow-sm"
-              aria-label="Jump to latest message"
-            >
-              ↓
-            </ThreadPrimitive.ScrollToBottom>
+            <div className="mt-auto">
+              <ThreadPrimitive.Messages
+                components={{
+                  UserMessage,
+                  AssistantMessage,
+                }}
+              />
+              <ThreadPrimitive.ScrollToBottom
+                className="sticky bottom-4 ml-auto rounded-full border bg-background/90 p-2 shadow-sm"
+                aria-label="Jump to latest message"
+              >
+                ↓
+              </ThreadPrimitive.ScrollToBottom>
+            </div>
           )}
         </div>
         {!isEmpty && (
