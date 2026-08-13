@@ -1,16 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { History, PanelRightClose, PanelRightOpen } from "lucide-react"
-
 import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
-import { EndpointsView } from "@/components/endpoints-view"
-import { KnowledgeView } from "@/components/knowledge-view"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
-import { MCPView } from "@/components/mcp-view"
-import { SettingsView } from "@/components/settings-view"
+import { SettingsShell } from "@/components/settings-shell"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -23,7 +18,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { APIError, api } from "@/lib/api"
 import type {
   Conversation,
@@ -81,7 +75,9 @@ export function Workspace() {
   const [createTranscriptionRequested, setCreateTranscriptionRequested] =
     useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [contextOpen, setContextOpen] = useState(true)
+  const [contextOpen, setContextOpen] = useState(false)
+  const conversationCreationRef = useRef<Promise<string> | null>(null)
+  const activeConversationRef = useRef<string | null>(requestedConversationId)
 
   const redirectToLogin = useCallback(() => {
     const next = `${window.location.pathname}${window.location.search}`
@@ -259,15 +255,45 @@ export function Workspace() {
     organizations.find(
       (organization) => organization.id === activeOrganizationId
     ) ?? organizations[0]
-  const activeConversationId = [
-    ...conversations,
-    ...archivedConversations,
-  ].some((conversation) => conversation.id === requestedConversationId)
-    ? requestedConversationId
-    : null
-  const activeConversation = [...conversations, ...archivedConversations].find(
-    (conversation) => conversation.id === activeConversationId
-  )
+  const activeConversationId = requestedConversationId
+
+  useEffect(() => {
+    activeConversationRef.current = requestedConversationId
+  }, [requestedConversationId])
+
+  useEffect(() => {
+    if (!requestedConversationId) return
+    if (
+      [...conversations, ...archivedConversations].some(
+        (conversation) => conversation.id === requestedConversationId
+      )
+    ) {
+      return
+    }
+    let cancelled = false
+    void api
+      .get<{ conversation: Conversation }>(
+        `/api/v1/conversations/${requestedConversationId}`
+      )
+      .then(({ conversation }) => {
+        if (cancelled) return
+        if (conversation.archivedAt) {
+          setArchivedConversations((current) => [
+            conversation,
+            ...current.filter((item) => item.id !== conversation.id),
+          ])
+        } else {
+          setConversations((current) => [
+            conversation,
+            ...current.filter((item) => item.id !== conversation.id),
+          ])
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [archivedConversations, conversations, requestedConversationId])
   const activeSessionId = [
     ...transcriptionSessions,
     ...archivedTranscriptionSessions,
@@ -289,9 +315,11 @@ export function Workspace() {
       view: ViewId,
       conversationId: string | null = null,
       replace = false,
-      sessionId: string | null = null
+      sessionId: string | null = null,
+      settingsTab: import("@/lib/types").SettingsTab = "workspace"
     ) => {
-      const path = workspacePath(view, conversationId, sessionId)
+      if (view !== "chat") setContextOpen(false)
+      const path = workspacePath(view, conversationId, sessionId, settingsTab)
       if (replace) {
         router.replace(path)
       } else {
@@ -302,17 +330,26 @@ export function Workspace() {
   )
 
   const ensureConversationForContext = useCallback(async () => {
-    if (activeConversationId) return activeConversationId
-    const result = await api.post<{ conversation: Conversation }>(
-      "/api/v1/conversations"
-    )
-    setConversations((current) => [
-      result.conversation,
-      ...current.filter((item) => item.id !== result.conversation.id),
-    ])
-    navigate("chat", result.conversation.id, true)
-    return result.conversation.id
-  }, [activeConversationId, navigate])
+    if (activeConversationRef.current) return activeConversationRef.current
+    if (conversationCreationRef.current) return conversationCreationRef.current
+
+    const creation = api
+      .post<{ conversation: Conversation }>("/api/v1/conversations")
+      .then((result) => {
+        activeConversationRef.current = result.conversation.id
+        setConversations((current) => [
+          result.conversation,
+          ...current.filter((item) => item.id !== result.conversation.id),
+        ])
+        navigate("chat", result.conversation.id, true)
+        return result.conversation.id
+      })
+      .finally(() => {
+        conversationCreationRef.current = null
+      })
+    conversationCreationRef.current = creation
+    return creation
+  }, [navigate])
 
   const selectOrganization = useCallback(
     (organizationId: string) => {
@@ -546,66 +583,6 @@ export function Workspace() {
           userInitials={initials}
         />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="flex min-h-16 shrink-0 items-center justify-between gap-4 border-b border-border/70 bg-background/85 px-4 backdrop-blur-sm sm:px-6">
-            <div className="flex min-w-0 items-center gap-3">
-              <Button
-                aria-label={historyOpen ? "Close sessions" : "Open sessions"}
-                className="shrink-0"
-                onClick={() => setHistoryOpen((open) => !open)}
-                size="icon-sm"
-                title={historyOpen ? "Close sessions" : "Open sessions"}
-                variant="outline"
-              >
-                <History data-icon="inline-start" />
-              </Button>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">
-                  {getViewTitle(activeView)}
-                </p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {activeView === "chat"
-                    ? (activeConversation?.title ?? "Start a new conversation")
-                    : getViewSubtitle(activeView)}
-                </p>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {activeView === "chat" && (
-                <Badge className="hidden md:inline-flex" variant="outline">
-                  {endpoints.find(
-                    (endpoint) =>
-                      endpoint.enabled &&
-                      endpoint.capabilities?.chat &&
-                      endpoint.isDefault
-                  )?.chatModel ?? "Connected endpoint"}
-                </Badge>
-              )}
-              {activeView === "chat" && (
-                <Button
-                  aria-expanded={contextOpen}
-                  aria-label={
-                    contextOpen
-                      ? "Hide context inspector"
-                      : "Show context inspector"
-                  }
-                  onClick={() => setContextOpen((open) => !open)}
-                  title={
-                    contextOpen
-                      ? "Hide context inspector"
-                      : "Show context inspector"
-                  }
-                  variant={contextOpen ? "secondary" : "outline"}
-                >
-                  {contextOpen ? (
-                    <PanelRightClose data-icon="inline-start" />
-                  ) : (
-                    <PanelRightOpen data-icon="inline-start" />
-                  )}
-                  <span className="hidden sm:inline">Context</span>
-                </Button>
-              )}
-            </div>
-          </header>
           {Object.keys(featureErrors).length > 0 && (
             <Alert className="m-4 mb-0 shrink-0" variant="destructive">
               <AlertTitle>Some workspace features need attention</AlertTitle>
@@ -641,6 +618,7 @@ export function Workspace() {
                 endpoints={endpoints}
                 user={user}
                 userInitials={initials}
+                onEnsureConversation={ensureConversationForContext}
                 onConversationCreated={(conversation) => {
                   setConversations((current) => {
                     if (current.some((item) => item.id === conversation.id)) {
@@ -655,6 +633,7 @@ export function Workspace() {
                 }}
                 onNavigate={(view) => navigate(view, null)}
                 onOpenHistory={() => setHistoryOpen(true)}
+                onOpenContext={() => setContextOpen(true)}
               />
             )}
             {activeView === "transcription" && (
@@ -671,39 +650,22 @@ export function Workspace() {
                 user={user}
               />
             )}
-            {activeView === "endpoints" && (
-              <EndpointsView
-                endpoints={endpoints}
-                onChange={setEndpoints}
-                organizationRole={activeOrganization?.role}
-                platformAdmin={user.platformAdmin}
-                userId={user.id}
-              />
-            )}
-            {activeView === "knowledge" && (
-              <KnowledgeView
-                sources={sources}
-                onChange={setSources}
-                organizationRole={activeOrganization?.role}
-                platformAdmin={user.platformAdmin}
-                userId={user.id}
-              />
-            )}
-            {activeView === "mcp" && (
-              <MCPView
-                servers={servers}
-                onChange={setServers}
-                organizationRole={activeOrganization?.role}
-                platformAdmin={user.platformAdmin}
-                userId={user.id}
-              />
-            )}
             {activeView === "settings" && (
-              <SettingsView
+              <SettingsShell
                 activeOrganizationId={activeOrganization?.id ?? null}
+                activeTab={route.settingsTab}
+                endpoints={endpoints}
+                knowledgeSources={sources}
+                mcpServers={servers}
                 onOrganizationCreated={handleOrganizationCreated}
                 onOrganizationSelect={selectOrganization}
                 onOrganizationUpdated={handleOrganizationUpdated}
+                onEndpointsChange={setEndpoints}
+                onKnowledgeChange={setSources}
+                onMCPChange={setServers}
+                onTabChange={(tab) =>
+                  navigate("settings", null, false, null, tab)
+                }
                 organizations={organizations}
                 user={user}
               />
@@ -766,38 +728,4 @@ function WorkspaceLoading() {
       </div>
     </main>
   )
-}
-
-function getViewTitle(view: ViewId) {
-  switch (view) {
-    case "chat":
-      return "Chat"
-    case "transcription":
-      return "Live transcription"
-    case "endpoints":
-      return "Endpoints"
-    case "knowledge":
-      return "Knowledge"
-    case "mcp":
-      return "MCP"
-    case "settings":
-      return "Settings"
-  }
-}
-
-function getViewSubtitle(view: ViewId) {
-  switch (view) {
-    case "transcription":
-      return "Listen to a room and keep the transcript close"
-    case "endpoints":
-      return "Models and provider connections"
-    case "knowledge":
-      return "Sources available to your workspace"
-    case "mcp":
-      return "Tools and external connections"
-    case "settings":
-      return "Workspace preferences and members"
-    case "chat":
-      return "Start a new conversation"
-  }
 }

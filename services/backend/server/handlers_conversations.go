@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -93,6 +94,44 @@ func (a *App) listConversations(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"conversations": result})
+}
+
+func (a *App) getConversation(c *gin.Context) {
+	principal, _ := middleware.GetPrincipal(c)
+	organizationID, _ := middleware.GetOrganizationID(c)
+	conversationID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid conversation id"))
+		return
+	}
+
+	var item models.Conversation
+	var rawEndpointID sql.NullString
+	err = a.DB.QueryRowContext(c, `
+		SELECT c.id, c.title, COALESCE(c.endpoint_id::text, ''), c.created_at,
+		       c.updated_at, c.archived_at,
+		       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'assistant'))::int
+		FROM conversations c
+		WHERE c.id = $1 AND c.user_id = $2 AND c.organization_id = $3
+	`, conversationID, principal.UserID, organizationID).Scan(
+		&item.ID,
+		&item.Title,
+		&rawEndpointID,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+		&item.ArchivedAt,
+		&item.MessageCount,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(c, http.StatusNotFound, fmt.Errorf("conversation not found"))
+		return
+	}
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	item.EndpointID = parseOptionalUUID(rawEndpointID)
+	c.JSON(http.StatusOK, gin.H{"conversation": item})
 }
 
 func (a *App) updateConversation(c *gin.Context) {

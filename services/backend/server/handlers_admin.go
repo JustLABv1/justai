@@ -1,0 +1,388 @@
+package server
+
+import (
+	"database/sql"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"justai-backend/middleware"
+)
+
+type adminDefaults struct {
+	EndpointID   *uuid.UUID  `json:"endpointId"`
+	MCPServerIDs []uuid.UUID `json:"mcpServerIds"`
+}
+
+func (a *App) getOrganizationAdminDefaults(c *gin.Context) {
+	organizationID, ok := a.adminOrganizationID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	defaults, err := a.readAdminDefaults(c, organizationID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, defaults)
+}
+
+func (a *App) putOrganizationAdminDefaults(c *gin.Context) {
+	organizationID, ok := a.adminOrganizationID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	var request struct {
+		EndpointID   *string  `json:"endpointId"`
+		MCPServerIDs []string `json:"mcpServerIds"`
+	}
+	if !decodeJSON(c, &request) {
+		return
+	}
+	principal, _ := middleware.GetPrincipal(c)
+	endpointID, err := parseNullableUUID(request.EndpointID)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid endpointId"))
+		return
+	}
+	serverIDs := make([]uuid.UUID, 0, len(request.MCPServerIDs))
+	seen := make(map[uuid.UUID]struct{}, len(request.MCPServerIDs))
+	for _, raw := range request.MCPServerIDs {
+		id, parseErr := uuid.Parse(strings.TrimSpace(raw))
+		if parseErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid MCP server id"))
+			return
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		serverIDs = append(serverIDs, id)
+	}
+
+	tx, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer tx.Rollback()
+	if endpointID != nil {
+		var valid bool
+		if err := tx.QueryRowContext(c, `
+			SELECT EXISTS (
+				SELECT 1 FROM endpoint_settings
+				WHERE id = $1 AND enabled = TRUE AND (capabilities->>'chat') = 'true'
+				  AND ((scope_type = 'organization' AND scope_id = $2) OR scope_type = 'global')
+			)`, *endpointID, organizationID).Scan(&valid); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if !valid {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("endpoint is not available to this organization"))
+			return
+		}
+	}
+	if _, err := tx.ExecContext(c, `UPDATE endpoint_settings SET is_default = FALSE, updated_at = now() WHERE scope_type = 'organization' AND scope_id = $1`, organizationID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if _, err := tx.ExecContext(c, `DELETE FROM organization_default_endpoints WHERE organization_id = $1`, organizationID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if endpointID != nil {
+		var scopeType string
+		if err := tx.QueryRowContext(c, `SELECT scope_type FROM endpoint_settings WHERE id = $1`, *endpointID).Scan(&scopeType); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if scopeType == "organization" {
+			if _, err := tx.ExecContext(c, `UPDATE endpoint_settings SET is_default = TRUE, updated_at = now() WHERE id = $1`, *endpointID); err != nil {
+				writeError(c, http.StatusInternalServerError, err)
+				return
+			}
+		}
+		if _, err := tx.ExecContext(c, `INSERT INTO organization_default_endpoints (organization_id, endpoint_id, created_by) VALUES ($1, $2, $3)`, organizationID, *endpointID, principal.UserID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if _, err := tx.ExecContext(c, `DELETE FROM organization_mcp_defaults WHERE organization_id = $1`, organizationID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	for _, serverID := range serverIDs {
+		var valid bool
+		if err := tx.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM mcp_servers WHERE id = $1 AND scope_type = 'organization' AND scope_id = $2 AND enabled = TRUE)`, serverID, organizationID).Scan(&valid); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if !valid {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("MCP server is not enabled in this organization"))
+			return
+		}
+		if _, err := tx.ExecContext(c, `INSERT INTO organization_mcp_defaults (organization_id, server_id, created_by) VALUES ($1, $2, $3)`, organizationID, serverID, principal.UserID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defaults, err := a.readAdminDefaults(c, organizationID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, defaults)
+}
+
+func (a *App) getGlobalAdminDefaults(c *gin.Context) {
+	principal, ok := middleware.GetPrincipal(c)
+	if !ok || !principal.PlatformAdmin {
+		writeError(c, http.StatusForbidden, fmt.Errorf("platform admin access required"))
+		return
+	}
+	var endpointID sql.NullString
+	err := a.DB.QueryRowContext(c, `SELECT id::text FROM endpoint_settings WHERE scope_type = 'global' AND is_default = TRUE LIMIT 1`).Scan(&endpointID)
+	if err != nil && err != sql.ErrNoRows {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defaults := adminDefaults{MCPServerIDs: []uuid.UUID{}}
+	defaults.EndpointID = parseOptionalUUID(endpointID)
+	c.JSON(http.StatusOK, defaults)
+}
+
+func (a *App) putGlobalAdminDefaults(c *gin.Context) {
+	principal, ok := middleware.GetPrincipal(c)
+	if !ok || !principal.PlatformAdmin {
+		writeError(c, http.StatusForbidden, fmt.Errorf("platform admin access required"))
+		return
+	}
+	var request struct {
+		EndpointID *string `json:"endpointId"`
+	}
+	if !decodeJSON(c, &request) {
+		return
+	}
+	endpointID, err := parseNullableUUID(request.EndpointID)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid endpointId"))
+		return
+	}
+	tx, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(c, `UPDATE endpoint_settings SET is_default = FALSE, updated_at = now() WHERE scope_type = 'global'`); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if endpointID != nil {
+		var valid bool
+		if err := tx.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM endpoint_settings WHERE id = $1 AND scope_type = 'global' AND enabled = TRUE AND (capabilities->>'chat') = 'true')`, *endpointID).Scan(&valid); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if !valid {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("global endpoint is not available"))
+			return
+		}
+		if _, err := tx.ExecContext(c, `UPDATE endpoint_settings SET is_default = TRUE, updated_at = now() WHERE id = $1`, *endpointID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	a.getGlobalAdminDefaults(c)
+}
+
+func (a *App) readAdminDefaults(ctx *gin.Context, organizationID uuid.UUID) (adminDefaults, error) {
+	var endpointID sql.NullString
+	err := a.DB.QueryRowContext(ctx, `SELECT endpoint_id::text FROM organization_default_endpoints WHERE organization_id = $1`, organizationID).Scan(&endpointID)
+	if err == sql.ErrNoRows {
+		err = a.DB.QueryRowContext(ctx, `
+			SELECT id::text FROM endpoint_settings
+			WHERE is_default = TRUE AND scope_type = 'organization' AND scope_id = $1
+			LIMIT 1`, organizationID).Scan(&endpointID)
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return adminDefaults{}, err
+	}
+	result := adminDefaults{EndpointID: parseOptionalUUID(endpointID), MCPServerIDs: []uuid.UUID{}}
+	rows, err := a.DB.QueryContext(ctx, `SELECT server_id FROM organization_mcp_defaults WHERE organization_id = $1 ORDER BY created_at, server_id`, organizationID)
+	if err != nil {
+		return adminDefaults{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return adminDefaults{}, err
+		}
+		result.MCPServerIDs = append(result.MCPServerIDs, id)
+	}
+	return result, rows.Err()
+}
+
+func (a *App) adminOrganizationID(c *gin.Context, raw string) (uuid.UUID, bool) {
+	organizationID, err := uuid.Parse(raw)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid organization id"))
+		return uuid.Nil, false
+	}
+	principal, ok := middleware.GetPrincipal(c)
+	if !ok {
+		writeError(c, http.StatusUnauthorized, fmt.Errorf("authentication required"))
+		return uuid.Nil, false
+	}
+	contextOrganization, _ := middleware.GetOrganizationID(c)
+	if contextOrganization != uuid.Nil && contextOrganization != organizationID && !principal.PlatformAdmin {
+		writeError(c, http.StatusForbidden, fmt.Errorf("organization context mismatch"))
+		return uuid.Nil, false
+	}
+	if principal.PlatformAdmin {
+		return organizationID, true
+	}
+	var role string
+	if err := a.DB.QueryRowContext(c, `SELECT role FROM organization_members WHERE organization_id = $1 AND user_id = $2`, organizationID, principal.UserID).Scan(&role); err != nil {
+		writeError(c, http.StatusForbidden, fmt.Errorf("organization access required"))
+		return uuid.Nil, false
+	}
+	if role != "owner" && role != "admin" {
+		writeError(c, http.StatusForbidden, fmt.Errorf("organization owner or admin access required"))
+		return uuid.Nil, false
+	}
+	return organizationID, true
+}
+
+func parseNullableUUID(value *string) (*uuid.UUID, error) {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(strings.TrimSpace(*value))
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
+}
+
+func (a *App) getOrganizationAnalytics(c *gin.Context) {
+	organizationID, ok := a.adminOrganizationID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	a.writeAnalytics(c, &organizationID)
+}
+
+func (a *App) getPlatformAnalytics(c *gin.Context) {
+	principal, ok := middleware.GetPrincipal(c)
+	if !ok || !principal.PlatformAdmin {
+		writeError(c, http.StatusForbidden, fmt.Errorf("platform admin access required"))
+		return
+	}
+	if raw := strings.TrimSpace(c.Query("organizationId")); raw != "" {
+		organizationID, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid organizationId"))
+			return
+		}
+		a.writeAnalytics(c, &organizationID)
+		return
+	}
+	a.writeAnalytics(c, nil)
+}
+
+func (a *App) writeAnalytics(c *gin.Context, organizationID *uuid.UUID) {
+	days := 30
+	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 365 {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("days must be between 1 and 365"))
+			return
+		}
+		days = value
+	}
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	where := "started_at >= $1"
+	args := []any{cutoff}
+	if organizationID != nil {
+		where += " AND organization_id = $2"
+		args = append(args, *organizationID)
+	}
+	var summary struct {
+		Requests       int     `json:"requests"`
+		Succeeded      int     `json:"succeeded"`
+		Failed         int     `json:"failed"`
+		Cancelled      int     `json:"cancelled"`
+		AverageLatency float64 `json:"averageLatencyMs"`
+		P95Latency     float64 `json:"p95LatencyMs"`
+		AverageTTFT    float64 `json:"averageTtftMs"`
+		InputTokens    *int64  `json:"inputTokens"`
+		OutputTokens   *int64  `json:"outputTokens"`
+		TotalTokens    *int64  `json:"totalTokens"`
+		ToolCalls      int     `json:"toolCalls"`
+	}
+	query := `SELECT COUNT(*)::int, COUNT(*) FILTER (WHERE status = 'complete')::int, COUNT(*) FILTER (WHERE status = 'error')::int, COUNT(*) FILTER (WHERE status = 'cancelled')::int, COALESCE(AVG(EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000) FILTER (WHERE finished_at IS NOT NULL), 0), COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000) FILTER (WHERE finished_at IS NOT NULL), 0), COALESCE(AVG(EXTRACT(EPOCH FROM (first_token_at - started_at)) * 1000) FILTER (WHERE first_token_at IS NOT NULL), 0), SUM(input_tokens), SUM(output_tokens), SUM(total_tokens), COALESCE(SUM(tool_call_count), 0)::int FROM chat_runs WHERE ` + where
+	if err := a.DB.QueryRowContext(c, query, args...).Scan(&summary.Requests, &summary.Succeeded, &summary.Failed, &summary.Cancelled, &summary.AverageLatency, &summary.P95Latency, &summary.AverageTTFT, &summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens, &summary.ToolCalls); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	byEndpointQuery := `SELECT COALESCE(r.endpoint_id::text, ''), COALESCE(e.name, 'Unknown endpoint'), r.model, COUNT(*)::int, COUNT(*) FILTER (WHERE r.status IN ('error', 'incomplete'))::int, COALESCE(AVG(EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.finished_at IS NOT NULL), 0) FROM chat_runs r LEFT JOIN endpoint_settings e ON e.id = r.endpoint_id WHERE ` + strings.ReplaceAll(where, "started_at", "r.started_at") + ` GROUP BY r.endpoint_id, e.name, r.model ORDER BY COUNT(*) DESC`
+	rows, err := a.DB.QueryContext(c, byEndpointQuery, args...)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer rows.Close()
+	byEndpoint := []gin.H{}
+	for rows.Next() {
+		var endpointID, name, model string
+		var requests, errors int
+		var latency float64
+		if err := rows.Scan(&endpointID, &name, &model, &requests, &errors, &latency); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		byEndpoint = append(byEndpoint, gin.H{"endpointId": endpointID, "endpointName": name, "model": model, "requests": requests, "errors": errors, "averageLatencyMs": latency})
+	}
+	if err := rows.Err(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	timeSeriesQuery := `SELECT TO_CHAR(r.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), COUNT(*)::int, COUNT(*) FILTER (WHERE r.status = 'complete')::int, COUNT(*) FILTER (WHERE r.status IN ('error', 'incomplete'))::int, COUNT(*) FILTER (WHERE r.status = 'cancelled')::int, COALESCE(AVG(EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.finished_at IS NOT NULL), 0), COALESCE(SUM(r.tool_call_count), 0)::int FROM chat_runs r WHERE ` + strings.ReplaceAll(where, "started_at", "r.started_at") + ` GROUP BY 1 ORDER BY 1`
+	timeRows, err := a.DB.QueryContext(c, timeSeriesQuery, args...)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer timeRows.Close()
+	timeSeries := []gin.H{}
+	for timeRows.Next() {
+		var date string
+		var requests, succeeded, failed, cancelled, toolCalls int
+		var latency float64
+		if err := timeRows.Scan(&date, &requests, &succeeded, &failed, &cancelled, &latency, &toolCalls); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		timeSeries = append(timeSeries, gin.H{"date": date, "requests": requests, "succeeded": succeeded, "failed": failed, "cancelled": cancelled, "averageLatencyMs": latency, "toolCalls": toolCalls})
+	}
+	if err := timeRows.Err(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"summary": summary, "byEndpoint": byEndpoint, "timeSeries": timeSeries})
+}

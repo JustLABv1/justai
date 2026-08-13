@@ -25,6 +25,7 @@ type assistantUIRequest struct {
 	ConversationID string            `json:"conversationId"`
 	EndpointID     string            `json:"endpointId"`
 	Model          string            `json:"model"`
+	RequestID      string            `json:"requestId"`
 }
 
 type assistantUIMessage struct {
@@ -176,6 +177,28 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		endpoint.ChatModel = model
 	}
 
+	runStatus := "complete"
+	runToolCalls := 0
+	runID := uuid.Nil
+	if requestID := strings.TrimSpace(request.RequestID); requestID != "" {
+		var duplicate bool
+		runID, duplicate, err = a.startChatRun(c, requestID, conversationID, principal.UserID, organizationID, endpointID, endpoint.ChatModel)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if duplicate {
+			writeError(c, http.StatusConflict, fmt.Errorf("chat request is already being processed"))
+			return
+		}
+		defer func() {
+			if c.Request.Context().Err() != nil {
+				runStatus = "cancelled"
+			}
+			_ = a.finishChatRun(context.Background(), runID, runStatus, runToolCalls)
+		}()
+	}
+
 	requestMessages := parseAssistantUIMessages(request.Messages)
 	approval := findAssistantUIApproval(requestMessages)
 	latestUser := latestAssistantUserMessage(requestMessages)
@@ -220,9 +243,17 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			case "text-delta", "reasoning-delta":
 				if firstTokenAt.IsZero() {
 					firstTokenAt = time.Now()
+					if runID != uuid.Nil {
+						_ = a.markChatRunFirstToken(context.Background(), runID, firstTokenAt)
+					}
 				}
 			case "tool-input-available":
 				toolCallCount++
+				runToolCalls++
+			case "error":
+				runStatus = "error"
+			case "tool-approval-request":
+				runStatus = "incomplete"
 			}
 		}
 		payload, marshalErr := json.Marshal(value)

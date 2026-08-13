@@ -768,45 +768,12 @@ export function EndpointsView({
                     <Input
                       id="endpoint-chat-model"
                       list="endpoint-chat-model-options"
-                      className={discoveredModels.length > 0 ? "pr-9" : undefined}
                       value={form.chatModel}
                       onChange={(event) =>
                         update("chatModel", event.target.value)
                       }
                       placeholder="e.g. gemma-3-27b-it or gpt-4o-mini"
                     />
-                    {discoveredModels.length > 0 && (
-                      <Select
-                        value={
-                          discoveredModels.some(
-                            (model) => model.id === form.chatModel
-                          )
-                            ? form.chatModel
-                            : undefined
-                        }
-                        onValueChange={(value) =>
-                          update("chatModel", value ?? "")
-                        }
-                      >
-                        <SelectTrigger
-                          aria-label="Choose a discovered chat model"
-                          className="absolute top-1 right-1 size-6 min-w-6 border-0 bg-transparent p-0.5 shadow-none hover:bg-muted [&_svg]:size-3"
-                        >
-                          <span className="sr-only">
-                            Choose a discovered chat model
-                          </span>
-                        </SelectTrigger>
-                        <SelectContent className="w-[min(32rem,calc(100vw-2rem))]">
-                          {discoveredModels.map((model) => (
-                            <SelectItem key={model.id} value={model.id}>
-                              {model.name && model.name !== model.id
-                                ? `${model.name} · ${model.id}`
-                                : model.id}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
                     {discoveredModels.length > 0 && (
                       <datalist id="endpoint-chat-model-options">
                         {discoveredModels.map((model) => (

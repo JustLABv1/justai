@@ -1,6 +1,9 @@
 export type ViewId =
   "chat" | "transcription" | "endpoints" | "knowledge" | "mcp" | "settings"
 
+export type SettingsTab =
+  "workspace" | "endpoints" | "knowledge" | "mcp" | "members" | "admin"
+
 export type User = {
   id: string
   email: string

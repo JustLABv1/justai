@@ -9,7 +9,7 @@ import (
 
 func TestDiscoverOpenAICompatibleModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/v1/model/info" {
+		if request.URL.Path == "/v1/model/info" || request.URL.Path == "/model/info" {
 			writer.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -58,6 +58,32 @@ func TestDiscoverOpenAICompatibleModelsUsesLiteLLMConfiguredAliases(t *testing.T
 	}
 	if len(models) != 1 || models[0].ID != "local-gemma" {
 		t.Fatalf("expected only configured LiteLLM chat alias, got %+v", models)
+	}
+}
+
+func TestDiscoverOpenAICompatibleModelsTriesLiteLLMProxyRoot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/v1/model/info":
+			writer.WriteHeader(http.StatusNotFound)
+		case "/model/info":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"data":[{"model_name":"local-gemma","model_info":{"mode":"chat"}}]}`))
+		default:
+			t.Fatalf("unexpected LiteLLM model path: %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	models, err := DiscoverChatModels(context.Background(), Endpoint{
+		ProviderType: "openai-compatible",
+		BaseURL:      server.URL + "/v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "local-gemma" {
+		t.Fatalf("expected configured LiteLLM proxy-root alias, got %+v", models)
 	}
 }
 

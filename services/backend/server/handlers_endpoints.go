@@ -52,7 +52,20 @@ func (a *App) supportedProviders(c *gin.Context) {
 func (a *App) listEndpoints(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
-	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_at, updated_at FROM endpoint_settings WHERE (scope_type = 'global') OR (scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) ORDER BY is_default DESC, created_at DESC`, organizationID, principal.UserID)
+	rows, err := a.DB.QueryContext(c, `
+		SELECT e.id, e.scope_type, e.scope_id, e.provider_type, e.name, e.base_url,
+		       COALESCE(e.api_path, ''), COALESCE(e.api_version, ''), COALESCE(e.chat_model, ''),
+		       COALESCE(e.embedding_model, ''), COALESCE(e.transcription_model, ''),
+		       COALESCE(e.diarization_model, ''), COALESCE(e.speech_model, ''), e.capabilities,
+		       e.credential_ciphertext IS NOT NULL, e.enabled,
+		       CASE WHEN defaults.endpoint_id IS NOT NULL THEN e.id = defaults.endpoint_id ELSE e.is_default END,
+		       e.timeout_seconds, e.max_output_tokens, e.temperature, e.created_at, e.updated_at
+		FROM endpoint_settings e
+		LEFT JOIN organization_default_endpoints defaults ON defaults.organization_id = $1
+		WHERE (e.scope_type = 'global')
+		   OR (e.scope_type = 'organization' AND e.scope_id = $1)
+		   OR (e.scope_type = 'user' AND e.scope_id = $2)
+		ORDER BY (CASE WHEN defaults.endpoint_id IS NOT NULL THEN e.id = defaults.endpoint_id ELSE e.is_default END) DESC, e.created_at DESC`, organizationID, principal.UserID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -366,14 +379,14 @@ func ensureEndpointDefault(ctx context.Context, executor sqlExecutor, scopeType 
 		WHERE scope_type = $1
 		  AND scope_id IS NOT DISTINCT FROM $2
 		  AND is_default = TRUE
-		  AND (enabled = FALSE OR NOT (capabilities ? 'chat'))`, scopeType, scopeID); err != nil {
+		  AND (enabled = FALSE OR (capabilities->>'chat') IS DISTINCT FROM 'true')`, scopeType, scopeID); err != nil {
 		return err
 	}
 	_, err := executor.ExecContext(ctx, `
 		UPDATE endpoint_settings candidate SET is_default = TRUE
 		WHERE candidate.id = (
 			SELECT id FROM endpoint_settings
-			WHERE scope_type = $1 AND scope_id IS NOT DISTINCT FROM $2 AND enabled = TRUE AND capabilities ? 'chat'
+			WHERE scope_type = $1 AND scope_id IS NOT DISTINCT FROM $2 AND enabled = TRUE AND (capabilities->>'chat') = 'true'
 			ORDER BY created_at LIMIT 1
 		)
 		AND NOT EXISTS (

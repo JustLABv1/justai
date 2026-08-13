@@ -3,6 +3,10 @@ import type { Metadata } from "next"
 
 import { ThemeProvider } from "@/components/theme-provider"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Inter } from "next/font/google";
+import { cn } from "@/lib/utils";
+
+const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
   title: "JustAI",
@@ -18,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className="antialiased font-sans">
+    <html lang="en" suppressHydrationWarning className={cn("antialiased font-sans", "font-sans", inter.variable)}>
       <body>
         <ThemeProvider>
           <TooltipProvider>{children}</TooltipProvider>

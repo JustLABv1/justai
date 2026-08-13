@@ -1,4 +1,5 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
 const REQUEST_TIMEOUT_MS = 30_000
 
 let selectedOrganizationId = ""
@@ -193,7 +194,7 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, {
       method: "POST",

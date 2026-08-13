@@ -17,6 +17,7 @@ import {
   Link,
   Mic,
   Paperclip,
+  PanelRightOpen,
   Pencil,
   RefreshCw,
   RotateCcw,
@@ -56,6 +57,7 @@ import { AssistantSource } from "@/components/assistant-ui/sources"
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback"
 import { VoiceControl } from "@/components/assistant-ui/voice"
 import { createJustAIVoiceAdapter } from "@/components/assistant-ui/voice-adapter"
+import { BrandMark } from "@/components/brand-mark"
 import { Button } from "@/components/ui/button"
 import { api, API_URL } from "@/lib/api"
 import type {
@@ -72,10 +74,12 @@ type Props = {
   endpoints: Endpoint[]
   user: Pick<User, "displayName" | "email">
   userInitials: string
+  onEnsureConversation?: () => Promise<string>
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
   onNavigate?: (view: ViewId) => void
   onOpenHistory?: () => void
+  onOpenContext?: () => void
 }
 
 type AssistantHistoryResponse = {
@@ -510,9 +514,7 @@ function EmptyThread({
   return (
     <ThreadPrimitive.Empty>
       <div className="flex min-h-[min(60vh,38rem)] flex-col items-center justify-center px-6 py-12 text-center">
-        <div className="mb-5 flex size-12 items-center justify-center rounded-2xl border bg-muted/50 text-lg font-semibold">
-          J
-        </div>
+        <BrandMark className="mb-5 size-14 rounded-full" priority />
         <p className="text-xs font-medium tracking-[0.2em] text-muted-foreground uppercase">
           JustAI
         </p>
@@ -567,6 +569,7 @@ function Composer({
   modelDiscoveryLoading,
   onModelChange,
   onOpenHistory,
+  onOpenContext,
   conversationContext,
   toolApproval,
   onImportURL,
@@ -580,11 +583,13 @@ function Composer({
   modelDiscoveryLoading?: boolean
   onModelChange: (id: string) => void
   onOpenHistory?: () => void
+  onOpenContext?: () => void
   conversationContext: ConversationContext
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
   onImportURL: () => void | Promise<void>
   onImportText: () => void | Promise<void>
 }) {
+  const isThreadRunning = useAuiState((state) => state.thread.isRunning)
   const contextTriggerAdapter = useMemo(() => {
     const groups = [
       {
@@ -641,7 +646,7 @@ function Composer({
   }, [conversationContext])
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-1 pt-2 pb-3 sm:px-4 sm:pb-5">
+    <div className="mx-auto w-full max-w-3xl px-3 pt-2 pb-3 sm:px-5 sm:pb-5">
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerPrimitive.Unstable_TriggerPopover
           adapter={contextTriggerAdapter}
@@ -684,7 +689,7 @@ function Composer({
             }
           </ComposerPrimitive.Unstable_TriggerPopoverItems>
         </ComposerPrimitive.Unstable_TriggerPopover>
-        <ComposerPrimitive.Root className="relative rounded-[1.6rem] border bg-background/95 p-2 shadow-[0_12px_40px_-22px_rgba(0,0,0,0.45)] backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <ComposerPrimitive.Root className="relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <ComposerPrimitive.Attachments>
             {({ attachment }) => (
               <AttachmentPrimitive.Root className="mx-1 mb-1 flex items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs">
@@ -769,7 +774,9 @@ function Composer({
                   aria-busy={modelDiscoveryLoading || undefined}
                   aria-label="Chat model"
                   className="max-w-[min(12rem,30vw)] bg-transparent text-xs text-foreground outline-none"
-                  disabled={modelDiscoveryLoading && models.length === 0 && !modelId}
+                  disabled={
+                    modelDiscoveryLoading && models.length === 0 && !modelId
+                  }
                   onChange={(event) => onModelChange(event.target.value)}
                   value={modelId}
                 >
@@ -785,7 +792,9 @@ function Composer({
                     <option value={modelId}>{modelId}</option>
                   ) : (
                     <option value="">
-                      {modelDiscoveryLoading ? "Discovering models…" : "No model configured"}
+                      {modelDiscoveryLoading
+                        ? "Discovering models…"
+                        : "No model configured"}
                     </option>
                   )}
                 </select>
@@ -803,20 +812,35 @@ function Composer({
                   <History className="size-4" />
                 </Button>
               )}
+              {onOpenContext && (
+                <Button
+                  aria-label="Open conversation context"
+                  className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={onOpenContext}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <PanelRightOpen className="size-4" />
+                </Button>
+              )}
             </div>
             <div className="flex items-center gap-1">
-              <ComposerPrimitive.Cancel
-                aria-label="Cancel response"
-                className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <RotateCcw className="size-4" />
-              </ComposerPrimitive.Cancel>
-              <ComposerPrimitive.Send
-                aria-label="Send message"
-                className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/85 disabled:opacity-40"
-              >
-                <ArrowUp className="size-4" />
-              </ComposerPrimitive.Send>
+              {isThreadRunning ? (
+                <ComposerPrimitive.Cancel
+                  aria-label="Cancel response"
+                  className="flex size-9 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
+                >
+                  <RotateCcw className="size-4" />
+                </ComposerPrimitive.Cancel>
+              ) : (
+                <ComposerPrimitive.Send
+                  aria-label="Send message"
+                  className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/85 disabled:opacity-40"
+                >
+                  <ArrowUp className="size-4" />
+                </ComposerPrimitive.Send>
+              )}
             </div>
           </div>
         </ComposerPrimitive.Root>
@@ -841,6 +865,7 @@ function AssistantChatSurface({
   onConversationCreated,
   onConversationUpdated,
   onOpenHistory,
+  onOpenContext,
   conversationContext,
 }: {
   conversationId: string | null
@@ -855,6 +880,7 @@ function AssistantChatSurface({
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
   onOpenHistory?: () => void
+  onOpenContext?: () => void
   conversationContext: ConversationContext
 }) {
   const [endpointId, setEndpointId] = useState(activeEndpoint?.id ?? "")
@@ -943,23 +969,36 @@ function AssistantChatSurface({
           return headers
         },
         body: () => ({
-          conversationId: conversationId ?? "",
+          conversationId: "",
           endpointId: selectedEndpointId,
           model: selectedModel,
         }),
         prepareSendMessagesRequest: async ({ body }) => {
-          const id = conversationId ?? (await onEnsureConversation())
+          const id = await onEnsureConversation()
+          const messages = Array.isArray(body?.messages) ? body.messages : []
+          const latestUser = [...messages]
+            .reverse()
+            .find((message) => message?.role === "user")
+          const latestMessage = messages.at(-1)
+          const requestId =
+            latestMessage?.role === "assistant" &&
+            typeof latestMessage.id === "string"
+              ? `approval:${latestMessage.id}`
+              : typeof latestUser?.id === "string"
+                ? `turn:${latestUser.id}`
+                : undefined
           return {
             body: {
               ...(body ?? {}),
               conversationId: id,
               endpointId: selectedEndpointId,
               model: selectedModel,
+              requestId,
             },
           }
         },
       }),
-    [conversationId, onEnsureConversation, selectedEndpointId, selectedModel]
+    [onEnsureConversation, selectedEndpointId, selectedModel]
   )
 
   const attachments = useMemo(
@@ -1038,12 +1077,6 @@ function AssistantChatSurface({
           scrollToBottomOnInitialize
         >
           <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 sm:px-8 lg:px-12">
-            <div className="flex items-center justify-between py-3 text-xs text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <span className="size-1.5 rounded-full bg-emerald-500" />
-                <span>{endpoint?.name ?? "Choose an endpoint"}</span>
-              </div>
-            </div>
             <EmptyThread onOpenHistory={onOpenHistory} user={user} />
             <ThreadPrimitive.Messages
               components={{
@@ -1076,6 +1109,7 @@ function AssistantChatSurface({
                 }))
               }
               onOpenHistory={onOpenHistory}
+              onOpenContext={onOpenContext}
               toolApproval={voiceApproval}
             />
           </ThreadPrimitive.ViewportFooter>
@@ -1091,7 +1125,9 @@ export function ChatView({
   user,
   onConversationCreated,
   onConversationUpdated,
+  onEnsureConversation,
   onOpenHistory,
+  onOpenContext,
 }: Props) {
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
@@ -1102,7 +1138,17 @@ export function ChatView({
   const [conversationContext, setConversationContext] =
     useState<ConversationContext>(EMPTY_CONTEXT)
   const locallyCreatedConversationRef = useRef<string | null>(null)
+  const conversationCreationRef = useRef<Promise<string> | null>(null)
+  const activeConversationRef = useRef<string | null>(conversationId)
+  const onConversationCreatedRef = useRef(onConversationCreated)
+  const onConversationUpdatedRef = useRef(onConversationUpdated)
   const uploadedAttachmentKeysRef = useRef(new Set<string>())
+
+  useEffect(() => {
+    activeConversationRef.current = conversationId
+    onConversationCreatedRef.current = onConversationCreated
+    onConversationUpdatedRef.current = onConversationUpdated
+  }, [conversationId, onConversationCreated, onConversationUpdated])
 
   const activeChatEndpoints = endpoints.filter(
     (endpoint) => endpoint.enabled && endpoint.capabilities?.chat
@@ -1111,30 +1157,40 @@ export function ChatView({
     activeChatEndpoints.find((endpoint) => endpoint.isDefault) ??
     activeChatEndpoints[0]
 
-  const loadConversation = useCallback(async (id: string | null) => {
-    setHistoryLoading(Boolean(id))
-    setConversationContext(EMPTY_CONTEXT)
-    if (!id) {
-      setInitialMessages([])
-      setHistoryLoading(false)
-      return
-    }
-    try {
-      const [history, context] = await Promise.all([
-        api.get<AssistantHistoryResponse>(
-          `/api/v1/conversations/${id}/messages?format=assistant-ui`
-        ),
-        api.get<ConversationContext>(`/api/v1/conversations/${id}/context`),
-      ])
-      setInitialMessages(normalizeHistory(history))
-      setConversationContext(context)
-    } catch (caught) {
-      console.error("Assistant UI history could not be loaded", caught)
-      setInitialMessages([])
-    } finally {
-      setHistoryLoading(false)
-    }
-  }, [])
+  const loadConversation = useCallback(
+    async (id: string | null, signal?: AbortSignal) => {
+      setHistoryLoading(Boolean(id))
+      setConversationContext(EMPTY_CONTEXT)
+      if (!id) {
+        setInitialMessages([])
+        setHistoryLoading(false)
+        return
+      }
+      try {
+        const [history, context] = await Promise.all([
+          api.get<AssistantHistoryResponse>(
+            `/api/v1/conversations/${id}/messages?format=assistant-ui`,
+            { signal }
+          ),
+          api.get<ConversationContext>(`/api/v1/conversations/${id}/context`, {
+            signal,
+          }),
+        ])
+        if (!signal?.aborted) {
+          setInitialMessages(normalizeHistory(history))
+          setConversationContext(context)
+        }
+      } catch (caught) {
+        if (!signal?.aborted) {
+          console.error("Assistant UI history could not be loaded", caught)
+          setInitialMessages([])
+        }
+      } finally {
+        if (!signal?.aborted) setHistoryLoading(false)
+      }
+    },
+    []
+  )
 
   const previousConversationRef = useRef<string | null | undefined>(undefined)
 
@@ -1147,24 +1203,44 @@ export function ChatView({
     ) {
       locallyCreatedConversationRef.current = null
       setActiveConversationId(conversationId)
+      activeConversationRef.current = conversationId
       return
     }
     setActiveConversationId(conversationId)
     setSurfaceKey(conversationId ?? "new")
+    activeConversationRef.current = conversationId
     uploadedAttachmentKeysRef.current.clear()
-    queueMicrotask(() => void loadConversation(conversationId))
+    const controller = new AbortController()
+    queueMicrotask(
+      () => void loadConversation(conversationId, controller.signal)
+    )
+    return () => controller.abort()
   }, [conversationId, loadConversation])
 
-  const ensureConversation = useCallback(async () => {
-    if (activeConversationId) return activeConversationId
-    const response = await api.post<{ conversation: Conversation }>(
-      "/api/v1/conversations"
-    )
-    locallyCreatedConversationRef.current = response.conversation.id
-    setActiveConversationId(response.conversation.id)
-    onConversationCreated?.(response.conversation)
-    return response.conversation.id
-  }, [activeConversationId, onConversationCreated])
+  const ensureLocalConversation = useCallback(async () => {
+    if (activeConversationRef.current) return activeConversationRef.current
+    if (conversationCreationRef.current) return conversationCreationRef.current
+
+    const creation = api
+      .post<{ conversation: Conversation }>("/api/v1/conversations")
+      .then((response) => {
+        locallyCreatedConversationRef.current = response.conversation.id
+        activeConversationRef.current = response.conversation.id
+        setActiveConversationId(response.conversation.id)
+        onConversationCreatedRef.current?.(response.conversation)
+        return response.conversation.id
+      })
+      .finally(() => {
+        conversationCreationRef.current = null
+      })
+    conversationCreationRef.current = creation
+    return creation
+  }, [])
+
+  const ensureConversation = useCallback(
+    () => onEnsureConversation?.() ?? ensureLocalConversation(),
+    [ensureLocalConversation, onEnsureConversation]
+  )
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -1179,21 +1255,18 @@ export function ChatView({
         `/api/v1/conversations/${id}/context`
       )
       setConversationContext(context)
-      onConversationUpdated?.()
+      onConversationUpdatedRef.current?.()
     },
-    [ensureConversation, onConversationUpdated]
+    [ensureConversation]
   )
 
-  const refreshConversationContext = useCallback(
-    async (id: string) => {
-      const context = await api.get<ConversationContext>(
-        `/api/v1/conversations/${id}/context`
-      )
-      setConversationContext(context)
-      onConversationUpdated?.()
-    },
-    [onConversationUpdated]
-  )
+  const refreshConversationContext = useCallback(async (id: string) => {
+    const context = await api.get<ConversationContext>(
+      `/api/v1/conversations/${id}/context`
+    )
+    setConversationContext(context)
+    onConversationUpdatedRef.current?.()
+  }, [])
 
   const importURL = useCallback(async () => {
     const value = window.prompt("Import URL")?.trim()
@@ -1239,6 +1312,7 @@ export function ChatView({
         onImportText={importText}
         onImportURL={importURL}
         onOpenHistory={onOpenHistory}
+        onOpenContext={onOpenContext}
         onUpload={uploadFile}
         conversationContext={conversationContext}
         user={user}

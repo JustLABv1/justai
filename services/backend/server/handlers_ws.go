@@ -521,7 +521,7 @@ func (a *App) resolveEndpoint(ctx context.Context, userID, organizationID uuid.U
 		}
 		var scopeType string
 		var scopeID sql.NullString
-		if err := a.DB.QueryRowContext(ctx, `SELECT scope_type, scope_id::text FROM endpoint_settings WHERE id = $1 AND enabled = TRUE AND capabilities ? 'chat'`, id).Scan(&scopeType, &scopeID); err != nil {
+		if err := a.DB.QueryRowContext(ctx, `SELECT scope_type, scope_id::text FROM endpoint_settings WHERE id = $1 AND enabled = TRUE AND (capabilities->>'chat') = 'true'`, id).Scan(&scopeType, &scopeID); err != nil {
 			return uuid.Nil, fmt.Errorf("endpoint not found")
 		}
 		if scopeType == "global" {
@@ -536,7 +536,18 @@ func (a *App) resolveEndpoint(ctx context.Context, userID, organizationID uuid.U
 		return uuid.Nil, fmt.Errorf("endpoint is outside the current scope")
 	}
 	var id uuid.UUID
-	if err := a.DB.QueryRowContext(ctx, `SELECT id FROM endpoint_settings WHERE enabled = TRUE AND capabilities ? 'chat' AND ((scope_type = 'user' AND scope_id = $1) OR (scope_type = 'organization' AND scope_id = $2) OR scope_type = 'global') ORDER BY CASE WHEN scope_type = 'user' THEN 1 WHEN scope_type = 'organization' THEN 2 ELSE 3 END, is_default DESC, created_at LIMIT 1`, userID, organizationID).Scan(&id); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `
+		SELECT e.id
+		FROM organization_default_endpoints defaults
+		JOIN endpoint_settings e ON e.id = defaults.endpoint_id
+		WHERE defaults.organization_id = $1
+		  AND e.enabled = TRUE
+		  AND (e.capabilities->>'chat') = 'true'`, organizationID).Scan(&id); err == nil {
+		return id, nil
+	} else if err != sql.ErrNoRows {
+		return uuid.Nil, err
+	}
+	if err := a.DB.QueryRowContext(ctx, `SELECT id FROM endpoint_settings WHERE enabled = TRUE AND (capabilities->>'chat') = 'true' AND ((scope_type = 'user' AND scope_id = $1) OR (scope_type = 'organization' AND scope_id = $2) OR scope_type = 'global') ORDER BY CASE WHEN scope_type = 'user' THEN 1 WHEN scope_type = 'organization' THEN 2 ELSE 3 END, is_default DESC, created_at LIMIT 1`, userID, organizationID).Scan(&id); err != nil {
 		return uuid.Nil, fmt.Errorf("no enabled chat endpoint is configured")
 	}
 	return id, nil

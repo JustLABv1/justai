@@ -62,7 +62,7 @@ func (a *App) Router() *gin.Engine {
 			return
 		}
 		var migrated bool
-		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '008_assistant_ui.sql')`).Scan(&migrated); err != nil || !migrated {
+		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '009_admin_analytics.sql')`).Scan(&migrated); err != nil || !migrated {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
@@ -98,6 +98,9 @@ func (a *App) Router() *gin.Engine {
 	protected.POST("/auth/logout", a.logout)
 	protected.GET("/providers/supported", a.supportedProviders)
 	protected.GET("/mcp/oauth/callback", a.mcpOAuthCallback)
+	protected.GET("/admin/defaults", a.getGlobalAdminDefaults)
+	protected.PUT("/admin/defaults", a.putGlobalAdminDefaults)
+	protected.GET("/admin/analytics", a.getPlatformAnalytics)
 
 	org := protected.Group("")
 	org.Use(middleware.RequireOrg(a.DB))
@@ -153,6 +156,7 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/mcp/servers/:id/oauth/start", a.mcpOAuthStart)
 	org.GET("/conversations", a.listConversations)
 	org.POST("/conversations", a.createConversation)
+	org.GET("/conversations/:id", a.getConversation)
 	org.PATCH("/conversations/:id", a.updateConversation)
 	org.DELETE("/conversations/:id", a.deleteConversation)
 	org.GET("/conversations/:id/messages", a.listConversationMessages)
@@ -165,6 +169,9 @@ func (a *App) Router() *gin.Engine {
 	organizationRoutes := protected.Group("/organizations/:id")
 	organizationRoutes.Use(middleware.RequireOrg(a.DB))
 	organizationRoutes.PATCH("", middleware.RequireOrgRole("owner", "admin"), a.updateOrganization)
+	organizationRoutes.GET("/admin/defaults", middleware.RequireOrgRole("owner", "admin"), a.getOrganizationAdminDefaults)
+	organizationRoutes.PUT("/admin/defaults", middleware.RequireOrgRole("owner", "admin"), a.putOrganizationAdminDefaults)
+	organizationRoutes.GET("/admin/analytics", middleware.RequireOrgRole("owner", "admin"), a.getOrganizationAnalytics)
 	organizationRoutes.GET("/members", a.listOrganizationMembers)
 	organizationRoutes.POST("/members", middleware.RequireOrgRole("owner", "admin"), a.addOrganizationMember)
 	organizationRoutes.PATCH("/members/:userId", middleware.RequireOrgRole("owner", "admin"), a.updateOrganizationMember)

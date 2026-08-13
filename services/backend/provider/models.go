@@ -81,27 +81,56 @@ func discoverLiteLLMModels(ctx context.Context, endpoint Endpoint) ([]ChatModel,
 			} `json:"model_info"`
 		} `json:"data"`
 	}
-	if err := requestModelCatalog(ctx, endpoint, "/model/info", &payload); err != nil {
-		return nil, err
+	// LiteLLM serves /model/info from the proxy root while many users enter an
+	// OpenAI-compatible base URL ending in /v1. Try the configured path first,
+	// then the proxy root, so discovery never silently falls back to a broad
+	// /models catalog containing upstream provider models.
+	candidates := []Endpoint{endpoint}
+	base := strings.TrimRight(endpoint.BaseURL, "/")
+	if strings.HasSuffix(base, "/v1") {
+		root := endpoint
+		root.BaseURL = strings.TrimSuffix(base, "/v1")
+		candidates = append(candidates, root)
 	}
-	models := make([]ChatModel, 0, len(payload.Data))
-	for _, item := range payload.Data {
-		// LiteLLM may expose embedding/audio entries alongside chat entries.
-		// Keep chat/completion/responses (and entries without mode metadata),
-		// because those are the model IDs accepted by our chat transport.
-		switch strings.ToLower(strings.TrimSpace(item.ModelInfo.Mode)) {
-		case "embedding", "image_generation", "moderation", "rerank", "audio_transcription", "audio_speech":
+	var lastErr error
+	for _, candidate := range candidates {
+		payload = struct {
+			Data []struct {
+				ModelName string `json:"model_name"`
+				ID        string `json:"id"`
+				ModelInfo struct {
+					ID   string `json:"id"`
+					Mode string `json:"mode"`
+				} `json:"model_info"`
+			} `json:"data"`
+		}{}
+		if err := requestModelCatalog(ctx, candidate, "/model/info", &payload); err != nil {
+			lastErr = err
 			continue
 		}
-		id := firstNonEmpty(item.ModelName, item.ID, item.ModelInfo.ID)
-		if id != "" {
-			models = append(models, ChatModel{ID: id, OwnedBy: "litellm"})
+		models := make([]ChatModel, 0, len(payload.Data))
+		for _, item := range payload.Data {
+			// LiteLLM may expose embedding/audio entries alongside chat entries.
+			// Keep chat/completion/responses (and entries without mode metadata),
+			// because those are the model IDs accepted by our chat transport.
+			switch strings.ToLower(strings.TrimSpace(item.ModelInfo.Mode)) {
+			case "embedding", "image_generation", "moderation", "rerank", "audio_transcription", "audio_speech":
+				continue
+			}
+			id := firstNonEmpty(item.ModelName, item.ID, item.ModelInfo.ID)
+			if id != "" {
+				models = append(models, ChatModel{ID: id, OwnedBy: "litellm"})
+			}
 		}
+		if len(models) > 0 {
+			return models, nil
+		}
+		lastErr = fmt.Errorf("LiteLLM returned no configured chat models")
 	}
-	if len(models) == 0 {
-		return nil, fmt.Errorf("LiteLLM returned no configured chat models")
+	if lastErr == nil {
+		lastErr = fmt.Errorf("LiteLLM model discovery failed")
 	}
-	return models, nil
+	return nil, lastErr
 }
 
 func discoverOllamaModels(ctx context.Context, endpoint Endpoint) ([]ChatModel, error) {

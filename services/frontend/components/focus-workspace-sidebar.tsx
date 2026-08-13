@@ -7,14 +7,12 @@ import {
   ChevronDown,
   ChevronRight,
   CircleHelp,
-  Cpu,
   Headphones,
-  LibraryBig,
   LogOut,
   MessageSquare,
   MoreHorizontal,
   PanelLeftClose,
-  Plug,
+  PanelLeftOpen,
   Plus,
   RotateCcw,
   Settings2,
@@ -71,19 +69,6 @@ const railNavigation: Array<{
     hint: "Rooms and transcripts",
     icon: Headphones,
   },
-  {
-    id: "endpoints",
-    label: "Endpoints",
-    hint: "Models and providers",
-    icon: Cpu,
-  },
-  {
-    id: "knowledge",
-    label: "Knowledge",
-    hint: "Sources and retrieval",
-    icon: LibraryBig,
-  },
-  { id: "mcp", label: "MCP", hint: "Tools and connections", icon: Plug },
 ]
 
 type FocusWorkspaceSidebarProps = {
@@ -109,7 +94,10 @@ type FocusWorkspaceSidebarProps = {
   onOrganizationSelect: (organizationId: string) => void
   onArchiveConversation: (conversationId: string, archived: boolean) => void
   onDeleteConversation: (conversation: Conversation) => void
-  onRenameConversation: (conversationId: string, title: string) => void | Promise<void>
+  onRenameConversation: (
+    conversationId: string,
+    title: string
+  ) => void | Promise<void>
   onArchiveSession: (sessionId: string, archived: boolean) => void
   onDeleteSession: (session: TranscriptionSession) => void
   onNewTranscriptionSession: () => void
@@ -185,7 +173,7 @@ export function FocusWorkspaceSidebar({
   return (
     <aside
       className={cn(
-        "flex h-svh shrink-0 overflow-hidden border-r border-border bg-background transition-[width] duration-200 ease-out",
+        "flex h-svh shrink-0 overflow-hidden border-r border-border bg-background transition-[width] duration-200 ease-out md:w-[352px]",
         historyOpen
           ? "w-[352px] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:shadow-lg"
           : "w-16"
@@ -203,6 +191,18 @@ export function FocusWorkspaceSidebar({
         >
           <Plus data-icon="inline-start" />
         </Button>
+        {!historyOpen && (
+          <Button
+            aria-label="Open chat history"
+            className="size-9 rounded-xl text-muted-foreground md:hidden"
+            onClick={() => onHistoryOpenChange(true)}
+            size="icon"
+            title="Open chat history"
+            variant="ghost"
+          >
+            <PanelLeftOpen data-icon="inline-start" />
+          </Button>
+        )}
 
         <nav
           aria-label="Workspace navigation"
@@ -308,139 +308,129 @@ export function FocusWorkspaceSidebar({
         </DropdownMenu>
       </div>
 
-      {historyOpen && (
-        <div className="flex w-[288px] min-w-0 flex-col gap-3 overflow-hidden p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] text-muted-foreground">
-                JustLAB workspace
-              </p>
-              <h2 className="text-sm font-semibold tracking-tight">
-                {activeView === "transcription"
-                  ? "Live sessions"
-                  : activeView === "chat"
-                    ? "Chat history"
-                    : "Workspace"}
-              </h2>
-            </div>
-            <Button
-              aria-label="Close sessions"
-              onClick={() => onHistoryOpenChange(false)}
-              size="icon-sm"
-              title="Close sessions"
-              variant="ghost"
-            >
-              <PanelLeftClose data-icon="inline-start" />
-            </Button>
+      <div
+        className={cn(
+          "hidden w-[288px] min-w-0 flex-col gap-3 overflow-hidden p-4 md:flex",
+          historyOpen && "max-md:flex"
+        )}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] text-muted-foreground">
+              JustLAB workspace
+            </p>
+            <h2 className="text-sm font-semibold tracking-tight">
+              {activeView === "transcription"
+                ? "Live sessions"
+                : activeView === "chat"
+                  ? "Chat history"
+                  : "Workspace"}
+            </h2>
           </div>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  className="h-auto w-full justify-start gap-2 border px-2.5 py-2"
-                  variant="outline"
-                />
-              }
-            >
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                <Bot aria-hidden="true" />
-              </span>
-              <span className="min-w-0 flex-1 text-left">
-                <span className="block truncate text-xs font-medium">
-                  {activeOrganization?.name ?? "Workspace"}
-                </span>
-                <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                  {activeOrganization?.role ?? "member"} access
-                </span>
-              </span>
-              <ChevronDown className="size-4 text-muted-foreground" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
-                {organizations.map((organization) => (
-                  <DropdownMenuItem
-                    key={organization.id}
-                    onClick={() => onOrganizationSelect(organization.id)}
-                  >
-                    <Bot data-icon="inline-start" />
-                    <span className="min-w-0 flex-1 truncate">
-                      {organization.name}
-                    </span>
-                    {organization.id === activeOrganization?.id && (
-                      <span className="text-xs text-muted-foreground">
-                        Current
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => onNavigate("settings")}>
-                <Settings2 data-icon="inline-start" />
-                Manage workspaces
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {actionError && (
-            <Alert className="shrink-0" variant="destructive">
-              <AlertDescription className="text-xs">
-                {actionError}
-              </AlertDescription>
-            </Alert>
-          )}
-
           <Button
-            className="w-full shrink-0 justify-start"
-            onClick={() => onNavigate("chat")}
+            aria-label="Close sessions"
+            onClick={() => onHistoryOpenChange(false)}
+            size="icon-sm"
+            title="Close sessions"
+            variant="ghost"
           >
-            <Plus data-icon="inline-start" />
-            New chat
+            <PanelLeftClose data-icon="inline-start" />
           </Button>
-
-          {activeView === "chat" && (
-            <AssistantThreadList
-              activeConversationId={activeConversationId}
-              archivedConversations={archivedConversations}
-              conversations={conversations}
-              historyQuery={historyQuery}
-              onArchive={onArchiveConversation}
-              onDelete={onDeleteConversation}
-              onHistoryQueryChange={setHistoryQuery}
-              onRename={onRenameConversation}
-              onSelect={(id) => onNavigate("chat", id)}
-            />
-          )}
-
-          {activeView === "transcription" && (
-            <TranscriptionHistoryPanel
-              activeSessionId={activeSessionId}
-              archivedSessionGroups={archivedSessionGroups}
-              archivedSessions={archivedTranscriptionSessions}
-              archivedOpen={archivedSessionsOpen}
-              onArchive={onArchiveSession}
-              onDelete={onDeleteSession}
-              onNewSession={onNewTranscriptionSession}
-              onSelect={(id) => onNavigate("transcription", null, id)}
-              sessionGroups={sessionGroups}
-              setArchivedOpen={setArchivedSessionsOpen}
-            />
-          )}
-
-          {activeView !== "chat" && activeView !== "transcription" && (
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-6 text-center">
-              <CircleHelp className="size-5 text-muted-foreground" />
-              <p className="text-xs font-medium">{getViewLabel(activeView)}</p>
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                Use the rail to switch workspace surfaces while keeping the
-                conversation nearby.
-              </p>
-            </div>
-          )}
         </div>
-      )}
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                className="h-auto w-full justify-start gap-2 border px-2.5 py-2"
+                variant="outline"
+              />
+            }
+          >
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+              <Bot aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block truncate text-xs font-medium">
+                {activeOrganization?.name ?? "Workspace"}
+              </span>
+              <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                {activeOrganization?.role ?? "member"} access
+              </span>
+            </span>
+            <ChevronDown className="size-4 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+              {organizations.map((organization) => (
+                <DropdownMenuItem
+                  key={organization.id}
+                  onClick={() => onOrganizationSelect(organization.id)}
+                >
+                  <Bot data-icon="inline-start" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {organization.name}
+                  </span>
+                  {organization.id === activeOrganization?.id && (
+                    <span className="text-xs text-muted-foreground">
+                      Current
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onNavigate("settings")}>
+              <Settings2 data-icon="inline-start" />
+              Manage workspaces
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {actionError && (
+          <Alert className="shrink-0" variant="destructive">
+            <AlertDescription className="text-xs">
+              {actionError}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <Button
+          className="w-full shrink-0 justify-start"
+          onClick={() => onNavigate("chat")}
+        >
+          <Plus data-icon="inline-start" />
+          New chat
+        </Button>
+
+        <AssistantThreadList
+          activeConversationId={activeConversationId}
+          archivedConversations={archivedConversations}
+          conversations={conversations}
+          historyQuery={historyQuery}
+          onArchive={onArchiveConversation}
+          onDelete={onDeleteConversation}
+          onHistoryQueryChange={setHistoryQuery}
+          onRename={onRenameConversation}
+          onSelect={(id) => onNavigate("chat", id)}
+        />
+
+        {activeView === "transcription" && (
+          <TranscriptionHistoryPanel
+            activeSessionId={activeSessionId}
+            archivedSessionGroups={archivedSessionGroups}
+            archivedSessions={archivedTranscriptionSessions}
+            archivedOpen={archivedSessionsOpen}
+            onArchive={onArchiveSession}
+            onDelete={onDeleteSession}
+            onNewSession={onNewTranscriptionSession}
+            onSelect={(id) => onNavigate("transcription", null, id)}
+            sessionGroups={sessionGroups}
+            setArchivedOpen={setArchivedSessionsOpen}
+          />
+        )}
+      </div>
     </aside>
   )
 }
@@ -727,23 +717,6 @@ function formatItemTime(value: string) {
     month: "short",
     day: "numeric",
   })
-}
-
-function getViewLabel(view: ViewId) {
-  switch (view) {
-    case "chat":
-      return "Chat"
-    case "transcription":
-      return "Live transcription"
-    case "endpoints":
-      return "Endpoints"
-    case "knowledge":
-      return "Knowledge"
-    case "mcp":
-      return "MCP"
-    case "settings":
-      return "Settings"
-  }
 }
 
 export { formatItemTime }

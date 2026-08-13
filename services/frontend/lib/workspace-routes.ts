@@ -1,4 +1,4 @@
-import type { ViewId } from "@/lib/types"
+import type { SettingsTab, ViewId } from "@/lib/types"
 
 const validViews: ViewId[] = [
   "chat",
@@ -17,6 +17,31 @@ export type WorkspaceRoute = {
   view: ViewId
   conversationId: string | null
   sessionId: string | null
+  settingsTab: SettingsTab
+}
+
+const settingsTabs: SettingsTab[] = [
+  "workspace",
+  "endpoints",
+  "knowledge",
+  "mcp",
+  "members",
+  "admin",
+]
+
+function isUUID(value: string | null): value is string {
+  return Boolean(
+    value &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value
+    )
+  )
+}
+
+function parseSettingsTab(value: string | null | undefined): SettingsTab {
+  return value && settingsTabs.includes(value as SettingsTab)
+    ? (value as SettingsTab)
+    : "workspace"
 }
 
 function decodeSegment(value: string | undefined) {
@@ -32,18 +57,27 @@ function decodeSegment(value: string | undefined) {
 export function workspacePath(
   view: ViewId,
   conversationId: string | null = null,
-  sessionId: string | null = null
+  sessionId: string | null = null,
+  settingsTab: SettingsTab = "workspace"
 ) {
   if (view === "chat") {
-    return conversationId
-      ? `/conversation/${encodeURIComponent(conversationId)}`
-      : "/conversation"
+    return conversationId ? `/${encodeURIComponent(conversationId)}` : "/"
   }
 
   if (view === "transcription") {
     return sessionId
       ? `/transcription/${encodeURIComponent(sessionId)}`
       : "/transcription"
+  }
+
+  if (view === "settings") {
+    return settingsTab === "workspace"
+      ? "/settings"
+      : `/settings?tab=${encodeURIComponent(settingsTab)}`
+  }
+
+  if (view === "endpoints" || view === "knowledge" || view === "mcp") {
+    return `/settings?tab=${view}`
   }
 
   return `/${view}`
@@ -61,6 +95,7 @@ export function parseWorkspaceRoute(
       view: "chat",
       conversationId: decodeSegment(segments[1]),
       sessionId: null,
+      settingsTab: "workspace",
     }
   }
 
@@ -69,6 +104,34 @@ export function parseWorkspaceRoute(
       view: "transcription",
       conversationId: null,
       sessionId: decodeSegment(segments[1]),
+      settingsTab: "workspace",
+    }
+  }
+
+  if (section === "settings") {
+    return {
+      view: "settings",
+      conversationId: null,
+      sessionId: null,
+      settingsTab: parseSettingsTab(searchParams.get("tab")),
+    }
+  }
+
+  if (section === "endpoints" || section === "knowledge" || section === "mcp") {
+    return {
+      view: "settings",
+      conversationId: null,
+      sessionId: null,
+      settingsTab: section,
+    }
+  }
+
+  if (isUUID(decodeSegment(section))) {
+    return {
+      view: "chat",
+      conversationId: decodeSegment(section),
+      sessionId: null,
+      settingsTab: "workspace",
     }
   }
 
@@ -77,6 +140,7 @@ export function parseWorkspaceRoute(
       view: section as ViewId,
       conversationId: null,
       sessionId: null,
+      settingsTab: "workspace",
     }
   }
 
@@ -87,5 +151,6 @@ export function parseWorkspaceRoute(
     view,
     conversationId: view === "chat" ? searchParams.get("conversation") : null,
     sessionId: view === "transcription" ? searchParams.get("session") : null,
+    settingsTab: parseSettingsTab(searchParams.get("tab")),
   }
 }
