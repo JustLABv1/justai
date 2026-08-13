@@ -45,6 +45,7 @@ import {
   type FeedbackAdapter,
   type SpeechSynthesisAdapter,
   WebSpeechDictationAdapter,
+  useAui,
   useThreadViewport,
   useAuiState,
 } from "@assistant-ui/react"
@@ -360,47 +361,233 @@ function MessageActions({ assistant }: { assistant: boolean }) {
         "focus-within:opacity-100"
       )}
     >
-      <ActionBarPrimitive.Copy
-        aria-label="Copy message"
-        className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        <Copy className="size-3.5" />
-      </ActionBarPrimitive.Copy>
-      <ActionBarPrimitive.Edit
-        aria-label="Edit message"
-        className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        <Pencil className="size-3.5" />
-      </ActionBarPrimitive.Edit>
+      <CopyMessageAction />
+      {!assistant && <EditMessageAction />}
       {assistant && (
         <>
-          <ActionBarPrimitive.Reload
-            aria-label="Regenerate response"
-            className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <RefreshCw className="size-3.5" />
-          </ActionBarPrimitive.Reload>
-          <ActionBarPrimitive.Speak
-            aria-label="Read response aloud"
-            className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <Volume2 className="size-3.5" />
-          </ActionBarPrimitive.Speak>
-          <ActionBarPrimitive.FeedbackPositive
-            aria-label="Good response"
-            className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <ThumbsUp className="size-3.5" />
-          </ActionBarPrimitive.FeedbackPositive>
-          <ActionBarPrimitive.FeedbackNegative
-            aria-label="Poor response"
-            className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <ThumbsDown className="size-3.5" />
-          </ActionBarPrimitive.FeedbackNegative>
+          <ReloadMessageAction />
+          <SpeakMessageAction />
+          <FeedbackMessageAction type="positive" />
+          <FeedbackMessageAction type="negative" />
         </>
       )}
     </ActionBarPrimitive.Root>
+  )
+}
+
+type MessageActionButtonProps = {
+  label: string
+  onClick: () => void | Promise<void>
+  children: ReactNode
+  disabled?: boolean
+}
+
+function MessageActionButton({
+  label,
+  onClick,
+  children,
+  disabled = false,
+}: MessageActionButtonProps) {
+  return (
+    <button
+      aria-label={label}
+      className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      disabled={disabled}
+      onClick={() => void onClick()}
+      title={label}
+      type="button"
+    >
+      {children}
+    </button>
+  )
+}
+
+async function copyTextToClipboard(text: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  if (typeof document === "undefined") {
+    throw new Error("Clipboard is unavailable")
+  }
+
+  const textarea = document.createElement("textarea")
+  textarea.value = text
+  textarea.setAttribute("readonly", "")
+  textarea.style.position = "fixed"
+  textarea.style.opacity = "0"
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand("copy")
+  textarea.remove()
+  if (!copied) throw new Error("Clipboard is unavailable")
+}
+
+function CopyMessageAction() {
+  const aui = useAui()
+  const isCopied = useAuiState((state) => state.message.isCopied)
+  const canCopy = useAuiState((state) => {
+    if (
+      state.message.role === "assistant" &&
+      state.message.status?.type === "running"
+    ) {
+      return false
+    }
+    return state.message.parts.some(
+      (part) => part.type === "text" && part.text.length > 0
+    )
+  })
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    },
+    []
+  )
+
+  const copy = useCallback(async () => {
+    const text = aui.message.getCopyText()
+    if (!text) return
+    await copyTextToClipboard(text)
+    aui.message.setIsCopied(true)
+    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    timeoutRef.current = setTimeout(() => {
+      aui.message.setIsCopied(false)
+      timeoutRef.current = null
+    }, 2000)
+  }, [aui])
+
+  return (
+    <MessageActionButton
+      disabled={!canCopy}
+      label={isCopied ? "Copied" : "Copy message"}
+      onClick={copy}
+    >
+      {isCopied ? (
+        <Check className="size-3.5" />
+      ) : (
+        <Copy className="size-3.5" />
+      )}
+    </MessageActionButton>
+  )
+}
+
+function EditMessageAction() {
+  const aui = useAui()
+  const isEditing = useAuiState((state) => state.message.composer.isEditing)
+  return (
+    <MessageActionButton
+      disabled={isEditing}
+      label="Edit message"
+      onClick={() => aui.composer.beginEdit()}
+    >
+      <Pencil className="size-3.5" />
+    </MessageActionButton>
+  )
+}
+
+function ReloadMessageAction() {
+  const aui = useAui()
+  const disabled = useAuiState(
+    (state) =>
+      state.thread.isRunning ||
+      state.thread.isDisabled ||
+      state.message.role !== "assistant"
+  )
+  return (
+    <MessageActionButton
+      disabled={disabled}
+      label="Regenerate response"
+      onClick={() => aui.message.reload()}
+    >
+      <RefreshCw className="size-3.5" />
+    </MessageActionButton>
+  )
+}
+
+function SpeakMessageAction() {
+  const aui = useAui()
+  const speaking = useAuiState((state) => {
+    const status = state.message.speech?.status.type
+    return status === "starting" || status === "running"
+  })
+  return (
+    <MessageActionButton
+      label={speaking ? "Stop reading aloud" : "Read response aloud"}
+      onClick={() =>
+        speaking ? aui.message.stopSpeaking() : aui.message.speak()
+      }
+    >
+      {speaking ? <X className="size-3.5" /> : <Volume2 className="size-3.5" />}
+    </MessageActionButton>
+  )
+}
+
+function FeedbackMessageAction({ type }: { type: "positive" | "negative" }) {
+  const aui = useAui()
+  const submitted = useAuiState((state) => {
+    const metadata = state.message.metadata
+    if (!metadata || typeof metadata !== "object") return undefined
+    const typedMetadata = metadata as {
+      feedback?: string
+      submittedFeedback?: { type?: string }
+    }
+    const value =
+      typedMetadata.submittedFeedback?.type ?? typedMetadata.feedback
+    return value === "positive" || value === "negative" ? value : undefined
+  })
+  return (
+    <MessageActionButton
+      label={type === "positive" ? "Good response" : "Poor response"}
+      onClick={() => aui.message.submitFeedback({ type })}
+    >
+      {type === "positive" ? (
+        <ThumbsUp
+          className={cn(
+            "size-3.5",
+            submitted === type && "fill-current text-foreground"
+          )}
+        />
+      ) : (
+        <ThumbsDown
+          className={cn(
+            "size-3.5",
+            submitted === type && "fill-current text-foreground"
+          )}
+        />
+      )}
+    </MessageActionButton>
+  )
+}
+
+function MessageEditComposer() {
+  return (
+    <div className="mx-auto w-full max-w-4xl px-1 py-3 sm:px-4">
+      <ComposerPrimitive.Root className="flex items-end gap-2 rounded-2xl border bg-background p-2 shadow-sm">
+        <ComposerPrimitive.Input
+          autoFocus
+          className="max-h-40 min-h-10 min-w-0 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+          placeholder="Edit message…"
+          submitMode="ctrlEnter"
+        />
+        <div className="flex shrink-0 items-center gap-1">
+          <ComposerPrimitive.Cancel
+            aria-label="Cancel edit"
+            className="flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-4" />
+          </ComposerPrimitive.Cancel>
+          <ComposerPrimitive.Send
+            aria-label="Save edit"
+            className="flex size-8 items-center justify-center rounded-full bg-foreground text-background hover:bg-foreground/85 disabled:opacity-40"
+          >
+            <ArrowUp className="size-4" />
+          </ComposerPrimitive.Send>
+        </div>
+      </ComposerPrimitive.Root>
+    </div>
   )
 }
 
@@ -531,9 +718,8 @@ function ScrollToLatest() {
     }
 
     const updateVisibility = () => {
-      const messages = viewport.querySelectorAll<HTMLElement>(
-        "[data-message-id]"
-      )
+      const messages =
+        viewport.querySelectorAll<HTMLElement>("[data-message-id]")
       const latestMessage = messages.item(messages.length - 1)
       if (!latestMessage) {
         setLatestMessageVisible(true)
@@ -577,9 +763,7 @@ function ScrollToLatest() {
   if (!viewport || latestMessageVisible) return null
 
   return (
-    <div
-      className="pointer-events-none absolute inset-x-0 bottom-full z-30 flex justify-center pb-3"
-    >
+    <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 flex justify-center pb-3">
       <div className="flex w-full max-w-3xl justify-end px-3 sm:px-5">
         <Button
           aria-label="Jump to latest message"
@@ -1048,6 +1232,7 @@ function AssistantThreadLayout({ composerProps }: AssistantThreadLayoutProps) {
               <ThreadPrimitive.Messages
                 components={{
                   UserMessage,
+                  UserEditComposer: MessageEditComposer,
                   AssistantMessage,
                 }}
               />
@@ -1396,11 +1581,10 @@ export function ChatView({
           historyResult.reason instanceof APIError
             ? historyResult.reason.status === 404
             : typeof historyResult.reason === "object" &&
-                historyResult.reason !== null &&
-                "status" in historyResult.reason &&
-                Number(
-                  (historyResult.reason as { status?: unknown }).status
-                ) === 404
+              historyResult.reason !== null &&
+              "status" in historyResult.reason &&
+              Number((historyResult.reason as { status?: unknown }).status) ===
+                404
         ) {
           onConversationMissingRef.current?.()
         } else {
@@ -1468,10 +1652,7 @@ export function ChatView({
       () => void loadConversationRef.current(conversationId, controller.signal)
     )
     return () => controller.abort()
-  }, [
-    conversationId,
-    conversationMessageCount,
-  ])
+  }, [conversationId, conversationMessageCount])
 
   const ensureLocalConversation = useCallback(async () => {
     if (activeConversationRef.current) return activeConversationRef.current
@@ -1493,28 +1674,24 @@ export function ChatView({
     return creation
   }, [])
 
-  const ensureConversation = useCallback(
-    async () => {
-      const creatingFromRoot = routeConversationIdRef.current === null
-      if (creatingFromRoot) pendingConversationRef.current = true
-      try {
-        const id = await (
-          onEnsureConversationRef.current?.() ?? ensureLocalConversation()
-        )
-        if (creatingFromRoot) {
-          pendingConversationRef.current = false
-          locallyCreatedConversationRef.current = id
-          activeConversationRef.current = id
-          setActiveConversationId(id)
-        }
-        return id
-      } catch (error) {
-        if (creatingFromRoot) pendingConversationRef.current = false
-        throw error
+  const ensureConversation = useCallback(async () => {
+    const creatingFromRoot = routeConversationIdRef.current === null
+    if (creatingFromRoot) pendingConversationRef.current = true
+    try {
+      const id = await (onEnsureConversationRef.current?.() ??
+        ensureLocalConversation())
+      if (creatingFromRoot) {
+        pendingConversationRef.current = false
+        locallyCreatedConversationRef.current = id
+        activeConversationRef.current = id
+        setActiveConversationId(id)
       }
-    },
-    [ensureLocalConversation]
-  )
+      return id
+    } catch (error) {
+      if (creatingFromRoot) pendingConversationRef.current = false
+      throw error
+    }
+  }, [ensureLocalConversation])
 
   const uploadFile = useCallback(
     async (file: File) => {
