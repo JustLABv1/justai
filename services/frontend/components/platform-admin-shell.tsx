@@ -1,7 +1,7 @@
 "use client"
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import {
   Activity,
   Archive,
@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -1048,8 +1049,149 @@ function InventoryView({ title, items, kind, onRefresh }: { title: string; items
   )
 }
 
+type HealthState = "healthy" | "warning" | "down" | "unknown"
+
+function healthState(value: any): HealthState {
+  if (typeof value === "boolean") return value ? "healthy" : "down"
+  if (!value || typeof value !== "object") return "unknown"
+
+  const failures = Number(value.recentFailures ?? value.failures ?? 0)
+  if (failures > 0) return "warning"
+  if (typeof value.ok === "boolean") return value.ok ? "healthy" : "down"
+
+  const signals = Object.values(value).filter(
+    (item): item is boolean => typeof item === "boolean"
+  )
+  if (signals.length > 0) return signals.every(Boolean) ? "healthy" : "down"
+  return "unknown"
+}
+
+function HealthStatusBadge({ state }: { state: HealthState }) {
+  const Icon = state === "healthy" ? CheckCircle2 : state === "unknown" ? Activity : AlertTriangle
+  const label = state === "healthy" ? "Operational" : state === "warning" ? "Degraded" : state === "down" ? "Unavailable" : "Unknown"
+  const variant = state === "healthy" ? "default" : state === "down" ? "destructive" : "outline"
+  const className = state === "warning" ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300" : undefined
+
+  return <Badge className={className} variant={variant}><Icon data-icon="inline-start" />{label}</Badge>
+}
+
+function HealthMetric({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return <div className="rounded-lg border bg-muted/20 px-3 py-2.5">
+    <p className="text-xs text-muted-foreground">{label}</p>
+    <p className="mt-1 text-base font-semibold tracking-tight">{value}</p>
+    {detail && <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>}
+  </div>
+}
+
+function HealthPanel({
+  title,
+  description,
+  icon: Icon,
+  state,
+  children,
+}: {
+  title: string
+  description: string
+  icon: typeof Activity
+  state: HealthState
+  children: ReactNode
+}) {
+  return <Card>
+    <CardHeader>
+      <div className="flex min-w-0 items-start gap-2.5">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          <Icon aria-hidden="true" />
+        </span>
+        <div className="min-w-0">
+          <CardTitle className="text-base">{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </div>
+      </div>
+      <CardAction>
+        <HealthStatusBadge state={state} />
+      </CardAction>
+    </CardHeader>
+    <CardContent>{children}</CardContent>
+  </Card>
+}
+
 function HealthView({ health }: { health: Record<string, any> | null }) {
-  return <Card><CardHeader><CardTitle>Service health</CardTitle><CardDescription>Runtime checks and recent provider failures.</CardDescription></CardHeader><CardContent className="grid gap-2 sm:grid-cols-2">{Object.entries(health ?? {}).filter(([key]) => key !== "checkedAt").map(([key, value]) => <div className="rounded-lg border p-3" key={key}><div className="flex items-center justify-between"><span className="font-medium capitalize">{key}</span>{typeof value === "object" ? <Badge variant="outline">reported</Badge> : <Badge variant={value ? "default" : "destructive"}>{value ? "ok" : "down"}</Badge>}</div><pre className="mt-2 whitespace-pre-wrap text-[11px] text-muted-foreground">{typeof value === "object" ? JSON.stringify(value, null, 2) : String(value)}</pre></div>)}</CardContent></Card>
+  if (!health) {
+    return <Card>
+      <CardHeader>
+        <CardTitle>Service health</CardTitle>
+        <CardDescription>Runtime checks for the platform services and background workers.</CardDescription>
+      </CardHeader>
+      <CardContent className="py-8 text-sm text-muted-foreground">Loading health checks…</CardContent>
+    </Card>
+  }
+
+  const database = health?.database ?? {}
+  const providers = health?.providers ?? {}
+  const mcp = health?.mcp ?? {}
+  const workers = health?.workers ?? {}
+  const providerFailures = Number(providers.recentFailures ?? 0)
+  const mcpFailures = Number(mcp.failures ?? 0)
+  const states = [healthState(database), healthState(providers), healthState(mcp), healthState(workers)]
+  const overallState = states.includes("down") ? "down" : states.includes("warning") ? "warning" : states.includes("unknown") ? "unknown" : "healthy"
+  const checkedAt = typeof health?.checkedAt === "string" ? new Date(health.checkedAt) : null
+  const checkedLabel = checkedAt && !Number.isNaN(checkedAt.getTime()) ? checkedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null
+  const enabledProviders = Number(providers.enabled ?? 0)
+  const totalProviders = Number(providers.total ?? 0)
+  const enabledMcp = Number(mcp.enabled ?? 0)
+  const totalMcp = Number(mcp.total ?? 0)
+  const workerEntries = [["RAG worker", workers.rag], ["Transcription worker", workers.transcription]] as const
+
+  return <div className="flex flex-col gap-4">
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>Service health</CardTitle>
+          <CardDescription>Runtime checks for the platform services and background workers.</CardDescription>
+        </div>
+        <CardAction className="flex flex-col items-end gap-1.5">
+          <HealthStatusBadge state={overallState} />
+          {checkedLabel && <span className="text-xs text-muted-foreground">Checked at {checkedLabel}</span>}
+        </CardAction>
+      </CardHeader>
+    </Card>
+
+    <div className="grid gap-4 sm:grid-cols-2">
+      <HealthPanel description="PostgreSQL connectivity and readiness." icon={Database} state={healthState(database)} title="Database">
+        <HealthMetric detail="Primary application store" label="Connection" value={database.ok ? "Connected" : "Unavailable"} />
+      </HealthPanel>
+      <HealthPanel description="Configured model endpoints and recent request failures." icon={Globe2} state={healthState(providers)} title="Providers">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <HealthMetric detail={`${totalProviders} configured`} label="Enabled" value={`${enabledProviders} / ${totalProviders}`} />
+          <HealthMetric detail="Last hour" label="Recent failures" value={String(providerFailures)} />
+        </div>
+      </HealthPanel>
+      <HealthPanel description="Connected tool servers and MCP execution." icon={Wrench} state={healthState(mcp)} title="MCP">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <HealthMetric detail={`${totalMcp} configured`} label="Enabled" value={`${enabledMcp} / ${totalMcp}`} />
+          <HealthMetric detail="Across configured servers" label="Failures" value={String(mcpFailures)} />
+        </div>
+      </HealthPanel>
+      <HealthPanel description="Background jobs that keep retrieval and transcription moving." icon={Activity} state={healthState(workers)} title="Workers">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {workerEntries.map(([label, value]) => <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5" key={label}>
+            <span className="text-sm">{label}</span>
+            <Badge variant={value ? "default" : "destructive"}>{value ? "Online" : "Offline"}</Badge>
+          </div>)}
+        </div>
+      </HealthPanel>
+    </div>
+
+    {(providerFailures > 0 || mcpFailures > 0) && <Alert variant="destructive">
+      <AlertTriangle />
+      <AlertTitle>Recent service failures</AlertTitle>
+      <AlertDescription>
+        {providerFailures > 0 && `${providerFailures} provider ${providerFailures === 1 ? "failure" : "failures"} recorded in the last hour.`}
+        {providerFailures > 0 && mcpFailures > 0 && " "}
+        {mcpFailures > 0 && `${mcpFailures} MCP ${mcpFailures === 1 ? "failure" : "failures"} reported.`}
+      </AlertDescription>
+    </Alert>}
+  </div>
 }
 
 function AnalyticsView({ analytics, filters, onFiltersChange, onRefresh }: { analytics: Record<string, any> | null; filters: Record<string, string>; onFiltersChange: (filters: Record<string, string>) => void; onRefresh: () => void }) {

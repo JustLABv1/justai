@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { Info } from "lucide-react"
 import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
@@ -57,6 +58,7 @@ export function Workspace() {
   const [status, setStatus] = useState<WorkspaceStatus>("loading")
   const [loadError, setLoadError] = useState("")
   const [featureErrors, setFeatureErrors] = useState<Record<string, string>>({})
+  const [disabledFeatures, setDisabledFeatures] = useState<Record<string, string>>({})
   const [reloadToken, setReloadToken] = useState(0)
   const [user, setUser] = useState<User | null>(null)
   const [organizations, setOrganizations] = useState<Organization[]>([])
@@ -217,11 +219,13 @@ export function Workspace() {
 
         if (activeView === "admin") {
           setFeatureErrors({})
+          setDisabledFeatures({})
           setStatus("ready")
           return
         }
 
         const errors: Record<string, string> = {}
+        const disabled: Record<string, string> = {}
         if (
           results.some(
             (result) =>
@@ -236,6 +240,13 @@ export function Workspace() {
         const valueAt = <T,>(index: number, key: string): T | null => {
           const result = results[index]
           if (result.status === "fulfilled") return result.value as T
+          if (
+            result.reason instanceof APIError &&
+            result.reason.code === "feature_disabled"
+          ) {
+            disabled[key] = result.reason.message
+            return null
+          }
           errors[key] =
             result.reason instanceof Error
               ? result.reason.message
@@ -276,6 +287,7 @@ export function Workspace() {
         if (sourceResult) setSources(sourceResult.sources)
         if (serverResult) setServers(serverResult.servers)
         setFeatureErrors(errors)
+        setDisabledFeatures(disabled)
         setStatus("ready")
       } catch (caught) {
         if (cancelled) return
@@ -718,6 +730,7 @@ export function Workspace() {
           onOrganizationSelect={selectOrganization}
           onSignOut={() => void signOut()}
           organizations={organizations}
+          disabledFeatures={disabledFeatures}
           transcriptionSessions={transcriptionSessions}
           user={user}
           userInitials={initials}
@@ -742,6 +755,28 @@ export function Workspace() {
               </AlertDescription>
             </Alert>
           )}
+          {activeView === "transcription" && disabledFeatures.transcription && (
+            <Alert className="m-4 mb-0 shrink-0 border-muted-foreground/20 bg-muted/30">
+              <Info />
+              <AlertTitle>Live transcription is disabled</AlertTitle>
+              <AlertDescription>
+                This capability was intentionally disabled by a platform administrator.
+              </AlertDescription>
+            </Alert>
+          )}
+          {activeView === "settings" &&
+            (route.settingsTab === "knowledge" || route.settingsTab === "mcp") &&
+            disabledFeatures[route.settingsTab] && (
+              <Alert className="m-4 mb-0 shrink-0 border-muted-foreground/20 bg-muted/30">
+                <Info />
+                <AlertTitle>
+                  {route.settingsTab === "knowledge" ? "Knowledge" : "MCP"} is disabled
+                </AlertTitle>
+                <AlertDescription>
+                  This capability was intentionally disabled by a platform administrator.
+                </AlertDescription>
+              </Alert>
+            )}
           <div
             className={cn(
               "min-h-0 w-full flex-1",
@@ -778,18 +813,22 @@ export function Workspace() {
               />
             )}
             {activeView === "transcription" && (
-              <LiveTranscriptionView
-                endpoints={endpoints}
-                onSessionCreated={handleTranscriptionSessionCreated}
-                onSessionsChanged={handleTranscriptionSessionsChanged}
-                onCreateSessionRequestHandled={() =>
-                  setCreateTranscriptionRequested(false)
-                }
-                createSessionRequested={createTranscriptionRequested}
-                sessionId={activeSessionId}
-                sessions={transcriptionSessions}
-                user={user}
-              />
+              disabledFeatures.transcription ? (
+                <FeatureDisabledPanel label="Live transcription" />
+              ) : (
+                <LiveTranscriptionView
+                  endpoints={endpoints}
+                  onSessionCreated={handleTranscriptionSessionCreated}
+                  onSessionsChanged={handleTranscriptionSessionsChanged}
+                  onCreateSessionRequestHandled={() =>
+                    setCreateTranscriptionRequested(false)
+                  }
+                  createSessionRequested={createTranscriptionRequested}
+                  sessionId={activeSessionId}
+                  sessions={transcriptionSessions}
+                  user={user}
+                />
+              )
             )}
             {activeView === "settings" && (
               <SettingsShell
@@ -876,5 +915,20 @@ function WorkspaceLoading() {
         <p className="text-sm text-muted-foreground">Loading JustAI…</p>
       </div>
     </main>
+  )
+}
+
+function FeatureDisabledPanel({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+      <Alert className="max-w-md border-muted-foreground/20 bg-muted/30">
+        <Info />
+        <AlertTitle>{label} is currently disabled</AlertTitle>
+        <AlertDescription>
+          A platform administrator has intentionally disabled this capability.
+          It will be available again when the platform control is enabled.
+        </AlertDescription>
+      </Alert>
+    </div>
   )
 }

@@ -65,6 +65,7 @@ const railNavigation: Array<{
   label: string
   hint: string
   icon: LucideIcon
+  feature?: string
 }> = [
   { id: "chat", label: "Chat", hint: "Conversations", icon: MessageSquare },
   {
@@ -72,6 +73,7 @@ const railNavigation: Array<{
     label: "Live transcription",
     hint: "Rooms and transcripts",
     icon: Headphones,
+    feature: "transcription",
   },
 ]
 
@@ -108,6 +110,7 @@ type FocusWorkspaceSidebarProps = {
   onDeleteSession: (session: TranscriptionSession) => void
   onNewTranscriptionSession: () => void
   onSignOut: () => void
+  disabledFeatures: Record<string, string>
 }
 
 type RecencyGroup<T> = {
@@ -139,6 +142,7 @@ export function FocusWorkspaceSidebar({
   onDeleteSession,
   onNewTranscriptionSession,
   onSignOut,
+  disabledFeatures,
 }: FocusWorkspaceSidebarProps) {
   const [historyQuery, setHistoryQuery] = useState("")
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
@@ -157,6 +161,9 @@ export function FocusWorkspaceSidebar({
   )
 
   function navigateFromRail(view: ViewId) {
+    const railItem = navigation.find((item) => item.id === view)
+    if (railItem?.feature && disabledFeatures[railItem.feature]) return
+
     if (view === "chat") {
       onNavigate(
         "chat",
@@ -210,6 +217,7 @@ export function FocusWorkspaceSidebar({
           {navigation.map((item) => {
             const Icon = item.icon
             const active = activeView === item.id
+            const disabled = Boolean(item.feature && disabledFeatures[item.feature])
             return (
               <Button
                 aria-current={active ? "page" : undefined}
@@ -218,10 +226,11 @@ export function FocusWorkspaceSidebar({
                   "relative size-9 rounded-xl text-muted-foreground",
                   active && "bg-accent text-accent-foreground"
                 )}
+                disabled={disabled}
                 key={item.id}
                 onClick={() => navigateFromRail(item.id)}
                 size="icon"
-                title={item.hint}
+                title={disabled ? "Disabled by platform administrator" : item.hint}
                 variant="ghost"
               >
                 <Icon data-icon="inline-start" />
@@ -416,7 +425,9 @@ export function FocusWorkspaceSidebar({
         {activeView === "transcription" ? (
           <Button
             className="w-full shrink-0 justify-start"
+            disabled={Boolean(disabledFeatures.transcription)}
             onClick={onNewTranscriptionSession}
+            title={disabledFeatures.transcription ? "Disabled by platform administrator" : "New room"}
           >
             <Plus data-icon="inline-start" />
             New room
