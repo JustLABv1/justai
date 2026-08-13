@@ -1,6 +1,6 @@
 "use client"
 
-import { Mic, MicOff, Phone, PhoneOff } from "lucide-react"
+import { Mic, MicOff, Phone, PhoneOff, X } from "lucide-react"
 import {
   useVoiceControls,
   useVoiceState,
@@ -14,12 +14,10 @@ import { cn } from "@/lib/utils"
 export function VoiceControl({
   className,
   compact = false,
-  hideIcon = false,
   toolApproval,
 }: {
   className?: string
   compact?: boolean
-  hideIcon?: boolean
   toolApproval?: ToolCallMessagePartProps | null
 }) {
   const state = useVoiceState()
@@ -29,23 +27,32 @@ export function VoiceControl({
     state?.status.type === "running" || state?.status.type === "starting"
   const muted = state?.isMuted === true
   const orbState =
-    state?.mode === "speaking" ? "speaking" : active ? "listening" : "idle"
+    state?.status.type === "starting"
+      ? "connecting"
+      : muted
+        ? "muted"
+        : state?.mode === "speaking"
+          ? "speaking"
+          : active
+            ? "listening"
+            : "idle"
   if (compact) {
-    const label = active ? (muted ? "Unmute" : "Mute") : "Voice"
+    const label = active
+      ? muted
+        ? "Unmute voice"
+        : "Mute voice"
+      : "Start voice"
     return (
       <div className={cn("relative flex items-center", className)}>
         <Button
-          aria-label={
-            active ? (muted ? "Unmute voice" : "Mute voice") : "Start voice"
-          }
+          aria-label={label}
+          aria-pressed={active && !muted}
           className={cn(
-            "relative rounded-full text-muted-foreground hover:bg-muted hover:text-foreground",
-            hideIcon ? "h-9 gap-1 px-2 text-xs" : "size-9 p-0",
-            compact && "text-inherit hover:bg-background/10 hover:text-inherit",
+            "relative size-9 rounded-full p-0 text-muted-foreground hover:bg-muted hover:text-foreground",
+            "focus-visible:ring-2 focus-visible:ring-primary/50",
             active &&
-              (compact
-                ? "bg-background/10 text-inherit hover:bg-background/15"
-                : "bg-primary/10 text-primary hover:bg-primary/15")
+              "bg-primary/10 text-primary hover:bg-primary/15",
+            muted && "opacity-70"
           )}
           onClick={() => {
             if (!active) controls.connect()
@@ -55,28 +62,13 @@ export function VoiceControl({
           type="button"
           variant="ghost"
         >
-          {!hideIcon && (
-            <>
-              <VoiceOrb
-                className="absolute inset-1 border-0 bg-primary/10 shadow-none"
-                compact
-                state={orbState}
-                volume={volume}
-              />
-              <span className="relative z-10">
-                {active ? (
-                  muted ? (
-                    <MicOff aria-hidden="true" />
-                  ) : (
-                    <Mic aria-hidden="true" />
-                  )
-                ) : (
-                  <Mic aria-hidden="true" />
-                )}
-              </span>
-            </>
-          )}
-          {hideIcon && <span>{label}</span>}
+          <VoiceOrb
+            className="absolute inset-1 border-0 bg-primary/10 shadow-none"
+            compact
+            state={orbState}
+            volume={volume}
+          />
+          <span className="sr-only">{label}</span>
         </Button>
         {active && (
           <Button
@@ -86,7 +78,7 @@ export function VoiceControl({
             type="button"
             variant="ghost"
           >
-            <PhoneOff aria-hidden="true" className="size-3.5" />
+            <X aria-hidden="true" className="size-3.5" />
           </Button>
         )}
         {toolApproval && (
@@ -169,10 +161,15 @@ export function VoiceOrb({
 }: {
   className?: string
   compact?: boolean
-  state?: "idle" | "listening" | "speaking" | "error"
+  state?:
+    | "idle"
+    | "connecting"
+    | "listening"
+    | "speaking"
+    | "muted"
+    | "error"
   volume?: number
 }) {
-  const active = state === "listening" || state === "speaking"
   const effectiveVolume = volume
   return (
     <div
@@ -180,8 +177,9 @@ export function VoiceOrb({
       className={cn(
         "relative flex items-center justify-center rounded-full border border-primary/20 bg-primary/10 shadow-[0_0_80px_rgba(99,102,241,0.22)]",
         compact ? "size-6" : "size-40",
-        active && "animate-pulse",
+        (state === "connecting" || state === "speaking") && "animate-pulse",
         state === "error" && "border-destructive/40 bg-destructive/10",
+        state === "muted" && "opacity-60 saturate-50",
         className
       )}
       role="img"

@@ -45,6 +45,7 @@ import {
   type FeedbackAdapter,
   type SpeechSynthesisAdapter,
   WebSpeechDictationAdapter,
+  useThreadViewport,
   useAuiState,
 } from "@assistant-ui/react"
 import {
@@ -420,7 +421,7 @@ function MessageTiming() {
     typeof timing?.totalChunks === "number" ? timing.totalChunks : 0
   if (!duration && !chunks) return null
   return (
-    <span className="text-[10px] text-muted-foreground">
+    <span className="ml-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100">
       {duration ? `${(duration / 1000).toFixed(1)}s` : ""}
       {duration && chunks ? " · " : ""}
       {chunks ? `${chunks} chunks` : ""}
@@ -505,13 +506,93 @@ function AssistantMessage() {
             <ErrorPrimitive.Message />
           </ErrorPrimitive.Root>
         </MessagePrimitive.Error>
-        <div className="flex items-center gap-2">
-          <MessageActions assistant />
-          <BranchPicker />
+        <div className="flex w-full items-center gap-2">
+          <div className="flex items-center gap-2">
+            <MessageActions assistant />
+            <BranchPicker />
+          </div>
           <MessageTiming />
         </div>
       </div>
     </MessagePrimitive.Root>
+  )
+}
+
+function ScrollToLatest() {
+  const viewport = useThreadViewport((state) => state.element.viewport)
+  const scrollToBottom = useThreadViewport((state) => state.scrollToBottom)
+  const footerInset = useThreadViewport((state) => state.height.inset)
+  const messageCount = useAuiState((state) => state.thread.messages.length)
+  const [latestMessageVisible, setLatestMessageVisible] = useState(true)
+
+  useEffect(() => {
+    if (!viewport) {
+      return
+    }
+
+    const updateVisibility = () => {
+      const messages = viewport.querySelectorAll<HTMLElement>(
+        "[data-message-id]"
+      )
+      const latestMessage = messages.item(messages.length - 1)
+      if (!latestMessage) {
+        setLatestMessageVisible(true)
+        return
+      }
+
+      const latestMessageRect = latestMessage.getBoundingClientRect()
+      const viewportRect = viewport.getBoundingClientRect()
+      // The composer is a sticky footer and can cover the bottom of the
+      // scroll viewport. Use the readable area above that inset instead of
+      // treating a message hidden behind the composer as visible.
+      const visibleBottom =
+        viewportRect.bottom -
+        Math.min(Math.max(footerInset, 0), viewportRect.height)
+      const nextVisible =
+        latestMessageRect.top < visibleBottom &&
+        latestMessageRect.bottom > viewportRect.top
+      setLatestMessageVisible((current) =>
+        current === nextVisible ? current : nextVisible
+      )
+    }
+
+    updateVisibility()
+    viewport.addEventListener("scroll", updateVisibility, { passive: true })
+
+    // Message content can stream in without changing the message count, so
+    // observe DOM updates as well as scroll events. This keeps the affordance
+    // correct while a long response grows or the composer changes height.
+    const observer = new MutationObserver(updateVisibility)
+    observer.observe(viewport, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    })
+    return () => {
+      viewport.removeEventListener("scroll", updateVisibility)
+      observer.disconnect()
+    }
+  }, [footerInset, messageCount, viewport])
+
+  if (!viewport || latestMessageVisible) return null
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 bottom-full z-30 flex justify-center pb-3"
+    >
+      <div className="flex w-full max-w-3xl justify-end px-3 sm:px-5">
+        <Button
+          aria-label="Jump to latest message"
+          className="pointer-events-auto rounded-full border bg-background/90 p-2 shadow-sm"
+          onClick={() => scrollToBottom({ behavior: "auto" })}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          ↓
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -910,7 +991,6 @@ function Composer({
               <VoiceControl
                 className="shrink-0"
                 compact
-                hideIcon
                 toolApproval={toolApproval}
               />
               {isThreadRunning ? (
@@ -953,10 +1033,6 @@ function AssistantThreadLayout({ composerProps }: AssistantThreadLayoutProps) {
     <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <ThreadPrimitive.Viewport
         className="relative min-h-0 flex-1 overflow-y-auto"
-        // Keep the latest turn at the bottom, like a conventional chat. The
-        // top-anchor mode intentionally places newly submitted user messages
-        // at the top of the viewport and disables the runtime's normal
-        // bottom auto-scroll behavior.
         turnAnchor="bottom"
         autoScroll
         scrollToBottomOnInitialize
@@ -975,17 +1051,12 @@ function AssistantThreadLayout({ composerProps }: AssistantThreadLayoutProps) {
                   AssistantMessage,
                 }}
               />
-              <ThreadPrimitive.ScrollToBottom
-                className="sticky bottom-4 ml-auto rounded-full border bg-background/90 p-2 shadow-sm"
-                aria-label="Jump to latest message"
-              >
-                ↓
-              </ThreadPrimitive.ScrollToBottom>
             </div>
           )}
         </div>
         {!isEmpty && (
-          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-5 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+          <ThreadPrimitive.ViewportFooter className="relative sticky bottom-0 z-20 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-5 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+            <ScrollToLatest />
             {composer}
           </ThreadPrimitive.ViewportFooter>
         )}

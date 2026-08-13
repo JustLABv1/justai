@@ -316,9 +316,6 @@ export function FocusWorkspaceSidebar({
       >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] text-muted-foreground">
-              JustLAB workspace
-            </p>
             <h2 className="text-sm font-semibold tracking-tight">
               {activeView === "transcription"
                 ? "Live sessions"
@@ -353,9 +350,6 @@ export function FocusWorkspaceSidebar({
             <span className="min-w-0 flex-1 text-left">
               <span className="block truncate text-xs font-medium">
                 {activeOrganization?.name ?? "Workspace"}
-              </span>
-              <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                {activeOrganization?.role ?? "member"} access
               </span>
             </span>
             <ChevronDown className="size-4 text-muted-foreground" />
