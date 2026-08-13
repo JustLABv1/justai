@@ -261,16 +261,18 @@ export function Workspace() {
       (organization) => organization.id === activeOrganizationId
     ) ?? organizations[0]
   const activeConversationId = requestedConversationId ?? pendingConversationId
-  const activeConversation = [...conversations, ...archivedConversations].find(
-    (conversation) => conversation.id === activeConversationId
-  )
 
   useEffect(() => {
-    activeConversationRef.current = requestedConversationId ?? pendingConversationId
+    activeConversationRef.current =
+      requestedConversationId ?? pendingConversationId
   }, [pendingConversationId, requestedConversationId])
 
   useEffect(() => {
-    if (!requestedConversationId || status !== "ready" || !activeOrganizationId) {
+    if (
+      !requestedConversationId ||
+      status !== "ready" ||
+      !activeOrganizationId
+    ) {
       return
     }
     const hydrationKey = `${activeOrganizationId}:${requestedConversationId}`
@@ -300,14 +302,17 @@ export function Workspace() {
         const statusCode =
           caught instanceof APIError
             ? caught.status
-            : typeof caught === "object" && caught !== null && "status" in caught
+            : typeof caught === "object" &&
+                caught !== null &&
+                "status" in caught
               ? Number((caught as { status?: unknown }).status)
               : undefined
         // The conversation lookup is only supplemental hydration for direct
         // URLs. Older backend processes may not expose this endpoint yet;
         // ChatView still loads the canonical message/context endpoints and
         // handles a truly missing conversation there.
-        if (statusCode !== 404) console.error("Conversation metadata could not be loaded", caught)
+        if (statusCode !== 404)
+          console.error("Conversation metadata could not be loaded", caught)
       })
     return () => {
       cancelled = true
@@ -395,7 +400,8 @@ export function Workspace() {
   }, [navigate, requestedConversationId])
 
   const handleConversationMissing = useCallback(() => {
-    const missingId = requestedConversationId ?? pendingConversationIdRef.current
+    const missingId =
+      requestedConversationId ?? pendingConversationIdRef.current
     if (missingId) {
       setConversations((current) =>
         current.filter((conversation) => conversation.id !== missingId)
@@ -673,7 +679,6 @@ export function Workspace() {
             {activeView === "chat" && (
               <ChatView
                 conversationId={activeConversationId}
-                conversationMessageCount={activeConversation?.messageCount}
                 endpoints={endpoints}
                 onEnsureConversation={ensureConversationForContext}
                 onConversationCreated={(conversation) => {

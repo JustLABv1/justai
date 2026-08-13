@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -86,10 +87,18 @@ func PCM16HasSustainedSpeech(pcm []byte) bool {
 type RealtimeStream struct {
 	provider  string
 	inputRate int
+	vllm      bool
 	conn      *websocket.Conn
 	writeMu   sync.Mutex
 	events    chan RealtimeEvent
 	closeMu   sync.Once
+	closed    chan struct{}
+}
+
+func (s *RealtimeStream) ForwardSilence() bool {
+	// Native OpenAI and Gemini use provider-side VAD. vLLM/Voxtral and chunked
+	// Whisper use explicit turn commits instead, so their silence stays local.
+	return !s.vllm && (s.provider == "openai" || s.provider == "gemini")
 }
 
 func OpenRealtime(ctx context.Context, endpoint Endpoint, model, language string) (*RealtimeStream, error) {
@@ -104,10 +113,14 @@ func OpenRealtime(ctx context.Context, endpoint Endpoint, model, language string
 	}
 
 	inputRate := 24000
-	if endpoint.ProviderType == "gemini" {
+	vllmRealtime := endpoint.ProviderType == "openai-compatible" && strings.Contains(strings.ToLower(model), "voxtral")
+	if endpoint.ProviderType == "gemini" || vllmRealtime {
+		// vLLM's OpenAI-compatible realtime endpoint (including Voxtral)
+		// requires mono PCM16 at 16 kHz. Native OpenAI realtime transcription
+		// continues to use its 24 kHz input format.
 		inputRate = 16000
 	}
-	stream := &RealtimeStream{provider: endpoint.ProviderType, inputRate: inputRate, events: make(chan RealtimeEvent, 32)}
+	stream := &RealtimeStream{provider: endpoint.ProviderType, inputRate: inputRate, vllm: vllmRealtime, events: make(chan RealtimeEvent, 32), closed: make(chan struct{})}
 	connection, err := dialRealtime(ctx, endpoint, model)
 	if err != nil {
 		return nil, err
@@ -117,7 +130,17 @@ func OpenRealtime(ctx context.Context, endpoint Endpoint, model, language string
 		_ = connection.Close()
 		return nil, err
 	}
+	if vllmRealtime {
+		// vLLM uses an empty non-final commit to complete the session
+		// handshake before the first audio buffer is appended. Without this,
+		// some releases keep the socket open but never start transcription.
+		if err := stream.CommitTurn(); err != nil {
+			_ = connection.Close()
+			return nil, err
+		}
+	}
 	go stream.readEvents()
+	go stream.keepAlive()
 	return stream, nil
 }
 
@@ -145,12 +168,33 @@ func ResamplePCM16(pcm []byte, sourceRate, targetRate int) []byte {
 }
 
 func (s *RealtimeStream) Commit() error {
+	return s.commit(true)
+}
+
+// CommitTurn closes the current speech segment while keeping the realtime
+// connection open for the next utterance. This is required by vLLM/Voxtral,
+// which does not run server-side VAD for transcription sessions.
+func (s *RealtimeStream) CommitTurn() error {
+	if !s.vllm {
+		return nil
+	}
+	return s.commit(false)
+}
+
+func (s *RealtimeStream) commit(final bool) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if s.provider == "gemini" {
 		return s.conn.WriteJSON(map[string]any{"realtimeInput": map[string]any{"audioStreamEnd": true}})
 	}
-	return s.conn.WriteJSON(map[string]any{"type": "input_audio_buffer.commit"})
+	message := map[string]any{"type": "input_audio_buffer.commit"}
+	if s.vllm {
+		// vLLM uses the final flag to distinguish an utterance boundary from
+		// the end of the whole audio input. Native OpenAI realtime does not
+		// define this field, so keep its original payload unchanged.
+		message["final"] = final
+	}
+	return s.conn.WriteJSON(message)
 }
 
 func (s *RealtimeStream) Events() <-chan RealtimeEvent {
@@ -159,8 +203,31 @@ func (s *RealtimeStream) Events() <-chan RealtimeEvent {
 
 func (s *RealtimeStream) Close() {
 	s.closeMu.Do(func() {
+		close(s.closed)
 		_ = s.conn.Close()
 	})
+}
+
+// keepAlive prevents a proxy or load balancer from expiring a realtime
+// transcription tunnel while the user is listening between utterances. Audio
+// is intentionally gated on speech, so without a control-frame heartbeat an
+// otherwise healthy session can look idle to the upstream service.
+func (s *RealtimeStream) keepAlive() {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.writeMu.Lock()
+			err := s.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			s.writeMu.Unlock()
+			if err != nil {
+				return
+			}
+		case <-s.closed:
+			return
+		}
+	}
 }
 
 func (s *RealtimeStream) configure(model, language string) error {
@@ -176,6 +243,15 @@ func (s *RealtimeStream) configure(model, language string) error {
 			setup["systemInstruction"] = map[string]any{"parts": []map[string]string{{"text": "Transcribe the input audio in " + language + ". Do not answer or add commentary."}}}
 		}
 		return s.conn.WriteJSON(map[string]any{"setup": setup})
+	}
+	if s.vllm {
+		// vLLM's OpenAI-compatible realtime API uses a flat session.update
+		// payload. The nested OpenAI transcription-session shape is rejected or
+		// ignored by vLLM and leaves the connection listening forever.
+		return s.conn.WriteJSON(map[string]any{
+			"type":  "session.update",
+			"model": model,
+		})
 	}
 	input := map[string]any{
 		"format":        map[string]any{"type": "audio/pcm", "rate": s.inputRate},
@@ -263,6 +339,7 @@ func parseRealtimeEvent(providerName string, payload []byte) RealtimeEvent {
 		Type       string `json:"type"`
 		Delta      string `json:"delta"`
 		Transcript string `json:"transcript"`
+		Text       string `json:"text"`
 		Error      *struct {
 			Message string `json:"message"`
 		} `json:"error"`
@@ -277,8 +354,12 @@ func parseRealtimeEvent(providerName string, payload []byte) RealtimeEvent {
 		}
 		return RealtimeEvent{Kind: "error", Err: fmt.Errorf("%s", message)}
 	}
-	textValue := firstNonEmpty(event.Delta, event.Transcript)
+	textValue := firstNonEmpty(event.Delta, event.Transcript, event.Text)
 	switch event.Type {
+	case "transcription.delta":
+		return RealtimeEvent{Kind: "partial", Text: textValue}
+	case "transcription.done":
+		return RealtimeEvent{Kind: "final", Text: textValue}
 	case "conversation.item.input_audio_transcription.delta":
 		return RealtimeEvent{Kind: "partial", Text: textValue}
 	case "conversation.item.input_audio_transcription.completed":

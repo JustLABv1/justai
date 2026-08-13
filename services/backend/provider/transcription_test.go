@@ -24,6 +24,17 @@ func TestParseRealtimeEventOpenAI(t *testing.T) {
 	}
 }
 
+func TestParseRealtimeEventVLLM(t *testing.T) {
+	partial := parseRealtimeEvent("openai-compatible", []byte(`{"type":"transcription.delta","delta":"hello"}`))
+	if partial.Kind != "partial" || partial.Text != "hello" {
+		t.Fatalf("unexpected vLLM partial event: %+v", partial)
+	}
+	final := parseRealtimeEvent("openai-compatible", []byte(`{"type":"transcription.done","text":"hello world"}`))
+	if final.Kind != "final" || final.Text != "hello world" {
+		t.Fatalf("unexpected vLLM final event: %+v", final)
+	}
+}
+
 func TestParseRealtimeEventGemini(t *testing.T) {
 	payload, err := json.Marshal(map[string]any{
 		"serverContent": map[string]any{
@@ -407,6 +418,41 @@ func TestChunkedStreamDoesNotRequestDigitalSilence(t *testing.T) {
 	<-done
 	if requests != 0 {
 		t.Fatalf("expected no provider request for silence, got %d", requests)
+	}
+}
+
+func TestChunkedStreamCommitTurnFlushesShortUtterance(t *testing.T) {
+	streamContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &ChunkedStream{
+		windowBytes:  durationBytes(2500 * time.Millisecond),
+		overlapBytes: durationBytes(500 * time.Millisecond),
+		minimumBytes: durationBytes(100 * time.Millisecond),
+		ctx:          streamContext,
+		cancel:       cancel,
+		jobs:         make(chan chunkedAudio, 1),
+		events:       make(chan RealtimeEvent, 1),
+	}
+	pcm := speechPCM(350 * time.Millisecond)
+	if err := stream.SendPCM(nil, pcm, 16000); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.CommitTurn(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case job := <-stream.jobs:
+		if len(job.pcm) != len(pcm) {
+			t.Fatalf("expected the short utterance to be flushed intact, got %d bytes", len(job.pcm))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("short utterance was not queued at the turn boundary")
+	}
+	stream.bufferMu.Lock()
+	remaining := len(stream.buffer)
+	stream.bufferMu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("expected the turn buffer to be empty after commit, got %d bytes", remaining)
 	}
 }
 

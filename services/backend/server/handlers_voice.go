@@ -167,9 +167,21 @@ func (a *App) runVoiceSocket(ctx context.Context, connection *websocket.Conn, us
 			if provider.PCM16HasSpeech(pcm16) {
 				state.voiceActive = true
 				state.lastVoiceAt = time.Now()
-			} else if !state.voiceActive || time.Since(state.lastVoiceAt) > 650*time.Millisecond {
-				state.voiceActive = false
-				continue
+			} else {
+				if state.voiceActive && time.Since(state.lastVoiceAt) > 650*time.Millisecond {
+					state.voiceActive = false
+					if committer, ok := state.transcription.(provider.TurnCommitter); ok {
+						if err := committer.CommitTurn(); err != nil && ctx.Err() == nil {
+							_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "voice turn commit failed: " + err.Error()}})
+						}
+					}
+				}
+				// Realtime providers with server-side VAD need quiet frames to
+				// observe the end of a turn. Whisper chunks and vLLM/Voxtral
+				// explicitly commit above and must not receive silence.
+				if forwarder, ok := state.transcription.(provider.SilenceForwarder); !ok || !forwarder.ForwardSilence() {
+					continue
+				}
 			}
 			if err := state.transcription.SendPCM(ctx, frame.PCM, frame.SampleRate); err != nil && ctx.Err() == nil {
 				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "voice audio transport failed: " + err.Error()}})

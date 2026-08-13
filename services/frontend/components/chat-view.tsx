@@ -48,6 +48,7 @@ import {
   useAui,
   useThreadViewport,
   useAuiState,
+  useVoiceState,
 } from "@assistant-ui/react"
 import {
   AssistantChatTransport,
@@ -82,7 +83,6 @@ import { cn } from "@/lib/utils"
 
 type Props = {
   conversationId: string | null
-  conversationMessageCount?: number
   endpoints: Endpoint[]
   onEnsureConversation?: () => Promise<string>
   onConversationCreated?: (conversation: Conversation) => void
@@ -110,6 +110,26 @@ type DiscoveredChatModel = {
   id: string
   name?: string
   ownedBy?: string
+}
+
+function supportsVoiceTranscription(endpoint: Endpoint) {
+  const capabilities = endpoint.capabilities ?? {}
+  if (Object.prototype.hasOwnProperty.call(capabilities, "transcription")) {
+    return Boolean(capabilities.transcription)
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(capabilities, "chunked-transcription")
+  ) {
+    return Boolean(capabilities["chunked-transcription"])
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(capabilities, "realtime-transcription")
+  ) {
+    return Boolean(capabilities["realtime-transcription"])
+  }
+  return (
+    endpoint.providerType === "openai" || endpoint.providerType === "gemini"
+  )
 }
 
 function createHistoryAdapter(
@@ -1207,11 +1227,35 @@ function Composer({
 
 type AssistantThreadLayoutProps = {
   composerProps: Parameters<typeof Composer>[0]
+  voiceError?: string | null
+  onVoiceErrorClear?: () => void
+  onVoiceErrorDismiss?: () => void
 }
 
-function AssistantThreadLayout({ composerProps }: AssistantThreadLayoutProps) {
+function AssistantThreadLayout({
+  composerProps,
+  voiceError,
+  onVoiceErrorClear,
+  onVoiceErrorDismiss,
+}: AssistantThreadLayoutProps) {
   const isEmpty = useAuiState((state) => state.thread.messages.length === 0)
+  const voiceState = useVoiceState()
+  const voiceActive =
+    voiceState?.status.type === "starting" ||
+    voiceState?.status.type === "running"
   const composer = <Composer {...composerProps} compact={isEmpty} />
+
+  if (voiceActive || voiceError) {
+    return (
+      <VoiceControl
+        centered
+        error={voiceError}
+        onClearError={onVoiceErrorClear}
+        onDismissError={onVoiceErrorDismiss}
+        toolApproval={composerProps.toolApproval}
+      />
+    )
+  }
 
   return (
     <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -1289,6 +1333,7 @@ function AssistantChatSurface({
   const [voiceApproval, setVoiceApproval] = useState<
     import("@assistant-ui/react").ToolCallMessagePartProps | null
   >(null)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
   const selectedEndpointId =
     endpointId && endpoints.some((item) => item.id === endpointId)
       ? endpointId
@@ -1301,6 +1346,18 @@ function AssistantChatSurface({
   const modelDiscoveryLoading =
     Boolean(selectedEndpointId) &&
     modelsByEndpoint[selectedEndpointId] === undefined
+  const transcriptionEndpointId = useMemo(() => {
+    const activeTranscriptionEndpoint = endpoint
+      ? supportsVoiceTranscription(endpoint)
+        ? endpoint
+        : undefined
+      : undefined
+    const fallbackTranscriptionEndpoint =
+      endpoints.find(
+        (item) => supportsVoiceTranscription(item) && item.isDefault
+      ) ?? endpoints.find(supportsVoiceTranscription)
+    return activeTranscriptionEndpoint?.id ?? fallbackTranscriptionEndpoint?.id
+  }, [endpoint, endpoints])
 
   useEffect(() => {
     if (
@@ -1412,6 +1469,7 @@ function AssistantChatSurface({
       createJustAIVoiceAdapter({
         conversationId,
         chatEndpointId: endpoint?.id,
+        transcriptionEndpointId,
         onConversationCreated: (id) => {
           onConversationCreated?.({
             id,
@@ -1422,9 +1480,17 @@ function AssistantChatSurface({
             messageCount: 0,
           })
         },
+        onConversationUpdated,
         onToolApproval: setVoiceApproval,
+        onError: (error) => setVoiceError(error.message),
       }),
-    [conversationId, endpoint?.id, onConversationCreated]
+    [
+      conversationId,
+      endpoint?.id,
+      onConversationCreated,
+      onConversationUpdated,
+      transcriptionEndpointId,
+    ]
   )
   const speech = useMemo(
     () => createSpeechAdapter(endpoint?.id ?? ""),
@@ -1473,6 +1539,15 @@ function AssistantChatSurface({
     },
   })
 
+  useEffect(() => {
+    return () => {
+      // A route change can unmount the surface while the browser still owns
+      // the microphone. Always close the Assistant UI voice session so the
+      // WebSocket, worklet, and tracks cannot outlive the thread runtime.
+      runtime.thread.disconnectVoice()
+    }
+  }, [runtime])
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <AssistantThreadLayout
@@ -1494,6 +1569,9 @@ function AssistantChatSurface({
           onOpenHistory,
           toolApproval: voiceApproval,
         }}
+        onVoiceErrorClear={() => setVoiceError(null)}
+        onVoiceErrorDismiss={() => setVoiceError(null)}
+        voiceError={voiceError}
       />
     </AssistantRuntimeProvider>
   )
@@ -1501,7 +1579,6 @@ function AssistantChatSurface({
 
 export function ChatView({
   conversationId,
-  conversationMessageCount,
   endpoints,
   onConversationCreated,
   onConversationUpdated,
@@ -1517,9 +1594,7 @@ export function ChatView({
   >(conversationId)
   const [surfaceKey, setSurfaceKey] = useState(conversationId ?? "new")
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([])
-  const [historyLoading, setHistoryLoading] = useState(
-    Boolean(conversationId && conversationMessageCount !== 0)
-  )
+  const [historyLoading, setHistoryLoading] = useState(Boolean(conversationId))
   const [conversationContext, setConversationContext] =
     useState<ConversationContext>(EMPTY_CONTEXT)
   const locallyCreatedConversationRef = useRef<string | null>(null)
@@ -1620,6 +1695,10 @@ export function ChatView({
   }, [loadConversation])
 
   useEffect(() => {
+    // The active Assistant UI runtime owns in-flight text and voice turns.
+    // Conversation metadata refreshes can change messageCount without a route
+    // change; reloading history for those updates would unmount the runtime
+    // and terminate an otherwise healthy voice WebSocket.
     if (conversationId && pendingConversationRef.current) {
       // The workspace creates the conversation as part of the first send or
       // attachment. Keep the mounted "new" runtime alive while the URL
@@ -1640,19 +1719,12 @@ export function ChatView({
     setSurfaceKey(conversationId ?? "new")
     activeConversationRef.current = conversationId
     uploadedAttachmentKeysRef.current.clear()
-    if (conversationMessageCount === 0) {
-      queueMicrotask(() => {
-        setInitialMessages([])
-        setHistoryLoading(false)
-      })
-      return
-    }
     const controller = new AbortController()
     queueMicrotask(
       () => void loadConversationRef.current(conversationId, controller.signal)
     )
     return () => controller.abort()
-  }, [conversationId, conversationMessageCount])
+  }, [conversationId])
 
   const ensureLocalConversation = useCallback(async () => {
     if (activeConversationRef.current) return activeConversationRef.current
@@ -1719,6 +1791,20 @@ export function ChatView({
     onConversationUpdatedRef.current?.()
   }, [])
 
+  const handleSurfaceConversationCreated = useCallback(
+    (conversation: Conversation) => {
+      // Voice can create its conversation without going through the normal
+      // first-message path. Mark it as locally created before the workspace
+      // updates the URL, so the route change does not replace the live voice
+      // runtime with a freshly loaded history surface.
+      locallyCreatedConversationRef.current = conversation.id
+      activeConversationRef.current = conversation.id
+      setActiveConversationId(conversation.id)
+      onConversationCreatedRef.current?.(conversation)
+    },
+    []
+  )
+
   const importURL = useCallback(async () => {
     const value = window.prompt("Import URL")?.trim()
     if (!value) return
@@ -1779,7 +1865,7 @@ export function ChatView({
         conversationId={activeConversationId}
         endpoints={activeChatEndpoints}
         initialMessages={initialMessages}
-        onConversationCreated={onConversationCreated}
+        onConversationCreated={handleSurfaceConversationCreated}
         onConversationUpdated={onConversationUpdated}
         onConversationSettled={onConversationSettled}
         onEnsureConversation={ensureConversation}

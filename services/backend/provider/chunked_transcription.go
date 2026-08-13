@@ -24,6 +24,20 @@ type TranscriptionStream interface {
 	Close()
 }
 
+// TurnCommitter is implemented by transports that need an explicit boundary
+// after the user's speech ends. Realtime providers send a protocol commit;
+// chunked HTTP providers flush their current rolling window without closing
+// the stream so the next utterance can continue on the same voice session.
+type TurnCommitter interface {
+	CommitTurn() error
+}
+
+// SilenceForwarder lets server-VAD realtime providers receive quiet PCM while
+// speech-gated transports (Whisper chunks and vLLM/Voxtral) keep silence local.
+type SilenceForwarder interface {
+	ForwardSilence() bool
+}
+
 type ChunkedOptions struct {
 	Window         time.Duration
 	Overlap        time.Duration
@@ -35,7 +49,7 @@ func DefaultChunkedOptions() ChunkedOptions {
 	return ChunkedOptions{
 		Window:         2500 * time.Millisecond,
 		Overlap:        500 * time.Millisecond,
-		Minimum:        400 * time.Millisecond,
+		Minimum:        250 * time.Millisecond,
 		PromptMaxChars: 160,
 	}
 }
@@ -61,6 +75,7 @@ type chunkedAudio struct {
 	pcm           []byte
 	startOffsetMs int64
 	endOffsetMs   int64
+	resetPrevious bool
 }
 
 // ChunkedStream keeps a short rolling audio window in memory and sends each
@@ -97,6 +112,10 @@ type ChunkedStream struct {
 	lastErr        error
 	previousText   string
 	promptDisabled bool
+}
+
+func (s *ChunkedStream) ForwardSilence() bool {
+	return false
 }
 
 func OpenChunked(ctx context.Context, endpoint Endpoint, model, language string, options ChunkedOptions) (*ChunkedStream, error) {
@@ -210,6 +229,7 @@ func (s *ChunkedStream) Commit() error {
 		s.bufferMu.Lock()
 		if !s.closed && len(s.buffer) >= s.minimumBytes {
 			value := s.takeChunkLocked(len(s.buffer), len(s.buffer))
+			value.resetPrevious = true
 			job = &value
 		}
 		s.committed = true
@@ -230,6 +250,25 @@ func (s *ChunkedStream) Commit() error {
 	s.errMu.Lock()
 	defer s.errMu.Unlock()
 	return s.lastErr
+}
+
+// CommitTurn flushes a short utterance before the rolling window is full while
+// keeping the stream open for the next utterance. Without this boundary,
+// Whisper sessions only submit audio after the full window (normally 2.5s),
+// which makes a user who speaks a short sentence appear stuck on Listening.
+func (s *ChunkedStream) CommitTurn() error {
+	var job *chunkedAudio
+	s.bufferMu.Lock()
+	if !s.closed && !s.committed && len(s.buffer) >= s.minimumBytes {
+		value := s.takeChunkLocked(len(s.buffer), len(s.buffer))
+		value.resetPrevious = true
+		job = &value
+	}
+	s.bufferMu.Unlock()
+	if job == nil {
+		return nil
+	}
+	return s.enqueue(*job)
 }
 
 func (s *ChunkedStream) Events() <-chan RealtimeEvent {
@@ -279,6 +318,12 @@ func (s *ChunkedStream) emit(event RealtimeEvent) {
 func (s *ChunkedStream) transcribe(job chunkedAudio) error {
 	if !PCM16HasSustainedSpeech(job.pcm) {
 		return nil
+	}
+	if job.resetPrevious {
+		// Rolling-window overlap is useful within one utterance, but carrying
+		// the previous turn into a new utterance can incorrectly remove a
+		// repeated opening word (for example, "hello" -> "hello again").
+		s.previousText = ""
 	}
 	prompt := ""
 	if !s.promptDisabled {

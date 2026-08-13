@@ -141,6 +141,10 @@ const providerDetails: Record<
   },
 }
 
+function isWhisperGateway(providerType: string, model: string) {
+  return providerType === "openai-compatible" && /whisper/i.test(model)
+}
+
 export function EndpointsView({
   endpoints,
   onChange,
@@ -240,12 +244,14 @@ export function EndpointsView({
 
   function openEdit(endpoint: Endpoint) {
     setEditingEndpoint(endpoint)
-    const isWhisperGateway =
-      endpoint.providerType === "openai-compatible" &&
-      /whisper/i.test(endpoint.transcriptionModel ?? "")
+    const whisperGateway = isWhisperGateway(
+      endpoint.providerType,
+      endpoint.transcriptionModel ?? ""
+    )
     const chunkedTranscription = Boolean(
       endpoint.capabilities["chunked-transcription"] ||
-      ((!endpoint.capabilities["realtime-transcription"] || isWhisperGateway) &&
+      whisperGateway ||
+      (!endpoint.capabilities["realtime-transcription"] &&
         endpoint.capabilities.transcription)
     )
     setForm({
@@ -814,9 +820,23 @@ export function EndpointsView({
                     <Input
                       id="endpoint-transcription"
                       value={form.transcriptionModel}
-                      onChange={(event) =>
-                        update("transcriptionModel", event.target.value)
-                      }
+                      onChange={(event) => {
+                        const transcriptionModel = event.target.value
+                        const whisperGateway = isWhisperGateway(
+                          form.providerType,
+                          transcriptionModel
+                        )
+                        setForm((current) => ({
+                          ...current,
+                          transcriptionModel,
+                          ...(whisperGateway
+                            ? {
+                                chunkedTranscription: true,
+                                realtimeTranscription: false,
+                              }
+                            : {}),
+                        }))
+                      }}
                       placeholder="whisper-large-v3-turbo"
                     />
                     <FieldDescription>

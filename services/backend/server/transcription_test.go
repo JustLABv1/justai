@@ -88,6 +88,9 @@ func TestTranscriptionModeKeepsRealtimeAndChunkedTransportsDistinct(t *testing.T
 	if got := transcriptionMode(provider.Endpoint{ProviderType: "openai-compatible", TranscriptionModel: "whisper-large-v3-turbo", Capabilities: map[string]bool{"transcription": true, "realtime-transcription": true}}); got != "chunked" {
 		t.Fatalf("legacy Whisper endpoint should use chunked mode, got %q", got)
 	}
+	if got := transcriptionMode(provider.Endpoint{ProviderType: "openai-compatible", TranscriptionModel: "whisper-large-v3-turbo", Capabilities: map[string]bool{"realtime-transcription": true}}); got != "chunked" {
+		t.Fatalf("Whisper should override a stale realtime-only capability, got %q", got)
+	}
 	if got := transcriptionMode(provider.Endpoint{ProviderType: "openai-compatible", Capabilities: map[string]bool{"chunked-transcription": true, "realtime-transcription": true}}); got != "chunked" {
 		t.Fatalf("explicit chunked capability should take precedence, got %q", got)
 	}

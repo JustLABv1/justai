@@ -1,6 +1,14 @@
 "use client"
 
-import { Mic, MicOff, Phone, PhoneOff, X } from "lucide-react"
+import {
+  AlertCircle,
+  Mic,
+  MicOff,
+  Phone,
+  PhoneOff,
+  RotateCcw,
+  X,
+} from "lucide-react"
 import {
   useVoiceControls,
   useVoiceState,
@@ -14,10 +22,18 @@ import { cn } from "@/lib/utils"
 export function VoiceControl({
   className,
   compact = false,
+  centered = false,
+  error,
+  onClearError,
+  onDismissError,
   toolApproval,
 }: {
   className?: string
   compact?: boolean
+  centered?: boolean
+  error?: string | null
+  onClearError?: () => void
+  onDismissError?: () => void
   toolApproval?: ToolCallMessagePartProps | null
 }) {
   const state = useVoiceState()
@@ -26,8 +42,9 @@ export function VoiceControl({
   const active =
     state?.status.type === "running" || state?.status.type === "starting"
   const muted = state?.isMuted === true
-  const orbState =
-    state?.status.type === "starting"
+  const orbState = error
+    ? "error"
+    : state?.status.type === "starting"
       ? "connecting"
       : muted
         ? "muted"
@@ -36,6 +53,131 @@ export function VoiceControl({
           : active
             ? "listening"
             : "idle"
+
+  if (centered) {
+    const statusLabel = error
+      ? "Voice unavailable"
+      : state?.status.type === "starting"
+        ? "Connecting to voice"
+        : active
+          ? muted
+            ? "Voice muted"
+            : state?.mode === "speaking"
+              ? "Assistant is speaking"
+              : "Listening"
+          : "Voice mode"
+    const statusDescription = error
+      ? error
+      : active
+        ? "Speak naturally. You can interrupt the assistant at any time."
+        : "Start a hands-free conversation with JustAI."
+
+    return (
+      <div
+        className={cn(
+          "absolute inset-0 z-40 flex min-h-0 items-center justify-center overflow-y-auto bg-background/95 px-6 py-12 backdrop-blur-sm",
+          className
+        )}
+      >
+        <div className="flex w-full max-w-lg flex-col items-center gap-7 text-center">
+          <div className="relative flex items-center justify-center">
+            <div className="absolute size-56 rounded-full bg-primary/5 blur-3xl" />
+            <VoiceOrb
+              className="relative size-40 border-primary/30 bg-primary/10 shadow-[0_0_120px_rgba(99,102,241,0.28)] sm:size-48"
+              state={orbState}
+              volume={volume}
+            />
+          </div>
+          <div className="space-y-2">
+            <p className="text-lg font-semibold tracking-tight">
+              {statusLabel}
+            </p>
+            <p
+              className={cn(
+                "mx-auto max-w-md text-sm leading-6 text-muted-foreground",
+                error && "text-destructive"
+              )}
+            >
+              {statusDescription}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {error ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    controls.connect()
+                    onClearError?.()
+                  }}
+                >
+                  <RotateCcw aria-hidden="true" className="mr-2 size-4" />
+                  Try again
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={onDismissError ?? onClearError}
+                >
+                  Back to chat
+                </Button>
+              </>
+            ) : active ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => (muted ? controls.unmute() : controls.mute())}
+                >
+                  {muted ? (
+                    <Mic aria-hidden="true" className="mr-2 size-4" />
+                  ) : (
+                    <MicOff aria-hidden="true" className="mr-2 size-4" />
+                  )}
+                  {muted ? "Unmute" : "Mute"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={controls.disconnect}
+                >
+                  <PhoneOff aria-hidden="true" className="mr-2 size-4" />
+                  End voice
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="button"
+                onClick={() => {
+                  onClearError?.()
+                  controls.connect()
+                }}
+              >
+                <Phone aria-hidden="true" className="mr-2 size-4" />
+                Start voice
+              </Button>
+            )}
+          </div>
+          {error && (
+            <div className="flex max-w-md items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-left text-xs text-destructive">
+              <AlertCircle
+                aria-hidden="true"
+                className="mt-0.5 size-4 shrink-0"
+              />
+              <span>{error}</span>
+            </div>
+          )}
+          {toolApproval && (
+            <div className="w-full max-w-lg">
+              <ToolFallback {...toolApproval} />
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   if (compact) {
     const label = active
       ? muted
@@ -50,8 +192,7 @@ export function VoiceControl({
           className={cn(
             "relative size-9 rounded-full p-0 text-muted-foreground hover:bg-muted hover:text-foreground",
             "focus-visible:ring-2 focus-visible:ring-primary/50",
-            active &&
-              "bg-primary/10 text-primary hover:bg-primary/15",
+            active && "bg-primary/10 text-primary hover:bg-primary/15",
             muted && "opacity-70"
           )}
           onClick={() => {
@@ -161,13 +302,7 @@ export function VoiceOrb({
 }: {
   className?: string
   compact?: boolean
-  state?:
-    | "idle"
-    | "connecting"
-    | "listening"
-    | "speaking"
-    | "muted"
-    | "error"
+  state?: "idle" | "connecting" | "listening" | "speaking" | "muted" | "error"
   volume?: number
 }) {
   const effectiveVolume = volume

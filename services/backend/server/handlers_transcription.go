@@ -1479,11 +1479,11 @@ func transcriptionMode(endpoint provider.Endpoint) string {
 	if enabled, declared := endpoint.Capabilities["chunked-transcription"]; declared && enabled {
 		return "chunked"
 	}
-	// Older endpoint records used the generic "transcription" capability for
-	// both transport modes. Whisper models are HTTP transcription models in the
-	// common OpenAI-compatible serving stacks, so keep those existing records
-	// working without requiring a database edit.
-	if endpoint.ProviderType == "openai-compatible" && endpoint.Capabilities["transcription"] && strings.Contains(strings.ToLower(endpoint.TranscriptionModel), "whisper") {
+	// Whisper-style models are finite HTTP transcription models on
+	// OpenAI-compatible gateways. A stale endpoint record can still have only
+	// realtime-transcription enabled; do not attempt the realtime protocol for
+	// a Whisper model, because it will accept the socket but never emit text.
+	if endpoint.ProviderType == "openai-compatible" && strings.Contains(strings.ToLower(endpoint.TranscriptionModel), "whisper") {
 		return "chunked"
 	}
 	if enabled, declared := endpoint.Capabilities["realtime-transcription"]; declared && enabled {
