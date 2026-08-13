@@ -64,6 +64,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       signal: controller.signal,
     })
   } catch (caught) {
+    globalThis.clearTimeout(timeout)
     if (caught instanceof DOMException && caught.name === "AbortError") {
       throw new APIError("The request timed out. Please try again.", 408, {
         code: "request_timeout",
@@ -72,47 +73,52 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new APIError("JustAI could not reach the backend.", 0, {
       code: "network_error",
     })
+  }
+  try {
+    if (!response.ok) {
+      let message = response.statusText
+      let code: string | undefined
+      let requestId: string | undefined
+      let details: unknown
+      try {
+        const payload = (await response.json()) as {
+          error?:
+            | string
+            | {
+                message?: string
+                code?: string
+                requestId?: string
+                details?: unknown
+              }
+          message?: string
+          code?: string
+          requestId?: string
+          details?: unknown
+        }
+        const error =
+          typeof payload.error === "object" ? payload.error : undefined
+        message =
+          error?.message ??
+          (typeof payload.error === "string" ? payload.error : payload.message) ??
+          message
+        code = error?.code ?? payload.code
+        requestId = error?.requestId ?? payload.requestId
+        details = error?.details ?? payload.details
+      } catch {
+        // Keep the HTTP status text when the backend did not return JSON.
+      }
+      throw new APIError(message, response.status, { code, requestId, details })
+    }
+    if (response.status === 204) {
+      return undefined as T
+    }
+    return (await response.json()) as T
   } finally {
+    // Keep the timeout alive while the response body is being decoded. A
+    // stalled JSON body must not leave history or context requests pending
+    // forever and keep the chat on its loading screen.
     globalThis.clearTimeout(timeout)
   }
-  if (!response.ok) {
-    let message = response.statusText
-    let code: string | undefined
-    let requestId: string | undefined
-    let details: unknown
-    try {
-      const payload = (await response.json()) as {
-        error?:
-          | string
-          | {
-              message?: string
-              code?: string
-              requestId?: string
-              details?: unknown
-            }
-        message?: string
-        code?: string
-        requestId?: string
-        details?: unknown
-      }
-      const error =
-        typeof payload.error === "object" ? payload.error : undefined
-      message =
-        error?.message ??
-        (typeof payload.error === "string" ? payload.error : payload.message) ??
-        message
-      code = error?.code ?? payload.code
-      requestId = error?.requestId ?? payload.requestId
-      details = error?.details ?? payload.details
-    } catch {
-      // Keep the HTTP status text when the backend did not return JSON.
-    }
-    throw new APIError(message, response.status, { code, requestId, details })
-  }
-  if (response.status === 204) {
-    return undefined as T
-  }
-  return response.json() as Promise<T>
 }
 
 async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {

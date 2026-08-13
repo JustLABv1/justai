@@ -69,7 +69,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { api, API_URL } from "@/lib/api"
+import { APIError, api, API_URL } from "@/lib/api"
 import type {
   Conversation,
   ConversationContext,
@@ -80,10 +80,13 @@ import { cn } from "@/lib/utils"
 
 type Props = {
   conversationId: string | null
+  conversationMessageCount?: number
   endpoints: Endpoint[]
   onEnsureConversation?: () => Promise<string>
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
+  onConversationSettled?: () => void
+  onConversationMissing?: () => void
   onNavigate?: (view: ViewId) => void
   onOpenHistory?: () => void
   onOpenContext?: () => void
@@ -993,6 +996,7 @@ function AssistantChatSurface({
   onImportText,
   onConversationCreated,
   onConversationUpdated,
+  onConversationSettled,
   onOpenHistory,
   conversationContext,
 }: {
@@ -1006,6 +1010,7 @@ function AssistantChatSurface({
   onImportText: () => void | Promise<void>
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
+  onConversationSettled?: () => void
   onOpenHistory?: () => void
   conversationContext: ConversationContext
 }) {
@@ -1191,7 +1196,10 @@ function AssistantChatSurface({
       onConversationUpdated?.()
       console.error("Assistant UI chat error", error)
     },
-    onFinish: () => onConversationUpdated?.(),
+    onFinish: ({ isError }) => {
+      onConversationUpdated?.()
+      if (!isError) onConversationSettled?.()
+    },
   })
 
   return (
@@ -1222,9 +1230,12 @@ function AssistantChatSurface({
 
 export function ChatView({
   conversationId,
+  conversationMessageCount,
   endpoints,
   onConversationCreated,
   onConversationUpdated,
+  onConversationSettled,
+  onConversationMissing,
   onEnsureConversation,
   onOpenHistory,
   onOpenContext,
@@ -1235,21 +1246,36 @@ export function ChatView({
   >(conversationId)
   const [surfaceKey, setSurfaceKey] = useState(conversationId ?? "new")
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([])
-  const [historyLoading, setHistoryLoading] = useState(Boolean(conversationId))
+  const [historyLoading, setHistoryLoading] = useState(
+    Boolean(conversationId && conversationMessageCount !== 0)
+  )
   const [conversationContext, setConversationContext] =
     useState<ConversationContext>(EMPTY_CONTEXT)
   const locallyCreatedConversationRef = useRef<string | null>(null)
+  const pendingConversationRef = useRef(false)
   const conversationCreationRef = useRef<Promise<string> | null>(null)
   const activeConversationRef = useRef<string | null>(conversationId)
+  const routeConversationIdRef = useRef<string | null>(conversationId)
+  const onEnsureConversationRef = useRef(onEnsureConversation)
+  const onConversationMissingRef = useRef(onConversationMissing)
   const onConversationCreatedRef = useRef(onConversationCreated)
   const onConversationUpdatedRef = useRef(onConversationUpdated)
   const uploadedAttachmentKeysRef = useRef(new Set<string>())
 
   useEffect(() => {
     activeConversationRef.current = conversationId
+    routeConversationIdRef.current = conversationId
+    onEnsureConversationRef.current = onEnsureConversation
+    onConversationMissingRef.current = onConversationMissing
     onConversationCreatedRef.current = onConversationCreated
     onConversationUpdatedRef.current = onConversationUpdated
-  }, [conversationId, onConversationCreated, onConversationUpdated])
+  }, [
+    conversationId,
+    onConversationCreated,
+    onConversationMissing,
+    onConversationUpdated,
+    onEnsureConversation,
+  ])
 
   const activeChatEndpoints = endpoints.filter(
     (endpoint) => endpoint.enabled && endpoint.capabilities?.chat
@@ -1268,7 +1294,7 @@ export function ChatView({
         return
       }
       try {
-        const [history, context] = await Promise.all([
+        const [historyResult, contextResult] = await Promise.allSettled([
           api.get<AssistantHistoryResponse>(
             `/api/v1/conversations/${id}/messages?format=assistant-ui`,
             { signal }
@@ -1277,9 +1303,34 @@ export function ChatView({
             signal,
           }),
         ])
-        if (!signal?.aborted) {
-          setInitialMessages(normalizeHistory(history))
-          setConversationContext(context)
+        if (signal?.aborted) return
+        if (historyResult.status === "fulfilled") {
+          setInitialMessages(normalizeHistory(historyResult.value))
+        } else if (
+          historyResult.reason instanceof APIError
+            ? historyResult.reason.status === 404
+            : typeof historyResult.reason === "object" &&
+                historyResult.reason !== null &&
+                "status" in historyResult.reason &&
+                Number(
+                  (historyResult.reason as { status?: unknown }).status
+                ) === 404
+        ) {
+          onConversationMissingRef.current?.()
+        } else {
+          console.error(
+            "Assistant UI history could not be loaded",
+            historyResult.reason
+          )
+          setInitialMessages([])
+        }
+        if (contextResult.status === "fulfilled") {
+          setConversationContext(contextResult.value)
+        } else {
+          console.error(
+            "Assistant UI conversation context could not be loaded",
+            contextResult.reason
+          )
         }
       } catch (caught) {
         if (!signal?.aborted) {
@@ -1292,12 +1343,20 @@ export function ChatView({
     },
     []
   )
-
-  const previousConversationRef = useRef<string | null | undefined>(undefined)
+  const loadConversationRef = useRef(loadConversation)
 
   useEffect(() => {
-    if (previousConversationRef.current === conversationId) return
-    previousConversationRef.current = conversationId
+    loadConversationRef.current = loadConversation
+  }, [loadConversation])
+
+  useEffect(() => {
+    if (conversationId && pendingConversationRef.current) {
+      // The workspace creates the conversation as part of the first send or
+      // attachment. Keep the mounted "new" runtime alive while the URL
+      // catches up; loading history here would unmount the active request.
+      pendingConversationRef.current = false
+      locallyCreatedConversationRef.current = conversationId
+    }
     if (
       conversationId &&
       locallyCreatedConversationRef.current === conversationId
@@ -1311,12 +1370,22 @@ export function ChatView({
     setSurfaceKey(conversationId ?? "new")
     activeConversationRef.current = conversationId
     uploadedAttachmentKeysRef.current.clear()
+    if (conversationMessageCount === 0) {
+      queueMicrotask(() => {
+        setInitialMessages([])
+        setHistoryLoading(false)
+      })
+      return
+    }
     const controller = new AbortController()
     queueMicrotask(
-      () => void loadConversation(conversationId, controller.signal)
+      () => void loadConversationRef.current(conversationId, controller.signal)
     )
     return () => controller.abort()
-  }, [conversationId, loadConversation])
+  }, [
+    conversationId,
+    conversationMessageCount,
+  ])
 
   const ensureLocalConversation = useCallback(async () => {
     if (activeConversationRef.current) return activeConversationRef.current
@@ -1339,8 +1408,26 @@ export function ChatView({
   }, [])
 
   const ensureConversation = useCallback(
-    () => onEnsureConversation?.() ?? ensureLocalConversation(),
-    [ensureLocalConversation, onEnsureConversation]
+    async () => {
+      const creatingFromRoot = routeConversationIdRef.current === null
+      if (creatingFromRoot) pendingConversationRef.current = true
+      try {
+        const id = await (
+          onEnsureConversationRef.current?.() ?? ensureLocalConversation()
+        )
+        if (creatingFromRoot) {
+          pendingConversationRef.current = false
+          locallyCreatedConversationRef.current = id
+          activeConversationRef.current = id
+          setActiveConversationId(id)
+        }
+        return id
+      } catch (error) {
+        if (creatingFromRoot) pendingConversationRef.current = false
+        throw error
+      }
+    },
+    [ensureLocalConversation]
   )
 
   const uploadFile = useCallback(
@@ -1391,7 +1478,7 @@ export function ChatView({
     await refreshConversationContext(id)
   }, [ensureConversation, refreshConversationContext])
 
-  if (historyLoading) {
+  if (historyLoading && conversationId) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
         Loading conversation…
@@ -1431,6 +1518,7 @@ export function ChatView({
         initialMessages={initialMessages}
         onConversationCreated={onConversationCreated}
         onConversationUpdated={onConversationUpdated}
+        onConversationSettled={onConversationSettled}
         onEnsureConversation={ensureConversation}
         onImportText={importText}
         onImportURL={importURL}

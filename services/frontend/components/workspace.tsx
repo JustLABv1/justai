@@ -76,8 +76,13 @@ export function Workspace() {
     useState(false)
   const [historyOpen, setHistoryOpen] = useState(true)
   const [contextOpen, setContextOpen] = useState(false)
+  const [pendingConversationId, setPendingConversationId] = useState<
+    string | null
+  >(null)
   const conversationCreationRef = useRef<Promise<string> | null>(null)
   const activeConversationRef = useRef<string | null>(requestedConversationId)
+  const pendingConversationIdRef = useRef<string | null>(null)
+  const hydratedConversationRef = useRef<string | null>(null)
 
   const redirectToLogin = useCallback(() => {
     const next = `${window.location.pathname}${window.location.search}`
@@ -255,21 +260,22 @@ export function Workspace() {
     organizations.find(
       (organization) => organization.id === activeOrganizationId
     ) ?? organizations[0]
-  const activeConversationId = requestedConversationId
+  const activeConversationId = requestedConversationId ?? pendingConversationId
+  const activeConversation = [...conversations, ...archivedConversations].find(
+    (conversation) => conversation.id === activeConversationId
+  )
 
   useEffect(() => {
-    activeConversationRef.current = requestedConversationId
-  }, [requestedConversationId])
+    activeConversationRef.current = requestedConversationId ?? pendingConversationId
+  }, [pendingConversationId, requestedConversationId])
 
   useEffect(() => {
-    if (!requestedConversationId) return
-    if (
-      [...conversations, ...archivedConversations].some(
-        (conversation) => conversation.id === requestedConversationId
-      )
-    ) {
+    if (!requestedConversationId || status !== "ready" || !activeOrganizationId) {
       return
     }
+    const hydrationKey = `${activeOrganizationId}:${requestedConversationId}`
+    if (hydratedConversationRef.current === hydrationKey) return
+    hydratedConversationRef.current = hydrationKey
     let cancelled = false
     void api
       .get<{ conversation: Conversation }>(
@@ -289,11 +295,24 @@ export function Workspace() {
           ])
         }
       })
-      .catch(() => undefined)
+      .catch((caught) => {
+        if (cancelled) return
+        const statusCode =
+          caught instanceof APIError
+            ? caught.status
+            : typeof caught === "object" && caught !== null && "status" in caught
+              ? Number((caught as { status?: unknown }).status)
+              : undefined
+        // The conversation lookup is only supplemental hydration for direct
+        // URLs. Older backend processes may not expose this endpoint yet;
+        // ChatView still loads the canonical message/context endpoints and
+        // handles a truly missing conversation there.
+        if (statusCode !== 404) console.error("Conversation metadata could not be loaded", caught)
+      })
     return () => {
       cancelled = true
     }
-  }, [archivedConversations, conversations, requestedConversationId])
+  }, [activeOrganizationId, requestedConversationId, status])
   const activeSessionId = [
     ...transcriptionSessions,
     ...archivedTranscriptionSessions,
@@ -319,6 +338,11 @@ export function Workspace() {
       settingsTab: import("@/lib/types").SettingsTab = "workspace"
     ) => {
       if (view !== "chat") setContextOpen(false)
+      if (view === "chat") {
+        activeConversationRef.current = conversationId
+        pendingConversationIdRef.current = null
+        setPendingConversationId(null)
+      }
       const path = workspacePath(view, conversationId, sessionId, settingsTab)
       if (replace) {
         router.replace(path)
@@ -330,6 +354,16 @@ export function Workspace() {
   )
 
   const ensureConversationForContext = useCallback(async () => {
+    // A root chat is intentionally pending until its first message or
+    // attachment needs a server conversation. Clear a stale route id before
+    // deciding whether there is already a conversation to reuse.
+    if (!requestedConversationId && pendingConversationIdRef.current) {
+      activeConversationRef.current = pendingConversationIdRef.current
+      return pendingConversationIdRef.current
+    }
+    if (!requestedConversationId && !pendingConversationId) {
+      activeConversationRef.current = null
+    }
     if (activeConversationRef.current) return activeConversationRef.current
     if (conversationCreationRef.current) return conversationCreationRef.current
 
@@ -337,11 +371,12 @@ export function Workspace() {
       .post<{ conversation: Conversation }>("/api/v1/conversations")
       .then((result) => {
         activeConversationRef.current = result.conversation.id
+        pendingConversationIdRef.current = result.conversation.id
+        setPendingConversationId(result.conversation.id)
         setConversations((current) => [
           result.conversation,
           ...current.filter((item) => item.id !== result.conversation.id),
         ])
-        navigate("chat", result.conversation.id, true)
         return result.conversation.id
       })
       .finally(() => {
@@ -349,7 +384,30 @@ export function Workspace() {
       })
     conversationCreationRef.current = creation
     return creation
-  }, [navigate])
+  }, [pendingConversationId, requestedConversationId])
+
+  const settlePendingConversation = useCallback(() => {
+    const id = pendingConversationIdRef.current
+    if (!id || requestedConversationId) return
+    pendingConversationIdRef.current = null
+    setPendingConversationId(null)
+    navigate("chat", id, true)
+  }, [navigate, requestedConversationId])
+
+  const handleConversationMissing = useCallback(() => {
+    const missingId = requestedConversationId ?? pendingConversationIdRef.current
+    if (missingId) {
+      setConversations((current) =>
+        current.filter((conversation) => conversation.id !== missingId)
+      )
+      setArchivedConversations((current) =>
+        current.filter((conversation) => conversation.id !== missingId)
+      )
+    }
+    pendingConversationIdRef.current = null
+    setPendingConversationId(null)
+    navigate("chat", null, true)
+  }, [navigate, requestedConversationId])
 
   const selectOrganization = useCallback(
     (organizationId: string) => {
@@ -615,6 +673,7 @@ export function Workspace() {
             {activeView === "chat" && (
               <ChatView
                 conversationId={activeConversationId}
+                conversationMessageCount={activeConversation?.messageCount}
                 endpoints={endpoints}
                 onEnsureConversation={ensureConversationForContext}
                 onConversationCreated={(conversation) => {
@@ -629,6 +688,8 @@ export function Workspace() {
                 onConversationUpdated={() => {
                   void refreshConversations().catch(() => undefined)
                 }}
+                onConversationSettled={settlePendingConversation}
+                onConversationMissing={handleConversationMissing}
                 onNavigate={(view) => navigate(view, null)}
                 onOpenHistory={() => setHistoryOpen(true)}
                 onOpenContext={() => setContextOpen((current) => !current)}
