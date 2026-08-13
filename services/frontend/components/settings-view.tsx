@@ -2,21 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  BookOpen,
   Check,
-  ExternalLink,
   LoaderCircle,
-  LockKeyhole,
-  LogOut,
   Pencil,
   Plus,
-  ShieldCheck,
   Trash2,
   UserPlus,
-  UserRound,
   Users,
 } from "lucide-react"
-import Link from "next/link"
 
 import { api } from "@/lib/api"
 import type { Organization, OrganizationMember, User } from "@/lib/types"
@@ -32,7 +25,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -63,7 +55,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 
 type MemberRole = OrganizationMember["role"]
 
@@ -74,6 +65,7 @@ type SettingsViewProps = {
   onOrganizationSelect: (organizationId: string) => void
   onOrganizationCreated: (organization: Organization) => void
   onOrganizationUpdated: (organization: Organization) => void
+  section?: "workspace" | "members"
 }
 
 export function SettingsView({
@@ -83,6 +75,7 @@ export function SettingsView({
   onOrganizationSelect,
   onOrganizationCreated,
   onOrganizationUpdated,
+  section = "workspace",
 }: SettingsViewProps) {
   const [members, setMembers] = useState<OrganizationMember[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
@@ -108,6 +101,7 @@ export function SettingsView({
     activeOrganization?.role === "owner" ||
     activeOrganization?.role === "admin"
   const canRenameWorkspace = canManageMembers
+  const isMembersSection = section === "members"
 
   const loadMembers = useCallback(async () => {
     if (!activeOrganization) {
@@ -133,11 +127,14 @@ export function SettingsView({
   }, [activeOrganization])
 
   useEffect(() => {
+    if (!isMembersSection) {
+      return
+    }
     const timer = window.setTimeout(() => {
       void loadMembers()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [loadMembers])
+  }, [isMembersSection, loadMembers])
 
   const initials = useMemo(
     () => (name: string) =>
@@ -271,33 +268,8 @@ export function SettingsView({
     }
   }
 
-  async function logout() {
-    try {
-      await api.post("/api/v1/auth/logout")
-    } finally {
-      api.setOrganizationId(null)
-      window.location.assign("/login")
-    }
-  }
-
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-8">
-      <div>
-        <div className="mb-3 flex items-center gap-2">
-          <Badge variant="secondary">Workspace controls</Badge>
-          <span className="text-sm text-muted-foreground">
-            Security and access
-          </span>
-        </div>
-        <h2 className="font-heading text-3xl font-semibold tracking-tight">
-          Settings
-        </h2>
-        <p className="mt-2 max-w-2xl text-base text-muted-foreground">
-          Create workspaces, choose the active team, and manage who can access
-          it.
-        </p>
-      </div>
-
+    <div className="mx-auto w-full max-w-7xl space-y-5">
       {actionError && (
         <Alert variant="destructive">
           <AlertTitle>Could not save changes</AlertTitle>
@@ -305,72 +277,76 @@ export function SettingsView({
         </Alert>
       )}
 
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-6 p-6">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Users aria-hidden="true" /> Workspaces
-            </CardTitle>
-            <CardDescription className="mt-1 text-sm">
-              Each workspace has its own conversations, endpoints, knowledge,
-              and members.
-            </CardDescription>
-          </div>
-          <Button
-            className="shrink-0"
-            onClick={() => setWorkspaceDialogOpen(true)}
-          >
-            <Plus data-icon="inline-start" /> New workspace
-          </Button>
-        </CardHeader>
-        <CardContent className="p-6 pt-0">
-          <div className="grid [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))] gap-4">
-            {organizations.map((organization) => {
-              const selected = organization.id === activeOrganization?.id
-              return (
-                <button
-                  className={`min-h-36 rounded-xl border p-5 text-left transition-colors hover:bg-accent ${selected ? "border-primary bg-primary/5 shadow-sm" : "bg-card"}`}
-                  key={organization.id}
-                  onClick={() => onOrganizationSelect(organization.id)}
-                  type="button"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="flex size-10 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                      <Users aria-hidden="true" />
-                    </span>
-                    {selected && (
-                      <Check
-                        className="size-4 text-primary"
-                        aria-label="Selected workspace"
-                      />
-                    )}
-                  </div>
-                  <p className="mt-4 truncate text-base font-medium">
-                    {organization.name}
-                  </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {organization.role ?? "member"} access
-                  </p>
-                </button>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
+      {!isMembersSection && (
+        <Card size="sm">
+          <CardHeader className="flex flex-row items-start justify-between gap-6">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Users aria-hidden="true" /> Workspaces
+              </CardTitle>
+              <CardDescription className="mt-1 text-sm">
+                Each workspace keeps conversations and integrations separate.
+              </CardDescription>
+            </div>
+            <Button
+              className="shrink-0"
+              onClick={() => setWorkspaceDialogOpen(true)}
+            >
+              <Plus data-icon="inline-start" /> New workspace
+            </Button>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {organizations.map((organization) => {
+                const selected = organization.id === activeOrganization?.id
+                return (
+                  <button
+                    aria-pressed={selected}
+                    aria-label={`${selected ? "Current" : "Switch to"} workspace ${organization.name}`}
+                    className={`cursor-pointer rounded-xl border p-4 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${selected ? "border-primary bg-primary/5 shadow-sm" : "bg-card"}`}
+                    onClick={() => onOrganizationSelect(organization.id)}
+                    type="button"
+                    key={organization.id}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="flex size-9 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+                        <Users aria-hidden="true" />
+                      </span>
+                      {selected && (
+                        <Check
+                          className="size-4 text-primary"
+                          aria-label="Selected workspace"
+                        />
+                      )}
+                    </div>
+                    <p className="mt-3 truncate text-sm font-medium">
+                      {organization.name}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {selected ? "Active workspace" : "Available workspace"}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {activeOrganization && (
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-6 p-6">
+        <Card size="sm">
+          <CardHeader className="flex flex-row items-start justify-between gap-6">
             <div className="min-w-0">
               <CardTitle className="truncate text-xl">
                 {activeOrganization.name}
               </CardTitle>
               <CardDescription className="mt-1 truncate text-sm">
-                {activeOrganization.slug} ·{" "}
-                {activeOrganization.role ?? "member"} access
+                {isMembersSection
+                  ? "People with access to this workspace"
+                  : "Active workspace details"}
               </CardDescription>
             </div>
-            {canRenameWorkspace && (
+            {canRenameWorkspace && !isMembersSection && (
               <Button
                 className="shrink-0"
                 onClick={openRenameDialog}
@@ -380,204 +356,121 @@ export function SettingsView({
               </Button>
             )}
           </CardHeader>
-          <CardContent className="p-6 pt-0">
-            <div className="mb-5 flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-base font-medium">Members</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  People with access to this workspace.
-                </p>
-              </div>
-              {canManageMembers && (
-                <Button
-                  className="shrink-0"
-                  onClick={() => setMemberDialogOpen(true)}
-                  variant="outline"
-                >
-                  <UserPlus data-icon="inline-start" /> Add member
-                </Button>
-              )}
-            </div>
-            {membersError && (
-              <Alert className="mb-4" variant="destructive">
-                <AlertDescription>{membersError}</AlertDescription>
-              </Alert>
-            )}
-            {membersLoading ? (
-              <div className="flex items-center gap-2 rounded-xl border p-4 text-sm text-muted-foreground">
-                <LoaderCircle className="animate-spin" /> Loading members…
-              </div>
-            ) : members.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                No members found.
+          <CardContent className="pt-0">
+            {!isMembersSection ? (
+              <div className="grid gap-3 border-t pt-4 text-sm sm:grid-cols-2">
+                <div>
+                  <p className="text-xs text-muted-foreground">
+                    Workspace slug
+                  </p>
+                  <p className="mt-1 truncate font-mono text-xs">
+                    {activeOrganization.slug}
+                  </p>
+                </div>
               </div>
             ) : (
-              <div className="divide-y rounded-xl border bg-card">
-                {members.map((member) => (
-                  <div
-                    className="flex flex-wrap items-center gap-4 p-4"
-                    key={member.id}
-                  >
-                    <Avatar className="size-9" size="sm">
-                      <AvatarFallback>
-                        {initials(member.displayName || member.email)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-base font-medium">
-                        {member.displayName}
-                      </p>
-                      <p className="truncate text-sm text-muted-foreground">
-                        {member.email}
-                      </p>
-                    </div>
-                    <span className="hidden text-xs text-muted-foreground lg:block">
-                      Joined {formatDate(member.createdAt)}
-                    </span>
-                    <Select
-                      disabled={
-                        !canManageMembers ||
-                        (!user.platformAdmin &&
-                          activeOrganization.role === "admin" &&
-                          member.role !== "member")
-                      }
-                      onValueChange={(value) => {
-                        if (value)
-                          void updateMemberRole(member, value as MemberRole)
-                      }}
-                      value={member.role}
-                    >
-                      <SelectTrigger
-                        className="w-32"
-                        aria-label={`Role for ${member.displayName}`}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="member">Member</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        {(activeOrganization.role === "owner" ||
-                          user.platformAdmin) && (
-                          <SelectItem value="owner">Owner</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    {canManageMembers && member.role !== "owner" && (
-                      <Button
-                        aria-label={`Remove ${member.displayName}`}
-                        onClick={() => setRemoveTarget(member)}
-                        size="icon-sm"
-                        title={`Remove ${member.displayName}`}
-                        variant="ghost"
-                      >
-                        <Trash2 className="text-destructive" />
-                      </Button>
-                    )}
+              <>
+                <div className="mb-5 flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-medium">Members</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      People with access to this workspace.
+                    </p>
                   </div>
-                ))}
-              </div>
+                  {canManageMembers && (
+                    <Button
+                      className="shrink-0"
+                      onClick={() => setMemberDialogOpen(true)}
+                      variant="outline"
+                    >
+                      <UserPlus data-icon="inline-start" /> Add member
+                    </Button>
+                  )}
+                </div>
+                {membersError && (
+                  <Alert className="mb-4" variant="destructive">
+                    <AlertDescription>{membersError}</AlertDescription>
+                  </Alert>
+                )}
+                {membersLoading ? (
+                  <div className="flex items-center gap-2 rounded-xl border p-4 text-sm text-muted-foreground">
+                    <LoaderCircle className="animate-spin" /> Loading members…
+                  </div>
+                ) : members.length === 0 ? (
+                  <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    No members found.
+                  </div>
+                ) : (
+                  <div className="divide-y rounded-xl border bg-card">
+                    {members.map((member) => (
+                      <div
+                        className="flex flex-wrap items-center gap-4 p-4"
+                        key={member.id}
+                      >
+                        <Avatar className="size-9" size="sm">
+                          <AvatarFallback>
+                            {initials(member.displayName || member.email)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-base font-medium">
+                            {member.displayName}
+                          </p>
+                          <p className="truncate text-sm text-muted-foreground">
+                            {member.email}
+                          </p>
+                        </div>
+                        <span className="hidden text-xs text-muted-foreground lg:block">
+                          Joined {formatDate(member.createdAt)}
+                        </span>
+                        <Select
+                          disabled={
+                            !canManageMembers ||
+                            (!user.platformAdmin &&
+                              activeOrganization.role === "admin" &&
+                              member.role !== "member")
+                          }
+                          onValueChange={(value) => {
+                            if (value)
+                              void updateMemberRole(member, value as MemberRole)
+                          }}
+                          value={member.role}
+                        >
+                          <SelectTrigger
+                            className="w-32"
+                            aria-label={`Role for ${member.displayName}`}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="member">Member</SelectItem>
+                            <SelectItem value="admin">Admin</SelectItem>
+                            {(activeOrganization.role === "owner" ||
+                              user.platformAdmin) && (
+                              <SelectItem value="owner">Owner</SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                        {canManageMembers && member.role !== "owner" && (
+                          <Button
+                            aria-label={`Remove ${member.displayName}`}
+                            onClick={() => setRemoveTarget(member)}
+                            size="icon-sm"
+                            title={`Remove ${member.displayName}`}
+                            variant="ghost"
+                          >
+                            <Trash2 className="text-destructive" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
       )}
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <UserRound aria-hidden="true" />
-              Your account
-            </CardTitle>
-            <CardDescription className="text-sm">
-              Authenticated JustAI identity.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3 text-sm">
-              <div>
-                <p className="text-xs text-muted-foreground">Display name</p>
-                <p className="mt-1 font-medium">{user.displayName}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Email</p>
-                <p className="mt-1 font-medium">{user.email}</p>
-              </div>
-              <Badge variant="outline">
-                {user.platformAdmin ? "Platform admin" : "Member"}
-              </Badge>
-            </div>
-            <Separator className="my-5" />
-            <Button onClick={() => void logout()} size="sm" variant="outline">
-              <LogOut data-icon="inline-start" aria-hidden="true" />
-              Sign out
-            </Button>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <LockKeyhole aria-hidden="true" />
-              Secrets boundary
-            </CardTitle>
-            <CardDescription className="text-sm">
-              Provider and MCP credentials stay on the backend.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <SettingRow
-              icon={ShieldCheck}
-              label="Encrypted credentials"
-              value="AES-GCM at rest"
-            />
-            <SettingRow
-              icon={Check}
-              label="Browser access"
-              value="No provider keys"
-            />
-            <SettingRow
-              icon={BookOpen}
-              label="Audit trail"
-              value="Requests + tool calls"
-            />
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Runtime notes</CardTitle>
-          <CardDescription>
-            Credentials stay server-side, readiness checks cover migrations and
-            workers, and MCP calls remain approval-gated.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button
-            nativeButton={false}
-            render={
-              <a
-                href="https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization"
-                rel="noreferrer"
-                target="_blank"
-              />
-            }
-            size="sm"
-            variant="outline"
-          >
-            <ExternalLink data-icon="inline-start" aria-hidden="true" />
-            MCP auth docs
-          </Button>
-          <Button
-            nativeButton={false}
-            render={<Link href="/login" />}
-            size="sm"
-            variant="outline"
-          >
-            <UserRound data-icon="inline-start" aria-hidden="true" />
-            Open sign-in
-          </Button>
-        </CardContent>
-      </Card>
 
       <Dialog open={workspaceDialogOpen} onOpenChange={setWorkspaceDialogOpen}>
         <DialogContent className="sm:max-w-md">
@@ -765,25 +658,5 @@ function formatDate(value: string) {
   if (Number.isNaN(date.getTime())) return "recently"
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
     date
-  )
-}
-
-function SettingRow({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof ShieldCheck
-  label: string
-  value: string
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl bg-muted/40 p-3">
-      <Icon aria-hidden="true" className="text-muted-foreground" />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{value}</p>
-      </div>
-    </div>
   )
 }

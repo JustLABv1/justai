@@ -1,5 +1,11 @@
 export type ViewId =
-  "chat" | "transcription" | "endpoints" | "knowledge" | "mcp" | "settings"
+  | "chat"
+  | "transcription"
+  | "endpoints"
+  | "knowledge"
+  | "mcp"
+  | "settings"
+  | "profile"
 
 export type SettingsTab =
   "workspace" | "endpoints" | "knowledge" | "mcp" | "members" | "admin"

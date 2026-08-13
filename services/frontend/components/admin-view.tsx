@@ -6,7 +6,6 @@ import { BarChart3, Check, LoaderCircle, ShieldCheck } from "lucide-react"
 import { api } from "@/lib/api"
 import type { Endpoint, MCPServer } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -98,14 +97,32 @@ export function AdminView({
   const enabledChatEndpoints = useMemo(
     () =>
       endpoints.filter(
-        (endpoint) => endpoint.enabled && endpoint.capabilities?.chat
+        (endpoint) =>
+          endpoint.enabled &&
+          (endpoint.capabilities?.chat === true ||
+            Boolean(endpoint.chatModel?.trim()))
       ),
     [endpoints]
+  )
+  const globalChatEndpoints = useMemo(
+    () =>
+      enabledChatEndpoints.filter(
+        (endpoint) => endpoint.scopeType === "global"
+      ),
+    [enabledChatEndpoints]
   )
   const enabledServers = useMemo(
     () => mcpServers.filter((server) => server.enabled),
     [mcpServers]
   )
+  const analyticsRangeLabel =
+    analyticsDays === 7
+      ? "Last 7 days"
+      : analyticsDays === 30
+        ? "Last 30 days"
+        : analyticsDays === 90
+          ? "Last 90 days"
+          : "Last year"
 
   useEffect(() => {
     if (!canManage || (!organizationId && !platformAdmin)) {
@@ -197,7 +214,7 @@ export function AdminView({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <ShieldCheck /> Admin controls
+            <ShieldCheck /> Workspace operations
           </CardTitle>
           <CardDescription>
             Organization owners and administrators can manage defaults and
@@ -211,69 +228,68 @@ export function AdminView({
   if (loading) {
     return (
       <div className="flex min-h-56 items-center justify-center text-sm text-muted-foreground">
-        <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading admin
-        controls…
+        <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading workspace
+        operations…
       </div>
     )
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
-      <div>
-        <Badge variant="secondary">Administration</Badge>
-        <h2 className="mt-3 font-heading text-3xl font-semibold tracking-tight">
-          Workspace control center
-        </h2>
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          Set defaults for new chats and monitor the health of your AI
-          workspace.
-        </p>
-      </div>
-
+    <div className="mx-auto w-full max-w-6xl space-y-5">
       {notice && (
         <Alert>
-          <AlertTitle>Admin update</AlertTitle>
+          <AlertTitle>Operations update</AlertTitle>
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       )}
 
-      <Card>
-        <CardHeader>
+      <Card size="sm" className="gap-0">
+        <CardHeader className="border-b pb-4">
           <CardTitle>New chat defaults</CardTitle>
           <CardDescription>
             These choices are applied when a new conversation is created.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="space-y-5 pt-4">
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2 text-sm font-medium">
-              <span>Default chat endpoint</span>
-              <Select
-                value={defaults.endpointId ?? "none"}
-                onValueChange={(value) =>
-                  setDefaults((current) => ({
-                    ...current,
-                    endpointId: value === "none" ? null : value,
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose an endpoint" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Use routing precedence</SelectItem>
-                  {enabledChatEndpoints.map((endpoint) => (
-                    <SelectItem key={endpoint.id} value={endpoint.id}>
-                      {endpoint.name} ·{" "}
-                      {endpoint.chatModel || "model not configured"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-            <div className="space-y-2 text-sm font-medium">
-              <span>Default MCP servers</span>
-              <div className="grid gap-2 rounded-lg border p-3">
+            <div className="rounded-xl border bg-card p-4">
+              <label className="block space-y-2 text-sm font-medium">
+                <span className="block">Default chat endpoint</span>
+                <Select
+                  value={defaults.endpointId ?? "none"}
+                  onValueChange={(value) =>
+                    setDefaults((current) => ({
+                      ...current,
+                      endpointId: value === "none" ? null : value,
+                    }))
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Choose an endpoint" />
+                  </SelectTrigger>
+                  <SelectContent
+                    align="start"
+                    className="max-w-[calc(100vw-2rem)] min-w-[min(30rem,calc(100vw-2rem))]"
+                  >
+                    <SelectItem value="none">Use routing precedence</SelectItem>
+                    {enabledChatEndpoints.map((endpoint) => (
+                      <SelectItem key={endpoint.id} value={endpoint.id}>
+                        {endpoint.name} ·{" "}
+                        {endpoint.chatModel || "model not configured"}
+                      </SelectItem>
+                    ))}
+                    {enabledChatEndpoints.length === 0 && (
+                      <SelectItem value="no-endpoints" disabled>
+                        No enabled chat endpoints configured
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </label>
+            </div>
+            <div className="rounded-xl border bg-card p-4">
+              <span className="text-sm font-medium">Default MCP servers</span>
+              <div className="mt-2 grid gap-1 rounded-lg border bg-muted/20 p-1">
                 {enabledServers.length === 0 && (
                   <p className="text-xs text-muted-foreground">
                     No enabled MCP servers.
@@ -283,7 +299,7 @@ export function AdminView({
                   const selected = defaults.mcpServerIds.includes(server.id)
                   return (
                     <button
-                      className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-muted"
+                      className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${selected ? "border-primary/50 bg-primary/10 text-foreground" : "border-border/70 bg-card hover:border-border hover:bg-muted/40"}`}
                       key={server.id}
                       onClick={() =>
                         setDefaults((current) => ({
@@ -314,24 +330,27 @@ export function AdminView({
               </div>
             </div>
           </div>
-          <Button disabled={saving} onClick={() => void saveDefaults()}>
-            {saving && <LoaderCircle className="animate-spin" />} Save defaults
-          </Button>
+          <div className="flex justify-end">
+            <Button disabled={saving} onClick={() => void saveDefaults()}>
+              {saving && <LoaderCircle className="animate-spin" />} Save
+              defaults
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
       {platformAdmin && (
-        <Card>
-          <CardHeader>
+        <Card size="sm" className="gap-0">
+          <CardHeader className="border-b pb-4">
             <CardTitle>Platform defaults</CardTitle>
             <CardDescription>
               Fallback endpoint selection for organizations without an explicit
               default.
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-wrap items-end gap-4">
-            <label className="min-w-64 space-y-2 text-sm font-medium">
-              <span>Global chat endpoint</span>
+          <CardContent className="flex flex-wrap items-end gap-4 pt-4">
+            <label className="min-w-64 flex-1 space-y-2 text-sm font-medium">
+              <span className="block">Global chat endpoint</span>
               <Select
                 value={globalDefaults.endpointId ?? "none"}
                 onValueChange={(value) =>
@@ -341,21 +360,27 @@ export function AdminView({
                   }))
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="Choose an endpoint" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent
+                  align="start"
+                  className="max-w-[calc(100vw-2rem)] min-w-[min(30rem,calc(100vw-2rem))]"
+                >
                   <SelectItem value="none">
                     Use endpoint routing precedence
                   </SelectItem>
-                  {enabledChatEndpoints
-                    .filter((endpoint) => endpoint.scopeType === "global")
-                    .map((endpoint) => (
-                      <SelectItem key={endpoint.id} value={endpoint.id}>
-                        {endpoint.name} ·{" "}
-                        {endpoint.chatModel || "model not configured"}
-                      </SelectItem>
-                    ))}
+                  {globalChatEndpoints.map((endpoint) => (
+                    <SelectItem key={endpoint.id} value={endpoint.id}>
+                      {endpoint.name} ·{" "}
+                      {endpoint.chatModel || "model not configured"}
+                    </SelectItem>
+                  ))}
+                  {globalChatEndpoints.length === 0 && (
+                    <SelectItem value="no-global-endpoints" disabled>
+                      No global chat endpoints configured
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </label>
@@ -385,8 +410,8 @@ export function AdminView({
               value={String(analyticsDays)}
               onValueChange={(value) => setAnalyticsDays(Number(value))}
             >
-              <SelectTrigger className="w-32">
-                <SelectValue />
+              <SelectTrigger className="w-40">
+                <SelectValue>{analyticsRangeLabel}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="7">Last 7 days</SelectItem>

@@ -7,6 +7,7 @@ const validViews: ViewId[] = [
   "knowledge",
   "mcp",
   "settings",
+  "profile",
 ]
 
 type QueryLike = {
@@ -114,6 +115,15 @@ export function parseWorkspaceRoute(
       conversationId: null,
       sessionId: null,
       settingsTab: parseSettingsTab(searchParams.get("tab")),
+    }
+  }
+
+  if (section === "profile") {
+    return {
+      view: "profile",
+      conversationId: null,
+      sessionId: null,
+      settingsTab: "workspace",
     }
   }
 

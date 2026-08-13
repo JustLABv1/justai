@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
+import { ProfileView } from "@/components/profile-view"
 import { SettingsShell } from "@/components/settings-shell"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
@@ -482,11 +483,12 @@ export function Workspace() {
         await api.patch(`/api/v1/conversations/${conversationId}`, { title })
         await refreshConversations()
       } catch (caught) {
-        setActionError(
+        const error =
           caught instanceof Error
-            ? caught.message
-            : "The conversation could not be renamed."
-        )
+            ? caught
+            : new Error("The conversation could not be renamed.")
+        setActionError(error.message)
+        throw error
       }
     },
     [refreshConversations]
@@ -634,9 +636,12 @@ export function Workspace() {
           onDeleteSession={handleDeleteSession}
           onRenameConversation={handleRenameConversation}
           onNewTranscriptionSession={handleNewTranscriptionSession}
-          onNavigate={(view, conversationId = null, sessionId = null) =>
-            navigate(view, conversationId, false, sessionId)
-          }
+          onNavigate={(
+            view,
+            conversationId = null,
+            sessionId = null,
+            settingsTab = "workspace"
+          ) => navigate(view, conversationId, false, sessionId, settingsTab)}
           historyOpen={historyOpen}
           onHistoryOpenChange={setHistoryOpen}
           onOrganizationSelect={selectOrganization}
@@ -722,8 +727,8 @@ export function Workspace() {
                 endpoints={endpoints}
                 knowledgeSources={sources}
                 mcpServers={servers}
-                onOrganizationCreated={handleOrganizationCreated}
                 onOrganizationSelect={selectOrganization}
+                onOrganizationCreated={handleOrganizationCreated}
                 onOrganizationUpdated={handleOrganizationUpdated}
                 onEndpointsChange={setEndpoints}
                 onKnowledgeChange={setSources}
@@ -735,6 +740,7 @@ export function Workspace() {
                 user={user}
               />
             )}
+            {activeView === "profile" && <ProfileView user={user} />}
           </div>
         </main>
         {activeView === "chat" && contextOpen && (

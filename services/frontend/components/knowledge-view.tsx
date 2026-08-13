@@ -16,6 +16,16 @@ import { APIError, api } from "@/lib/api"
 import type { KnowledgeSource } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
   Attachment,
   AttachmentContent,
   AttachmentDescription,
@@ -63,6 +73,45 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
+
+const sourceStatusStyles: Record<
+  KnowledgeSource["status"],
+  { label: string; card: string; badge: string; media: string }
+> = {
+  ready: {
+    label: "Ready",
+    card: "border-emerald-500/30 bg-emerald-500/5",
+    badge:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    media:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  },
+  queued: {
+    label: "Queued",
+    card: "border-amber-500/30 bg-amber-500/5",
+    badge:
+      "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    media:
+      "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  processing: {
+    label: "Processing",
+    card: "border-primary/30 bg-primary/5",
+    badge: "border-primary/30 bg-primary/10 text-primary",
+    media: "border-primary/30 bg-primary/10 text-primary",
+  },
+  failed: {
+    label: "Failed",
+    card: "border-destructive/30 bg-destructive/5",
+    badge: "border-destructive/30 bg-destructive/10 text-destructive",
+    media: "border-destructive/30 bg-destructive/10 text-destructive",
+  },
+}
+
+function formatStage(stage: string) {
+  return stage.replace(/[-_]/g, " ")
+}
 
 type Props = {
   sources: KnowledgeSource[]
@@ -92,6 +141,7 @@ export function KnowledgeView({
   )
   const [uploading, setUploading] = useState(false)
   const [notice, setNotice] = useState("")
+  const [removeTarget, setRemoveTarget] = useState<KnowledgeSource | null>(null)
   const [busyId, setBusyId] = useState("")
 
   const hasPendingRemoteSources = sources.some(
@@ -243,7 +293,6 @@ export function KnowledgeView({
   }
 
   async function remove(source: KnowledgeSource) {
-    if (!window.confirm(`Remove “${source.title}” from Knowledge?`)) return
     setBusyId(source.id)
     try {
       await api.delete(`/api/v1/knowledge/sources/${source.id}`)
@@ -261,46 +310,28 @@ export function KnowledgeView({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-2">
-            <Badge variant="secondary">Retrieval layer</Badge>
-            <span className="text-xs text-muted-foreground">
-              PDF · Markdown · text · URLs
-            </span>
-          </div>
-          <h2 className="font-heading text-2xl font-semibold tracking-tight">
-            Give JustAI useful memory
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Upload source material or index a URL. Processing stays scoped to
-            your organization or personal workspace, with status and citations
-            visible here.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setDialogOpen(true)}>
-            <Link2 data-icon="inline-start" aria-hidden="true" />
-            Add URL
-          </Button>
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-          >
-            <UploadCloud data-icon="inline-start" aria-hidden="true" />
-            Upload file
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.md,.markdown,.txt,.html,.htm,.json,text/*,application/pdf,application/json"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) void uploadFile(file)
-            }}
-          />
-        </div>
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={() => setDialogOpen(true)}>
+          <Link2 data-icon="inline-start" aria-hidden="true" />
+          Add URL
+        </Button>
+        <Button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+        >
+          <UploadCloud data-icon="inline-start" aria-hidden="true" />
+          Upload file
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.md,.markdown,.txt,.html,.htm,.json,text/*,application/pdf,application/json"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) void uploadFile(file)
+          }}
+        />
       </div>
 
       {notice && (
@@ -311,7 +342,7 @@ export function KnowledgeView({
         </Alert>
       )}
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-3">
         <Metric
           label="Indexed sources"
           value={String(
@@ -368,9 +399,13 @@ export function KnowledgeView({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <AttachmentGroup className="grid grid-cols-1 gap-3 overflow-visible sm:grid-cols-2 lg:grid-cols-3">
+            <AttachmentGroup className="flex flex-wrap items-start justify-start gap-2 overflow-visible">
               {sources.map((source) => {
                 const manageable = canManageSource(source)
+                const statusStyle = sourceStatusStyles[source.status]
+                const showStage = Boolean(
+                  source.stage && source.stage !== source.status
+                )
                 return (
                   <Attachment
                     key={source.id}
@@ -383,10 +418,20 @@ export function KnowledgeView({
                             ? "uploading"
                             : "done"
                     }
-                    orientation="vertical"
-                    className="w-full"
+                    orientation="horizontal"
+                    size="sm"
+                    className={cn(
+                      "w-full min-w-0 sm:max-w-[22rem]",
+                      statusStyle.card
+                    )}
                   >
-                    <AttachmentMedia variant="icon">
+                    <AttachmentMedia
+                      className={cn(
+                        "size-9 rounded-lg border",
+                        statusStyle.media
+                      )}
+                      variant="icon"
+                    >
                       {source.sourceType === "url" ? (
                         <Globe2 aria-hidden="true" />
                       ) : (
@@ -402,16 +447,10 @@ export function KnowledgeView({
                       </AttachmentDescription>
                       <div className="mt-3 flex items-center gap-2">
                         <Badge
-                          variant={
-                            source.status === "ready"
-                              ? "secondary"
-                              : source.status === "failed"
-                                ? "destructive"
-                                : "outline"
-                          }
-                          className="text-[10px]"
+                          className={cn("text-[10px]", statusStyle.badge)}
+                          variant="outline"
                         >
-                          {source.status}
+                          {statusStyle.label}
                         </Badge>
                         {manageable && (
                           <div className="ml-auto flex gap-1">
@@ -428,7 +467,7 @@ export function KnowledgeView({
                               variant="ghost"
                               size="icon-xs"
                               disabled={busyId === source.id}
-                              onClick={() => void remove(source)}
+                              onClick={() => setRemoveTarget(source)}
                               aria-label={`Remove ${source.title}`}
                             >
                               <Trash2 aria-hidden="true" />
@@ -446,9 +485,9 @@ export function KnowledgeView({
                           className="mt-3"
                         />
                       )}
-                      {source.stage && (
+                      {showStage && (
                         <p className="mt-2 text-[11px] text-muted-foreground">
-                          {source.stage}
+                          {formatStage(source.stage ?? "")}
                         </p>
                       )}
                       {source.error && (
@@ -547,6 +586,40 @@ export function KnowledgeView({
           </form>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={removeTarget !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !busyId) setRemoveTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove knowledge source?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove “{removeTarget?.title}” from Knowledge? Existing messages
+              keep their stored citations, but this source will no longer be
+              available for new retrievals.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(busyId)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!removeTarget || Boolean(busyId)}
+              variant="destructive"
+              onClick={() => {
+                const target = removeTarget
+                setRemoveTarget(null)
+                if (target) void remove(target)
+              }}
+            >
+              Remove source
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -561,10 +634,10 @@ function Metric({
   detail: string
 }) {
   return (
-    <Card>
-      <CardContent className="p-4">
+    <Card size="sm" className="gap-0">
+      <CardContent className="py-3">
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="mt-2 font-heading text-2xl font-semibold tracking-tight">
+        <p className="font-heading mt-2 text-2xl font-semibold tracking-tight">
           {value}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">{detail}</p>

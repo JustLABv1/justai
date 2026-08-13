@@ -17,6 +17,7 @@ import {
   RotateCcw,
   Settings2,
   Trash2,
+  UserRound,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -52,6 +53,7 @@ import type {
   Organization,
   TranscriptionSession,
   User,
+  SettingsTab,
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -89,7 +91,8 @@ type FocusWorkspaceSidebarProps = {
   onNavigate: (
     view: ViewId,
     conversationId?: string | null,
-    sessionId?: string | null
+    sessionId?: string | null,
+    settingsTab?: SettingsTab
   ) => void
   onOrganizationSelect: (organizationId: string) => void
   onArchiveConversation: (conversationId: string, archived: boolean) => void
@@ -136,6 +139,8 @@ export function FocusWorkspaceSidebar({
 }: FocusWorkspaceSidebarProps) {
   const [historyQuery, setHistoryQuery] = useState("")
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
+  const historyView = activeView === "chat" || activeView === "transcription"
+  const historyVisible = historyView && historyOpen
   const sessionGroups = useMemo(
     () => groupByRecency(transcriptionSessions),
     [transcriptionSessions]
@@ -174,11 +179,11 @@ export function FocusWorkspaceSidebar({
     <aside
       className={cn(
         "flex h-svh shrink-0 overflow-hidden border-r border-border bg-background transition-[width] duration-200 ease-out",
-        historyOpen
+        historyVisible
           ? "w-[352px] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:shadow-lg"
           : "w-16 md:w-16"
       )}
-      data-history-open={historyOpen}
+      data-history-open={historyVisible}
     >
       <div className="flex w-16 shrink-0 flex-col items-center gap-3 border-r border-border/70 px-2 py-4">
         <BrandMark className="size-8" priority />
@@ -191,7 +196,7 @@ export function FocusWorkspaceSidebar({
         >
           <Plus data-icon="inline-start" />
         </Button>
-        {!historyOpen && (
+        {!historyVisible && historyView && (
           <Button
             aria-label="Open chat history"
             className="size-9 rounded-xl text-muted-foreground"
@@ -287,18 +292,24 @@ export function FocusWorkspaceSidebar({
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56" side="right">
-            <DropdownMenuLabel>
-              <span className="block truncate text-xs font-medium">
-                {user.displayName}
-              </span>
-              <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                {user.email}
-              </span>
-            </DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>
+                <span className="block truncate text-xs font-medium">
+                  {user.displayName}
+                </span>
+                <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                  {user.email}
+                </span>
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onNavigate("profile")}>
+              <UserRound data-icon="inline-start" />
+              Profile
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onNavigate("settings")}>
               <Settings2 data-icon="inline-start" />
-              Settings
+              Workspace settings
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onSignOut}>
               <LogOut data-icon="inline-start" />
@@ -311,7 +322,7 @@ export function FocusWorkspaceSidebar({
       <div
         className={cn(
           "w-[288px] min-w-0 flex-col gap-3 overflow-hidden p-4",
-          historyOpen ? "flex" : "hidden"
+          historyVisible ? "flex" : "hidden"
         )}
       >
         <div className="flex items-center justify-between gap-3">

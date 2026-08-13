@@ -3,10 +3,10 @@
 import { useState } from "react"
 import {
   Check,
-  ExternalLink,
   KeyRound,
   LoaderCircle,
   MoreHorizontal,
+  Pencil,
   Plug,
   Plus,
   ShieldCheck,
@@ -19,6 +19,16 @@ import { APIError, api, API_URL } from "@/lib/api"
 import type { MCPServer } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Card,
   CardContent,
@@ -109,6 +119,7 @@ export function MCPView({
   >({})
   const [busyId, setBusyId] = useState("")
   const [saving, setSaving] = useState(false)
+  const [removeTarget, setRemoveTarget] = useState<MCPServer | null>(null)
   const canManageOrganization =
     platformAdmin ||
     organizationRole === "owner" ||
@@ -259,7 +270,11 @@ export function MCPView({
       onChange(
         servers.map((item) =>
           item.id === server.id
-            ? { ...item, lastError: message, lastTestedAt: new Date().toISOString() }
+            ? {
+                ...item,
+                lastError: message,
+                lastTestedAt: new Date().toISOString(),
+              }
             : item
         )
       )
@@ -276,7 +291,6 @@ export function MCPView({
   }
 
   async function remove(server: MCPServer) {
-    if (!window.confirm(`Remove ${server.name}?`)) return
     setBusyId(server.id)
     try {
       await api.delete(`/api/v1/mcp/servers/${server.id}`)
@@ -294,22 +308,7 @@ export function MCPView({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-2">
-            <Badge variant="secondary">Tool layer</Badge>
-            <span className="text-xs text-muted-foreground">
-              Streamable HTTP + legacy SSE
-            </span>
-          </div>
-          <h2 className="font-heading text-2xl font-semibold tracking-tight">
-            Connect an MCP tool belt
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Register remote MCP servers, discover only the tools you allow, and
-            keep every call behind explicit consent.
-          </p>
-        </div>
+      <div className="flex justify-end">
         <Button
           onClick={() => {
             setEditingServer(null)
@@ -329,11 +328,11 @@ export function MCPView({
           {notice}
         </div>
       )}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2">
         {servers.map((server) => (
-          <Card key={server.id}>
-            <CardHeader className="flex-row items-start gap-3 space-y-0">
-              <div className="flex size-10 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
+          <Card key={server.id} size="sm" className="gap-0">
+            <CardHeader className="flex-row items-start gap-3 border-b pb-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
                 <Plug aria-hidden="true" />
               </div>
               <div className="min-w-0 flex-1">
@@ -351,50 +350,8 @@ export function MCPView({
                   {server.endpointUrl}
                 </CardDescription>
               </div>
-              {canManageServer(server) && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Actions for ${server.name}`}
-                      />
-                    }
-                  >
-                    <MoreHorizontal aria-hidden="true" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => edit(server)}>
-                      Edit server
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() =>
-                        void patchServer(server, { enabled: !server.enabled })
-                      }
-                    >
-                      {server.enabled ? "Disable" : "Enable"}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() =>
-                        void patchServer(server, {
-                          trustedReadOnly: !server.trustedReadOnly,
-                        })
-                      }
-                    >
-                      {server.trustedReadOnly
-                        ? "Remove read-only trust"
-                        : "Trust read-only tools"}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => void remove(server)}>
-                      Remove
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4 pt-3">
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <Badge variant="secondary">{server.scopeType}</Badge>
                 {!server.enabled && <Badge variant="outline">Disabled</Badge>}
@@ -430,9 +387,9 @@ export function MCPView({
                     : "Not tested"}
                 </div>
               </div>
-              <div className="mt-3 flex items-center gap-2 text-sm">
-                <Wrench aria-hidden="true" className="text-muted-foreground" />
-                <span>
+              <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-xs text-muted-foreground">
+                <Wrench aria-hidden="true" className="size-3.5" />
+                <span className="truncate">
                   {server.toolCount
                     ? `${server.toolCount} discovered tools`
                     : server.allowedTools.length
@@ -441,14 +398,14 @@ export function MCPView({
                 </span>
               </div>
               {tools[server.id] && (
-                <div className="mt-3 grid gap-2">
+                <div className="mt-2 grid max-h-36 gap-1 overflow-y-auto sm:grid-cols-2">
                   {tools[server.id].map((tool) => (
                     <div
                       key={tool.name}
-                      className="rounded-lg border bg-muted/40 px-3 py-2"
+                      className="rounded-md border bg-muted/20 px-2 py-1.5"
                     >
                       <p className="font-mono text-xs">{tool.name}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
                         {tool.description || "No description provided"}
                       </p>
                     </div>
@@ -461,67 +418,94 @@ export function MCPView({
                 </p>
               )}
               {canManageServer(server) && (
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busyId === server.id}
-                    onClick={() => void discover(server)}
-                  >
-                    {busyId === server.id ? (
-                      <LoaderCircle
-                        className="animate-spin"
-                        data-icon="inline-start"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <TerminalSquare
-                        data-icon="inline-start"
-                        aria-hidden="true"
-                      />
-                    )}
-                    Discover tools
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={busyId === server.id}
-                    onClick={() => void test(server)}
-                  >
-                    {busyId === server.id ? (
-                      <LoaderCircle
-                        className="animate-spin"
-                        data-icon="inline-start"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <Check data-icon="inline-start" aria-hidden="true" />
-                    )}
-                    Test
-                  </Button>
-                  {server.authType === "oauth" && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={busyId === server.id}
-                      onClick={() => authorize(server)}
+                <div className="flex items-center justify-end border-t pt-3">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Actions for ${server.name}`}
+                        />
+                      }
                     >
-                      <KeyRound data-icon="inline-start" aria-hidden="true" />
-                      {server.credentialConfigured
-                        ? "Reconnect OAuth"
-                        : "Authorize"}
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto text-muted-foreground"
-                    disabled={busyId === server.id}
-                    onClick={() => void remove(server)}
-                  >
-                    <Trash2 data-icon="inline-start" aria-hidden="true" />
-                    Remove
-                  </Button>
+                      <MoreHorizontal
+                        data-icon="inline-start"
+                        aria-hidden="true"
+                      />
+                      Actions
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        disabled={busyId === server.id}
+                        onClick={() => void discover(server)}
+                      >
+                        <TerminalSquare aria-hidden="true" /> Discover tools
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={busyId === server.id}
+                        onClick={() => void test(server)}
+                      >
+                        <Check aria-hidden="true" /> Test connection
+                      </DropdownMenuItem>
+                      {server.authType === "oauth" && (
+                        <DropdownMenuItem
+                          disabled={busyId === server.id}
+                          onClick={() => authorize(server)}
+                        >
+                          <KeyRound aria-hidden="true" />
+                          {server.credentialConfigured
+                            ? "Reconnect OAuth"
+                            : "Authorize"}
+                        </DropdownMenuItem>
+                      )}
+                      {canManageServer(server) && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            disabled={busyId === server.id}
+                            onClick={() => edit(server)}
+                          >
+                            <Pencil aria-hidden="true" /> Edit server
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={busyId === server.id}
+                            className={
+                              server.enabled
+                                ? "text-destructive focus:text-destructive"
+                                : "text-primary focus:text-primary"
+                            }
+                            onClick={() =>
+                              void patchServer(server, {
+                                enabled: !server.enabled,
+                              })
+                            }
+                          >
+                            {server.enabled ? "Disable" : "Enable"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={busyId === server.id}
+                            onClick={() =>
+                              void patchServer(server, {
+                                trustedReadOnly: !server.trustedReadOnly,
+                              })
+                            }
+                          >
+                            {server.trustedReadOnly
+                              ? "Remove read-only trust"
+                              : "Trust read-only tools"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={busyId === server.id}
+                            variant="destructive"
+                            onClick={() => setRemoveTarget(server)}
+                          >
+                            <Trash2 aria-hidden="true" /> Remove
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               )}
             </CardContent>
@@ -555,38 +539,40 @@ export function MCPView({
           </Card>
         )}
       </div>
-      <Card className="bg-muted/35">
-        <CardContent className="flex items-start gap-3 p-4">
-          <ShieldCheck
-            aria-hidden="true"
-            className="mt-0.5 text-muted-foreground"
-          />
-          <div>
-            <p className="text-sm font-medium">A safe default for tools</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              API-key and OAuth credentials remain backend-only. Every call
-              needs approval unless an administrator trusts read-only tools for
-              this server.
-            </p>
-          </div>
-          <Button
-            nativeButton={false}
-            variant="ghost"
-            size="icon-sm"
-            className="ml-auto"
-            render={
-              <a
-                href="https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Read MCP transport docs"
-              />
-            }
-          >
-            <ExternalLink aria-hidden="true" />
-          </Button>
-        </CardContent>
-      </Card>
+
+      <AlertDialog
+        open={removeTarget !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !busyId) setRemoveTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove MCP server?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove “{removeTarget?.name}”? Existing conversations keep their
+              messages, but this server and its tools will no longer be
+              available for new calls.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(busyId)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!removeTarget || Boolean(busyId)}
+              variant="destructive"
+              onClick={() => {
+                const target = removeTarget
+                setRemoveTarget(null)
+                if (target) void remove(target)
+              }}
+            >
+              Remove server
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Dialog
         open={open}
         onOpenChange={(value) => {

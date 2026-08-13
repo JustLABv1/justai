@@ -6,6 +6,7 @@ import {
   CircleAlert,
   Cloud,
   KeyRound,
+  MoreHorizontal,
   Pencil,
   Plus,
   Radio,
@@ -19,6 +20,16 @@ import { api } from "@/lib/api"
 import type { Endpoint } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Card,
   CardContent,
@@ -50,6 +61,13 @@ import {
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 type Props = {
   endpoints: Endpoint[]
@@ -158,6 +176,7 @@ export function EndpointsView({
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState("")
   const [notice, setNotice] = useState("")
+  const [removeTarget, setRemoveTarget] = useState<Endpoint | null>(null)
   const [discoveredModels, setDiscoveredModels] = useState<
     DiscoveredChatModel[]
   >([])
@@ -400,12 +419,6 @@ export function EndpointsView({
   }
 
   async function removeEndpoint(endpoint: Endpoint) {
-    if (
-      !window.confirm(
-        `Remove ${endpoint.name}? Existing conversations will keep their stored messages.`
-      )
-    )
-      return
     setBusyId(endpoint.id)
     try {
       await api.delete(`/api/v1/endpoints/${endpoint.id}`)
@@ -472,23 +485,7 @@ export function EndpointsView({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-2">
-            <Badge variant="secondary">Model layer</Badge>
-            <span className="text-xs text-muted-foreground">
-              {endpoints.length} connected
-            </span>
-          </div>
-          <h2 className="font-heading text-2xl font-semibold tracking-tight">
-            Endpoints that fit your stack
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Connect native providers, local runtimes, or OpenAI-compatible
-            gateways. Keys are encrypted by the backend and never sent to the
-            browser.
-          </p>
-        </div>
+      <div className="flex justify-end">
         <Button onClick={openCreate}>
           <Plus data-icon="inline-start" aria-hidden="true" />
           Add endpoint
@@ -501,16 +498,16 @@ export function EndpointsView({
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2">
         {endpoints.map((endpoint) => {
           const details =
             providerDetails[endpoint.providerType] ??
             providerDetails["openai-compatible"]
           const manageable = canManageEndpoint(endpoint)
           return (
-            <Card key={endpoint.id} className="overflow-hidden">
-              <CardHeader className="flex-row items-start gap-3">
-                <div className="flex size-10 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
+            <Card key={endpoint.id} size="sm" className="gap-0">
+              <CardHeader className="flex-row items-start gap-3 border-b pb-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
                   <ProviderIcon provider={endpoint.providerType} />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -526,7 +523,7 @@ export function EndpointsView({
                   </CardDescription>
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4 pt-3">
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <Badge variant="secondary">{endpoint.scopeType}</Badge>
                   <Badge variant="outline" className="gap-1.5">
@@ -546,7 +543,10 @@ export function EndpointsView({
                 <div className="grid gap-3 text-sm sm:grid-cols-2">
                   <div>
                     <p className="text-xs text-muted-foreground">Base URL</p>
-                    <p className="mt-1 truncate font-mono text-xs">
+                    <p
+                      className="mt-1 truncate font-mono text-xs"
+                      title={endpoint.baseUrl}
+                    >
                       {endpoint.baseUrl}
                     </p>
                   </div>
@@ -554,7 +554,7 @@ export function EndpointsView({
                     <p className="text-xs text-muted-foreground">
                       Capabilities
                     </p>
-                    <div className="mt-1 flex gap-1.5">
+                    <div className="mt-1 flex flex-wrap gap-1.5">
                       {Object.entries(endpoint.capabilities ?? {})
                         .filter(([, enabled]) => enabled)
                         .map(([capability]) => (
@@ -569,57 +569,69 @@ export function EndpointsView({
                     </div>
                   </div>
                 </div>
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!endpoint.enabled || busyId === endpoint.id}
-                    onClick={() => void testEndpoint(endpoint)}
-                  >
-                    <Radio data-icon="inline-start" aria-hidden="true" />
-                    Test capabilities
-                  </Button>
-                  {manageable && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={busyId === endpoint.id}
-                        onClick={() => toggleEndpoint(endpoint)}
-                      >
-                        {endpoint.enabled ? "Disable" : "Enable"}
-                      </Button>
-                      {!endpoint.isDefault && (
+                <div className="flex items-center justify-end border-t pt-3">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
-                          disabled={busyId === endpoint.id}
-                          onClick={() => setDefaultEndpoint(endpoint)}
-                        >
-                          Set default
-                        </Button>
+                          aria-label={`Actions for ${endpoint.name}`}
+                        />
+                      }
+                    >
+                      <MoreHorizontal
+                        data-icon="inline-start"
+                        aria-hidden="true"
+                      />
+                      Actions
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        disabled={!endpoint.enabled || busyId === endpoint.id}
+                        onClick={() => void testEndpoint(endpoint)}
+                      >
+                        <Radio aria-hidden="true" /> Test capabilities
+                      </DropdownMenuItem>
+                      {manageable && (
+                        <>
+                          <DropdownMenuSeparator />
+                          {!endpoint.isDefault && (
+                            <DropdownMenuItem
+                              disabled={busyId === endpoint.id}
+                              onClick={() => setDefaultEndpoint(endpoint)}
+                            >
+                              <CheckCircle2 aria-hidden="true" /> Set default
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem
+                            disabled={busyId === endpoint.id}
+                            className={
+                              endpoint.enabled
+                                ? "text-destructive focus:text-destructive"
+                                : "text-primary focus:text-primary"
+                            }
+                            onClick={() => toggleEndpoint(endpoint)}
+                          >
+                            {endpoint.enabled ? "Disable" : "Enable"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={busyId === endpoint.id}
+                            onClick={() => openEdit(endpoint)}
+                          >
+                            <Pencil aria-hidden="true" /> Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={busyId === endpoint.id}
+                            variant="destructive"
+                            onClick={() => setRemoveTarget(endpoint)}
+                          >
+                            <Trash2 aria-hidden="true" /> Remove
+                          </DropdownMenuItem>
+                        </>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={busyId === endpoint.id}
-                        onClick={() => openEdit(endpoint)}
-                      >
-                        <Pencil data-icon="inline-start" aria-hidden="true" />
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={busyId === endpoint.id}
-                        className="ml-auto text-muted-foreground"
-                        onClick={() => void removeEndpoint(endpoint)}
-                      >
-                        <Trash2 data-icon="inline-start" aria-hidden="true" />
-                        Remove
-                      </Button>
-                    </>
-                  )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardContent>
             </Card>
@@ -1036,6 +1048,39 @@ export function EndpointsView({
           </form>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={removeTarget !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !busyId) setRemoveTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove endpoint?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove “{removeTarget?.name}”? Existing conversations keep their
+              stored messages, but new requests will no longer route here.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(busyId)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!removeTarget || Boolean(busyId)}
+              variant="destructive"
+              onClick={() => {
+                const target = removeTarget
+                setRemoveTarget(null)
+                if (target) void removeEndpoint(target)
+              }}
+            >
+              Remove endpoint
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

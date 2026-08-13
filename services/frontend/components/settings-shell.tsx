@@ -41,7 +41,7 @@ const tabs: Array<{ id: SettingsTab; label: string; icon: typeof Settings2 }> =
     { id: "knowledge", label: "Knowledge", icon: BookOpen },
     { id: "mcp", label: "MCP", icon: Plug },
     { id: "members", label: "Members", icon: Users },
-    { id: "admin", label: "Admin", icon: BarChart3 },
+    { id: "admin", label: "Operations", icon: BarChart3 },
   ]
 
 export function SettingsShell({
@@ -68,24 +68,64 @@ export function SettingsShell({
     activeOrganization?.role === "owner" ||
     activeOrganization?.role === "admin"
   const visibleTabs = tabs.filter((tab) => tab.id !== "admin" || canManageAdmin)
+  const pageMeta = {
+    workspace: {
+      eyebrow: "Workspace",
+      title: "Workspace",
+      description:
+        "Create and rename workspaces, then manage workspace access.",
+    },
+    endpoints: {
+      eyebrow: "Models",
+      title: "Endpoints",
+      description:
+        "Connect providers and configure the models available to your workspace.",
+    },
+    knowledge: {
+      eyebrow: "Knowledge",
+      title: "Knowledge",
+      description:
+        "Index sources that can be attached to conversations and cited in answers.",
+    },
+    mcp: {
+      eyebrow: "Tools",
+      title: "MCP servers",
+      description:
+        "Connect and manage the remote tools available to your workspace.",
+    },
+    members: {
+      eyebrow: "Access",
+      title: "Members",
+      description: "Invite people and manage access for the active workspace.",
+    },
+    admin: {
+      eyebrow: "Operations",
+      title: "Workspace operations",
+      description:
+        "Set chat defaults and review usage and reliability metrics.",
+    },
+  } satisfies Record<
+    SettingsTab,
+    { eyebrow: string; title: string; description: string }
+  >
+  const currentPage = pageMeta[activeTab]
 
   return (
     <div className="min-h-full w-full bg-muted/10 p-4 sm:p-6 lg:p-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <div>
           <p className="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">
-            JustAI settings
+            {currentPage.eyebrow}
           </p>
-          <h1 className="mt-2 font-heading text-3xl font-semibold tracking-tight">
-            Workspace settings
+          <h1 className="font-heading mt-2 text-3xl font-semibold tracking-tight">
+            {currentPage.title}
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Configure models, knowledge, tools, access, and operational controls
-            for {activeOrganization?.name ?? "your workspace"}.
+            {currentPage.description}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-1 rounded-xl border bg-background p-1">
+        <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl border bg-background p-1">
           {visibleTabs.map(({ id, label, icon: Icon }) => (
             <Button
               aria-current={activeTab === id ? "page" : undefined}
@@ -103,10 +143,11 @@ export function SettingsShell({
         {activeTab === "workspace" || activeTab === "members" ? (
           <SettingsView
             activeOrganizationId={activeOrganizationId}
-            onOrganizationCreated={onOrganizationCreated}
             onOrganizationSelect={onOrganizationSelect}
+            onOrganizationCreated={onOrganizationCreated}
             onOrganizationUpdated={onOrganizationUpdated}
             organizations={organizations}
+            section={activeTab === "members" ? "members" : "workspace"}
             user={user}
           />
         ) : null}
