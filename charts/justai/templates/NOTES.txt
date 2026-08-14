@@ -1,0 +1,25 @@
+JustAI has been deployed in {{ .Values.deploymentMode }} mode.
+
+{{- if .Values.ingress.enabled }}
+Public URL:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+
+Register this OIDC callback URL with every identity provider:
+  {{ include "justai.publicOrigin" . }}/api/v1/auth/oidc/callback
+{{- else }}
+The ingress is disabled. Expose the frontend service and configure
+config.oidc.redirectUrl plus config.frontendOrigins for the public hostname.
+{{- end }}
+
+Required Secret keys:
+  {{ include "justai.secretRefKey" (dict "root" . "ref" "databaseURL") }}
+  {{ include "justai.secretRefKey" (dict "root" . "ref" "jwtSecret") }}
+  {{ include "justai.secretRefKey" (dict "root" . "ref" "encryptionKey") }}
+{{- if .Values.postgresql.enabled }}
+  {{ include "justai.secretRefKey" (dict "root" . "ref" "postgresqlPassword") }}
+{{- end }}
+
+Check rollout status with:
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}

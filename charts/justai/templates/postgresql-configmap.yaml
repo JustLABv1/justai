@@ -1,0 +1,12 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "justai.fullname" . }}-postgresql-config
+  labels:
+    {{- include "justai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+data:
+  POSTGRES_DB: {{ .Values.postgresql.auth.database | quote }}
+  POSTGRES_USER: {{ .Values.postgresql.auth.username | quote }}
+{{- end }}

@@ -31,6 +31,27 @@ JustAI is the JustLAB workspace for routing chat, transcription, retrieval, and 
 
 Open [http://localhost:3000](http://localhost:3000). The production UI talks to the backend for authentication, persistence, retrieval, MCP, and transcription; it does not report successful work when the backend is unavailable.
 
+## Container deployment
+
+The repository provides separate backend/frontend images and a combined image.
+The Docker Compose installation is in [`deploy/compose`](deploy/compose) and
+the Kubernetes chart is in [`charts/justai`](charts/justai). Published frontend
+images use same-origin `/api/v1` requests, so route the browser through the
+provided nginx/Ingress and keep the backend and frontend on one public origin.
+
+For a Compose installation:
+
+```bash
+cd deploy/compose
+cp .env.example .env
+# Set the database, JWT, encryption, public-origin, and OIDC values in .env.
+docker compose up -d
+```
+
+For Kubernetes, provide a Secret containing `database-url`, `jwt-secret`, and
+`encryption-key`, then install `charts/justai`. Set
+`postgresql.enabled=true` only when using the bundled pgvector database.
+
 ## Product boundaries
 
 - Provider keys and MCP credentials are encrypted and stay in the Go backend.

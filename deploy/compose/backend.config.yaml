@@ -1,0 +1,37 @@
+# Non-secret backend defaults. Deployment secrets and environment-specific
+# values are supplied through JUSTAI_* environment variables in compose.yaml.
+port: "8080"
+database_url: ""
+jwt_secret: ""
+encryption_key: ""
+frontend_origins:
+  - "http://localhost"
+
+oidc:
+  issuer: ""
+  client_id: ""
+  client_secret: ""
+  redirect_url: "http://localhost/api/v1/auth/oidc/callback"
+
+mcp_oauth_redirect_url: "http://localhost/api/v1/mcp/oauth/callback"
+allow_private_targets: false
+dev_seed: false
+secure_cookies: true
+cookie_same_site: lax
+cookie_domain: ""
+
+transcription:
+  storage_driver: local
+  local_storage_path: /app/data/transcription
+  s3_endpoint: ""
+  s3_region: us-east-1
+  s3_bucket: ""
+  s3_access_key: ""
+  s3_secret_key: ""
+  audio_retention_days: 30
+  diarization_window_seconds: 30
+  diarization_overlap_seconds: 5
+  streaming_chunk_ms: 2500
+  streaming_overlap_ms: 500
+  streaming_prompt_chars: 160
+  max_session_hours: 8

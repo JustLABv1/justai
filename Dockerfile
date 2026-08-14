@@ -1,56 +1,83 @@
-# JustAI production images are intentionally separate: the frontend and
-# backend have different lifecycle, health, and scaling requirements.
+FROM reg.mini.dev/node:v26.5.1-dev AS frontend-builder
+USER root
+WORKDIR /app/frontend
 
-FROM node:22-alpine AS frontend-deps
-WORKDIR /app
-RUN corepack enable
-COPY services/frontend/package.json services/frontend/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN npm install -g pnpm
 
-FROM frontend-deps AS frontend-build
-WORKDIR /app
+COPY services/frontend/package.json services/frontend/pnpm-lock.yaml services/frontend/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --network-concurrency=4 --child-concurrency=1
+
 COPY services/frontend/ ./
-ARG NEXT_PUBLIC_API_URL=http://localhost:8080
+
+ARG NEXT_PUBLIC_API_URL=""
 ARG APP_VERSION=dev
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_APP_VERSION=$APP_VERSION
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm run lint && pnpm run typecheck && pnpm run build
 
-FROM node:22-alpine AS frontend
-WORKDIR /app
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
-COPY --from=frontend-build --chown=nextjs:nodejs /app/public ./public
-COPY --from=frontend-build --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=frontend-build --chown=nextjs:nodejs /app/.next/static ./.next/static
-USER nextjs
-EXPOSE 3000
-CMD ["node", "server.js"]
+RUN pnpm run build
 
-FROM golang:1.26-alpine AS backend-build
-WORKDIR /app
-RUN apk add --no-cache ca-certificates
-COPY services/backend/go.mod services/backend/go.sum ./services/backend/
-WORKDIR /app/services/backend
+# Stage 2: Build the backend
+FROM reg.mini.dev/go:v1.26.5 AS backend-builder
+WORKDIR /app/backend
+COPY services/backend/go.mod services/backend/go.sum ./
 RUN go mod download
 COPY services/backend/ ./
-ARG APP_VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${APP_VERSION}" -o /justai-backend .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o justai-backend
 
-FROM alpine:3.22 AS backend
-RUN apk add --no-cache ca-certificates poppler-utils tzdata wget \
-    && addgroup -S justai \
-    && adduser -S justai -G justai
+# Stage 3: Create the combined runtime image
+FROM reg.mini.dev/node:v26.5.1-dev AS runner
+USER root
 WORKDIR /app
-COPY --from=backend-build /justai-backend ./justai-backend
-RUN mkdir -p /app/data && chown -R justai:justai /app
+
+RUN apk add --upgrade --no-cache \
+    ca-certificates \
+    poppler-utils \
+    tini \
+    tzdata \
+    wget \
+    libcrypto3 \
+    libssl3
+
+# Create user and group
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nextjs
+
+# Copy the backend binary
+COPY --from=backend-builder /app/backend/justai-backend /app/justai-backend
+
+# Copy the frontend build
+COPY --from=frontend-builder /app/frontend/public /app/public
+
+# Set the correct permission for prerender cache
+RUN mkdir .next \
+    && chown nextjs:nodejs .next
+
+# Automatically leverage output traces to reduce image size
+COPY --from=frontend-builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
+COPY --from=frontend-builder --chown=nextjs:nodejs /app/frontend/.next/static ./.next/static
+
+RUN chown -R nextjs:nodejs /app
+
+RUN mkdir -p /etc/justai \
+    && chown -R nextjs:nodejs /etc/justai
+
+RUN mkdir -p /app/data \
+    && chown -R nextjs:nodejs /app/data
+
 ENV JUSTAI_ENV=production
-ENV JUSTAI_PORT=8080
-ENV JUSTAI_TRANSCRIPTION_LOCAL_STORAGE_PATH=/app/data/transcription
-USER justai
-EXPOSE 8080
-HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=6 \
-  CMD wget -q -O - http://127.0.0.1:8080/api/v1/health/ready >/dev/null || exit 1
-ENTRYPOINT ["/app/justai-backend"]
+ENV NODE_ENV=production
+
+VOLUME [ "/etc/justai", "/app/data" ]
+
+EXPOSE 8080 3000
+
+USER nextjs
+
+ENTRYPOINT ["/sbin/tini", "--"]
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=12 \
+    CMD wget -q -O - http://127.0.0.1:8080/api/v1/health/ready >/dev/null \
+    && wget -q -O - http://127.0.0.1:3000/ >/dev/null || exit 1
+
+CMD ["sh", "-c", "./justai-backend --config /etc/justai/config.yaml & backend_pid=$!; node /app/server.js; status=$?; kill $backend_pid 2>/dev/null || true; wait $backend_pid 2>/dev/null || true; exit $status"]

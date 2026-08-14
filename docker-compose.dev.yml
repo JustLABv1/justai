@@ -18,8 +18,8 @@ services:
 
   justai-backend:
     build:
-      context: .
-      target: backend
+      context: ./services/backend
+      dockerfile: Dockerfile
     environment:
       JUSTAI_ENV: development
       JUSTAI_PORT: 8080
@@ -29,6 +29,8 @@ services:
       JUSTAI_FRONTEND_ORIGINS: http://localhost:3000
       JUSTAI_DEV_SEED: "true"
       JUSTAI_SECURE_COOKIES: "false"
+      JUSTAI_OIDC_REDIRECT_URL: http://localhost:8080/api/v1/auth/oidc/callback
+      JUSTAI_MCP_OAUTH_REDIRECT_URL: http://localhost:8080/api/v1/mcp/oauth/callback
       JUSTAI_ALLOW_PRIVATE_TARGETS: "false"
     ports:
       - "8080:8080"
@@ -36,6 +38,7 @@ services:
       justai-postgres:
         condition: service_healthy
     volumes:
+      - ./services/backend/config.example.yaml:/etc/justai/config.yaml:ro
       - justai-backend-data:/app/data
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/api/v1/health/ready"]
@@ -45,8 +48,8 @@ services:
 
   justai-frontend:
     build:
-      context: .
-      target: frontend
+      context: ./services/frontend
+      dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:8080
     environment:

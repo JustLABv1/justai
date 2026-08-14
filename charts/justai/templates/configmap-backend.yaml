@@ -1,0 +1,44 @@
+{{- $origins := .Values.config.frontendOrigins -}}
+{{- if not $origins }}
+{{- $origins = list (include "justai.publicOrigin" .) -}}
+{{- end }}
+{{- $oidcRedirect := .Values.config.oidc.redirectUrl | default (printf "%s/api/v1/auth/oidc/callback" (include "justai.publicOrigin" .)) -}}
+{{- $mcpRedirect := .Values.config.mcpOAuthRedirectUrl | default (printf "%s/api/v1/mcp/oauth/callback" (include "justai.publicOrigin" .)) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "justai.fullname" . }}-backend-config
+  labels:
+    {{- include "justai.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    port: {{ .Values.config.port | quote }}
+    database_url: ""
+    jwt_secret: ""
+    encryption_key: ""
+    frontend_origins:
+      {{- toYaml $origins | nindent 6 }}
+    oidc:
+      issuer: {{ .Values.config.oidc.issuer | quote }}
+      client_id: {{ .Values.config.oidc.clientId | quote }}
+      client_secret: ""
+      redirect_url: {{ $oidcRedirect | quote }}
+    mcp_oauth_redirect_url: {{ $mcpRedirect | quote }}
+    allow_private_targets: {{ .Values.config.allowPrivateTargets }}
+    dev_seed: {{ .Values.config.devSeed }}
+    secure_cookies: {{ .Values.config.secureCookies }}
+    cookie_same_site: {{ .Values.config.cookieSameSite | quote }}
+    cookie_domain: {{ .Values.config.cookieDomain | quote }}
+    transcription:
+      storage_driver: {{ .Values.config.transcription.storageDriver | quote }}
+      local_storage_path: {{ .Values.config.transcription.localStoragePath | quote }}
+      s3_endpoint: {{ .Values.config.transcription.s3Endpoint | quote }}
+      s3_region: {{ .Values.config.transcription.s3Region | quote }}
+      s3_bucket: {{ .Values.config.transcription.s3Bucket | quote }}
+      audio_retention_days: {{ .Values.config.transcription.audioRetentionDays }}
+      diarization_window_seconds: {{ .Values.config.transcription.diarizationWindowSeconds }}
+      diarization_overlap_seconds: {{ .Values.config.transcription.diarizationOverlapSeconds }}
+      streaming_chunk_ms: {{ .Values.config.transcription.streamingChunkMs }}
+      streaming_overlap_ms: {{ .Values.config.transcription.streamingOverlapMs }}
+      streaming_prompt_chars: {{ .Values.config.transcription.streamingPromptChars }}
+      max_session_hours: {{ .Values.config.transcription.maxSessionHours }}

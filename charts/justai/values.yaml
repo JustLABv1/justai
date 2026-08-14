@@ -1,0 +1,206 @@
+## JustAI Helm chart defaults.
+## Supply production secrets through an external Secret, Vault integration, or
+## set secrets.create=true with non-empty values in a private values file.
+
+# microservices uses the backend and frontend images separately. monolith uses
+# the combined root Dockerfile image.
+deploymentMode: microservices
+replicaCount: 1
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+
+config:
+  environment: production
+  port: 8080
+  # Empty derives the first ingress host and scheme. Set explicitly when the
+  # frontend is exposed by another hostname.
+  frontendOrigins: []
+  database:
+    # Required when postgresql.enabled=false and secrets.create=true.
+    # Prefer supplying this through an external Secret in production.
+    url: ""
+  # These are only used when secrets.create=true. External Secrets should
+  # provide the corresponding Secret keys instead.
+  jwtSecret: ""
+  encryptionKey: ""
+  oidc:
+    issuer: ""
+    clientId: ""
+    # The callback defaults to the first ingress host plus the backend path.
+    redirectUrl: ""
+  mcpOAuthRedirectUrl: ""
+  allowPrivateTargets: false
+  devSeed: false
+  secureCookies: true
+  cookieSameSite: lax
+  cookieDomain: ""
+  transcription:
+    storageDriver: local
+    localStoragePath: /app/data/transcription
+    s3Endpoint: ""
+    s3Region: us-east-1
+    s3Bucket: ""
+    streamingChunkMs: 2500
+    streamingOverlapMs: 500
+    streamingPromptChars: 160
+    audioRetentionDays: 30
+    diarizationWindowSeconds: 30
+    diarizationOverlapSeconds: 5
+    maxSessionHours: 8
+
+monolith:
+  image:
+    repository: ghcr.io/justlabv1/justai
+    pullPolicy: IfNotPresent
+    # Empty follows Chart.appVersion (latest for local chart, release version
+    # when the chart is packaged by the release workflow).
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 80
+    backendPort: 8080
+    frontendPort: 3000
+  extraEnv: []
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+backend:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/justlabv1/justai
+    pullPolicy: IfNotPresent
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 8080
+  extraEnv: []
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/justlabv1/justai
+    pullPolicy: IfNotPresent
+    tag: ""
+  # Published frontend images default to same-origin /api/v1 requests. If you
+  # build a frontend for a separately exposed backend, pass
+  # NEXT_PUBLIC_API_URL to services/frontend/Dockerfile at build time.
+  service:
+    type: ClusterIP
+    port: 3000
+  extraEnv: []
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  hosts:
+    - host: justai.example.com
+      paths:
+        - path: /api/v1
+          pathType: Prefix
+          backend: true
+        - path: /health
+          pathType: Prefix
+          backend: true
+        - path: /
+          pathType: Prefix
+  tls: []
+
+uploads:
+  persistence:
+    enabled: false
+    storageClassName: ""
+    size: 10Gi
+
+postgresql:
+  enabled: false
+  image: pgvector/pgvector:pg17
+  pullPolicy: IfNotPresent
+  mountPath: /var/lib/postgresql/data
+  persistence:
+    enabled: true
+    storageClassName: ""
+    size: 20Gi
+  auth:
+    database: justai
+    username: justai
+    password: ""
+  service:
+    type: ClusterIP
+    port: 5432
+  podSecurityContext: {}
+  securityContext: {}
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+secrets:
+  create: false
+  existingSecret: ""
+  vault:
+    enabled: false
+    authRef: ""
+    type: kv-v2
+    mount: secrets
+    namespace: ""
+    path: ""
+    refreshAfter: 30s
+    destination:
+      create: true
+  refs:
+    databaseURL:
+      name: ""
+      key: database-url
+    postgresqlPassword:
+      name: ""
+      key: postgresql-password
+    jwtSecret:
+      name: ""
+      key: jwt-secret
+    encryptionKey:
+      name: ""
+      key: encryption-key
+
+customCA:
+  enabled: false
+  name: ""
+  secret: true
+  mountPath: /etc/ssl/certs/extra-ca.crt
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
