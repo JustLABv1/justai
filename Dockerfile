@@ -25,19 +25,45 @@ RUN go mod download
 COPY services/backend/ ./
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o justai-backend
 
-# Stage 3: Create the combined runtime image
+# Stage 3: Build the PDF extraction utility. The MinimOS Node base image does
+# not publish Poppler in its APK repository, so keep the dependency isolated
+# and copy only the utility's non-glibc shared libraries into the final image.
+FROM debian:bookworm-slim AS poppler-runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/poppler/bin /opt/poppler/lib \
+    && cp /usr/bin/pdftotext /opt/poppler/bin/pdftotext \
+    && ldd /usr/bin/pdftotext \
+        | awk '/=> \// {print $3} /^\// {print $1}' \
+        | while read -r library; do \
+            case "$library" in \
+                */libc.so.*|*/libm.so.*|*/libpthread.so.*|*/libdl.so.*|*/librt.so.*|*/libgcc_s.so.*|*/libstdc++.so.*|*/ld-linux*) ;; \
+                *) cp -L "$library" /opt/poppler/lib/ ;; \
+            esac; \
+        done \
+    && printf '%s\n' \
+        '#!/bin/sh' \
+        'export LD_LIBRARY_PATH="/opt/poppler/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"' \
+        'exec /opt/poppler/bin/pdftotext "$@"' \
+        > /usr/local/bin/pdftotext \
+    && chmod 0755 /usr/local/bin/pdftotext
+
+# Stage 4: Create the combined runtime image
 FROM reg.mini.dev/node:v26.5.1-dev AS runner
 USER root
 WORKDIR /app
 
 RUN apk add --upgrade --no-cache \
     ca-certificates \
-    poppler-utils \
     tini \
     tzdata \
     wget \
     libcrypto3 \
     libssl3
+
+COPY --from=poppler-runtime /opt/poppler /opt/poppler
+COPY --from=poppler-runtime /usr/local/bin/pdftotext /usr/local/bin/pdftotext
 
 # Create user and group
 RUN addgroup --system --gid 1001 nodejs \
