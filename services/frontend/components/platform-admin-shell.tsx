@@ -14,6 +14,7 @@ import {
   Globe2,
   KeyRound,
   MoreHorizontal,
+  Megaphone,
   Network,
   RefreshCw,
   RotateCcw,
@@ -29,6 +30,8 @@ import { api } from "@/lib/api"
 import type { AdminTab, Endpoint, User } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { EndpointsView } from "@/components/endpoints-view"
+import { PlatformAnnouncementsView } from "@/components/platform-announcements-view"
+import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -75,6 +78,8 @@ const tabs: Array<{ id: AdminTab; label: string; icon: typeof ShieldCheck }> = [
   { id: "endpoints", label: "Endpoints", icon: Globe2 },
   { id: "mcp", label: "MCP", icon: Wrench },
   { id: "controls", label: "Platform controls", icon: ShieldCheck },
+  { id: "authentication", label: "Authentication", icon: KeyRound },
+  { id: "announcements", label: "Announcements", icon: Megaphone },
   { id: "health", label: "Health", icon: Database },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "audit", label: "Audit", icon: KeyRound },
@@ -82,6 +87,7 @@ const tabs: Array<{ id: AdminTab; label: string; icon: typeof ShieldCheck }> = [
 
 type PlatformSettings = {
   loginEnabled: boolean
+  localAuthEnabled: boolean
   signupEnabled: boolean
   aiEnabled: boolean
   voiceEnabled: boolean
@@ -100,6 +106,7 @@ type PlatformAdminShellProps = {
 
 const emptySettings: PlatformSettings = {
   loginEnabled: true,
+  localAuthEnabled: true,
   signupEnabled: true,
   aiEnabled: true,
   voiceEnabled: true,
@@ -311,6 +318,8 @@ export function PlatformAdminShell({
       {activeTab === "controls" && (
         <ControlsView settings={settings} saving={saving} onChange={setSettings} onSave={() => void saveSettings()} />
       )}
+      {activeTab === "authentication" && <PlatformAuthenticationView />}
+      {activeTab === "announcements" && <PlatformAnnouncementsView />}
       {(activeTab === "users" || activeTab === "workspaces") && (
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -432,6 +441,7 @@ function OverviewView({ overview, onTabChange }: { overview: Record<string, any>
 function ControlsView({ settings, saving, onChange, onSave }: { settings: PlatformSettings; saving: boolean; onChange: (settings: PlatformSettings) => void; onSave: () => void }) {
   const controls: Array<[keyof PlatformSettings, string, string]> = [
     ["loginEnabled", "Login", "Allow existing users to sign in."],
+    ["localAuthEnabled", "Local password auth", "Allow password login and password account creation."],
     ["signupEnabled", "Signup", "Allow new password and OIDC provisioning."],
     ["aiEnabled", "AI chat", "Allow model requests and text chat."],
     ["voiceEnabled", "Voice", "Allow realtime voice and speech synthesis."],

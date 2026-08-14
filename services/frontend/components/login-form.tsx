@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { ArrowRight, KeyRound, ShieldCheck } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -17,6 +17,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { api, API_URL } from "@/lib/api"
+import { usePlatformConfig } from "@/components/platform-config"
+import { oidcLoginPath } from "@/lib/platform-config-logic"
 import { cn } from "@/lib/utils"
 
 type AuthMode = "login" | "register"
@@ -32,37 +34,26 @@ export function LoginForm({
   const [displayName, setDisplayName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const [oidcEnabled, setOidcEnabled] = useState(false)
-  const [loginEnabled, setLoginEnabled] = useState(true)
-  const [signupEnabled, setSignupEnabled] = useState(true)
-  const [maintenanceMessage, setMaintenanceMessage] = useState("")
 
-  useEffect(() => {
-    let cancelled = false
-    void api
-      .getAuthConfig()
-      .then((config) => {
-        if (!cancelled) {
-          setOidcEnabled(config.oidcEnabled)
-          setLoginEnabled(config.loginEnabled !== false)
-          setSignupEnabled(config.signupEnabled !== false)
-          setMaintenanceMessage(config.maintenanceMessage ?? "")
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setOidcEnabled(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { config } = usePlatformConfig()
+  const oidcProviders =
+    config?.oidcProviders?.length
+      ? config.oidcProviders
+      : config?.oidcEnabled
+        ? [{ id: "legacy", slug: "", displayName: config.oidcLabel || "Continue with OIDC" }]
+        : []
+  const oidcEnabled = config?.oidcEnabled ?? false
+  const loginEnabled = config?.loginEnabled !== false
+  const localAuthEnabled = config?.localAuthEnabled !== false
+  const signupEnabled = config?.signupEnabled !== false
+  const maintenanceMessage = config?.maintenanceMessage ?? ""
 
   const isRegister = mode === "register"
   // Keep the sign-in form usable even when the platform gate is closed. The
   // backend intentionally allows platform administrators to recover the
   // deployment while rejecting regular users.
   const modeGateEnabled = isRegister ? signupEnabled : loginEnabled
-  const modeEnabled = isRegister ? signupEnabled : true
+  const modeEnabled = isRegister ? signupEnabled && localAuthEnabled : true
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode)
@@ -75,12 +66,12 @@ export function LoginForm({
     event.preventDefault()
     setError("")
 
-    if (isRegister && !signupEnabled) {
+    if (isRegister && (!signupEnabled || !localAuthEnabled)) {
       setError(
         maintenanceMessage ||
-          (isRegister
+          (localAuthEnabled
             ? "Account creation is temporarily disabled."
-            : "Sign in is temporarily disabled.")
+            : "Local password authentication is disabled.")
       )
       return
     }
@@ -193,7 +184,7 @@ export function LoginForm({
                 </Field>
               )}
 
-              {!modeGateEnabled && !error && (
+              {(!modeGateEnabled || (!isRegister && !localAuthEnabled)) && !error && (
                 <Alert>
                   <ShieldCheck aria-hidden="true" />
                   <AlertTitle>Temporarily unavailable</AlertTitle>
@@ -201,7 +192,9 @@ export function LoginForm({
                     {maintenanceMessage ||
                       (isRegister
                         ? "Account creation is temporarily disabled."
-                        : "Sign in is temporarily disabled for regular users. Platform administrators can still sign in for recovery.")}
+                        : !localAuthEnabled
+                          ? "Local password authentication is disabled for regular users. Platform administrators can still sign in for recovery."
+                          : "Sign in is temporarily disabled for regular users. Platform administrators can still sign in for recovery.")}
                   </AlertDescription>
                 </Alert>
               )}
@@ -231,21 +224,23 @@ export function LoginForm({
                 </Button>
               </Field>
 
-              {oidcEnabled && (!isRegister || signupEnabled) && (
+              {oidcEnabled && oidcProviders.length > 0 && (!isRegister || signupEnabled) && (
                 <>
                   <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
                     Or continue with
                   </FieldSeparator>
 
-                  <Field>
-                    <a
-                      className={buttonVariants({ variant: "outline" })}
-                      href={`${API_URL}/api/v1/auth/oidc/start?next=${encodeURIComponent(safeNext(typeof window === "undefined" ? "" : window.location.search))}`}
-                    >
-                      <KeyRound data-icon="inline-start" aria-hidden="true" />
-                      Continue with OIDC
-                    </a>
-                  </Field>
+                  {oidcProviders.map((provider) => (
+                    <Field key={provider.id || provider.slug}>
+                      <a
+                        className={buttonVariants({ variant: "outline" })}
+                        href={`${API_URL}${oidcLoginPath(provider.slug, safeNext(typeof window === "undefined" ? "" : window.location.search))}`}
+                      >
+                        <KeyRound data-icon="inline-start" aria-hidden="true" />
+                        {provider.displayName || "Continue with OIDC"}
+                      </a>
+                    </Field>
+                  ))}
                 </>
               )}
 

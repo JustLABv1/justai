@@ -674,7 +674,7 @@ export function Workspace() {
 
   if (status === "error" || !user) {
     return (
-      <main className="flex min-h-svh items-center justify-center bg-background p-6">
+      <main className="flex min-h-full flex-1 items-center justify-center bg-background p-6">
         <Alert className="max-w-md" variant="destructive">
           <AlertTitle>Workspace unavailable</AlertTitle>
           <AlertDescription className="flex flex-col gap-4">
@@ -694,7 +694,7 @@ export function Workspace() {
 
   return (
     <>
-      <div className="relative flex h-svh min-h-0 overflow-hidden bg-background">
+      <div className="relative flex h-full min-h-0 flex-1 overflow-hidden bg-background">
         <FocusWorkspaceSidebar
           activeConversationId={activeConversationId}
           activeOrganization={activeOrganization}
@@ -909,7 +909,7 @@ export function Workspace() {
 
 function WorkspaceLoading() {
   return (
-    <main className="flex min-h-svh items-center justify-center bg-background p-6">
+    <main className="flex min-h-full flex-1 items-center justify-center bg-background p-6">
       <div className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
         <BrandMark className="size-10" priority />
         <p className="text-sm text-muted-foreground">Loading JustAI…</p>

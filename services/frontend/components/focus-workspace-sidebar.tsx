@@ -191,7 +191,7 @@ export function FocusWorkspaceSidebar({
   return (
     <aside
       className={cn(
-        "flex h-svh shrink-0 overflow-hidden border-r border-border bg-background transition-[width] duration-200 ease-out",
+        "flex h-full min-h-0 shrink-0 overflow-hidden border-r border-border bg-background transition-[width] duration-200 ease-out",
         historyVisible
           ? "w-[352px] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:shadow-lg"
           : "w-16 md:w-16"

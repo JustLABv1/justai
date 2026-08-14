@@ -44,6 +44,9 @@ func main() {
 		seedDevelopmentEndpoint(ctx, db)
 	}
 	application := server.New(cfg, db)
+	if err := application.ImportLegacyOIDCProvider(ctx); err != nil {
+		log.Fatalf("import legacy OIDC provider: %v", err)
+	}
 	workerContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	application.RAG.Start(workerContext)

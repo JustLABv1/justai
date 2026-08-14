@@ -15,6 +15,7 @@ import (
 
 type platformSettingsRequest struct {
 	LoginEnabled         *bool   `json:"loginEnabled"`
+	LocalAuthEnabled     *bool   `json:"localAuthEnabled"`
 	SignupEnabled        *bool   `json:"signupEnabled"`
 	AIEnabled            *bool   `json:"aiEnabled"`
 	VoiceEnabled         *bool   `json:"voiceEnabled"`
@@ -60,6 +61,9 @@ func (a *App) putPlatformSettings(c *gin.Context) {
 	if request.LoginEnabled != nil {
 		current.LoginEnabled = *request.LoginEnabled
 	}
+	if request.LocalAuthEnabled != nil {
+		current.LocalAuthEnabled = *request.LocalAuthEnabled
+	}
 	if request.SignupEnabled != nil {
 		current.SignupEnabled = *request.SignupEnabled
 	}
@@ -85,7 +89,7 @@ func (a *App) putPlatformSettings(c *gin.Context) {
 		current.MaintenanceMessage = strings.TrimSpace(*request.MaintenanceMessage)
 	}
 	principal, _ := middleware.GetPrincipal(c)
-	if _, err := a.DB.ExecContext(c, `UPDATE platform_settings SET login_enabled = $1, signup_enabled = $2, ai_enabled = $3, voice_enabled = $4, transcription_enabled = $5, mcp_enabled = $6, knowledge_enabled = $7, attachments_enabled = $8, maintenance_message = $9, updated_by = $10, updated_at = now() WHERE id = TRUE`, current.LoginEnabled, current.SignupEnabled, current.AIEnabled, current.VoiceEnabled, current.TranscriptionEnabled, current.MCPEnabled, current.KnowledgeEnabled, current.AttachmentsEnabled, current.MaintenanceMessage, principal.UserID); err != nil {
+	if _, err := a.DB.ExecContext(c, `UPDATE platform_settings SET login_enabled = $1, local_auth_enabled = $2, signup_enabled = $3, ai_enabled = $4, voice_enabled = $5, transcription_enabled = $6, mcp_enabled = $7, knowledge_enabled = $8, attachments_enabled = $9, maintenance_message = $10, updated_by = $11, updated_at = now() WHERE id = TRUE`, current.LoginEnabled, current.LocalAuthEnabled, current.SignupEnabled, current.AIEnabled, current.VoiceEnabled, current.TranscriptionEnabled, current.MCPEnabled, current.KnowledgeEnabled, current.AttachmentsEnabled, current.MaintenanceMessage, principal.UserID); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}

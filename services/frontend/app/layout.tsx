@@ -3,6 +3,10 @@ import type { Metadata } from "next"
 
 import { ThemeProvider } from "@/components/theme-provider"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import {
+  PlatformBannerStack,
+  PlatformConfigProvider,
+} from "@/components/platform-config"
 
 export const metadata: Metadata = {
   title: "JustAI",
@@ -34,7 +38,14 @@ export default function RootLayout({
         className="antialiased"
       >
         <ThemeProvider>
-          <TooltipProvider>{children}</TooltipProvider>
+          <TooltipProvider>
+            <PlatformConfigProvider>
+              <div className="flex h-svh min-h-svh flex-col">
+                <PlatformBannerStack />
+                <div className="flex h-full min-h-0 flex-1 flex-col">{children}</div>
+              </div>
+            </PlatformConfigProvider>
+          </TooltipProvider>
         </ThemeProvider>
       </body>
     </html>

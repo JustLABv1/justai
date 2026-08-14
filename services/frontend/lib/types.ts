@@ -18,9 +18,53 @@ export type AdminTab =
   | "endpoints"
   | "mcp"
   | "controls"
+  | "authentication"
+  | "announcements"
   | "health"
   | "analytics"
   | "audit"
+
+export type OIDCProviderSummary = {
+  id: string
+  slug: string
+  displayName: string
+}
+
+export type AdminOIDCProvider = OIDCProviderSummary & {
+  issuer: string
+  clientId: string
+  scopes: string
+  enabled: boolean
+  secretConfigured: boolean
+  lastTestedAt?: string | null
+  lastError?: string
+  callbackUrl: string
+}
+
+export type PlatformBanner = {
+  id: string
+  message: string
+  severity: "info" | "success" | "warning" | "danger"
+  linkUrl?: string
+  priority: number
+  enabled: boolean
+  dismissible: boolean
+  startsAt: string
+  endsAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type AuthConfig = {
+  oidcEnabled: boolean
+  oidcLabel?: string
+  oidcProviders: OIDCProviderSummary[]
+  loginEnabled: boolean
+  localAuthEnabled: boolean
+  signupEnabled: boolean
+  maintenanceMessage?: string
+  banners: PlatformBanner[]
+}
 
 export type User = {
   id: string

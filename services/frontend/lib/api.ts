@@ -1,3 +1,5 @@
+import type { AuthConfig } from "@/lib/types"
+
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
 const REQUEST_TIMEOUT_MS = 30_000
@@ -241,15 +243,7 @@ export const api = {
     }),
   getOrganizationId: () => organizationIdForRequest() || null,
   getAuthConfig: () =>
-    request<{
-      oidcEnabled: boolean
-      oidcLabel?: string
-      loginEnabled?: boolean
-      signupEnabled?: boolean
-      maintenanceMessage?: string
-    }>(
-      "/api/v1/auth/config"
-    ),
+    request<AuthConfig>("/api/v1/auth/config"),
   setOrganizationId: (organizationId: string | null) => {
     selectedOrganizationId = organizationId || ""
     hasLoadedOrganizationId = true

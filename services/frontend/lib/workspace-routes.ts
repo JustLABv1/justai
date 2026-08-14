@@ -39,6 +39,8 @@ const adminTabs: AdminTab[] = [
   "endpoints",
   "mcp",
   "controls",
+  "authentication",
+  "announcements",
   "health",
   "analytics",
   "audit",

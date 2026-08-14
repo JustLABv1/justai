@@ -38,6 +38,7 @@ func (a *App) platformCapabilityEnabled(ctx context.Context, feature string) boo
 
 type platformSettings struct {
 	LoginEnabled         bool   `json:"loginEnabled"`
+	LocalAuthEnabled     bool   `json:"localAuthEnabled"`
 	SignupEnabled        bool   `json:"signupEnabled"`
 	AIEnabled            bool   `json:"aiEnabled"`
 	VoiceEnabled         bool   `json:"voiceEnabled"`
@@ -51,14 +52,17 @@ type platformSettings struct {
 }
 
 func (a *App) readPlatformSettings(c *gin.Context) (platformSettings, error) {
+	if a.DB == nil {
+		return platformSettings{LoginEnabled: true, LocalAuthEnabled: true, SignupEnabled: true, AIEnabled: true, VoiceEnabled: true, TranscriptionEnabled: true, MCPEnabled: true, KnowledgeEnabled: true, AttachmentsEnabled: true}, nil
+	}
 	var settings platformSettings
-	err := a.DB.QueryRowContext(c, `SELECT login_enabled, signup_enabled, ai_enabled, voice_enabled, transcription_enabled, mcp_enabled, knowledge_enabled, attachments_enabled, maintenance_message, updated_by, updated_at FROM platform_settings WHERE id = TRUE`).Scan(
-		&settings.LoginEnabled, &settings.SignupEnabled, &settings.AIEnabled, &settings.VoiceEnabled,
+	err := a.DB.QueryRowContext(c, `SELECT login_enabled, local_auth_enabled, signup_enabled, ai_enabled, voice_enabled, transcription_enabled, mcp_enabled, knowledge_enabled, attachments_enabled, maintenance_message, updated_by, updated_at FROM platform_settings WHERE id = TRUE`).Scan(
+		&settings.LoginEnabled, &settings.LocalAuthEnabled, &settings.SignupEnabled, &settings.AIEnabled, &settings.VoiceEnabled,
 		&settings.TranscriptionEnabled, &settings.MCPEnabled, &settings.KnowledgeEnabled,
 		&settings.AttachmentsEnabled, &settings.MaintenanceMessage, &settings.UpdatedBy, &settings.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return platformSettings{LoginEnabled: true, SignupEnabled: true, AIEnabled: true, VoiceEnabled: true, TranscriptionEnabled: true, MCPEnabled: true, KnowledgeEnabled: true, AttachmentsEnabled: true}, nil
+		return platformSettings{LoginEnabled: true, LocalAuthEnabled: true, SignupEnabled: true, AIEnabled: true, VoiceEnabled: true, TranscriptionEnabled: true, MCPEnabled: true, KnowledgeEnabled: true, AttachmentsEnabled: true}, nil
 	}
 	return settings, err
 }

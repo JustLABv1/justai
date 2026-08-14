@@ -298,7 +298,7 @@ export function TranscriptionJoin() {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-background px-4 py-8">
+    <main className="flex min-h-full flex-1 items-center justify-center bg-background px-4 py-8">
       <Card className="w-full max-w-lg">
         <CardHeader>
           <div className="mb-2 flex size-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">

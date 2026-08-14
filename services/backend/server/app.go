@@ -104,6 +104,15 @@ func (a *App) Router() *gin.Engine {
 	protected.GET("/admin/overview", a.getPlatformOverview)
 	protected.GET("/admin/settings", a.getPlatformSettings)
 	protected.PUT("/admin/settings", a.putPlatformSettings)
+	protected.GET("/admin/oidc/providers", a.listPlatformOIDCProviders)
+	protected.POST("/admin/oidc/providers", a.createPlatformOIDCProvider)
+	protected.PATCH("/admin/oidc/providers/:id", a.updatePlatformOIDCProvider)
+	protected.DELETE("/admin/oidc/providers/:id", a.deletePlatformOIDCProvider)
+	protected.POST("/admin/oidc/providers/:id/test", a.testPlatformOIDCProvider)
+	protected.GET("/admin/banners", a.listPlatformBanners)
+	protected.POST("/admin/banners", a.createPlatformBanner)
+	protected.PATCH("/admin/banners/:id", a.updatePlatformBanner)
+	protected.DELETE("/admin/banners/:id", a.deletePlatformBanner)
 	protected.GET("/admin/users", a.listPlatformUsers)
 	protected.GET("/admin/users/:id", a.getPlatformUser)
 	protected.PATCH("/admin/users/:id", a.updatePlatformUser)
@@ -218,6 +227,7 @@ func (a *App) registerAuthRoutes(router *gin.Engine) {
 	group.POST("/register", a.register)
 	group.POST("/login", a.login)
 	group.GET("/oidc/start", a.oidcStart)
+	group.GET("/oidc/:provider/start", a.oidcStart)
 	group.GET("/oidc/callback", a.oidcCallback)
 	group.GET("/config", a.authConfig)
 }
@@ -293,9 +303,19 @@ func (a *App) me(c *gin.Context) {
 func (a *App) authConfig(c *gin.Context) {
 	settings, err := a.readPlatformSettings(c)
 	if err != nil {
-		settings = platformSettings{LoginEnabled: true, SignupEnabled: true, AIEnabled: true, VoiceEnabled: true, TranscriptionEnabled: true, MCPEnabled: true, KnowledgeEnabled: true, AttachmentsEnabled: true}
+		settings = platformSettings{LoginEnabled: true, LocalAuthEnabled: true, SignupEnabled: true, AIEnabled: true, VoiceEnabled: true, TranscriptionEnabled: true, MCPEnabled: true, KnowledgeEnabled: true, AttachmentsEnabled: true}
 	}
-	c.JSON(http.StatusOK, gin.H{"oidcEnabled": a.Config.OIDCEnabled(), "oidcLabel": "Continue with OIDC", "loginEnabled": settings.LoginEnabled, "signupEnabled": settings.SignupEnabled, "maintenanceMessage": settings.MaintenanceMessage})
+	providers := a.publicOIDCProviders(c)
+	c.JSON(http.StatusOK, gin.H{
+		"oidcEnabled":        len(providers) > 0,
+		"oidcLabel":          "Continue with OIDC",
+		"oidcProviders":      providers,
+		"loginEnabled":       settings.LoginEnabled,
+		"localAuthEnabled":   settings.LocalAuthEnabled,
+		"signupEnabled":      settings.SignupEnabled,
+		"maintenanceMessage": settings.MaintenanceMessage,
+		"banners":            a.activePlatformBanners(c),
+	})
 }
 
 func (a *App) listOrganizations(c *gin.Context) {
