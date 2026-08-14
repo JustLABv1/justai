@@ -1,4 +1,4 @@
-FROM reg.mini.dev/node:v26.5.1-dev AS frontend-builder
+FROM reg.mini.dev/node:26.7.0-dev AS frontend-builder
 USER root
 WORKDIR /app/frontend
 
@@ -18,7 +18,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm run build
 
 # Stage 2: Build the backend
-FROM reg.mini.dev/go:v1.26.5 AS backend-builder
+FROM reg.mini.dev/go:v1.26.6 AS backend-builder
 WORKDIR /app/backend
 COPY services/backend/go.mod services/backend/go.sum ./
 RUN go mod download
@@ -50,7 +50,7 @@ RUN apt-get update \
     && chmod 0755 /usr/local/bin/pdftotext
 
 # Stage 4: Create the combined runtime image
-FROM reg.mini.dev/node:v26.5.1-dev AS runner
+FROM reg.mini.dev/node:26.7.0-dev AS runner
 USER root
 WORKDIR /app
 
