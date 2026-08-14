@@ -7,6 +7,7 @@ import {
   Database,
   Headphones,
   LoaderCircle,
+  Pin,
   Plug,
   Plus,
   Radio,
@@ -206,6 +207,35 @@ export function WorkspaceContext({
     }
   }
 
+  async function pinKnowledge(sourceId: string) {
+    setBusy(sourceId)
+    setNotice("")
+    try {
+      const targetConversationId =
+        conversationId ?? (await onEnsureConversation?.())
+      if (!targetConversationId) {
+        throw new Error("A conversation is required before pinning context.")
+      }
+      await api.patch(
+        `/api/v1/conversations/${targetConversationId}/context/knowledge/${sourceId}`,
+        { contextScope: "persistent" }
+      )
+      const next = await api.get<ConversationContext>(
+        `/api/v1/conversations/${targetConversationId}/context`
+      )
+      setContext(next)
+      setLoadedConversationId(targetConversationId)
+    } catch (caught) {
+      setNotice(
+        caught instanceof Error
+          ? caught.message
+          : "Context could not be pinned."
+      )
+    } finally {
+      setBusy("")
+    }
+  }
+
   const panel = (
     <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 py-5">
       <div className="flex items-start justify-between gap-3">
@@ -276,42 +306,59 @@ export function WorkspaceContext({
           {availableSources.length > 0 ? (
             availableSources.slice(0, 6).map((source) => (
               <ContextItem
-                detail={`${source.status}${source.sourceType ? ` · ${source.sourceType}` : ""}`}
+                detail={`${source.contextScope === "message" ? "this message · " : ""}${source.status}${source.sourceType ? ` · ${source.sourceType}` : ""}`}
                 icon={BookOpenText}
                 key={source.id}
                 label={source.title}
                 action={
-                  <Button
-                    aria-label={`${visibleContext.knowledgeSources.some((item) => item.id === source.id) ? "Detach" : "Attach"} ${source.title}`}
-                    disabled={
-                      busy === source.id ||
-                      (source.status === "failed" &&
-                        !visibleContext.knowledgeSources.some(
-                          (item) => item.id === source.id
-                        ))
-                    }
-                    onClick={() =>
-                      void toggle(
-                        "knowledge",
-                        source.id,
-                        visibleContext.knowledgeSources.some(
-                          (item) => item.id === source.id
-                        )
-                      )
-                    }
-                    size="icon-xs"
-                    variant="ghost"
-                  >
-                    {busy === source.id ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : visibleContext.knowledgeSources.some(
+                  <div className="flex items-center gap-1">
+                    {source.contextScope === "message" &&
+                      visibleContext.knowledgeSources.some(
                         (item) => item.id === source.id
-                      ) ? (
-                      <CheckCircle2 />
-                    ) : (
-                      <Plus />
-                    )}
-                  </Button>
+                      ) && (
+                        <Button
+                          aria-label={`Keep ${source.title} in conversation context`}
+                          disabled={busy === source.id}
+                          onClick={() => void pinKnowledge(source.id)}
+                          size="icon-xs"
+                          title="Keep in conversation context"
+                          variant="ghost"
+                        >
+                          <Pin />
+                        </Button>
+                      )}
+                    <Button
+                      aria-label={`${visibleContext.knowledgeSources.some((item) => item.id === source.id) ? "Remove" : "Attach"} ${source.title}`}
+                      disabled={
+                        busy === source.id ||
+                        (source.status === "failed" &&
+                          !visibleContext.knowledgeSources.some(
+                            (item) => item.id === source.id
+                          ))
+                      }
+                      onClick={() =>
+                        void toggle(
+                          "knowledge",
+                          source.id,
+                          visibleContext.knowledgeSources.some(
+                            (item) => item.id === source.id
+                          )
+                        )
+                      }
+                      size="icon-xs"
+                      variant="ghost"
+                    >
+                      {busy === source.id ? (
+                        <LoaderCircle className="animate-spin" />
+                      ) : visibleContext.knowledgeSources.some(
+                          (item) => item.id === source.id
+                        ) ? (
+                        <CheckCircle2 />
+                      ) : (
+                        <Plus />
+                      )}
+                    </Button>
+                  </div>
                 }
               />
             ))

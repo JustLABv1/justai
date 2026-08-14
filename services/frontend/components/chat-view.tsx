@@ -23,6 +23,7 @@ import {
   Pencil,
   RefreshCw,
   RotateCcw,
+  Quote,
   ThumbsDown,
   ThumbsUp,
   Volume2,
@@ -32,17 +33,24 @@ import {
   ActionBarPrimitive,
   AssistantRuntimeProvider,
   AttachmentPrimitive,
+  AuiConfig,
   BranchPickerPrimitive,
   ComposerPrimitive,
   type ExportedMessageRepository,
   ErrorPrimitive,
+  McpAppRenderer,
+  McpAppsRemoteHost,
   type MessageFormatAdapter,
   MessagePrimitive,
-  MessagePartPrimitive,
+  QueueItemPrimitive,
+  SelectionToolbarPrimitive,
+  Tools,
   ThreadPrimitive,
   type ThreadHistoryAdapter,
   type AttachmentAdapter,
+  type CompleteAttachment,
   type FeedbackAdapter,
+  type PendingAttachment,
   type SpeechSynthesisAdapter,
   WebSpeechDictationAdapter,
   useAui,
@@ -52,14 +60,16 @@ import {
 } from "@assistant-ui/react"
 import {
   AssistantChatTransport,
+  createResumableSessionStorage,
   useChatRuntime,
 } from "@assistant-ui/react-ai-sdk"
 import { lastAssistantMessageIsCompleteWithApprovalResponses } from "ai"
 import type { UIMessage } from "ai"
 
-import { AssistantMarkdown } from "@/components/assistant-ui/markdown-text"
-import { AssistantSource } from "@/components/assistant-ui/sources"
-import { ToolFallback } from "@/components/assistant-ui/tool-fallback"
+import {
+  AssistantMessageParts,
+  UserMessageParts,
+} from "@/components/assistant-ui/message-parts"
 import { VoiceControl } from "@/components/assistant-ui/voice"
 import { createJustAIVoiceAdapter } from "@/components/assistant-ui/voice-adapter"
 import { BrandMark } from "@/components/brand-mark"
@@ -77,6 +87,7 @@ import type {
   Conversation,
   ConversationContext,
   Endpoint,
+  KnowledgeSource,
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -112,6 +123,10 @@ type DiscoveredChatModel = {
   ownedBy?: string
 }
 
+type UploadedConversationAttachment = {
+  source: KnowledgeSource
+}
+
 function supportsVoiceTranscription(endpoint: Endpoint) {
   const capabilities = endpoint.capabilities ?? {}
   if (Object.prototype.hasOwnProperty.call(capabilities, "transcription")) {
@@ -130,6 +145,18 @@ function supportsVoiceTranscription(endpoint: Endpoint) {
   return (
     endpoint.providerType === "openai" || endpoint.providerType === "gemini"
   )
+}
+
+function supportsVision(endpoint?: Endpoint) {
+  if (!endpoint) return false
+  const capabilities = endpoint.capabilities ?? {}
+  if (Object.prototype.hasOwnProperty.call(capabilities, "vision")) {
+    return Boolean(capabilities.vision)
+  }
+  if (Object.prototype.hasOwnProperty.call(capabilities, "multimodal")) {
+    return Boolean(capabilities.multimodal)
+  }
+  return false
 }
 
 function createHistoryAdapter(
@@ -253,14 +280,37 @@ function normalizeHistory(payload: AssistantHistoryResponse): UIMessage[] {
   return Array.isArray(payload.messages) ? payload.messages : []
 }
 
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result)
+      } else {
+        reject(new Error("The attachment could not be read"))
+      }
+    })
+    reader.addEventListener("error", () => {
+      reject(reader.error ?? new Error("The attachment could not be read"))
+    })
+    reader.readAsDataURL(file)
+  })
+}
+
 function createAttachmentAdapter(
-  upload: (file: File) => Promise<void>
+  upload: (file: File) => Promise<UploadedConversationAttachment>,
+  remove: (sourceId: string) => Promise<void>,
+  supportsVision: boolean
 ): AttachmentAdapter {
+  const uploadedByAttachmentId = new Map<
+    string,
+    UploadedConversationAttachment
+  >()
+
   return {
-    accept:
-      "image/*,text/plain,text/markdown,text/html,application/json,application/pdf",
-    async add({ file }) {
-      return {
+    accept: `${supportsVision ? "image/*," : ""}text/plain,text/markdown,text/html,application/json,application/pdf`,
+    async *add({ file }) {
+      const attachment: PendingAttachment = {
         id: crypto.randomUUID(),
         type: file.type.startsWith("image/") ? "image" : "document",
         name: file.name,
@@ -268,18 +318,93 @@ function createAttachmentAdapter(
         file,
         status: { type: "requires-action", reason: "composer-send" },
       }
+
+      // Vision images are sent as model content, not pushed through the text
+      // ingestion pipeline. This keeps image uploads from being advertised as
+      // Knowledge sources the backend cannot extract.
+      if (attachment.type === "image") {
+        if (!supportsVision) {
+          throw new Error("The selected endpoint cannot process images")
+        }
+        yield attachment
+        return
+      }
+
+      yield {
+        ...attachment,
+        status: { type: "running", reason: "uploading", progress: 0 },
+      }
+      try {
+        const uploaded = await upload(file)
+        uploadedByAttachmentId.set(attachment.id, uploaded)
+        yield attachment
+      } catch (caught) {
+        yield {
+          ...attachment,
+          status: {
+            type: "incomplete",
+            reason: "error",
+            message:
+              caught instanceof Error
+                ? caught.message
+                : "The file could not be prepared",
+          },
+        }
+      }
     },
-    async send(attachment) {
-      await upload(attachment.file)
+    async send(attachment): Promise<CompleteAttachment> {
+      if (attachment.type === "image") {
+        return {
+          ...attachment,
+          status: { type: "complete" },
+          content: [
+            {
+              type: "image",
+              image: await readFileAsDataURL(attachment.file),
+              filename: attachment.name,
+            },
+          ],
+        }
+      }
+      const uploaded = uploadedByAttachmentId.get(attachment.id)
+      if (!uploaded) {
+        throw new Error("The file is still being prepared. Wait until it is ready.")
+      }
+      uploadedByAttachmentId.delete(attachment.id)
       return {
         ...attachment,
         status: { type: "complete" },
-        content: [],
+        content: [
+          {
+            // The UI keeps a lightweight reference so the file can render in
+            // the sent message without putting a second 25 MB payload on the
+            // chat request. The backend resolves the source id only inside
+            // the authorized conversation relation.
+            type: "file",
+            data: `justai-source:${uploaded.source.id}`,
+            sourceType: "id",
+            filename: attachment.name,
+            mimeType:
+              attachment.contentType ||
+              uploaded.source.mimeType ||
+              "application/octet-stream",
+          },
+          {
+            type: "data",
+            name: "justai-attachment",
+            data: {
+              sourceId: uploaded.source.id,
+              title: uploaded.source.title,
+              contextScope: "message",
+            },
+          },
+        ],
       }
     },
-    async remove() {
-      // The backend attachment is intentionally retained as conversation
-      // context. Removing it from the composer only removes the pending item.
+    async remove(attachment) {
+      const uploaded = uploadedByAttachmentId.get(attachment.id)
+      uploadedByAttachmentId.delete(attachment.id)
+      if (uploaded) await remove(uploaded.source.id)
     },
   }
 }
@@ -338,14 +463,6 @@ function createSpeechAdapter(endpointId: string): SpeechSynthesisAdapter {
       }
     },
   }
-}
-
-function ToolGroup({ children }: { children?: ReactNode }) {
-  return (
-    <div className="my-2 space-y-1 rounded-xl border border-border/60 bg-muted/20 p-1.5">
-      {children}
-    </div>
-  )
 }
 
 function BranchPicker() {
@@ -638,11 +755,13 @@ function MessageTiming() {
 
 function ContextDisplay({ context }: { context: ConversationContext }) {
   const items = [
-    ...context.knowledgeSources.map((source) => ({
+    ...context.knowledgeSources
+      .filter((source) => source.contextScope !== "message")
+      .map((source) => ({
       id: `knowledge:${source.id}`,
       label: source.title,
       detail: source.sourceType || "knowledge",
-    })),
+      })),
     ...context.mcpServers.map((server) => ({
       id: `mcp:${server.id}`,
       label: server.name,
@@ -676,15 +795,37 @@ function UserMessage() {
   return (
     <MessagePrimitive.Root className="group/message flex justify-end px-1 py-3 sm:px-4">
       <div className="flex max-w-[min(44rem,90%)] flex-col items-end">
-        <div className="rounded-[1.35rem] rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
-          <MessagePrimitive.Parts
-            components={{
-              Text: () => (
-                <MessagePartPrimitive.Text component="span" smooth={false} />
-              ),
-            }}
-          />
+        <div className="rounded-[1.35rem] rounded-br-md border border-accent-foreground/15 bg-accent px-4 py-2.5 text-[15px] leading-6 text-accent-foreground shadow-sm dark:border-primary/40 dark:bg-primary dark:text-primary-foreground">
+          <MessagePrimitive.Quote>
+            {({ text }) => (
+              <blockquote className="mb-2 border-l-2 border-accent-foreground/40 pl-3 text-xs leading-5 text-accent-foreground/80 dark:border-primary-foreground/50 dark:text-primary-foreground/80">
+                {text}
+              </blockquote>
+            )}
+          </MessagePrimitive.Quote>
+          <UserMessageParts />
         </div>
+        <MessagePrimitive.Attachments>
+          {({ attachment }) => (
+            <AttachmentPrimitive.Root className="mt-2 flex max-w-full items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs text-foreground">
+              {attachment.contentType?.startsWith("image/") ? (
+                <AttachmentPrimitive.unstable_Thumb className="size-7 shrink-0 rounded-md" />
+              ) : (
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+                  <FileText className="size-4" aria-hidden="true" />
+                </span>
+              )}
+              <span className="max-w-52 truncate">
+                <AttachmentPrimitive.Name />
+              </span>
+              <span className="text-muted-foreground">
+                {attachment.contentType?.startsWith("image/")
+                  ? "Image"
+                  : "File"}
+              </span>
+            </AttachmentPrimitive.Root>
+          )}
+        </MessagePrimitive.Attachments>
         <div className="flex items-center gap-2">
           <MessageActions assistant={false} />
           <BranchPicker />
@@ -699,15 +840,29 @@ function AssistantMessage() {
     <MessagePrimitive.Root className="group/message px-1 py-4 sm:px-4">
       <div className="mx-auto flex w-full max-w-4xl flex-col items-start">
         <div className="w-full text-sm leading-7 text-foreground">
-          <MessagePrimitive.Parts
-            components={{
-              Text: AssistantMarkdown,
-              Source: AssistantSource,
-              tools: { Fallback: ToolFallback },
-              ToolGroup,
-            }}
-          />
+          <AssistantMessageParts />
         </div>
+        <MessagePrimitive.Attachments>
+          {({ attachment }) => (
+            <AttachmentPrimitive.Root className="mt-2 flex max-w-full items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs text-foreground">
+              {attachment.contentType?.startsWith("image/") ? (
+                <AttachmentPrimitive.unstable_Thumb className="size-7 shrink-0 rounded-md" />
+              ) : (
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+                  <FileText className="size-4" aria-hidden="true" />
+                </span>
+              )}
+              <span className="max-w-52 truncate">
+                <AttachmentPrimitive.Name />
+              </span>
+              <span className="text-muted-foreground">
+                {attachment.contentType?.startsWith("image/")
+                  ? "Image"
+                  : "File"}
+              </span>
+            </AttachmentPrimitive.Root>
+          )}
+        </MessagePrimitive.Attachments>
         <MessagePrimitive.Error>
           <ErrorPrimitive.Root className="mt-2 flex max-w-4xl items-center rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             <ErrorPrimitive.Message />
@@ -882,6 +1037,9 @@ function ModelEndpointPicker({
                 </span>
                 <span className="block truncate text-[11px] text-muted-foreground">
                   {item.providerType} · {item.chatModel || "No default model"}
+                  {item.capabilities?.vision && (
+                    <> · Vision: {item.visionModel || "chat model"}</>
+                  )}
                 </span>
               </span>
               <Check
@@ -973,8 +1131,12 @@ function Composer({
   onImportText: () => void | Promise<void>
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
-  const hasAttachments = useAuiState(
-    (state) => state.composer.attachments.length > 0
+  const composerAttachments = useAuiState((state) => state.composer.attachments)
+  const hasAttachments = composerAttachments.length > 0
+  const hasUnreadyAttachments = composerAttachments.some(
+    (attachment) =>
+      attachment.status.type === "running" ||
+      attachment.status.type === "incomplete"
   )
   const contextTriggerAdapter = useMemo(() => {
     const groups = [
@@ -1080,157 +1242,189 @@ function Composer({
             }
           </ComposerPrimitive.Unstable_TriggerPopoverItems>
         </ComposerPrimitive.Unstable_TriggerPopover>
-        <ComposerPrimitive.Root
-          className={cn(
-            "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
-            compact &&
-              "flex flex-wrap items-center gap-2 overflow-hidden rounded-[1.75rem] bg-muted/30 p-2 ring-border/60"
-          )}
-          data-running={isThreadRunning}
-        >
-          {hasAttachments && (
-            <div
-              className={cn(
-                "flex w-full flex-wrap items-center gap-2 px-2 pt-1 pb-0.5",
-                compact && "order-first basis-full"
-              )}
-            >
-              <ComposerPrimitive.Attachments>
-                {({ attachment }) => (
-                  <AttachmentPrimitive.Root className="flex max-w-full items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs">
-                    <span className="max-w-52 truncate">
-                      <AttachmentPrimitive.Name />
-                    </span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {attachment.status.type === "running"
-                        ? `${Math.round(attachment.status.progress * 100)}%`
-                        : attachment.status.type === "complete"
-                          ? "Ready"
-                          : "Pending"}
-                    </span>
-                    <AttachmentPrimitive.Remove
-                      aria-label={`Remove ${attachment.name}`}
-                      className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <X className="size-3.5" />
-                    </AttachmentPrimitive.Remove>
-                  </AttachmentPrimitive.Root>
-                )}
-              </ComposerPrimitive.Attachments>
-            </div>
-          )}
-          {!compact && <ContextDisplay context={conversationContext} />}
-          <ComposerPrimitive.Input
+        <ComposerPrimitive.AttachmentDropzone className="rounded-[2rem] transition-colors data-[dragging=true]:ring-2 data-[dragging=true]:ring-primary/40">
+          <ComposerPrimitive.Root
             className={cn(
-              "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
-              compact && "order-2 min-h-10 min-w-0 flex-1 px-2 py-2 leading-6"
+              "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
+              compact &&
+                "flex flex-wrap items-center gap-2 overflow-hidden rounded-[1.75rem] bg-muted/30 p-2 ring-border/60"
             )}
-            placeholder={
-              compact ? "What do you want to know?" : "Message JustAI…"
-            }
-            submitMode="enter"
-          />
-          <div
-            className={cn(
-              "flex items-center justify-between gap-2 px-1",
-              compact && "contents"
-            )}
+            data-running={isThreadRunning}
           >
+            <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+              <Quote className="size-3.5 shrink-0" aria-hidden="true" />
+              <ComposerPrimitive.QuoteText className="min-w-0 flex-1 truncate" />
+              <ComposerPrimitive.QuoteDismiss
+                aria-label="Remove quote"
+                className="rounded p-0.5 hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </ComposerPrimitive.QuoteDismiss>
+            </ComposerPrimitive.Quote>
+            <ComposerPrimitive.Queue>
+              {() => (
+                <div className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+                  <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                  <QueueItemPrimitive.Text className="min-w-0 flex-1 truncate" />
+                  <QueueItemPrimitive.Steer className="rounded px-1.5 py-0.5 text-[11px] hover:bg-muted hover:text-foreground">
+                    Send now
+                  </QueueItemPrimitive.Steer>
+                  <QueueItemPrimitive.Remove
+                    aria-label="Remove queued message"
+                    className="rounded p-0.5 hover:bg-muted hover:text-foreground"
+                  >
+                    <X className="size-3.5" />
+                  </QueueItemPrimitive.Remove>
+                </div>
+              )}
+            </ComposerPrimitive.Queue>
+            {hasAttachments && (
+              <div
+                className={cn(
+                  "flex w-full flex-wrap items-center gap-2 px-2 pt-1 pb-0.5",
+                  compact && "order-first basis-full"
+                )}
+              >
+                <ComposerPrimitive.Attachments>
+                  {({ attachment }) => (
+                    <AttachmentPrimitive.Root className="flex max-w-full items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs">
+                      <span className="max-w-52 truncate">
+                        <AttachmentPrimitive.Name />
+                      </span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {attachment.status.type === "running"
+                          ? "Preparing…"
+                          : attachment.status.type === "complete"
+                            ? "Sent"
+                            : attachment.status.type === "incomplete"
+                              ? "Could not prepare"
+                              : "Ready for this message"}
+                      </span>
+                      <AttachmentPrimitive.Remove
+                        aria-label={`Remove ${attachment.name}`}
+                        className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <X className="size-3.5" />
+                      </AttachmentPrimitive.Remove>
+                    </AttachmentPrimitive.Root>
+                  )}
+                </ComposerPrimitive.Attachments>
+              </div>
+            )}
+            {!compact && <ContextDisplay context={conversationContext} />}
+            <ComposerPrimitive.Input
+              className={cn(
+                "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
+                compact && "order-2 min-h-10 min-w-0 flex-1 px-2 py-2 leading-6"
+              )}
+              placeholder={
+                compact ? "What do you want to know?" : "Message JustAI…"
+              }
+              submitMode="enter"
+            />
             <div
               className={cn(
-                "flex min-w-0 items-center gap-1",
-                compact && "order-1"
+                "flex items-center justify-between gap-2 px-1",
+                compact && "contents"
               )}
             >
-              <ComposerPrimitive.AddAttachment
-                aria-label="Attach a file"
-                className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-                multiple
-              >
-                <Paperclip className="size-4" />
-              </ComposerPrimitive.AddAttachment>
-              <Button
-                aria-label="Import a URL"
+              <div
                 className={cn(
-                  "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
-                  compact && "hidden"
-                )}
-                onClick={() => void onImportURL()}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <Link className="size-4" />
-              </Button>
-              <Button
-                aria-label="Import text"
-                className={cn(
-                  "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
-                  compact && "hidden"
-                )}
-                onClick={() => void onImportText()}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <FileText className="size-4" />
-              </Button>
-              <ComposerPrimitive.Dictate
-                aria-label="Dictate message"
-                className={cn(
-                  "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
-                  compact && "hidden"
+                  "flex min-w-0 items-center gap-1",
+                  compact && "order-1"
                 )}
               >
-                <Mic className="size-4" />
-              </ComposerPrimitive.Dictate>
-              {onOpenHistory && (
+                <ComposerPrimitive.AddAttachment
+                  aria-label="Attach a file"
+                  className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  multiple
+                >
+                  <Paperclip className="size-4" />
+                </ComposerPrimitive.AddAttachment>
                 <Button
-                  aria-label="Open conversation history"
-                  className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
-                  onClick={onOpenHistory}
-                  size="icon-sm"
+                  aria-label="Import a URL"
+                  className={cn(
+                    "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
+                    compact && "hidden"
+                  )}
+                  onClick={() => void onImportURL()}
+                  size="icon"
                   type="button"
                   variant="ghost"
                 >
-                  <History className="size-4" />
+                  <Link className="size-4" />
                 </Button>
-              )}
-            </div>
-            <div className="order-3 flex shrink-0 items-center gap-1">
-              <ModelEndpointPicker
-                compact={compact}
-                endpointId={endpointId}
-                endpoints={endpoints}
-                modelDiscoveryLoading={modelDiscoveryLoading}
-                modelId={modelId}
-                models={models}
-                onEndpointChange={onEndpointChange}
-                onModelChange={onModelChange}
-              />
-              <VoiceControl
-                className="shrink-0"
-                compact
-                toolApproval={toolApproval}
-              />
-              {isThreadRunning ? (
-                <ComposerPrimitive.Cancel
-                  aria-label="Cancel response"
-                  className="flex size-9 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
+                <Button
+                  aria-label="Import text"
+                  className={cn(
+                    "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
+                    compact && "hidden"
+                  )}
+                  onClick={() => void onImportText()}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
                 >
-                  <RotateCcw className="size-4" />
-                </ComposerPrimitive.Cancel>
-              ) : (
-                <ComposerPrimitive.Send
-                  aria-label="Send message"
-                  className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
+                  <FileText className="size-4" />
+                </Button>
+                <ComposerPrimitive.Dictate
+                  aria-label="Dictate message"
+                  className={cn(
+                    "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
+                    compact && "hidden"
+                  )}
                 >
-                  <ArrowUp className="size-4" />
-                </ComposerPrimitive.Send>
-              )}
+                  <Mic className="size-4" />
+                </ComposerPrimitive.Dictate>
+                {onOpenHistory && (
+                  <Button
+                    aria-label="Open conversation history"
+                    className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
+                    onClick={onOpenHistory}
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <History className="size-4" />
+                  </Button>
+                )}
+              </div>
+              <div className="order-3 flex shrink-0 items-center gap-1">
+                <ModelEndpointPicker
+                  compact={compact}
+                  endpointId={endpointId}
+                  endpoints={endpoints}
+                  modelDiscoveryLoading={modelDiscoveryLoading}
+                  modelId={modelId}
+                  models={models}
+                  onEndpointChange={onEndpointChange}
+                  onModelChange={onModelChange}
+                />
+                <VoiceControl
+                  className="shrink-0"
+                  compact
+                  toolApproval={toolApproval}
+                />
+                {isThreadRunning ? (
+                  <ComposerPrimitive.Cancel
+                    aria-label="Cancel response"
+                    className="flex size-9 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
+                  >
+                    <RotateCcw className="size-4" />
+                  </ComposerPrimitive.Cancel>
+                ) : (
+                  <ComposerPrimitive.Send
+                    aria-label="Send message"
+                    className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
+                    disabled={hasUnreadyAttachments}
+                  >
+                    <ArrowUp className="size-4" />
+                  </ComposerPrimitive.Send>
+                )}
+              </div>
             </div>
-          </div>
-        </ComposerPrimitive.Root>
+          </ComposerPrimitive.Root>
+        </ComposerPrimitive.AttachmentDropzone>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       {!compact && (
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
@@ -1275,6 +1469,12 @@ function AssistantThreadLayout({
 
   return (
     <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <SelectionToolbarPrimitive.Root className="z-50 flex items-center gap-1 rounded-lg border bg-background/95 p-1 text-xs text-foreground shadow-lg backdrop-blur">
+        <SelectionToolbarPrimitive.Quote className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
+          <Quote className="size-3.5" aria-hidden="true" />
+          Quote
+        </SelectionToolbarPrimitive.Quote>
+      </SelectionToolbarPrimitive.Root>
       <ThreadPrimitive.Viewport
         className="relative min-h-0 flex-1 overflow-y-auto"
         turnAnchor="bottom"
@@ -1289,13 +1489,18 @@ function AssistantThreadLayout({
           </EmptyThread>
           {!isEmpty && (
             <div className="mt-auto">
-              <ThreadPrimitive.Messages
-                components={{
-                  UserMessage,
-                  UserEditComposer: MessageEditComposer,
-                  AssistantMessage,
+              <ThreadPrimitive.Messages>
+                {({ message }) => {
+                  if (message.composer.isEditing) {
+                    return <MessageEditComposer />
+                  }
+                  return message.role === "user" ? (
+                    <UserMessage />
+                  ) : (
+                    <AssistantMessage />
+                  )
                 }}
-              />
+              </ThreadPrimitive.Messages>
             </div>
           )}
         </div>
@@ -1317,6 +1522,7 @@ function AssistantChatSurface({
   activeEndpoint,
   onEnsureConversation,
   onUpload,
+  onRemoveUpload,
   onImportURL,
   onImportText,
   onConversationCreated,
@@ -1330,7 +1536,8 @@ function AssistantChatSurface({
   endpoints: Endpoint[]
   activeEndpoint?: Endpoint
   onEnsureConversation: () => Promise<string>
-  onUpload: (file: File) => Promise<void>
+  onUpload: (file: File) => Promise<UploadedConversationAttachment>
+  onRemoveUpload: (sourceId: string) => Promise<void>
   onImportURL: () => void | Promise<void>
   onImportText: () => void | Promise<void>
   onConversationCreated?: (conversation: Conversation) => void
@@ -1426,6 +1633,15 @@ function AssistantChatSurface({
     }
   }, [endpoint?.chatModel, modelsByEndpoint, selectedEndpointId])
 
+  const resumableStorage = useMemo(
+    () =>
+      createResumableSessionStorage({
+        // A newly-created conversation uses a temporary key until the route
+        // catches up; existing conversations are always isolated by id.
+        key: `justai:resumable:${conversationId ?? "new"}`,
+      }),
+    [conversationId]
+  )
   const transport = useMemo(
     () =>
       new AssistantChatTransport<UIMessage>({
@@ -1442,6 +1658,22 @@ function AssistantChatSurface({
           endpointId: selectedEndpointId,
           model: selectedModel,
         }),
+        resumable: {
+          storage: resumableStorage,
+          resumeApi: (streamId) =>
+            `${API_URL}/api/v1/chat/resume/${encodeURIComponent(streamId)}`,
+        },
+        prepareReconnectToStreamRequest: async ({ headers }) => {
+          const reconnectHeaders = new Headers(headers)
+          const organizationId = api.getOrganizationId()
+          if (organizationId) {
+            reconnectHeaders.set("X-Organization-ID", organizationId)
+          }
+          return {
+            headers: reconnectHeaders,
+            credentials: "include",
+          }
+        },
         prepareSendMessagesRequest: async ({ body, messages }) => {
           const id = await onEnsureConversation()
           const requestMessages = Array.isArray(messages) ? messages : []
@@ -1473,12 +1705,17 @@ function AssistantChatSurface({
           }
         },
       }),
-    [onEnsureConversation, selectedEndpointId, selectedModel]
+    [onEnsureConversation, resumableStorage, selectedEndpointId, selectedModel]
   )
 
   const attachments = useMemo(
-    () => createAttachmentAdapter(onUpload),
-    [onUpload]
+    () =>
+      createAttachmentAdapter(
+        onUpload,
+        onRemoveUpload,
+        supportsVision(endpoint)
+      ),
+    [endpoint, onRemoveUpload, onUpload]
   )
   const voice = useMemo(
     () =>
@@ -1545,6 +1782,10 @@ function AssistantChatSurface({
       history,
     },
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+    onResumeError: (error) => {
+      onConversationUpdated?.()
+      console.error("Assistant UI stream resume failed", error)
+    },
     onError: (error) => {
       onConversationUpdated?.()
       console.error("Assistant UI chat error", error)
@@ -1564,8 +1805,42 @@ function AssistantChatSurface({
     }
   }, [runtime])
 
+  const mcpAppHost = useMemo(
+    () =>
+      McpAppsRemoteHost({
+        url: `${API_URL}/api/v1/mcp/apps`,
+        fetch: (input, init) =>
+          globalThis.fetch(input, { ...init, credentials: "include" }),
+        headers: () => {
+          const organizationId = api.getOrganizationId()
+          const headers: Record<string, string> = {}
+          if (organizationId) headers["X-Organization-ID"] = organizationId
+          return headers
+        },
+      }),
+    []
+  )
+  const mcpAppRenderer = useMemo(
+    () =>
+      McpAppRenderer({
+        host: mcpAppHost,
+        hostInfo: { name: "JustAI", version: "0.1.0" },
+        maxHeight: 720,
+        fallback: (
+          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            This MCP app is unavailable.
+          </div>
+        ),
+      }),
+    [mcpAppHost]
+  )
+  const assistantConfig = useMemo(
+    () => AuiConfig({ tools: Tools({ mcpApp: mcpAppRenderer }) }),
+    [mcpAppRenderer]
+  )
+
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
+    <AssistantRuntimeProvider runtime={runtime} config={assistantConfig}>
       <AssistantThreadLayout
         composerProps={{
           conversationContext,
@@ -1622,7 +1897,6 @@ export function ChatView({
   const onConversationMissingRef = useRef(onConversationMissing)
   const onConversationCreatedRef = useRef(onConversationCreated)
   const onConversationUpdatedRef = useRef(onConversationUpdated)
-  const uploadedAttachmentKeysRef = useRef(new Set<string>())
 
   useEffect(() => {
     activeConversationRef.current = conversationId
@@ -1734,12 +2008,29 @@ export function ChatView({
     setActiveConversationId(conversationId)
     setSurfaceKey(conversationId ?? "new")
     activeConversationRef.current = conversationId
-    uploadedAttachmentKeysRef.current.clear()
     const controller = new AbortController()
     queueMicrotask(
       () => void loadConversationRef.current(conversationId, controller.signal)
     )
     return () => controller.abort()
+  }, [conversationId])
+
+  useEffect(() => {
+    if (!conversationId) return
+    let cancelled = false
+    const refresh = () => {
+      void api
+        .get<ConversationContext>(`/api/v1/conversations/${conversationId}/context`)
+        .then((context) => {
+          if (!cancelled) setConversationContext(context)
+        })
+        .catch(() => undefined)
+    }
+    const timer = window.setInterval(refresh, 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
   }, [conversationId])
 
   const ensureLocalConversation = useCallback(async () => {
@@ -1781,25 +2072,70 @@ export function ChatView({
     }
   }, [ensureLocalConversation])
 
-  const uploadFile = useCallback(
-    async (file: File) => {
-      const id = await ensureConversation()
-      const key = `${file.name}:${file.size}:${file.lastModified}`
-      if (uploadedAttachmentKeysRef.current.has(key)) return
-      const body = new FormData()
-      body.append("file", file)
-      await api.upload(`/api/v1/conversations/${id}/attachments`, body)
-      uploadedAttachmentKeysRef.current.add(key)
-      const context = await api.get<ConversationContext>(
-        `/api/v1/conversations/${id}/context`
-      )
-      setConversationContext(context)
-      onConversationUpdatedRef.current?.()
+  const refreshConversationContext = useCallback(async (id: string) => {
+    const context = await api.get<ConversationContext>(
+      `/api/v1/conversations/${id}/context`
+    )
+    setConversationContext(context)
+    onConversationUpdatedRef.current?.()
+  }, [])
+
+  const waitForKnowledgeSource = useCallback(
+    async (id: string, sourceId: string): Promise<KnowledgeSource> => {
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        const context = await api.get<ConversationContext>(
+          `/api/v1/conversations/${id}/context`
+        )
+        setConversationContext(context)
+        onConversationUpdatedRef.current?.()
+        const source = context.knowledgeSources.find(
+          (item) => item.id === sourceId
+        )
+        if (!source) {
+          throw new Error("The imported source disappeared from this chat.")
+        }
+        if (source.status === "ready") return source
+        if (source.status === "failed") {
+          throw new Error(
+            source.error || "The source could not be indexed for this chat."
+          )
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 750))
+      }
+      throw new Error("The source took too long to become ready. Try it again.")
     },
-    [ensureConversation]
+    []
   )
 
-  const refreshConversationContext = useCallback(async (id: string) => {
+  const uploadFile = useCallback(
+    async (file: File): Promise<UploadedConversationAttachment> => {
+      const id = await ensureConversation()
+      const body = new FormData()
+      body.append("file", file)
+      const source = await api.upload<KnowledgeSource>(
+        `/api/v1/conversations/${id}/attachments`,
+        body
+      )
+
+      try {
+        return { source: await waitForKnowledgeSource(id, source.id) }
+      } catch (caught) {
+        // Composer uploads are message-scoped. A failed or timed-out upload
+        // should not leave an invisible Knowledge source blocking future turns.
+        await api
+          .delete(`/api/v1/conversations/${id}/context/knowledge/${source.id}`)
+          .catch(() => undefined)
+        await refreshConversationContext(id).catch(() => undefined)
+        throw caught
+      }
+    },
+    [ensureConversation, refreshConversationContext, waitForKnowledgeSource]
+  )
+
+  const removeUploadedFile = useCallback(async (sourceId: string) => {
+    const id = activeConversationRef.current
+    if (!id) return
+    await api.delete(`/api/v1/conversations/${id}/context/knowledge/${sourceId}`)
     const context = await api.get<ConversationContext>(
       `/api/v1/conversations/${id}/context`
     )
@@ -1825,23 +2161,29 @@ export function ChatView({
     const value = window.prompt("Import URL")?.trim()
     if (!value) return
     const id = await ensureConversation()
-    await api.post(`/api/v1/conversations/${id}/attachments/url`, {
+    const source = await api.post<KnowledgeSource>(
+      `/api/v1/conversations/${id}/attachments/url`,
+      {
       url: value,
       title: value,
-    })
-    await refreshConversationContext(id)
-  }, [ensureConversation, refreshConversationContext])
+      }
+    )
+    await waitForKnowledgeSource(id, source.id)
+  }, [ensureConversation, waitForKnowledgeSource])
 
   const importText = useCallback(async () => {
     const value = window.prompt("Paste text to import")
     if (!value?.trim()) return
     const id = await ensureConversation()
-    await api.post(`/api/v1/conversations/${id}/attachments/text`, {
-      title: "Pasted text",
-      content: value,
-    })
-    await refreshConversationContext(id)
-  }, [ensureConversation, refreshConversationContext])
+    const source = await api.post<KnowledgeSource>(
+      `/api/v1/conversations/${id}/attachments/text`,
+      {
+        title: "Pasted text",
+        content: value,
+      }
+    )
+    await waitForKnowledgeSource(id, source.id)
+  }, [ensureConversation, waitForKnowledgeSource])
 
   if (historyLoading && conversationId) {
     return (
@@ -1888,11 +2230,14 @@ export function ChatView({
         onImportText={importText}
         onImportURL={importURL}
         onOpenHistory={onOpenHistory}
+        onRemoveUpload={removeUploadedFile}
         onUpload={uploadFile}
         conversationContext={conversationContext}
       />
       <span className="sr-only">
-        {conversationContext.knowledgeSources.length} knowledge sources,{" "}
+		{conversationContext.knowledgeSources.filter(
+			(source) => source.contextScope !== "message"
+		).length} knowledge sources,{" "}
         {conversationContext.mcpServers.length} MCP servers,{" "}
         {conversationContext.transcriptionSessions.length} transcription
         sessions attached.

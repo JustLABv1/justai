@@ -58,6 +58,7 @@ type Endpoint struct {
 	APIPath              string          `json:"apiPath,omitempty"`
 	APIVersion           string          `json:"apiVersion,omitempty"`
 	ChatModel            string          `json:"chatModel,omitempty"`
+	VisionModel          string          `json:"visionModel,omitempty"`
 	EmbeddingModel       string          `json:"embeddingModel,omitempty"`
 	TranscriptionModel   string          `json:"transcriptionModel,omitempty"`
 	DiarizationModel     string          `json:"diarizationModel,omitempty"`
@@ -141,19 +142,20 @@ type TranscriptionRecording struct {
 }
 
 type KnowledgeSource struct {
-	ID         uuid.UUID `json:"id"`
-	ScopeType  string    `json:"scopeType"`
-	ScopeID    uuid.UUID `json:"scopeId"`
-	Title      string    `json:"title"`
-	SourceType string    `json:"sourceType"`
-	SourceURL  string    `json:"sourceUrl,omitempty"`
-	MimeType   string    `json:"mimeType,omitempty"`
-	Status     string    `json:"status"`
-	Error      string    `json:"error,omitempty"`
-	Progress   int       `json:"progress,omitempty"`
-	Stage      string    `json:"stage,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID           uuid.UUID `json:"id"`
+	ScopeType    string    `json:"scopeType"`
+	ScopeID      uuid.UUID `json:"scopeId"`
+	ContextScope string    `json:"contextScope,omitempty"`
+	Title        string    `json:"title"`
+	SourceType   string    `json:"sourceType"`
+	SourceURL    string    `json:"sourceUrl,omitempty"`
+	MimeType     string    `json:"mimeType,omitempty"`
+	Status       string    `json:"status"`
+	Error        string    `json:"error,omitempty"`
+	Progress     int       `json:"progress,omitempty"`
+	Stage        string    `json:"stage,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type MCPServer struct {

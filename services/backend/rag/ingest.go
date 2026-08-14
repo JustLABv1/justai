@@ -411,10 +411,32 @@ func (w *Worker) Search(ctx context.Context, organizationID, userID uuid.UUID, q
 	return mergeCitations(lexical, semantic, limit), nil
 }
 
-// SearchConversation is intentionally scoped to explicit conversation context.
-// A new conversation therefore cannot accidentally search every organization
-// source or MCP/transcription record available to the user.
+// SearchConversation searches only persistent context. Message-scoped uploads
+// must be named explicitly by the current user message so a file does not
+// silently remain active for every later turn.
 func SearchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int) ([]models.Citation, error) {
+	return searchConversation(ctx, db, conversationID, query, limit, "")
+}
+
+// SearchConversationSources searches the explicitly attached source ids for a
+// message-scoped upload. The caller is responsible for authorizing the source
+// ids against the current conversation before calling this method; the SQL
+// still joins the conversation relation as a second isolation boundary.
+func SearchConversationSources(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int, sourceIDs []uuid.UUID) ([]models.Citation, error) {
+	return searchConversation(ctx, db, conversationID, query, limit, sourceIDsCSV(sourceIDs))
+}
+
+func sourceIDsCSV(sourceIDs []uuid.UUID) string {
+	values := make([]string, 0, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		if sourceID != uuid.Nil {
+			values = append(values, sourceID.String())
+		}
+	}
+	return strings.Join(values, ",")
+}
+
+func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int, selectedSourceIDs string) ([]models.Citation, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
@@ -432,11 +454,14 @@ func SearchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
 		JOIN conversation_knowledge_sources cks ON cks.source_id = ks.id
 		WHERE cks.conversation_id = $1 AND ks.status = 'ready'
-		  AND (to_tsvector('simple', kc.content) @@ plainto_tsquery('simple', $2)
-		       OR to_tsvector('simple', kc.content) @@ to_tsquery('simple', $3))
-		ORDER BY GREATEST(ts_rank(to_tsvector('simple', kc.content), plainto_tsquery('simple', $2)),
-		                  ts_rank(to_tsvector('simple', kc.content), to_tsquery('simple', $3))) DESC
-		LIMIT $4`, conversationID, query, orQuery, limit)
+		  AND CASE WHEN $2 = '' THEN cks.context_scope = 'persistent'
+		           ELSE cks.source_id = ANY(string_to_array($2, ',')::uuid[])
+		      END
+		  AND (to_tsvector('simple', kc.content) @@ plainto_tsquery('simple', $3)
+		       OR to_tsvector('simple', kc.content) @@ to_tsquery('simple', $4))
+		ORDER BY GREATEST(ts_rank(to_tsvector('simple', kc.content), plainto_tsquery('simple', $3)),
+		                  ts_rank(to_tsvector('simple', kc.content), to_tsquery('simple', $4))) DESC
+		LIMIT $5`, conversationID, selectedSourceIDs, query, orQuery, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -454,6 +479,42 @@ func SearchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if selectedSourceIDs != "" {
+		// Queries such as “summarize this file” often share no terms with the
+		// document. Keep the attachment useful by falling back to its first
+		// chunks instead of handing the model an empty grounding set.
+		if len(result) == 0 {
+			fallbackRows, fallbackErr := db.QueryContext(ctx, `
+				SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
+				FROM knowledge_chunks kc
+				JOIN knowledge_sources ks ON ks.id = kc.source_id
+				JOIN conversation_knowledge_sources cks ON cks.source_id = kc.source_id
+				WHERE cks.conversation_id = $1 AND ks.status = 'ready'
+				  AND cks.source_id = ANY(string_to_array($2, ',')::uuid[])
+				ORDER BY cks.source_id, kc.chunk_index
+				LIMIT $3`, conversationID, selectedSourceIDs, limit)
+			if fallbackErr != nil {
+				return nil, fallbackErr
+			}
+			for fallbackRows.Next() {
+				var citation models.Citation
+				if scanErr := fallbackRows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); scanErr != nil {
+					fallbackRows.Close()
+					return nil, scanErr
+				}
+				citation.Kind = "knowledge"
+				citation.ResourceID = citation.SourceID
+				citation.Snippet = truncateSnippet(citation.Snippet)
+				result = append(result, citation)
+			}
+			if scanErr := fallbackRows.Err(); scanErr != nil {
+				fallbackRows.Close()
+				return nil, scanErr
+			}
+			fallbackRows.Close()
+		}
+		return result, nil
 	}
 	transcriptionRows, err := db.QueryContext(ctx, `
 		SELECT ts.id, ts.title, tsg.start_offset_ms, tsg.end_offset_ms, tsg.text
@@ -530,7 +591,35 @@ func (w *Worker) SearchConversation(ctx context.Context, conversationID uuid.UUI
 	if err != nil || len(values) == 0 {
 		return lexical, nil
 	}
-	semantic, err := searchConversationByEmbedding(ctx, w.db, conversationID, vectorLiteral(values), len(values), limit)
+	semantic, err := searchConversationByEmbedding(ctx, w.db, conversationID, vectorLiteral(values), len(values), limit, "")
+	if err != nil {
+		return lexical, nil
+	}
+	return mergeCitations(lexical, semantic, limit), nil
+}
+
+// SearchConversationSources is the explicit-upload variant of
+// SearchConversation. It keeps semantic retrieval inside the same source
+// allowlist as lexical retrieval.
+func (w *Worker) SearchConversationSources(ctx context.Context, conversationID uuid.UUID, query string, limit int, sourceIDs []uuid.UUID) ([]models.Citation, error) {
+	if w == nil || w.db == nil {
+		return nil, fmt.Errorf("knowledge worker is not configured")
+	}
+	lexical, err := SearchConversationSources(ctx, w.db, conversationID, query, limit, sourceIDs)
+	if err != nil || w.secrets == nil {
+		return lexical, err
+	}
+	endpoint, err := w.conversationEmbeddingEndpoint(ctx, conversationID)
+	if err != nil || endpoint == nil {
+		return lexical, nil
+	}
+	embeddingContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	values, err := provider.Embed(embeddingContext, *endpoint, query)
+	cancel()
+	if err != nil || len(values) == 0 {
+		return lexical, nil
+	}
+	semantic, err := searchConversationByEmbedding(ctx, w.db, conversationID, vectorLiteral(values), len(values), limit, sourceIDsCSV(sourceIDs))
 	if err != nil {
 		return lexical, nil
 	}
@@ -564,16 +653,19 @@ func (w *Worker) conversationEmbeddingEndpoint(ctx context.Context, conversation
 	return &endpoint, nil
 }
 
-func searchConversationByEmbedding(ctx context.Context, db *sql.DB, conversationID uuid.UUID, embedding string, dimension, limit int) ([]models.Citation, error) {
+func searchConversationByEmbedding(ctx context.Context, db *sql.DB, conversationID uuid.UUID, embedding string, dimension, limit int, selectedSourceIDs string) ([]models.Citation, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
 		FROM knowledge_chunks kc
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
 		JOIN conversation_knowledge_sources cks ON cks.source_id = kc.source_id
 		WHERE cks.conversation_id = $1 AND ks.status = 'ready' AND kc.embedding IS NOT NULL
+		  AND CASE WHEN $4 = '' THEN cks.context_scope = 'persistent'
+		           ELSE cks.source_id = ANY(string_to_array($4, ',')::uuid[])
+		      END
 		  AND kc.embedding_dimension = $3
 		ORDER BY kc.embedding <=> $2::vector
-		LIMIT $4`, conversationID, embedding, dimension, limit)
+		LIMIT $5`, conversationID, embedding, dimension, selectedSourceIDs, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -946,8 +1038,18 @@ func isPrivateIP(ip net.IP) bool {
 func ExtractUpload(filename, mimeType string, body []byte) (string, error) {
 	lowerName := strings.ToLower(filename)
 	lowerMime := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
-	if strings.HasPrefix(lowerMime, "image/") || strings.HasPrefix(lowerMime, "audio/") || strings.HasPrefix(lowerMime, "video/") || mediaExtension(lowerName) {
-		return "", fmt.Errorf("images and media attachments are not supported yet")
+	if strings.HasPrefix(lowerMime, "image/") || imageExtension(lowerName) {
+		if len(body) == 0 {
+			return "", fmt.Errorf("image attachment is empty")
+		}
+		// The binary is carried to vision-capable chat models as an image UI
+		// part. Keep a small, searchable source record for Knowledge context
+		// without pretending that the RAG worker performed OCR or image
+		// understanding.
+		return fmt.Sprintf("Image attachment %q. Ask a vision-capable chat endpoint to inspect the image itself.", filename), nil
+	}
+	if strings.HasPrefix(lowerMime, "audio/") || strings.HasPrefix(lowerMime, "video/") || mediaExtension(lowerName) {
+		return "", fmt.Errorf("audio and video attachments must be transcribed before they can be added as Knowledge")
 	}
 	allowedText := lowerMime == "" || strings.HasPrefix(lowerMime, "text/") || lowerMime == "application/json" || lowerMime == "application/pdf" || strings.HasSuffix(lowerName, ".md") || strings.HasSuffix(lowerName, ".markdown") || strings.HasSuffix(lowerName, ".txt") || strings.HasSuffix(lowerName, ".html") || strings.HasSuffix(lowerName, ".htm") || strings.HasSuffix(lowerName, ".json") || strings.HasSuffix(lowerName, ".pdf")
 	if !allowedText {
@@ -973,6 +1075,15 @@ func ExtractUpload(filename, mimeType string, body []byte) (string, error) {
 
 func mediaExtension(filename string) bool {
 	for _, extension := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".heic", ".mp3", ".wav", ".ogg", ".m4a", ".mp4", ".mov", ".webm", ".avi"} {
+		if strings.HasSuffix(filename, extension) {
+			return true
+		}
+	}
+	return false
+}
+
+func imageExtension(filename string) bool {
+	for _, extension := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".heic"} {
 		if strings.HasSuffix(filename, extension) {
 			return true
 		}

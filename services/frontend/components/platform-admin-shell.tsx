@@ -26,8 +26,9 @@ import {
 } from "lucide-react"
 
 import { api } from "@/lib/api"
-import type { AdminTab, User } from "@/lib/types"
+import type { AdminTab, Endpoint, User } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { EndpointsView } from "@/components/endpoints-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -121,7 +122,7 @@ export function PlatformAdminShell({
   )
   const [users, setUsers] = useState<any[]>([])
   const [workspaces, setWorkspaces] = useState<any[]>([])
-  const [endpoints, setEndpoints] = useState<any[]>([])
+  const [endpoints, setEndpoints] = useState<Endpoint[]>([])
   const [servers, setServers] = useState<any[]>([])
   const [health, setHealth] = useState<Record<string, any> | null>(null)
   const [audit, setAudit] = useState<any[]>([])
@@ -378,7 +379,16 @@ export function PlatformAdminShell({
           )}
         </div>
       )}
-      {activeTab === "endpoints" && <InventoryView title="Global and scoped endpoints" items={endpoints} kind="endpoint" onRefresh={() => void load()} />}
+      {activeTab === "endpoints" && (
+        <EndpointsView
+          endpoints={endpoints}
+          onChange={setEndpoints}
+          platformAdmin
+          userId={user.id}
+          apiBasePath="/api/v1/admin/endpoints"
+          defaultScopeType="global"
+        />
+      )}
       {activeTab === "mcp" && <InventoryView title="Global and scoped MCP servers" items={servers} kind="mcp" onRefresh={() => void load()} />}
       {activeTab === "health" && <HealthView health={health} />}
       {activeTab === "analytics" && <AnalyticsView analytics={analytics} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onRefresh={() => void load()} />}

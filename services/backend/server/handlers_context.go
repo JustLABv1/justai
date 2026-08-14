@@ -63,7 +63,7 @@ func (a *App) getConversationContext(c *gin.Context) {
 
 func (a *App) loadConversationKnowledge(c *gin.Context, conversationID uuid.UUID, result *models.ConversationContext) error {
 	rows, err := a.DB.QueryContext(c, `
-		SELECT ks.id, ks.scope_type, ks.scope_id, ks.title, ks.source_type,
+		SELECT ks.id, ks.scope_type, ks.scope_id, cks.context_scope, ks.title, ks.source_type,
 		       COALESCE(ks.source_url, ''), COALESCE(ks.mime_type, ''), ks.status,
 		       COALESCE(ks.error_message, ''), COALESCE(ij.progress, 0),
 		       COALESCE(ij.stage, ks.status), ks.created_at, ks.updated_at
@@ -83,7 +83,7 @@ func (a *App) loadConversationKnowledge(c *gin.Context, conversationID uuid.UUID
 	defer rows.Close()
 	for rows.Next() {
 		var item models.KnowledgeSource
-		if err := rows.Scan(&item.ID, &item.ScopeType, &item.ScopeID, &item.Title, &item.SourceType, &item.SourceURL, &item.MimeType, &item.Status, &item.Error, &item.Progress, &item.Stage, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.ScopeType, &item.ScopeID, &item.ContextScope, &item.Title, &item.SourceType, &item.SourceURL, &item.MimeType, &item.Status, &item.Error, &item.Progress, &item.Stage, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return err
 		}
 		result.KnowledgeSources = append(result.KnowledgeSources, item)
@@ -152,8 +152,45 @@ func (a *App) attachConversationKnowledge(c *gin.Context) {
 		return
 	}
 	principal, _ := middleware.GetPrincipal(c)
-	if _, err := a.DB.ExecContext(c, `INSERT INTO conversation_knowledge_sources (conversation_id, source_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, conversationID, sourceID, principal.UserID); err != nil {
+	if _, err := a.DB.ExecContext(c, `INSERT INTO conversation_knowledge_sources (conversation_id, source_id, added_by, context_scope) VALUES ($1, $2, $3, 'persistent') ON CONFLICT (conversation_id, source_id) DO UPDATE SET context_scope = 'persistent'`, conversationID, sourceID, principal.UserID); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (a *App) updateConversationKnowledge(c *gin.Context) {
+	conversationID, err := a.authorizeConversation(c, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	sourceID, err := uuid.Parse(c.Param("sourceId"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid context resource id"))
+		return
+	}
+	var request struct {
+		ContextScope string `json:"contextScope"`
+	}
+	if !decodeJSON(c, &request) {
+		return
+	}
+	request.ContextScope = strings.TrimSpace(request.ContextScope)
+	if request.ContextScope != "persistent" && request.ContextScope != "message" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("contextScope must be persistent or message"))
+		return
+	}
+	result, err := a.DB.ExecContext(c, `UPDATE conversation_knowledge_sources SET context_scope = $3 WHERE conversation_id = $1 AND source_id = $2`, conversationID, sourceID, request.ContextScope)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+		writeError(c, http.StatusInternalServerError, rowsErr)
+		return
+	} else if affected == 0 {
+		writeError(c, http.StatusNotFound, fmt.Errorf("knowledge source is not attached to this conversation"))
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -341,7 +378,8 @@ func (a *App) createConversationAttachment(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if err := a.attachConversationSource(c, conversationID, item.ID, principal.UserID); err != nil {
+	item.ContextScope = "message"
+	if err := a.attachConversationSource(c, conversationID, item.ID, principal.UserID, "message"); err != nil {
 		_, _ = a.DB.ExecContext(c, `DELETE FROM knowledge_sources WHERE id = $1 AND created_by = $2`, item.ID, principal.UserID)
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -373,7 +411,8 @@ func (a *App) createConversationURLAttachment(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
-	if err := a.attachConversationSource(c, conversationID, item.ID, principal.UserID); err != nil {
+	item.ContextScope = "persistent"
+	if err := a.attachConversationSource(c, conversationID, item.ID, principal.UserID, "persistent"); err != nil {
 		_, _ = a.DB.ExecContext(c, `DELETE FROM knowledge_sources WHERE id = $1 AND created_by = $2`, item.ID, principal.UserID)
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -408,7 +447,8 @@ func (a *App) createConversationTextAttachment(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if err := a.attachConversationSource(c, conversationID, item.ID, principal.UserID); err != nil {
+	item.ContextScope = "persistent"
+	if err := a.attachConversationSource(c, conversationID, item.ID, principal.UserID, "persistent"); err != nil {
 		_, _ = a.DB.ExecContext(c, `DELETE FROM knowledge_sources WHERE id = $1 AND created_by = $2`, item.ID, principal.UserID)
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -416,7 +456,10 @@ func (a *App) createConversationTextAttachment(c *gin.Context) {
 	c.JSON(http.StatusAccepted, item)
 }
 
-func (a *App) attachConversationSource(ctx context.Context, conversationID, sourceID, userID uuid.UUID) error {
+func (a *App) attachConversationSource(ctx context.Context, conversationID, sourceID, userID uuid.UUID, contextScope string) error {
+	if contextScope != "persistent" && contextScope != "message" {
+		return fmt.Errorf("invalid conversation context scope")
+	}
 	transaction, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -425,7 +468,7 @@ func (a *App) attachConversationSource(ctx context.Context, conversationID, sour
 	if _, err := transaction.ExecContext(ctx, `UPDATE knowledge_sources SET conversation_id = $1, updated_at = now() WHERE id = $2 AND created_by = $3`, conversationID, sourceID, userID); err != nil {
 		return err
 	}
-	if _, err := transaction.ExecContext(ctx, `INSERT INTO conversation_knowledge_sources (conversation_id, source_id, added_by) VALUES ($1, $2, $3)`, conversationID, sourceID, userID); err != nil {
+	if _, err := transaction.ExecContext(ctx, `INSERT INTO conversation_knowledge_sources (conversation_id, source_id, added_by, context_scope) VALUES ($1, $2, $3, $4)`, conversationID, sourceID, userID, contextScope); err != nil {
 		return err
 	}
 	return transaction.Commit()

@@ -91,7 +91,7 @@ func TestListConversationsReturnsCountsAndScopesRows(t *testing.T) {
 	conversationID := uuid.New()
 	updatedAt := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	mock.ExpectQuery("SELECT\\s+c\\.id").
-		WithArgs(userID, organizationID).
+		WithArgs(userID, organizationID, 51).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "endpoint_id", "created_at", "updated_at", "archived_at", "message_count"}).
 			AddRow(conversationID, "Provider routing", "", updatedAt, updatedAt, nil, 4))
 
@@ -253,6 +253,19 @@ func TestConversationTitleNormalizesAndTruncatesPrompt(t *testing.T) {
 	long := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
 	if got := conversationTitle(long); len([]rune(got)) != 73 {
 		t.Fatalf("expected a 72-rune title plus ellipsis, got %d runes", len([]rune(got)))
+	}
+}
+
+func TestConversationCursorRoundTripsTimestampAndID(t *testing.T) {
+	updatedAt := time.Date(2026, 8, 14, 12, 34, 56, 123456789, time.FixedZone("CEST", 2*60*60))
+	id := uuid.New()
+	cursor := encodeConversationCursor(updatedAt, id)
+	decoded, err := decodeConversationCursor(cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.UpdatedAt.Equal(updatedAt) || decoded.ID != id {
+		t.Fatalf("cursor did not round-trip: %+v", decoded)
 	}
 }
 

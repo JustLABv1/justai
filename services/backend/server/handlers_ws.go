@@ -27,18 +27,20 @@ type wsTicketRequest struct {
 }
 
 type chatToolEvent struct {
-	Kind          string         `json:"kind"`
-	Status        string         `json:"status"`
-	Round         int            `json:"round,omitempty"`
-	ServerID      uuid.UUID      `json:"serverId"`
-	ServerName    string         `json:"serverName"`
-	ToolName      string         `json:"toolName"`
-	CallID        string         `json:"callId"`
-	ApprovalID    string         `json:"approvalId,omitempty"`
-	Arguments     map[string]any `json:"arguments,omitempty"`
-	Result        string         `json:"result,omitempty"`
-	ResultPreview string         `json:"resultPreview,omitempty"`
-	Error         string         `json:"error,omitempty"`
+	Kind              string         `json:"kind"`
+	Status            string         `json:"status"`
+	Round             int            `json:"round,omitempty"`
+	ServerID          uuid.UUID      `json:"serverId"`
+	ServerName        string         `json:"serverName"`
+	ToolName          string         `json:"toolName"`
+	MCPAppResourceURI string         `json:"mcpAppResourceUri,omitempty"`
+	MCPAppMIMEType    string         `json:"mcpAppMimeType,omitempty"`
+	CallID            string         `json:"callId"`
+	ApprovalID        string         `json:"approvalId,omitempty"`
+	Arguments         map[string]any `json:"arguments,omitempty"`
+	Result            string         `json:"result,omitempty"`
+	ResultPreview     string         `json:"resultPreview,omitempty"`
+	Error             string         `json:"error,omitempty"`
 }
 
 var websocketUpgrader = websocket.Upgrader{
@@ -144,19 +146,51 @@ func (a *App) createWSTicket(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"ticket": value, "expiresAt": expiresAt, "kind": request.Kind})
 }
 
-func (a *App) conversationHasIndexingKnowledge(ctx context.Context, conversationID uuid.UUID) (bool, error) {
+func assistantUISourceIDsCSV(sourceIDs []uuid.UUID) string {
+	values := make([]string, 0, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		if sourceID != uuid.Nil {
+			values = append(values, sourceID.String())
+		}
+	}
+	return strings.Join(values, ",")
+}
+
+func (a *App) conversationHasIndexingKnowledge(ctx context.Context, conversationID uuid.UUID, selectedSourceIDs []uuid.UUID) (bool, error) {
 	var indexing bool
 	err := a.DB.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM conversation_knowledge_sources cks
 			JOIN knowledge_sources ks ON ks.id = cks.source_id
-			WHERE cks.conversation_id = $1 AND ks.status IN ('queued', 'processing')
-		)`, conversationID).Scan(&indexing)
+			WHERE cks.conversation_id = $1
+			  AND CASE WHEN $2 = '' THEN cks.context_scope = 'persistent'
+			           ELSE cks.source_id = ANY(string_to_array($2, ',')::uuid[])
+			      END
+			  AND ks.status IN ('queued', 'processing')
+		)`, conversationID, assistantUISourceIDsCSV(selectedSourceIDs)).Scan(&indexing)
 	return indexing, err
 }
 
-func (a *App) searchKnowledge(ctx context.Context, organizationID, userID, conversationID uuid.UUID, query string, limit int) ([]models.Citation, error) {
+func (a *App) conversationHasKnowledge(ctx context.Context, conversationID uuid.UUID, selectedSourceIDs []uuid.UUID) (bool, error) {
+	var attached bool
+	err := a.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM conversation_knowledge_sources cks
+			JOIN knowledge_sources ks ON ks.id = cks.source_id
+			WHERE cks.conversation_id = $1
+			  AND CASE WHEN $2 = '' THEN cks.context_scope = 'persistent'
+			           ELSE cks.source_id = ANY(string_to_array($2, ',')::uuid[])
+			      END
+		)`, conversationID, assistantUISourceIDsCSV(selectedSourceIDs)).Scan(&attached)
+	return attached, err
+}
+
+func (a *App) searchKnowledge(ctx context.Context, organizationID, userID, conversationID uuid.UUID, query string, limit int, selectedSourceIDs []uuid.UUID) ([]models.Citation, error) {
+	if len(selectedSourceIDs) > 0 {
+		return a.RAG.SearchConversationSources(ctx, conversationID, query, limit, selectedSourceIDs)
+	}
 	return a.RAG.SearchConversation(ctx, conversationID, query, limit)
 }
 
@@ -165,12 +199,13 @@ func chatToolInstructions() string {
 }
 
 type storedChatMessage struct {
-	Role    string
-	Content string
+	Role      string
+	Content   string
+	UIMessage []byte
 }
 
 func (a *App) conversationToolHistory(ctx context.Context, conversationID uuid.UUID) ([]provider.ToolMessage, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT 500`, conversationID)
+	rows, err := a.DB.QueryContext(ctx, `SELECT role, content, ui_message FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT 500`, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +214,7 @@ func (a *App) conversationToolHistory(ctx context.Context, conversationID uuid.U
 	stored := []storedChatMessage{}
 	for rows.Next() {
 		var item storedChatMessage
-		if err := rows.Scan(&item.Role, &item.Content); err != nil {
+		if err := rows.Scan(&item.Role, &item.Content, &item.UIMessage); err != nil {
 			return nil, err
 		}
 		stored = append(stored, item)
@@ -204,16 +239,16 @@ func (a *App) conversationBranchMessages(ctx context.Context, conversationID, he
 	}
 	rows, err := a.DB.QueryContext(ctx, `
 		WITH RECURSIVE branch AS (
-			SELECT id, parent_id, role, content, created_at
+			SELECT id, parent_id, role, content, ui_message, created_at
 			FROM messages
 			WHERE conversation_id = $1 AND id = $2
 			UNION ALL
-			SELECT message.id, message.parent_id, message.role, message.content, message.created_at
+			SELECT message.id, message.parent_id, message.role, message.content, message.ui_message, message.created_at
 			FROM messages message
 			JOIN branch current ON current.parent_id = message.id
 			WHERE message.conversation_id = $1
 		)
-		SELECT role, content
+		SELECT role, content, ui_message
 		FROM branch
 		ORDER BY created_at ASC, id ASC
 	`, conversationID, headID)
@@ -224,7 +259,7 @@ func (a *App) conversationBranchMessages(ctx context.Context, conversationID, he
 	stored := []storedChatMessage{}
 	for rows.Next() {
 		var item storedChatMessage
-		if err := rows.Scan(&item.Role, &item.Content); err != nil {
+		if err := rows.Scan(&item.Role, &item.Content, &item.UIMessage); err != nil {
 			return nil, err
 		}
 		stored = append(stored, item)
@@ -258,7 +293,8 @@ func buildConversationToolHistory(stored []storedChatMessage) []provider.ToolMes
 	for index := 0; index < len(stored); {
 		item := stored[index]
 		if item.Role != "tool" {
-			history = append(history, provider.ToolMessage{Role: item.Role, Content: item.Content})
+			message := providerMessageFromStored(item)
+			history = append(history, provider.ToolMessage{Role: message.Role, Content: message.Content, ContentParts: message.ContentParts})
 			index++
 			continue
 		}
@@ -480,18 +516,19 @@ func (a *App) ensureConversation(ctx context.Context, userID, organizationID uui
 }
 
 func (a *App) conversationHistory(ctx context.Context, conversationID uuid.UUID) ([]provider.Message, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT role, content FROM messages WHERE conversation_id = $1 AND role IN ('user', 'assistant') ORDER BY created_at DESC LIMIT 20`, conversationID)
+	rows, err := a.DB.QueryContext(ctx, `SELECT role, content, ui_message FROM messages WHERE conversation_id = $1 AND role IN ('user', 'assistant') ORDER BY created_at DESC LIMIT 20`, conversationID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	result := []provider.Message{}
 	for rows.Next() {
-		var item provider.Message
-		if err := rows.Scan(&item.Role, &item.Content); err != nil {
+		var role, content string
+		var rawUIMessage []byte
+		if err := rows.Scan(&role, &content, &rawUIMessage); err != nil {
 			return nil, err
 		}
-		result = append(result, item)
+		result = append(result, providerMessageFromStored(storedChatMessage{Role: role, Content: content, UIMessage: rawUIMessage}))
 	}
 	for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
 		result[left], result[right] = result[right], result[left]
@@ -507,10 +544,24 @@ func (a *App) conversationHistoryFromHead(ctx context.Context, conversationID, h
 	result := make([]provider.Message, 0, len(stored))
 	for _, item := range stored {
 		if item.Role == "user" || item.Role == "assistant" {
-			result = append(result, provider.Message{Role: item.Role, Content: item.Content})
+			result = append(result, providerMessageFromStored(item))
 		}
 	}
 	return result, nil
+}
+
+func providerMessageFromStored(item storedChatMessage) provider.Message {
+	message := provider.Message{Role: item.Role, Content: item.Content}
+	if len(item.UIMessage) == 0 {
+		return message
+	}
+	var envelope struct {
+		Parts []json.RawMessage `json:"parts"`
+	}
+	if json.Unmarshal(item.UIMessage, &envelope) == nil {
+		message.ContentParts = assistantUIProviderImageParts(envelope.Parts)
+	}
+	return message
 }
 
 func (a *App) resolveEndpoint(ctx context.Context, userID, organizationID uuid.UUID, rawID string) (uuid.UUID, error) {

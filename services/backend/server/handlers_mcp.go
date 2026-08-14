@@ -329,6 +329,99 @@ func (a *App) listMCPTools(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"tools": tools})
 }
 
+func (a *App) listMCPResources(c *gin.Context) {
+	if err := a.authorizeMCPServer(c, c.Param("id")); err != nil {
+		writeError(c, http.StatusForbidden, err)
+		return
+	}
+	server, err := a.loadMCPServer(c, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	result, err := server.ListResources(c)
+	if err != nil {
+		writeError(c, http.StatusBadGateway, err)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", result)
+}
+
+func (a *App) readMCPResource(c *gin.Context) {
+	if err := a.authorizeMCPServer(c, c.Param("id")); err != nil {
+		writeError(c, http.StatusForbidden, err)
+		return
+	}
+	var request struct {
+		URI string `json:"uri"`
+	}
+	if !decodeJSON(c, &request) {
+		return
+	}
+	if strings.TrimSpace(request.URI) == "" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("uri is required"))
+		return
+	}
+	server, err := a.loadMCPServer(c, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	result, err := server.ReadResource(c, strings.TrimSpace(request.URI))
+	if err != nil {
+		writeError(c, http.StatusBadGateway, err)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", result)
+}
+
+func (a *App) listMCPPrompts(c *gin.Context) {
+	if err := a.authorizeMCPServer(c, c.Param("id")); err != nil {
+		writeError(c, http.StatusForbidden, err)
+		return
+	}
+	server, err := a.loadMCPServer(c, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	result, err := server.ListPrompts(c)
+	if err != nil {
+		writeError(c, http.StatusBadGateway, err)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", result)
+}
+
+func (a *App) getMCPPrompt(c *gin.Context) {
+	if err := a.authorizeMCPServer(c, c.Param("id")); err != nil {
+		writeError(c, http.StatusForbidden, err)
+		return
+	}
+	var request struct {
+		Name      string            `json:"name"`
+		Arguments map[string]string `json:"arguments"`
+	}
+	if !decodeJSON(c, &request) {
+		return
+	}
+	if strings.TrimSpace(request.Name) == "" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("name is required"))
+		return
+	}
+	server, err := a.loadMCPServer(c, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	result, err := server.GetPrompt(c, strings.TrimSpace(request.Name), request.Arguments)
+	if err != nil {
+		writeError(c, http.StatusBadGateway, err)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", result)
+}
+
 func (a *App) authorizeMCPServer(c *gin.Context, rawID string) error {
 	id, err := uuid.Parse(rawID)
 	if err != nil {
@@ -495,7 +588,7 @@ func (a *App) cacheMCPTools(ctx context.Context, serverID uuid.UUID, tools []mcp
 		return err
 	}
 	for _, tool := range tools {
-		_, err := transaction.ExecContext(ctx, `INSERT INTO mcp_server_tools (server_id, name, description, input_schema, annotations) VALUES ($1, $2, NULLIF($3, ''), $4, $5) ON CONFLICT (server_id, name) DO UPDATE SET description = EXCLUDED.description, input_schema = EXCLUDED.input_schema, annotations = EXCLUDED.annotations, discovered_at = now()`, serverID, tool.Name, tool.Description, jsonRaw(tool.InputSchema), jsonRaw(tool.Annotations))
+		_, err := transaction.ExecContext(ctx, `INSERT INTO mcp_server_tools (server_id, name, description, input_schema, annotations, metadata) VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6) ON CONFLICT (server_id, name) DO UPDATE SET description = EXCLUDED.description, input_schema = EXCLUDED.input_schema, annotations = EXCLUDED.annotations, metadata = EXCLUDED.metadata, discovered_at = now()`, serverID, tool.Name, tool.Description, jsonRaw(tool.InputSchema), jsonRaw(tool.Annotations), jsonRaw(tool.Meta))
 		if err != nil {
 			return err
 		}
@@ -517,7 +610,7 @@ func (a *App) cachedMCPTools(ctx context.Context, serverID uuid.UUID) ([]mcp.Too
 	if !cached {
 		return nil, false, nil
 	}
-	rows, err := a.DB.QueryContext(ctx, `SELECT name, COALESCE(description, ''), input_schema, annotations FROM mcp_server_tools WHERE server_id = $1 AND discovered_at > now() - interval '10 minutes' ORDER BY name`, serverID)
+	rows, err := a.DB.QueryContext(ctx, `SELECT name, COALESCE(description, ''), input_schema, annotations, metadata FROM mcp_server_tools WHERE server_id = $1 AND discovered_at > now() - interval '10 minutes' ORDER BY name`, serverID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -525,8 +618,8 @@ func (a *App) cachedMCPTools(ctx context.Context, serverID uuid.UUID) ([]mcp.Too
 	tools := make([]mcp.Tool, 0)
 	for rows.Next() {
 		var tool mcp.Tool
-		var inputSchema, annotations []byte
-		if err := rows.Scan(&tool.Name, &tool.Description, &inputSchema, &annotations); err != nil {
+		var inputSchema, annotations, metadata []byte
+		if err := rows.Scan(&tool.Name, &tool.Description, &inputSchema, &annotations, &metadata); err != nil {
 			return nil, false, err
 		}
 		tool.InputSchema = json.RawMessage(inputSchema)
@@ -534,6 +627,9 @@ func (a *App) cachedMCPTools(ctx context.Context, serverID uuid.UUID) ([]mcp.Too
 			if err := json.Unmarshal(annotations, &tool.Annotations); err != nil {
 				return nil, false, err
 			}
+		}
+		if len(metadata) > 0 && string(metadata) != "null" {
+			tool.Meta = json.RawMessage(metadata)
 		}
 		tools = append(tools, tool)
 	}

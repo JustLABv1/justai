@@ -50,3 +50,10 @@ func (a *App) discoverEndpointModels(c *gin.Context) {
 		"providerType":    metadata.ProviderType,
 	})
 }
+
+func (a *App) discoverPlatformEndpointModels(c *gin.Context) {
+	if !a.requirePlatformAdmin(c) {
+		return
+	}
+	a.discoverEndpointModels(c)
+}

@@ -33,14 +33,18 @@ func TestRunMigrationsIntegration(t *testing.T) {
 	}
 
 	checks := map[string]string{
-		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '010_platform_admin.sql')`,
+		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '014_vision_model.sql')`,
 		"platform settings":                    `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'platform_settings')`,
 		"organization endpoint default":        `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'organization_default_endpoints')`,
 		"chat runs":                            `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_runs')`,
+		"chat stream chunks":                   `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_stream_chunks')`,
 		"conversation knowledge context":       `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'conversation_knowledge_sources')`,
+		"message scoped context column":        `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'conversation_knowledge_sources' AND column_name = 'context_scope')`,
 		"one active ingestion job index":       `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'ingestion_jobs_one_active_per_source_idx')`,
 		"encrypted transcription grant column": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'transcription_join_requests' AND column_name = 'grant_token_encrypted')`,
 		"MCP discovery marker":                 `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mcp_servers' AND column_name = 'tools_discovered_at')`,
+		"MCP tool metadata":                    `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mcp_server_tools' AND column_name = 'metadata')`,
+		"vision model":                         `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'endpoint_settings' AND column_name = 'vision_model')`,
 	}
 	for name, query := range checks {
 		var present bool

@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"justai-backend/models"
+	"justai-backend/provider"
 )
 
 func TestFindAssistantUIApprovalReadsV7ResponsePart(t *testing.T) {
@@ -216,5 +219,201 @@ func TestAssistantUIMessageRunStatusDefaultsSafely(t *testing.T) {
 	}
 	if got := assistantUIMessageRunStatus(map[string]any{"metadata": map[string]any{"runStatus": "tampered"}}); got != "complete" {
 		t.Fatalf("expected complete fallback, got %q", got)
+	}
+}
+
+func TestCollapseAssistantUIRetrievalStatusesKeepsLatestState(t *testing.T) {
+	message := map[string]any{
+		"parts": []any{
+			map[string]any{
+				"type": "data-retrieval-status",
+				"data": map[string]any{"status": "started"},
+			},
+			map[string]any{
+				"type": "data-retrieval-status",
+				"data": map[string]any{"status": "completed", "citationCount": 2},
+			},
+			map[string]any{"type": "text", "text": "Answer"},
+		},
+	}
+
+	collapseAssistantUIRetrievalStatuses(message)
+	parts := message["parts"].([]any)
+	if len(parts) != 2 {
+		t.Fatalf("expected one status and one text part, got %+v", parts)
+	}
+	statusPart := parts[0].(map[string]any)
+	statusData := statusPart["data"].(map[string]any)
+	if statusData["status"] != "completed" {
+		t.Fatalf("expected the latest retrieval status, got %+v", statusData)
+	}
+}
+
+func TestRemoveAssistantUIRetrievalStatuses(t *testing.T) {
+	message := map[string]any{
+		"parts": []any{
+			map[string]any{"type": "data-retrieval-status"},
+			map[string]any{"type": "text", "text": "Answer"},
+		},
+	}
+
+	removeAssistantUIRetrievalStatuses(message)
+	parts := message["parts"].([]any)
+	if len(parts) != 1 || parts[0].(map[string]any)["type"] != "text" {
+		t.Fatalf("expected retrieval status to be removed, got %+v", parts)
+	}
+}
+
+func TestAssistantUIMessageHasSourceParts(t *testing.T) {
+	if !assistantUIMessageHasSourceParts(map[string]any{
+		"parts": []any{map[string]any{"type": "source-document", "sourceId": "source-1"}},
+	}) {
+		t.Fatal("expected source-document part to mark a message as grounded")
+	}
+	if assistantUIMessageHasSourceParts(map[string]any{
+		"parts": []any{map[string]any{"type": "text", "text": "Answer"}},
+	}) {
+		t.Fatal("did not expect a text-only message to be marked as grounded")
+	}
+}
+
+func TestDeduplicateAssistantUICitationsKeepsOneEntryPerResource(t *testing.T) {
+	sourceID := uuid.New()
+	otherSourceID := uuid.New()
+	citations := []models.Citation{
+		{Kind: "knowledge", ResourceID: sourceID, Title: "README.md", ChunkIndex: 0},
+		{Kind: "knowledge", ResourceID: sourceID, Title: "README.md", ChunkIndex: 1},
+		{Kind: "knowledge", ResourceID: otherSourceID, Title: "START-HERE.md", ChunkIndex: 0},
+	}
+
+	unique := deduplicateAssistantUICitations(citations)
+	if len(unique) != 2 {
+		t.Fatalf("expected two unique source entries, got %+v", unique)
+	}
+	if unique[0].ChunkIndex != 0 || unique[1].ResourceID != otherSourceID {
+		t.Fatalf("expected the first citation per resource to be retained, got %+v", unique)
+	}
+}
+
+func TestDeduplicateAssistantUISourcePartsRemovesRepeatedResourceRows(t *testing.T) {
+	sourceID := uuid.New().String()
+	message := map[string]any{
+		"parts": []any{
+			map[string]any{"type": "text", "text": "Answer"},
+			map[string]any{"type": "source-document", "sourceId": sourceID, "title": "README.md"},
+			map[string]any{"type": "source-document", "sourceId": sourceID, "title": "README.md"},
+			map[string]any{"type": "source-url", "sourceId": uuid.New().String(), "title": "Docs"},
+		},
+	}
+
+	deduplicateAssistantUISourceParts(message)
+	parts := message["parts"].([]any)
+	if len(parts) != 3 {
+		t.Fatalf("expected repeated source row to be removed, got %+v", parts)
+	}
+}
+
+func TestAssistantUIToolPartCarriesMCPAppMetadata(t *testing.T) {
+	part := assistantUIDynamicToolPart(chatToolEvent{
+		Status:            "completed",
+		ServerID:          uuid.New(),
+		ToolName:          "weather",
+		MCPAppResourceURI: "ui://weather/widget",
+		CallID:            "call-app",
+		Result:            `{"temperature":22}`,
+	})
+	mcpMetadata, ok := part["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected MCP metadata, got %+v", part)
+	}
+	appMetadata, ok := mcpMetadata["app"].(map[string]any)
+	if !ok || appMetadata["resourceUri"] != "ui://weather/widget" {
+		t.Fatalf("unexpected MCP app metadata: %+v", mcpMetadata)
+	}
+}
+
+func TestLatestAssistantUserMessageIncludesQuotedContextWithoutTextPart(t *testing.T) {
+	message := latestAssistantUserMessage([]assistantUIMessage{{
+		ID:       "user-quote",
+		Role:     "user",
+		Metadata: json.RawMessage(`{"custom":{"quote":{"messageId":"source-1","text":"A decision was made."}}}`),
+	}})
+	if message == nil {
+		t.Fatal("expected a quote-only user message")
+	}
+	if message.Text != "Please respond to the quoted context.\n\nQuoted context:\n> A decision was made." {
+		t.Fatalf("unexpected quoted prompt: %q", message.Text)
+	}
+}
+
+func TestLatestAssistantUserMessageCarriesMessageScopedAttachmentSource(t *testing.T) {
+	sourceID := uuid.New()
+	message := latestAssistantUserMessage([]assistantUIMessage{{
+		ID:   "user-file",
+		Role: "user",
+		Parts: []json.RawMessage{
+			json.RawMessage(`{"type":"file","url":"justai-source:` + sourceID.String() + `","mediaType":"text/plain","filename":"notes.txt"}`),
+			json.RawMessage(`{"type":"data-justai-attachment","data":{"sourceId":"` + sourceID.String() + `","contextScope":"message"}}`),
+		},
+	}})
+	if message == nil {
+		t.Fatal("expected a file-only user message")
+	}
+	if message.Text != "Please inspect the attached file." {
+		t.Fatalf("unexpected file prompt: %q", message.Text)
+	}
+	if len(message.AttachmentSourceIDs) != 1 || message.AttachmentSourceIDs[0] != sourceID {
+		t.Fatalf("unexpected attachment source ids: %+v", message.AttachmentSourceIDs)
+	}
+}
+
+func TestAssistantUIImageHelpersAcceptAISDKFileParts(t *testing.T) {
+	messages := []assistantUIMessage{{
+		Role:  "user",
+		Parts: []json.RawMessage{json.RawMessage(`{"type":"file","url":"data:image/png;base64,aGVsbG8=","mediaType":"image/png"}`)},
+	}}
+	if !assistantUIMessageHasImages(messages) {
+		t.Fatal("expected an AI SDK file part with an image media type to be detected")
+	}
+	parts := assistantUIProviderImageParts(messages[0].Parts)
+	if len(parts) != 1 || parts[0].ImageURL == nil || parts[0].ImageURL.URL != "data:image/png;base64,aGVsbG8=" {
+		t.Fatalf("unexpected provider image parts: %+v", parts)
+	}
+}
+
+func TestAssistantUIEndpointForRequestSelectsVisionModel(t *testing.T) {
+	endpoint := provider.Endpoint{
+		ChatModel:   "text-model",
+		VisionModel: "vision-model",
+		Capabilities: map[string]bool{
+			"chat":   true,
+			"vision": true,
+		},
+	}
+
+	selected, err := assistantUIEndpointForRequest(endpoint, "request-model", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.ChatModel != "vision-model" {
+		t.Fatalf("expected the configured vision model, got %q", selected.ChatModel)
+	}
+
+	selected, err = assistantUIEndpointForRequest(endpoint, "request-model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.ChatModel != "request-model" {
+		t.Fatalf("expected an explicit text request model, got %q", selected.ChatModel)
+	}
+}
+
+func TestAssistantUIEndpointForRequestRejectsImagesWithoutVision(t *testing.T) {
+	_, err := assistantUIEndpointForRequest(provider.Endpoint{
+		ChatModel:    "text-model",
+		Capabilities: map[string]bool{"chat": true},
+	}, "", true)
+	if err == nil {
+		t.Fatal("expected image requests to be rejected for a text-only endpoint")
 	}
 }

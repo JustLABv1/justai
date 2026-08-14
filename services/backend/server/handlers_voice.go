@@ -53,11 +53,13 @@ type voiceApproval struct {
 }
 
 type voiceToolBinding struct {
-	ServerID         uuid.UUID
-	ServerName       string
-	ToolName         string
-	Definition       provider.ToolDefinition
-	RequiresApproval bool
+	ServerID          uuid.UUID
+	ServerName        string
+	ToolName          string
+	MCPAppResourceURI string
+	MCPAppMIMEType    string
+	Definition        provider.ToolDefinition
+	RequiresApproval  bool
 }
 
 type voiceToolDiscovery struct {
@@ -394,7 +396,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	requestID := "voice-" + uuid.NewString()
 	conversationID := state.conversationID
 	endpointID := state.endpointID
-	indexing, err := a.conversationHasIndexingKnowledge(ctx, conversationID)
+	indexing, err := a.conversationHasIndexingKnowledge(ctx, conversationID, nil)
 	if err != nil {
 		if ctx.Err() == nil {
 			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "conversation context could not be checked: " + err.Error()}})
@@ -421,7 +423,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	}
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
-	citations, err := a.searchKnowledge(ctx, organizationID, userID, conversationID, content, 6)
+	citations, err := a.searchKnowledge(ctx, organizationID, userID, conversationID, content, 6, nil)
 	if err != nil {
 		citations = nil
 	}
@@ -511,7 +513,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 							continue
 						}
 					}
-					event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, CallID: call.ID, Arguments: arguments}
+					event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
 					messageID := a.persistChatToolEvent(ctx, conversationID, event)
 					approvalID := ""
 					approved := true
@@ -664,6 +666,7 @@ func (a *App) discoverConversationTools(ctx context.Context, userID, organizatio
 			if !mcpToolAllowed(server.Allowed, tool.Name) {
 				continue
 			}
+			appMetadata := tool.AppMetadata()
 			name := voiceToolName(serverID, tool.Name, result.Bindings)
 			parameters := tool.InputSchema
 			if len(parameters) == 0 || !json.Valid(parameters) {
@@ -672,11 +675,13 @@ func (a *App) discoverConversationTools(ctx context.Context, userID, organizatio
 			definition := provider.ToolDefinition{Name: name, Description: tool.Description, Parameters: parameters}
 			result.Definitions = append(result.Definitions, definition)
 			result.Bindings[name] = voiceToolBinding{
-				ServerID:         serverID,
-				ServerName:       serverName,
-				ToolName:         tool.Name,
-				Definition:       definition,
-				RequiresApproval: !(server.TrustedReadOnly && tool.Annotations.ReadOnlyHintSet && tool.Annotations.ReadOnlyHint && tool.Annotations.DestructiveHintSet && !tool.Annotations.DestructiveHint),
+				ServerID:          serverID,
+				ServerName:        serverName,
+				ToolName:          tool.Name,
+				MCPAppResourceURI: appMetadata.ResourceURI,
+				MCPAppMIMEType:    appMetadata.MIMEType,
+				Definition:        definition,
+				RequiresApproval:  mcpToolRequiresApproval(server, tool),
 			}
 		}
 	}

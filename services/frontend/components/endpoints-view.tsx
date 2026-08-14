@@ -75,23 +75,32 @@ type Props = {
   organizationRole?: string
   userId?: string
   platformAdmin?: boolean
+  apiBasePath?: string
+  defaultScopeType?: "global" | "organization" | "user"
 }
 
 type EndpointForm = {
   name: string
   providerType: string
   scopeType: string
+  scopeId: string
   baseUrl: string
   apiPath: string
+  apiVersion: string
   chatModel: string
+  visionModel: string
   embeddingModel: string
   transcriptionModel: string
   diarizationModel: string
   speechModel: string
+  timeoutSeconds: number
+  maxOutputTokens: number
+  temperature: number
   realtimeTranscription: boolean
   chunkedTranscription: boolean
   diarization: boolean
   toolCalling: boolean
+  vision: boolean
   credential: string
   enabled: boolean
   isDefault: boolean
@@ -107,17 +116,24 @@ const defaults: EndpointForm = {
   name: "My endpoint",
   providerType: "openai-compatible",
   scopeType: "organization",
+  scopeId: "",
   baseUrl: "http://localhost:4000/v1",
   apiPath: "",
+  apiVersion: "",
   chatModel: "",
+  visionModel: "",
   embeddingModel: "",
   transcriptionModel: "",
   diarizationModel: "",
   speechModel: "",
+  timeoutSeconds: 120,
+  maxOutputTokens: 2048,
+  temperature: 0.2,
   realtimeTranscription: false,
   chunkedTranscription: false,
   diarization: false,
   toolCalling: false,
+  vision: false,
   credential: "",
   enabled: true,
   isDefault: false,
@@ -169,6 +185,8 @@ export function EndpointsView({
   organizationRole,
   userId,
   platformAdmin = false,
+  apiBasePath = "/api/v1/endpoints",
+  defaultScopeType,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [editingEndpoint, setEditingEndpoint] = useState<Endpoint | null>(null)
@@ -185,6 +203,7 @@ export function EndpointsView({
   const [capabilityMatrix, setCapabilityMatrix] = useState<
     Record<string, string[]>
   >({})
+  const endpointPath = apiBasePath.replace(/\/+$/, "")
 
   useEffect(() => {
     void api
@@ -216,6 +235,7 @@ export function EndpointsView({
     organizationRole === "owner" ||
     organizationRole === "admin"
   const canManageEndpoint = (endpoint: Endpoint) => {
+    if (platformAdmin) return true
     if (userId === undefined && organizationRole === undefined) return true
     if (endpoint.scopeType === "user") return endpoint.scopeId === userId
     if (endpoint.scopeType === "organization") return canManageOrganization
@@ -251,7 +271,8 @@ export function EndpointsView({
     setDiscoveringModels(false)
     setForm({
       ...defaults,
-      scopeType: canManageOrganization ? defaults.scopeType : "user",
+      scopeType:
+        defaultScopeType ?? (canManageOrganization ? defaults.scopeType : "user"),
     })
   }
 
@@ -277,19 +298,26 @@ export function EndpointsView({
       name: endpoint.name,
       providerType: endpoint.providerType,
       scopeType: endpoint.scopeType,
+      scopeId: endpoint.scopeId ?? "",
       baseUrl: endpoint.baseUrl,
       apiPath: endpoint.apiPath ?? "",
+      apiVersion: endpoint.apiVersion ?? "",
       chatModel: endpoint.chatModel ?? "",
+      visionModel: endpoint.visionModel ?? "",
       embeddingModel: endpoint.embeddingModel ?? "",
       transcriptionModel: endpoint.transcriptionModel ?? "",
       diarizationModel: endpoint.diarizationModel ?? "",
       speechModel: endpoint.speechModel ?? "",
+      timeoutSeconds: endpoint.timeoutSeconds || defaults.timeoutSeconds,
+      maxOutputTokens: endpoint.maxOutputTokens || defaults.maxOutputTokens,
+      temperature: endpoint.temperature || defaults.temperature,
       realtimeTranscription: Boolean(
         endpoint.capabilities["realtime-transcription"] && !chunkedTranscription
       ),
       chunkedTranscription,
       diarization: Boolean(endpoint.capabilities.diarization),
       toolCalling: Boolean(endpoint.capabilities["tool-calling"]),
+      vision: Boolean(endpoint.capabilities.vision),
       credential: "",
       enabled: endpoint.enabled,
       isDefault: endpoint.isDefault,
@@ -307,7 +335,7 @@ export function EndpointsView({
       const result = await api.get<{
         models?: DiscoveredChatModel[]
         configuredModel?: string
-      }>(`/api/v1/endpoints/${endpointId}/models`)
+      }>(`${endpointPath}/${endpointId}/models`)
       if (requestId !== discoveryRequestRef.current) return
       const models = (result.models ?? []).filter((model) => model.id?.trim())
       setDiscoveredModels(models)
@@ -361,18 +389,20 @@ export function EndpointsView({
           Boolean(form.diarizationModel),
         "tool-calling":
           supports(form.providerType, "tool-calling") && form.toolCalling,
+        vision: supports(form.providerType, "vision") && form.vision,
         tts: supports(form.providerType, "tts") && Boolean(form.speechModel),
       }
       const payload = {
         ...form,
+        scopeId: form.scopeId.trim() || null,
         capabilities,
       }
       const result = editingEndpoint
         ? await api.patch<Endpoint>(
-            `/api/v1/endpoints/${editingEndpoint.id}`,
+            `${endpointPath}/${editingEndpoint.id}`,
             payload
           )
-        : await api.post<Endpoint>("/api/v1/endpoints", {
+        : await api.post<Endpoint>(endpointPath, {
             ...payload,
             isDefault: form.isDefault || endpoints.length === 0,
           })
@@ -400,7 +430,7 @@ export function EndpointsView({
           string,
           { ok: boolean; supported: boolean; tested: boolean; error?: string }
         >
-      }>(`/api/v1/endpoints/${endpoint.id}/test`)
+      }>(`${endpointPath}/${endpoint.id}/test`)
       const failed = Object.entries(result.results ?? {}).filter(
         ([, value]) => value.tested && !value.ok
       )
@@ -421,7 +451,7 @@ export function EndpointsView({
   async function removeEndpoint(endpoint: Endpoint) {
     setBusyId(endpoint.id)
     try {
-      await api.delete(`/api/v1/endpoints/${endpoint.id}`)
+      await api.delete(`${endpointPath}/${endpoint.id}`)
       onChange(endpoints.filter((item) => item.id !== endpoint.id))
     } catch (caught) {
       setNotice(
@@ -437,7 +467,7 @@ export function EndpointsView({
   function toggleEndpoint(endpoint: Endpoint) {
     setBusyId(endpoint.id)
     void api
-      .patch<Endpoint>(`/api/v1/endpoints/${endpoint.id}`, {
+      .patch<Endpoint>(`${endpointPath}/${endpoint.id}`, {
         enabled: !endpoint.enabled,
       })
       .then((updated) =>
@@ -460,7 +490,7 @@ export function EndpointsView({
   function setDefaultEndpoint(endpoint: Endpoint) {
     setBusyId(endpoint.id)
     void api
-      .patch<Endpoint>(`/api/v1/endpoints/${endpoint.id}`, {
+      .patch<Endpoint>(`${endpointPath}/${endpoint.id}`, {
         isDefault: true,
         enabled: true,
       })
@@ -517,9 +547,16 @@ export function EndpointsView({
                       <Badge variant="outline">Default</Badge>
                     )}
                   </div>
-                  <CardDescription className="mt-1">
-                    {details.label} ·{" "}
-                    {endpoint.chatModel || "model selected at request time"}
+                  <CardDescription className="mt-1 flex flex-col gap-0.5">
+                    <span>
+                      {details.label} ·{" "}
+                      {endpoint.chatModel || "model selected at request time"}
+                    </span>
+                    {endpoint.capabilities?.vision && (
+                      <span className="text-xs">
+                        Vision: {endpoint.visionModel || endpoint.chatModel || "uses chat model"}
+                      </span>
+                    )}
                   </CardDescription>
                 </div>
               </CardHeader>
@@ -714,8 +751,9 @@ export function EndpointsView({
                 </div>
                 <Field>
                   <FieldLabel>Visibility</FieldLabel>
-                  <Select
-                    value={form.scopeType}
+                    <Select
+                      disabled={Boolean(editingEndpoint)}
+                      value={form.scopeType}
                     onValueChange={(value) =>
                       update(
                         "scopeType",
@@ -746,6 +784,24 @@ export function EndpointsView({
                     organization, then global.
                   </FieldDescription>
                 </Field>
+                {platformAdmin && form.scopeType !== "global" && (
+                  <Field>
+                    <FieldLabel htmlFor="endpoint-scope-id">Scope ID</FieldLabel>
+                    <Input
+                      id="endpoint-scope-id"
+                      value={form.scopeId}
+                      onChange={(event) => update("scopeId", event.target.value)}
+                      placeholder="Organization or user UUID"
+                      required
+                      readOnly={Boolean(editingEndpoint)}
+                    />
+                    <FieldDescription>
+                      {editingEndpoint
+                        ? "An endpoint's scope is fixed after creation."
+                        : "Platform administrators can assign this endpoint to a specific organization or user."}
+                    </FieldDescription>
+                  </Field>
+                )}
                 <Field>
                   <FieldLabel htmlFor="endpoint-url">Base URL</FieldLabel>
                   <Input
@@ -759,6 +815,38 @@ export function EndpointsView({
                     {providerDetails[form.providerType]?.description}
                   </FieldDescription>
                 </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="endpoint-api-path">
+                      API path (optional)
+                    </FieldLabel>
+                    <Input
+                      id="endpoint-api-path"
+                      value={form.apiPath}
+                      onChange={(event) => update("apiPath", event.target.value)}
+                      placeholder="/v1"
+                    />
+                    <FieldDescription>
+                      Override the provider&apos;s default chat route when using a gateway.
+                    </FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="endpoint-api-version">
+                      API version (optional)
+                    </FieldLabel>
+                    <Input
+                      id="endpoint-api-version"
+                      value={form.apiVersion}
+                      onChange={(event) =>
+                        update("apiVersion", event.target.value)
+                      }
+                      placeholder="2024-06-20"
+                    />
+                    <FieldDescription>
+                      Used by providers that require an explicit API version header or path.
+                    </FieldDescription>
+                  </Field>
+                </div>
                 <Field>
                   <div className="flex items-center justify-between gap-3">
                     <FieldLabel htmlFor="endpoint-chat-model">
@@ -808,6 +896,25 @@ export function EndpointsView({
                     work with compatible gateways too.
                   </FieldDescription>
                 </Field>
+                {supports(form.providerType, "vision") && (
+                  <Field>
+                    <FieldLabel htmlFor="endpoint-vision-model">
+                      Vision model
+                    </FieldLabel>
+                    <Input
+                      id="endpoint-vision-model"
+                      list="endpoint-chat-model-options"
+                      value={form.visionModel}
+                      onChange={(event) =>
+                        update("visionModel", event.target.value)
+                      }
+                      placeholder="e.g. gpt-4o or gemini-2.5-flash"
+                    />
+                    <FieldDescription>
+                      Used automatically when a chat includes an image. Leave empty to reuse the chat model.
+                    </FieldDescription>
+                  </Field>
+                )}
                 {supports(form.providerType, "embeddings") && (
                   <Field>
                     <FieldLabel htmlFor="endpoint-embedding">
@@ -890,6 +997,53 @@ export function EndpointsView({
                     <FieldDescription>Optional TTS model.</FieldDescription>
                   </Field>
                 )}
+                <div className="grid gap-4 rounded-xl border p-3 sm:grid-cols-3">
+                  <Field>
+                    <FieldLabel htmlFor="endpoint-timeout">Timeout (seconds)</FieldLabel>
+                    <Input
+                      id="endpoint-timeout"
+                      type="number"
+                      min={1}
+                      value={form.timeoutSeconds}
+                      onChange={(event) =>
+                        update("timeoutSeconds", Number(event.target.value))
+                      }
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="endpoint-max-tokens">
+                      Max output tokens
+                    </FieldLabel>
+                    <Input
+                      id="endpoint-max-tokens"
+                      type="number"
+                      min={1}
+                      value={form.maxOutputTokens}
+                      onChange={(event) =>
+                        update("maxOutputTokens", Number(event.target.value))
+                      }
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="endpoint-temperature">
+                      Temperature
+                    </FieldLabel>
+                    <Input
+                      id="endpoint-temperature"
+                      type="number"
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      value={form.temperature}
+                      onChange={(event) =>
+                        update("temperature", Number(event.target.value))
+                      }
+                    />
+                  </Field>
+                  <FieldDescription className="sm:col-span-3">
+                    These runtime settings are shared by organization and platform-admin endpoint configuration.
+                  </FieldDescription>
+                </div>
                 <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2 lg:grid-cols-4">
                   {supports(form.providerType, "realtime-transcription") && (
                     <label className="flex items-start justify-between gap-3">
@@ -976,6 +1130,23 @@ export function EndpointsView({
                         onCheckedChange={(checked) =>
                           update("toolCalling", checked)
                         }
+                      />
+                    </label>
+                  )}
+                  {supports(form.providerType, "vision") && (
+                    <label className="flex items-start justify-between gap-3">
+                      <span>
+                        <span className="block text-sm font-medium">
+                          Image input
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Enable image messages for a vision-capable model.
+                        </span>
+                      </span>
+                      <Switch
+                        aria-label="Enable image input"
+                        checked={form.vision}
+                        onCheckedChange={(checked) => update("vision", checked)}
                       />
                     </label>
                   )}

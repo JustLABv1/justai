@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,16 +30,28 @@ type assistantUIRequest struct {
 }
 
 type assistantUIMessage struct {
-	ID    string            `json:"id"`
-	Role  string            `json:"role"`
-	Parts []json.RawMessage `json:"parts"`
+	ID       string            `json:"id"`
+	Role     string            `json:"role"`
+	Parts    []json.RawMessage `json:"parts"`
+	Metadata json.RawMessage   `json:"metadata"`
+}
+
+type assistantUIQuote struct {
+	MessageID string `json:"messageId"`
+	Text      string `json:"text"`
 }
 
 type assistantUIPart struct {
 	Type       string               `json:"type"`
+	Name       string               `json:"name"`
 	ApprovalID string               `json:"approvalId"`
 	Approved   *bool                `json:"approved"`
 	Text       string               `json:"text"`
+	Image      string               `json:"image"`
+	URL        string               `json:"url"`
+	Filename   string               `json:"filename"`
+	MimeType   string               `json:"mimeType"`
+	MediaType  string               `json:"mediaType"`
 	State      string               `json:"state"`
 	ToolCallID string               `json:"toolCallId"`
 	ToolName   string               `json:"toolName"`
@@ -186,9 +199,21 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	}
 	// The endpoint's configured chat model is the safe default. A model chosen
 	// from discovery (or entered manually for a compatible gateway) is scoped to
-	// this request and never changes the endpoint's persisted default.
-	if model := strings.TrimSpace(request.Model); model != "" {
-		endpoint.ChatModel = model
+	// this request and never changes the endpoint's persisted default. When the
+	// history contains an image, switch to the endpoint's dedicated vision model
+	// if one is configured; otherwise retain the chat model for providers where a
+	// single multimodal model handles both modes.
+	hasImages := assistantUIMessageHasImages(requestMessages)
+	endpoint, err = assistantUIEndpointForRequest(endpoint, request.Model, hasImages)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	if hasImages {
+		if err := validateAssistantUIImageParts(requestMessages); err != nil {
+			writeError(c, http.StatusBadRequest, err)
+			return
+		}
 	}
 
 	runStatus := "complete"
@@ -231,8 +256,10 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	}
 
 	knowledgeEnabled := a.platformCapabilityEnabled(c, "knowledge")
+	knowledgeAttached := false
 	if knowledgeEnabled {
-		indexing, err := a.conversationHasIndexingKnowledge(c, conversationID)
+		selectedSourceIDs := latestUserAttachmentSourceIDs(latestUser)
+		indexing, err := a.conversationHasIndexingKnowledge(c, conversationID, selectedSourceIDs)
 		if err != nil {
 			runStatus = "error"
 			writeError(c, http.StatusInternalServerError, err)
@@ -243,6 +270,20 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			writeError(c, http.StatusConflict, fmt.Errorf("attached Knowledge is still indexing; detach it or wait for indexing to finish"))
 			return
 		}
+		if latestUser != nil {
+			knowledgeAttached, err = a.conversationHasKnowledge(c, conversationID, selectedSourceIDs)
+			if err != nil {
+				runStatus = "error"
+				writeError(c, http.StatusInternalServerError, err)
+				return
+			}
+		}
+	}
+	streamID := uuid.New()
+	if err := a.createChatStream(context.Background(), streamID, conversationID, principal.UserID, organizationID, runID); err != nil {
+		runStatus = "error"
+		writeError(c, http.StatusInternalServerError, fmt.Errorf("resumable chat stream could not be created: %w", err))
+		return
 	}
 
 	// The UI Message Stream is deliberately emitted directly from Go. This
@@ -254,6 +295,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	writer.Header().Set("Connection", "keep-alive")
 	writer.Header().Set("X-Accel-Buffering", "no")
 	writer.Header().Set("x-vercel-ai-ui-message-stream", "v1")
+	writer.Header().Set("x-resumable-stream-id", streamID.String())
 	writer.WriteHeader(http.StatusOK)
 	flusher, _ := writer.(http.Flusher)
 	start := time.Now()
@@ -284,6 +326,12 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		if marshalErr != nil {
 			return marshalErr
 		}
+		// Persist before writing to the live connection. If the browser drops
+		// between these operations, a reconnect still receives the event.
+		if persistErr := a.appendChatStreamChunk(context.Background(), streamID, string(payload)); persistErr != nil {
+			runStatus = "error"
+			return persistErr
+		}
 		if _, writeErr := fmt.Fprintf(writer, "data: %s\n\n", payload); writeErr != nil {
 			return writeErr
 		}
@@ -293,12 +341,20 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		return nil
 	}
 	finishStream := func() {
+		streamStatus := runStatus
 		if requestContext := c.Request.Context(); requestContext.Err() != nil {
+			streamStatus = "cancelled"
 			if payload, marshalErr := json.Marshal(map[string]any{"type": "abort", "reason": requestContext.Err().Error()}); marshalErr == nil {
+				_ = a.appendChatStreamChunk(context.Background(), streamID, string(payload))
 				_, _ = fmt.Fprintf(writer, "data: %s\n\n", payload)
 			}
 		}
+		_ = a.appendChatStreamChunk(context.Background(), streamID, "[DONE]")
 		_, _ = fmt.Fprint(writer, "data: [DONE]\n\n")
+		if streamStatus == "running" {
+			streamStatus = "complete"
+		}
+		_ = a.finishChatStream(context.Background(), streamID, streamStatus)
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -314,11 +370,11 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		}
 	}
 	textID := assistantMessageID + ":text"
+	defer finishStream()
 	if err := writeChunk(map[string]any{"type": "start", "messageId": assistantMessageID}); err != nil {
 		runStatus = "error"
 		return
 	}
-	defer finishStream()
 	writeTiming := func() map[string]any {
 		timing := map[string]any{
 			"streamStartTime": start.UnixMilli(),
@@ -333,33 +389,34 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	}
 
 	var citations []models.Citation
-	if latestUser != nil {
+	if latestUser != nil && knowledgeEnabled && knowledgeAttached {
 		_ = writeChunk(map[string]any{
 			"type": "data-retrieval-status",
+			"id":   "retrieval-status",
 			"data": map[string]any{"status": "started", "query": latestUser.Text},
 		})
-		if !knowledgeEnabled {
+		var retrievalErr error
+		citations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6, latestUser.AttachmentSourceIDs)
+		if retrievalErr != nil {
 			_ = writeChunk(map[string]any{
 				"type": "data-retrieval-status",
-				"data": map[string]any{"status": "disabled"},
+				"id":   "retrieval-status",
+				"data": map[string]any{"status": "failed", "error": retrievalErr.Error()},
 			})
 		} else {
-			var retrievalErr error
-			citations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6)
-			if retrievalErr != nil {
-				_ = writeChunk(map[string]any{
-					"type": "data-retrieval-status",
-					"data": map[string]any{"status": "failed", "error": retrievalErr.Error()},
-				})
-			} else {
-				_ = writeChunk(map[string]any{
-					"type": "data-retrieval-status",
-					"data": map[string]any{"status": "completed", "citationCount": len(citations)},
-				})
-			}
+			_ = writeChunk(map[string]any{
+				"type": "data-retrieval-status",
+				"id":   "retrieval-status",
+				"data": map[string]any{
+					"status":        "completed",
+					"citationCount": len(deduplicateAssistantUICitations(citations)),
+					"sourceCount":   len(deduplicateAssistantUICitations(citations)),
+					"passageCount":  len(citations),
+				},
+			})
 		}
 	}
-	for _, citation := range citations {
+	for _, citation := range deduplicateAssistantUICitations(citations) {
 		_ = writeChunk(a.assistantUICitationPart(c, citation))
 	}
 
@@ -498,10 +555,29 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	_ = start
 }
 
+func assistantUIEndpointForRequest(endpoint provider.Endpoint, requestedModel string, hasImages bool) (provider.Endpoint, error) {
+	if model := strings.TrimSpace(requestedModel); model != "" {
+		endpoint.ChatModel = model
+	}
+	if !hasImages {
+		return endpoint, nil
+	}
+	if !provider.SupportsVision(endpoint) {
+		return endpoint, fmt.Errorf("the selected endpoint does not support image messages")
+	}
+	if model := strings.TrimSpace(endpoint.VisionModel); model != "" {
+		endpoint.ChatModel = model
+	}
+	return endpoint, nil
+}
+
 type assistantUserMessage struct {
-	ID       string
-	Text     string
-	ParentID string
+	ID                  string
+	Text                string
+	ParentID            string
+	Parts               []json.RawMessage
+	Metadata            json.RawMessage
+	AttachmentSourceIDs []uuid.UUID
 }
 
 func parseAssistantUIMessages(raw []json.RawMessage) []assistantUIMessage {
@@ -520,18 +596,214 @@ func latestAssistantUserMessage(messages []assistantUIMessage) *assistantUserMes
 		if messages[index].Role != "user" {
 			continue
 		}
+		text := ""
+		hasContent := false
+		hasImage := false
+		hasFile := false
 		for _, rawPart := range messages[index].Parts {
 			var part assistantUIPart
-			if json.Unmarshal(rawPart, &part) == nil && part.Type == "text" && strings.TrimSpace(part.Text) != "" {
-				parentID := ""
-				if index > 0 {
-					parentID = messages[index-1].ID
+			if json.Unmarshal(rawPart, &part) != nil {
+				continue
+			}
+			switch part.Type {
+			case "text":
+				if strings.TrimSpace(part.Text) != "" {
+					text = strings.TrimSpace(part.Text)
+					hasContent = true
 				}
-				return &assistantUserMessage{ID: messages[index].ID, Text: part.Text, ParentID: parentID}
+			case "image":
+				if _, ok := assistantUIImageURL(part); ok {
+					hasContent = true
+					hasImage = true
+				}
+			case "file":
+				hasFile = strings.TrimSpace(part.URL) != ""
+				if hasFile {
+					hasContent = true
+				}
+				if _, ok := assistantUIImageURL(part); ok {
+					hasContent = true
+					hasImage = true
+				}
+			}
+		}
+		attachmentSourceIDs := assistantUIAttachmentSourceIDs(messages[index])
+		if len(attachmentSourceIDs) > 0 {
+			hasContent = true
+			hasFile = true
+		}
+		quote := assistantUIMessageQuote(messages[index])
+		if !hasContent && quote == nil {
+			continue
+		}
+		if text == "" {
+			if hasImage && !hasFile {
+				text = "Please inspect the attached image."
+			} else if hasFile {
+				text = "Please inspect the attached file."
+			} else if hasContent {
+				text = "Please inspect the attached image."
+			} else {
+				text = "Please respond to the quoted context."
+			}
+		}
+		if quote != nil {
+			text += "\n\nQuoted context:\n" + assistantUIQuoteBlock(quote.Text)
+		}
+		parentID := ""
+		if index > 0 {
+			parentID = messages[index-1].ID
+		}
+		return &assistantUserMessage{ID: messages[index].ID, Text: text, ParentID: parentID, Parts: messages[index].Parts, Metadata: messages[index].Metadata, AttachmentSourceIDs: attachmentSourceIDs}
+	}
+	return nil
+}
+
+func assistantUIAttachmentSourceIDs(message assistantUIMessage) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{})
+	result := make([]uuid.UUID, 0)
+	appendSource := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		raw = strings.TrimPrefix(raw, "justai-source:")
+		id, err := uuid.Parse(raw)
+		if err != nil || id == uuid.Nil {
+			return
+		}
+		if _, exists := seen[id]; exists {
+			return
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	for _, rawPart := range message.Parts {
+		var part assistantUIPart
+		if json.Unmarshal(rawPart, &part) != nil {
+			continue
+		}
+		if part.Type == "file" && strings.HasPrefix(strings.TrimSpace(part.URL), "justai-source:") {
+			appendSource(part.URL)
+		}
+		if part.Type != "data-justai-attachment" && part.Name != "justai-attachment" {
+			continue
+		}
+		if part.Data == nil {
+			continue
+		}
+		if rawID, ok := part.Data["sourceId"].(string); ok {
+			appendSource(rawID)
+		}
+	}
+	return result
+}
+
+func latestUserAttachmentSourceIDs(message *assistantUserMessage) []uuid.UUID {
+	if message == nil {
+		return nil
+	}
+	return message.AttachmentSourceIDs
+}
+
+func assistantUIMessageQuote(message assistantUIMessage) *assistantUIQuote {
+	if len(message.Metadata) == 0 || !json.Valid(message.Metadata) {
+		return nil
+	}
+	var envelope struct {
+		Custom struct {
+			Quote *assistantUIQuote `json:"quote"`
+		} `json:"custom"`
+	}
+	if json.Unmarshal(message.Metadata, &envelope) != nil || envelope.Custom.Quote == nil || strings.TrimSpace(envelope.Custom.Quote.Text) == "" {
+		return nil
+	}
+	envelope.Custom.Quote.Text = strings.TrimSpace(envelope.Custom.Quote.Text)
+	return envelope.Custom.Quote
+}
+
+func assistantUIQuoteBlock(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for index, line := range lines {
+		lines[index] = "> " + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func assistantUIMessageHasImages(messages []assistantUIMessage) bool {
+	for _, message := range messages {
+		if message.Role != "user" {
+			continue
+		}
+		for _, rawPart := range message.Parts {
+			var part assistantUIPart
+			if json.Unmarshal(rawPart, &part) == nil {
+				if _, ok := assistantUIImageURL(part); ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func assistantUIProviderImageParts(rawParts []json.RawMessage) []provider.MessageContentPart {
+	result := make([]provider.MessageContentPart, 0)
+	for _, rawPart := range rawParts {
+		var part assistantUIPart
+		if json.Unmarshal(rawPart, &part) != nil {
+			continue
+		}
+		imageURL, ok := assistantUIImageURL(part)
+		if !ok {
+			continue
+		}
+		result = append(result, provider.MessageContentPart{
+			Type:     "image_url",
+			ImageURL: &provider.MessageImageURL{URL: imageURL, Detail: "auto"},
+		})
+	}
+	return result
+}
+
+func validateAssistantUIImageParts(messages []assistantUIMessage) error {
+	const maxImageBytes = 12 * 1024 * 1024
+	for _, message := range messages {
+		for _, rawPart := range message.Parts {
+			var part assistantUIPart
+			if json.Unmarshal(rawPart, &part) != nil {
+				continue
+			}
+			imageURL, ok := assistantUIImageURL(part)
+			if !ok {
+				continue
+			}
+			header, encoded, ok := strings.Cut(imageURL, ",")
+			if !ok || !strings.HasPrefix(header, "data:image/") || !strings.HasSuffix(header, ";base64") {
+				return fmt.Errorf("image messages must use base64 data URLs")
+			}
+			decoded, err := base64.StdEncoding.DecodeString(encoded)
+			if err != nil {
+				return fmt.Errorf("image message data is invalid")
+			}
+			if len(decoded) > maxImageBytes {
+				return fmt.Errorf("image messages must be smaller than %d MB", maxImageBytes/(1024*1024))
 			}
 		}
 	}
 	return nil
+}
+
+func assistantUIImageURL(part assistantUIPart) (string, bool) {
+	imageURL := strings.TrimSpace(part.Image)
+	if part.Type == "file" {
+		imageURL = strings.TrimSpace(part.URL)
+	}
+	if imageURL == "" || !strings.HasPrefix(strings.ToLower(imageURL), "data:image/") {
+		return "", false
+	}
+	mimeType := strings.ToLower(strings.TrimSpace(firstAssistantUIString(part.MimeType, part.MediaType)))
+	if part.Type == "file" && mimeType != "" && !strings.HasPrefix(mimeType, "image/") {
+		return "", false
+	}
+	return imageURL, true
 }
 
 func findAssistantUIApproval(messages []assistantUIMessage) *assistantUIApprovalResponse {
@@ -589,10 +861,22 @@ func (a *App) persistAssistantUIUser(ctx context.Context, conversationID uuid.UU
 		}
 		parentID = head
 	}
+	uiMessage := map[string]any{
+		"id":    message.ID,
+		"role":  "user",
+		"parts": message.Parts,
+	}
+	if len(message.Metadata) > 0 && json.Valid(message.Metadata) {
+		uiMessage["metadata"] = json.RawMessage(message.Metadata)
+	}
+	encodedUIMessage, err := json.Marshal(uiMessage)
+	if err != nil {
+		return err
+	}
 	_, err = a.DB.ExecContext(ctx, `
 		INSERT INTO messages (conversation_id, role, content, format, ui_message, parent_id, run_status, updated_at)
-		VALUES ($1, 'user', $2::text, 'ai-sdk-ui', jsonb_build_object('id', $3::text, 'role', 'user', 'parts', jsonb_build_array(jsonb_build_object('type', 'text', 'text', $2::text))), $4::uuid, 'complete', now())
-	`, conversationID, message.Text, message.ID, parentID)
+		VALUES ($1, 'user', $2::text, 'ai-sdk-ui', $4::jsonb, $3::uuid, 'complete', now())
+	`, conversationID, message.Text, parentID, encodedUIMessage)
 	if err != nil {
 		return err
 	}
@@ -611,7 +895,7 @@ func (a *App) persistAssistantUITextMessage(ctx context.Context, conversationID 
 		return uuid.Nil, err
 	}
 	parts := []map[string]any{{"type": "text", "text": content}}
-	for _, citation := range citations {
+	for _, citation := range deduplicateAssistantUICitations(citations) {
 		parts = append(parts, a.assistantUICitationPart(ctx, citation))
 	}
 	payload, err := json.Marshal(map[string]any{"id": messageID.String(), "role": role, "parts": parts})
@@ -644,6 +928,9 @@ func assistantUIDynamicToolPart(event chatToolEvent) map[string]any {
 		"state":      state,
 		"dynamic":    true,
 	}
+	if app := assistantUIMCPAppMetadata(event); app != nil {
+		part["mcp"] = map[string]any{"app": app}
+	}
 	switch event.Status {
 	case "awaiting_approval":
 		part["state"] = "approval-requested"
@@ -668,6 +955,25 @@ func assistantUIDynamicToolPart(event chatToolEvent) map[string]any {
 		}
 	}
 	return part
+}
+
+func assistantUIMCPAppMetadata(event chatToolEvent) map[string]any {
+	resourceURI := strings.TrimSpace(event.MCPAppResourceURI)
+	if resourceURI == "" || !strings.HasPrefix(resourceURI, "ui://") {
+		return nil
+	}
+	mimeType := strings.TrimSpace(event.MCPAppMIMEType)
+	if mimeType == "" {
+		mimeType = "text/html;profile=mcp-app"
+	}
+	metadata := map[string]any{
+		"resourceUri": resourceURI,
+		"mimeType":    mimeType,
+	}
+	if event.ServerID != uuid.Nil {
+		metadata["serverId"] = event.ServerID.String()
+	}
+	return metadata
 }
 
 func assistantUIJSONValue(value string) any {
@@ -744,14 +1050,15 @@ func (a *App) persistAssistantUIAssistantAtParts(ctx context.Context, conversati
 }
 
 func (a *App) persistAssistantUIAssistantAtPartsStatus(ctx context.Context, conversationID uuid.UUID, parentID any, messageID, content string, citations []models.Citation, toolParts []map[string]any, metadata map[string]any, runStatus string) error {
-	parts := make([]any, 0, 1+len(toolParts)+len(citations))
+	displayCitations := deduplicateAssistantUICitations(citations)
+	parts := make([]any, 0, 1+len(toolParts)+len(displayCitations))
 	if strings.TrimSpace(content) != "" {
 		parts = append(parts, map[string]any{"type": "text", "text": content})
 	}
 	for _, toolPart := range toolParts {
 		parts = append(parts, toolPart)
 	}
-	for _, citation := range citations {
+	for _, citation := range displayCitations {
 		parts = append(parts, a.assistantUICitationPart(ctx, citation))
 	}
 	payload := map[string]any{"id": messageID, "role": "assistant", "parts": parts}
@@ -1003,12 +1310,16 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 				toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: errorText})
 				continue
 			}
-			event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, CallID: call.ID, Arguments: arguments}
+			event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
 			messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 			if messageRowID != uuid.Nil {
 				*parentID = messageRowID
 			}
-			if err := writeChunk(map[string]any{"type": "tool-input-available", "toolCallId": call.ID, "toolName": call.Name, "input": arguments, "dynamic": true, "toolMetadata": map[string]any{"serverId": binding.ServerID.String(), "serverName": binding.ServerName, "messageId": messageRowID.String()}}); err != nil {
+			toolInput := map[string]any{"type": "tool-input-available", "toolCallId": call.ID, "toolName": call.Name, "input": arguments, "dynamic": true, "toolMetadata": map[string]any{"serverId": binding.ServerID.String(), "serverName": binding.ServerName, "messageId": messageRowID.String()}}
+			if app := assistantUIMCPAppMetadata(event); app != nil {
+				toolInput["mcp"] = map[string]any{"app": app}
+			}
+			if err := writeChunk(toolInput); err != nil {
 				return false, err
 			}
 			if binding.RequiresApproval {
@@ -1084,6 +1395,11 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
+	knowledgeAttached, err := a.conversationHasKnowledge(c, conversationID, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 	rows, err := a.DB.QueryContext(c, `
 		SELECT m.id, m.role, m.content, m.citations, m.format, m.ui_message, m.parent_id,
 		       COALESCE(parent.ui_message->>'id', ''), m.run_status, m.feedback
@@ -1127,6 +1443,12 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 		if message == nil {
 			message = a.legacyAssistantUIMessage(c, id, role, content, citations, runStatus, feedback)
 		} else {
+			messageKnowledgeAttached := knowledgeAttached || assistantUIMessageHasSourceParts(message)
+			if messageKnowledgeAttached {
+				collapseAssistantUIRetrievalStatuses(message)
+			} else {
+				removeAssistantUIRetrievalStatuses(message)
+			}
 			metadata, _ := message["metadata"].(map[string]any)
 			if metadata == nil {
 				metadata = map[string]any{}
@@ -1182,7 +1504,78 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"repository": repository})
 }
 
+func collapseAssistantUIRetrievalStatuses(message map[string]any) {
+	parts, ok := message["parts"].([]any)
+	if !ok {
+		return
+	}
+
+	lastStatusIndex := -1
+	for index, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			continue
+		}
+		if partType, _ := part["type"].(string); partType == "data-retrieval-status" {
+			lastStatusIndex = index
+		}
+	}
+	if lastStatusIndex < 0 {
+		return
+	}
+
+	collapsed := make([]any, 0, len(parts))
+	for index, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if ok {
+			if partType, _ := part["type"].(string); partType == "data-retrieval-status" && index != lastStatusIndex {
+				continue
+			}
+		}
+		collapsed = append(collapsed, rawPart)
+	}
+	message["parts"] = collapsed
+}
+
+func removeAssistantUIRetrievalStatuses(message map[string]any) {
+	parts, ok := message["parts"].([]any)
+	if !ok {
+		return
+	}
+
+	filtered := make([]any, 0, len(parts))
+	for _, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if ok {
+			if partType, _ := part["type"].(string); partType == "data-retrieval-status" {
+				continue
+			}
+		}
+		filtered = append(filtered, rawPart)
+	}
+	message["parts"] = filtered
+}
+
+func assistantUIMessageHasSourceParts(message map[string]any) bool {
+	parts, ok := message["parts"].([]any)
+	if !ok {
+		return false
+	}
+	for _, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			continue
+		}
+		partType, _ := part["type"].(string)
+		if partType == "source-document" || partType == "source-url" {
+			return true
+		}
+	}
+	return false
+}
+
 func assistantUIAppendMissingCitations(ctx context.Context, message map[string]any, raw []byte, app *App) {
+	deduplicateAssistantUISourceParts(message)
 	if len(raw) == 0 {
 		return
 	}
@@ -1207,6 +1600,65 @@ func assistantUIAppendMissingCitations(ctx context.Context, message map[string]a
 		present[id] = struct{}{}
 	}
 	message["parts"] = parts
+	deduplicateAssistantUISourceParts(message)
+}
+
+// deduplicateAssistantUICitations keeps all retrieved passages available to
+// the model while exposing one source entry per resource in the UI. A single
+// file can contribute several chunks to one answer, but repeating its filename
+// for every chunk makes the grounding state look broken.
+func deduplicateAssistantUICitations(citations []models.Citation) []models.Citation {
+	if len(citations) < 2 {
+		return citations
+	}
+
+	seen := make(map[string]struct{}, len(citations))
+	result := make([]models.Citation, 0, len(citations))
+	for _, citation := range citations {
+		resourceID := citation.ResourceID
+		if resourceID == uuid.Nil {
+			resourceID = citation.SourceID
+		}
+		key := citation.Kind + ":" + resourceID.String()
+		if resourceID == uuid.Nil {
+			key = citation.Kind + ":" + citation.Title + ":" + citation.Locator
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, citation)
+	}
+	return result
+}
+
+func deduplicateAssistantUISourceParts(message map[string]any) {
+	parts, ok := message["parts"].([]any)
+	if !ok || len(parts) < 2 {
+		return
+	}
+
+	seen := make(map[string]struct{}, len(parts))
+	filtered := make([]any, 0, len(parts))
+	for _, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			filtered = append(filtered, rawPart)
+			continue
+		}
+		partType, _ := part["type"].(string)
+		if partType == "source-document" || partType == "source-url" {
+			sourceID, _ := part["sourceId"].(string)
+			if sourceID != "" {
+				if _, exists := seen[sourceID]; exists {
+					continue
+				}
+				seen[sourceID] = struct{}{}
+			}
+		}
+		filtered = append(filtered, rawPart)
+	}
+	message["parts"] = filtered
 }
 
 func filterAssistantUIRepositoryTools(repository *assistantUIRepository) {
@@ -1333,7 +1785,7 @@ func (a *App) legacyAssistantUIMessage(ctx context.Context, id uuid.UUID, role, 
 	if len(citations) > 0 {
 		var items []models.Citation
 		if json.Unmarshal(citations, &items) == nil {
-			for _, citation := range items {
+			for _, citation := range deduplicateAssistantUICitations(items) {
 				parts = append(parts, a.assistantUICitationPart(ctx, citation))
 			}
 		}

@@ -26,10 +26,11 @@ type ToolCall struct {
 }
 
 type ToolMessage struct {
-	Role       string
-	Content    string
-	ToolCallID string
-	ToolCalls  []ToolCall
+	Role         string
+	Content      string
+	ContentParts []MessageContentPart
+	ToolCallID   string
+	ToolCalls    []ToolCall
 }
 
 type ToolChatOptions struct {
@@ -70,7 +71,7 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 	for _, message := range options.Messages {
 		item := map[string]any{
 			"role":    message.Role,
-			"content": message.Content,
+			"content": openAIMessageContent(Message{Content: message.Content, ContentParts: message.ContentParts}),
 		}
 		if message.ToolCallID != "" {
 			item["tool_call_id"] = message.ToolCallID

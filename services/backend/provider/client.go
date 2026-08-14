@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ type Endpoint struct {
 	APIVersion         string
 	Credential         string
 	ChatModel          string
+	VisionModel        string
 	EmbeddingModel     string
 	TranscriptionModel string
 	DiarizationModel   string
@@ -31,8 +33,20 @@ type Endpoint struct {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role         string
+	Content      string
+	ContentParts []MessageContentPart
+}
+
+type MessageContentPart struct {
+	Type     string
+	Text     string
+	ImageURL *MessageImageURL
+}
+
+type MessageImageURL struct {
+	URL    string
+	Detail string
 }
 
 type ChatOptions struct {
@@ -93,6 +107,13 @@ func StreamChat(ctx context.Context, endpoint Endpoint, options ChatOptions, onD
 	}
 }
 
+// SupportsVision is deliberately capability-driven. Native providers may
+// support image input, but an endpoint must explicitly opt in so a gateway
+// configured with a text-only model never receives an image part by accident.
+func SupportsVision(endpoint Endpoint) bool {
+	return endpoint.Capabilities["vision"] || endpoint.Capabilities["multimodal"]
+}
+
 func Test(ctx context.Context, endpoint Endpoint) error {
 	seen := false
 	err := StreamChat(ctx, endpoint, ChatOptions{Messages: []Message{{Role: "user", Content: "Reply with the word ready."}}}, func(_ string) error {
@@ -109,9 +130,16 @@ func Test(ctx context.Context, endpoint Endpoint) error {
 }
 
 func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc) error {
+	messages := make([]map[string]any, 0, len(options.Messages))
+	for _, message := range options.Messages {
+		messages = append(messages, map[string]any{
+			"role":    message.Role,
+			"content": openAIMessageContent(message),
+		})
+	}
 	payload := map[string]any{
 		"model":       firstNonEmpty(options.Model, endpoint.ChatModel, "gpt-4o-mini"),
-		"messages":    options.Messages,
+		"messages":    messages,
 		"stream":      true,
 		"temperature": endpoint.Temperature,
 		"max_tokens":  endpoint.MaxOutputTokens,
@@ -291,9 +319,28 @@ func embedGemini(ctx context.Context, endpoint Endpoint, input string) ([]float6
 }
 
 func streamOllama(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc) error {
+	messages := make([]map[string]any, 0, len(options.Messages))
+	for _, message := range options.Messages {
+		item := map[string]any{"role": message.Role, "content": message.Content}
+		if len(message.ContentParts) > 0 {
+			images := make([]string, 0, len(message.ContentParts))
+			for _, part := range message.ContentParts {
+				if part.ImageURL == nil {
+					continue
+				}
+				if _, data, err := decodeImageDataURL(part.ImageURL.URL); err == nil {
+					images = append(images, data)
+				}
+			}
+			if len(images) > 0 {
+				item["images"] = images
+			}
+		}
+		messages = append(messages, item)
+	}
 	payload := map[string]any{
 		"model":    firstNonEmpty(options.Model, endpoint.ChatModel, "llama3.2"),
-		"messages": options.Messages,
+		"messages": messages,
 		"stream":   true,
 	}
 	body, err := json.Marshal(payload)
@@ -340,7 +387,7 @@ func chatGemini(ctx context.Context, endpoint Endpoint, options ChatOptions, onD
 		if message.Role == "assistant" {
 			role = "model"
 		}
-		contents = append(contents, map[string]any{"role": role, "parts": []map[string]string{{"text": message.Content}}})
+		contents = append(contents, map[string]any{"role": role, "parts": geminiMessageParts(message)})
 	}
 	payload := map[string]any{
 		"contents": contents,
@@ -394,9 +441,16 @@ func chatGemini(ctx context.Context, endpoint Endpoint, options ChatOptions, onD
 }
 
 func chatAnthropic(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc) error {
+	messages := make([]map[string]any, 0, len(options.Messages))
+	for _, message := range options.Messages {
+		messages = append(messages, map[string]any{
+			"role":    message.Role,
+			"content": anthropicMessageContent(message),
+		})
+	}
 	payload := map[string]any{
 		"model":       firstNonEmpty(options.Model, endpoint.ChatModel, "claude-3-5-haiku-latest"),
-		"messages":    options.Messages,
+		"messages":    messages,
 		"max_tokens":  endpoint.MaxOutputTokens,
 		"temperature": endpoint.Temperature,
 	}
@@ -433,6 +487,106 @@ func chatAnthropic(ctx context.Context, endpoint Endpoint, options ChatOptions, 
 		return fmt.Errorf("anthropic returned no content")
 	}
 	return onDelta(result.Content[0].Text)
+}
+
+func openAIMessageContent(message Message) any {
+	if len(message.ContentParts) == 0 {
+		return message.Content
+	}
+	parts := make([]map[string]any, 0, len(message.ContentParts)+1)
+	if strings.TrimSpace(message.Content) != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": message.Content})
+	}
+	for _, part := range message.ContentParts {
+		switch part.Type {
+		case "text":
+			if strings.TrimSpace(part.Text) != "" {
+				parts = append(parts, map[string]any{"type": "text", "text": part.Text})
+			}
+		case "image_url":
+			if part.ImageURL != nil && part.ImageURL.URL != "" {
+				imageURL := map[string]any{"url": part.ImageURL.URL}
+				if part.ImageURL.Detail != "" {
+					imageURL["detail"] = part.ImageURL.Detail
+				}
+				parts = append(parts, map[string]any{"type": "image_url", "image_url": imageURL})
+			}
+		}
+	}
+	return parts
+}
+
+func geminiMessageParts(message Message) []map[string]any {
+	parts := make([]map[string]any, 0, len(message.ContentParts)+1)
+	if strings.TrimSpace(message.Content) != "" {
+		parts = append(parts, map[string]any{"text": message.Content})
+	}
+	for _, part := range message.ContentParts {
+		switch part.Type {
+		case "text":
+			if strings.TrimSpace(part.Text) != "" {
+				parts = append(parts, map[string]any{"text": part.Text})
+			}
+		case "image_url":
+			if part.ImageURL == nil {
+				continue
+			}
+			mimeType, data, err := decodeImageDataURL(part.ImageURL.URL)
+			if err == nil {
+				parts = append(parts, map[string]any{"inline_data": map[string]string{"mime_type": mimeType, "data": data}})
+			}
+		}
+	}
+	return parts
+}
+
+func anthropicMessageContent(message Message) any {
+	if len(message.ContentParts) == 0 {
+		return message.Content
+	}
+	parts := make([]map[string]any, 0, len(message.ContentParts)+1)
+	if strings.TrimSpace(message.Content) != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": message.Content})
+	}
+	for _, part := range message.ContentParts {
+		switch part.Type {
+		case "text":
+			if strings.TrimSpace(part.Text) != "" {
+				parts = append(parts, map[string]any{"type": "text", "text": part.Text})
+			}
+		case "image_url":
+			if part.ImageURL == nil {
+				continue
+			}
+			mediaType, data, err := decodeImageDataURL(part.ImageURL.URL)
+			if err == nil {
+				parts = append(parts, map[string]any{
+					"type":   "image",
+					"source": map[string]string{"type": "base64", "media_type": mediaType, "data": data},
+				})
+			}
+		}
+	}
+	return parts
+}
+
+func decodeImageDataURL(value string) (string, string, error) {
+	if !strings.HasPrefix(value, "data:") {
+		return "", "", fmt.Errorf("image must be a data URL")
+	}
+	header, encoded, ok := strings.Cut(value, ",")
+	if !ok || !strings.HasSuffix(header, ";base64") {
+		return "", "", fmt.Errorf("image data URL must be base64 encoded")
+	}
+	mimeType := strings.TrimPrefix(strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64"), ";")
+	if !strings.HasPrefix(mimeType, "image/") {
+		return "", "", fmt.Errorf("image data URL has an invalid MIME type")
+	}
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", "", fmt.Errorf("image data URL is invalid: %w", err)
+	}
+	return mimeType, base64.StdEncoding.EncodeToString(data), nil
 }
 
 func doRequest(request *http.Request, timeoutSeconds int) (*http.Response, error) {

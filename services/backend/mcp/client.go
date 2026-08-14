@@ -79,6 +79,64 @@ type Tool struct {
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
 	Annotations ToolAnnotations `json:"annotations,omitempty"`
+	Meta        json.RawMessage `json:"_meta,omitempty"`
+}
+
+// ToolAppMetadata is the small, transport-neutral subset of MCP tool
+// metadata needed to connect a tool call to an MCP App resource. MCP servers
+// in the wild use both the current `ui` namespace and the older
+// `modelcontextprotocol/ui` namespace, so the parser accepts both forms.
+type ToolAppMetadata struct {
+	ResourceURI string
+	MIMEType    string
+}
+
+func (t Tool) AppMetadata() ToolAppMetadata {
+	return ParseToolAppMetadata(t.Meta)
+}
+
+func ParseToolAppMetadata(raw json.RawMessage) ToolAppMetadata {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return ToolAppMetadata{}
+	}
+	var value map[string]any
+	if json.Unmarshal(raw, &value) != nil {
+		return ToolAppMetadata{}
+	}
+	for _, namespace := range []string{
+		"ui",
+		"modelcontextprotocol/ui",
+		"io.modelcontextprotocol/ui",
+		"mcpApps",
+		"mcp_app",
+	} {
+		if nested, ok := value[namespace].(map[string]any); ok {
+			if metadata := parseToolAppMetadataMap(nested); metadata.ResourceURI != "" {
+				return metadata
+			}
+		}
+	}
+	return parseToolAppMetadataMap(value)
+}
+
+func parseToolAppMetadataMap(value map[string]any) ToolAppMetadata {
+	metadata := ToolAppMetadata{}
+	for _, key := range []string{"resourceUri", "resourceURI", "resource_uri"} {
+		if resourceURI, ok := value[key].(string); ok {
+			metadata.ResourceURI = strings.TrimSpace(resourceURI)
+			break
+		}
+	}
+	for _, key := range []string{"mimeType", "mime_type", "mime"} {
+		if mimeType, ok := value[key].(string); ok {
+			metadata.MIMEType = strings.TrimSpace(mimeType)
+			break
+		}
+	}
+	if !strings.HasPrefix(metadata.ResourceURI, "ui://") {
+		return ToolAppMetadata{}
+	}
+	return metadata
 }
 
 type rpcRequest struct {
@@ -368,6 +426,11 @@ func (s *Server) sdkCallToolLegacy(ctx context.Context, name string, arguments m
 
 func sdkTool(tool *sdkmcp.Tool) Tool {
 	result := Tool{Name: tool.Name, Description: tool.Description}
+	if tool.Meta != nil {
+		if encoded, err := json.Marshal(tool.Meta); err == nil {
+			result.Meta = encoded
+		}
+	}
 	if tool.InputSchema != nil {
 		if encoded, err := json.Marshal(tool.InputSchema); err == nil && string(encoded) != "null" {
 			result.InputSchema = encoded
@@ -649,6 +712,222 @@ func (s *Server) CallTool(ctx context.Context, name string, arguments map[string
 		}
 	}
 	return s.request(ctx, "tools/call", map[string]any{"name": name, "arguments": arguments})
+}
+
+func (s *Server) ListResources(ctx context.Context) (json.RawMessage, error) {
+	if err := s.ensureOAuthToken(ctx); err != nil {
+		return nil, err
+	}
+	if resources, err := s.sdkListResources(ctx, false); err == nil {
+		return json.Marshal(map[string]any{"resources": resources})
+	}
+	if resources, err := s.sdkListResources(ctx, true); err == nil {
+		return json.Marshal(map[string]any{"resources": resources})
+	}
+	if s.SessionID == "" {
+		if _, err := s.Initialize(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return s.listResourcesLegacyRPC(ctx)
+}
+
+func (s *Server) ReadResource(ctx context.Context, uri string) (json.RawMessage, error) {
+	if err := s.ensureOAuthToken(ctx); err != nil {
+		return nil, err
+	}
+	if result, err := s.sdkReadResource(ctx, uri, false); err == nil {
+		return json.Marshal(result)
+	}
+	if result, err := s.sdkReadResource(ctx, uri, true); err == nil {
+		return json.Marshal(result)
+	}
+	if s.SessionID == "" {
+		if _, err := s.Initialize(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return s.request(ctx, "resources/read", map[string]any{"uri": uri})
+}
+
+func (s *Server) ListPrompts(ctx context.Context) (json.RawMessage, error) {
+	if err := s.ensureOAuthToken(ctx); err != nil {
+		return nil, err
+	}
+	if prompts, err := s.sdkListPrompts(ctx, false); err == nil {
+		return json.Marshal(map[string]any{"prompts": prompts})
+	}
+	if prompts, err := s.sdkListPrompts(ctx, true); err == nil {
+		return json.Marshal(map[string]any{"prompts": prompts})
+	}
+	if s.SessionID == "" {
+		if _, err := s.Initialize(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return s.listPromptsLegacyRPC(ctx)
+}
+
+func (s *Server) GetPrompt(ctx context.Context, name string, arguments map[string]string) (json.RawMessage, error) {
+	if err := s.ensureOAuthToken(ctx); err != nil {
+		return nil, err
+	}
+	if result, err := s.sdkGetPrompt(ctx, name, arguments, false); err == nil {
+		return json.Marshal(result)
+	}
+	if result, err := s.sdkGetPrompt(ctx, name, arguments, true); err == nil {
+		return json.Marshal(result)
+	}
+	if s.SessionID == "" {
+		if _, err := s.Initialize(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return s.request(ctx, "prompts/get", map[string]any{"name": name, "arguments": arguments})
+}
+
+func (s *Server) sdkListResources(ctx context.Context, legacySSE bool) ([]*sdkmcp.Resource, error) {
+	session, entry, err := s.sdkSessionWithTransport(ctx, legacySSE)
+	if err != nil {
+		return nil, err
+	}
+	if err := entry.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer entry.release()
+	resources := make([]*sdkmcp.Resource, 0)
+	var cursor string
+	for {
+		result, listErr := session.ListResources(ctx, &sdkmcp.ListResourcesParams{Cursor: cursor})
+		if listErr != nil {
+			connections.invalidate(s.connectionKey(), session)
+			return nil, listErr
+		}
+		resources = append(resources, result.Resources...)
+		if result.NextCursor == "" {
+			return resources, nil
+		}
+		cursor = result.NextCursor
+	}
+}
+
+func (s *Server) sdkReadResource(ctx context.Context, uri string, legacySSE bool) (*sdkmcp.ReadResourceResult, error) {
+	session, entry, err := s.sdkSessionWithTransport(ctx, legacySSE)
+	if err != nil {
+		return nil, err
+	}
+	if err := entry.acquire(ctx); err != nil {
+		return nil, err
+	}
+	result, readErr := session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: uri})
+	entry.release()
+	if readErr != nil {
+		connections.invalidate(s.connectionKey(), session)
+		return nil, readErr
+	}
+	return result, nil
+}
+
+func (s *Server) sdkListPrompts(ctx context.Context, legacySSE bool) ([]*sdkmcp.Prompt, error) {
+	session, entry, err := s.sdkSessionWithTransport(ctx, legacySSE)
+	if err != nil {
+		return nil, err
+	}
+	if err := entry.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer entry.release()
+	prompts := make([]*sdkmcp.Prompt, 0)
+	var cursor string
+	for {
+		result, listErr := session.ListPrompts(ctx, &sdkmcp.ListPromptsParams{Cursor: cursor})
+		if listErr != nil {
+			connections.invalidate(s.connectionKey(), session)
+			return nil, listErr
+		}
+		prompts = append(prompts, result.Prompts...)
+		if result.NextCursor == "" {
+			return prompts, nil
+		}
+		cursor = result.NextCursor
+	}
+}
+
+func (s *Server) sdkGetPrompt(ctx context.Context, name string, arguments map[string]string, legacySSE bool) (*sdkmcp.GetPromptResult, error) {
+	session, entry, err := s.sdkSessionWithTransport(ctx, legacySSE)
+	if err != nil {
+		return nil, err
+	}
+	if err := entry.acquire(ctx); err != nil {
+		return nil, err
+	}
+	result, getErr := session.GetPrompt(ctx, &sdkmcp.GetPromptParams{Name: name, Arguments: arguments})
+	entry.release()
+	if getErr != nil {
+		connections.invalidate(s.connectionKey(), session)
+		return nil, getErr
+	}
+	return result, nil
+}
+
+func (s *Server) listResourcesLegacyRPC(ctx context.Context) (json.RawMessage, error) {
+	result, err := s.request(ctx, "resources/list", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Resources  []json.RawMessage `json:"resources"`
+		NextCursor string            `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return nil, err
+	}
+	all := append([]json.RawMessage(nil), payload.Resources...)
+	for payload.NextCursor != "" {
+		result, err = s.request(ctx, "resources/list", map[string]any{"cursor": payload.NextCursor})
+		if err != nil {
+			return nil, err
+		}
+		payload = struct {
+			Resources  []json.RawMessage `json:"resources"`
+			NextCursor string            `json:"nextCursor"`
+		}{}
+		if err := json.Unmarshal(result, &payload); err != nil {
+			return nil, err
+		}
+		all = append(all, payload.Resources...)
+	}
+	return json.Marshal(map[string]any{"resources": all})
+}
+
+func (s *Server) listPromptsLegacyRPC(ctx context.Context) (json.RawMessage, error) {
+	result, err := s.request(ctx, "prompts/list", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Prompts    []json.RawMessage `json:"prompts"`
+		NextCursor string            `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return nil, err
+	}
+	all := append([]json.RawMessage(nil), payload.Prompts...)
+	for payload.NextCursor != "" {
+		result, err = s.request(ctx, "prompts/list", map[string]any{"cursor": payload.NextCursor})
+		if err != nil {
+			return nil, err
+		}
+		payload = struct {
+			Prompts    []json.RawMessage `json:"prompts"`
+			NextCursor string            `json:"nextCursor"`
+		}{}
+		if err := json.Unmarshal(result, &payload); err != nil {
+			return nil, err
+		}
+		all = append(all, payload.Prompts...)
+	}
+	return json.Marshal(map[string]any{"prompts": all})
 }
 
 func (s *Server) request(ctx context.Context, method string, params any) (json.RawMessage, error) {

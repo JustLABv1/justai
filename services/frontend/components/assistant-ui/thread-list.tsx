@@ -62,6 +62,24 @@ function metadata(conversation: Conversation, status: "regular" | "archived") {
   } as const
 }
 
+function conversationForThread(thread: {
+  id: string
+  title?: string
+  custom?: Record<string, unknown>
+}): Conversation {
+  const messageCount =
+    typeof thread.custom?.messageCount === "number"
+      ? thread.custom.messageCount
+      : 0
+  return {
+    id: thread.id,
+    title: thread.title || "New conversation",
+    createdAt: "",
+    updatedAt: "",
+    messageCount,
+  }
+}
+
 function emptyAssistantStream() {
   return new ReadableStream() as unknown as Awaited<
     ReturnType<RemoteThreadListAdapter["generateTitle"]>
@@ -178,19 +196,24 @@ export function AssistantThreadList({
   )
   const adapter = useMemo<RemoteThreadListAdapter>(
     () => ({
-      async list() {
-        const query = historyQuery.trim().toLocaleLowerCase()
-        const regular = conversations
-          .filter(
-            (item) => !query || item.title.toLocaleLowerCase().includes(query)
-          )
-          .map((item) => metadata(item, "regular"))
-        const archived = archivedConversations
-          .filter(
-            (item) => !query || item.title.toLocaleLowerCase().includes(query)
-          )
-          .map((item) => metadata(item, "archived"))
-        return { threads: [...regular, ...archived] }
+      async list({ after } = {}) {
+        const params = new URLSearchParams({ archived: "all" })
+        const query = historyQuery.trim()
+        if (query) params.set("q", query)
+        if (after) params.set("cursor", after)
+        const response = await api.get<{
+          conversations: Conversation[]
+          nextCursor?: string
+        }>(`/api/v1/conversations?${params.toString()}`)
+        return {
+          threads: response.conversations.map((conversation) =>
+            metadata(
+              conversation,
+              conversation.archivedAt ? "archived" : "regular"
+            )
+          ),
+          nextCursor: response.nextCursor || undefined,
+        }
       },
       async rename(remoteId, newTitle) {
         await onRename(remoteId, newTitle)
@@ -205,7 +228,15 @@ export function AssistantThreadList({
         const conversation = allConversations.find(
           (item) => item.id === remoteId
         )
-        if (conversation) onDelete(conversation)
+        onDelete(
+          conversation ?? {
+            id: remoteId,
+            title: "Conversation",
+            createdAt: "",
+            updatedAt: "",
+            messageCount: 0,
+          }
+        )
       },
       async initialize(threadId) {
         const existing = allConversations.find((item) => item.id === threadId)
@@ -216,30 +247,20 @@ export function AssistantThreadList({
         return { remoteId: response.conversation.id }
       },
       async fetch(threadId) {
-        const conversation = allConversations.find(
-          (item) => item.id === threadId
+        const response = await api.get<{ conversation: Conversation }>(
+          `/api/v1/conversations/${threadId}`
         )
-        if (!conversation) throw new Error("Conversation not found")
+        const conversation = response.conversation
         return metadata(
           conversation,
-          archivedConversations.some((item) => item.id === threadId)
-            ? "archived"
-            : "regular"
+          conversation.archivedAt ? "archived" : "regular"
         )
       },
       async generateTitle() {
         return emptyAssistantStream()
       },
     }),
-    [
-      allConversations,
-      archivedConversations,
-      conversations,
-      historyQuery,
-      onArchive,
-      onDelete,
-      onRename,
-    ]
+    [allConversations, historyQuery, onArchive, onDelete, onRename]
   )
 
   const requestRename = (id: string, title: string) => {
@@ -293,7 +314,14 @@ export function AssistantThreadList({
                   const conversation = allConversations.find(
                     (item) => item.id === threadId
                   )
-                  if (conversation) onDelete(conversation)
+                  onDelete(
+                    conversation ??
+                      conversationForThread({
+                        id: threadId,
+                        title: threadListItem.title,
+                        custom: threadListItem.custom,
+                      })
+                  )
                 }}
                 onRequestRename={requestRename}
                 thread={threadListItem}
@@ -329,7 +357,14 @@ export function AssistantThreadList({
                           const conversation = allConversations.find(
                             (item) => item.id === threadId
                           )
-                          if (conversation) onDelete(conversation)
+                          onDelete(
+                            conversation ??
+                              conversationForThread({
+                                id: threadId,
+                                title: threadListItem.title,
+                                custom: threadListItem.custom,
+                              })
+                          )
                         }}
                         onRequestRename={requestRename}
                         thread={threadListItem}

@@ -56,10 +56,11 @@ export type Endpoint = {
   providerType: string
   name: string
   baseUrl: string
-  apiPath?: string
-  apiVersion?: string
-  chatModel?: string
-  embeddingModel?: string
+	apiPath?: string
+	apiVersion?: string
+	chatModel?: string
+	visionModel?: string
+	embeddingModel?: string
   transcriptionModel?: string
   diarizationModel?: string
   speechModel?: string
@@ -78,6 +79,7 @@ export type KnowledgeSource = {
   id: string
   scopeType: string
   scopeId?: string | null
+  contextScope?: "persistent" | "message"
   title: string
   sourceType: string
   sourceUrl?: string

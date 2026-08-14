@@ -2,11 +2,14 @@ package server
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -55,10 +58,48 @@ func (a *App) listConversations(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
 	archiveFilter := "c.archived_at IS NULL"
-	if strings.EqualFold(strings.TrimSpace(c.Query("archived")), "true") {
+	archivedQuery := strings.ToLower(strings.TrimSpace(c.Query("archived")))
+	if archivedQuery == "true" {
 		archiveFilter = "c.archived_at IS NOT NULL"
+	} else if archivedQuery == "all" {
+		archiveFilter = "TRUE"
 	}
-	rows, err := a.DB.QueryContext(c, `
+	conditions := []string{"c.user_id = $1", "c.organization_id = $2", archiveFilter}
+	args := []any{principal.UserID, organizationID}
+	if query := strings.TrimSpace(c.Query("q")); query != "" {
+		pattern := "%" + strings.ToLower(query) + "%"
+		args = append(args, pattern, query)
+		patternIndex := len(args) - 1
+		textIndex := len(args)
+		conditions = append(conditions, fmt.Sprintf(`(
+			LOWER(c.title) LIKE $%d
+			OR EXISTS (
+				SELECT 1 FROM messages search_messages
+				WHERE search_messages.conversation_id = c.id
+				  AND LOWER(search_messages.content) LIKE $%d
+			)
+			OR to_tsvector('simple', COALESCE(c.title, '')) @@ plainto_tsquery('simple', $%d)
+			OR EXISTS (
+				SELECT 1 FROM messages search_documents
+				WHERE search_documents.conversation_id = c.id
+				  AND to_tsvector('simple', COALESCE(search_documents.content, '')) @@ plainto_tsquery('simple', $%d)
+			)
+		)`, patternIndex, patternIndex, textIndex, textIndex))
+	}
+	if cursor := strings.TrimSpace(c.Query("cursor")); cursor != "" {
+		value, decodeErr := decodeConversationCursor(cursor)
+		if decodeErr != nil {
+			writeError(c, http.StatusBadRequest, decodeErr)
+			return
+		}
+		args = append(args, value.UpdatedAt, value.ID)
+		updatedAtIndex := len(args) - 1
+		idIndex := len(args)
+		conditions = append(conditions, fmt.Sprintf("(c.updated_at, c.id) < ($%d, $%d)", updatedAtIndex, idIndex))
+	}
+	args = append(args, 51)
+	limitIndex := len(args)
+	query := `
 		SELECT
 			c.id,
 			c.title,
@@ -68,10 +109,10 @@ func (a *App) listConversations(c *gin.Context) {
 			c.archived_at,
 			(SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'assistant'))::int
 		FROM conversations c
-		WHERE c.user_id = $1 AND c.organization_id = $2 AND `+archiveFilter+`
-		ORDER BY c.updated_at DESC
-		LIMIT 50
-	`, principal.UserID, organizationID)
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY c.updated_at DESC, c.id DESC
+		LIMIT $` + strconv.Itoa(limitIndex)
+	rows, err := a.DB.QueryContext(c, query, args...)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -93,7 +134,43 @@ func (a *App) listConversations(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"conversations": result})
+	nextCursor := ""
+	if len(result) > 50 {
+		last := result[50]
+		nextCursor = encodeConversationCursor(last.UpdatedAt, last.ID)
+		result = result[:50]
+	}
+	c.JSON(http.StatusOK, gin.H{"conversations": result, "nextCursor": nextCursor})
+}
+
+type conversationCursor struct {
+	UpdatedAt time.Time
+	ID        uuid.UUID
+}
+
+func encodeConversationCursor(updatedAt time.Time, id uuid.UUID) string {
+	value := updatedAt.UTC().Format(time.RFC3339Nano) + "|" + id.String()
+	return base64.RawURLEncoding.EncodeToString([]byte(value))
+}
+
+func decodeConversationCursor(value string) (conversationCursor, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return conversationCursor{}, fmt.Errorf("invalid conversation cursor")
+	}
+	parts := strings.Split(string(decoded), "|")
+	if len(parts) != 2 {
+		return conversationCursor{}, fmt.Errorf("invalid conversation cursor")
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return conversationCursor{}, fmt.Errorf("invalid conversation cursor")
+	}
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		return conversationCursor{}, fmt.Errorf("invalid conversation cursor")
+	}
+	return conversationCursor{UpdatedAt: updatedAt, ID: id}, nil
 }
 
 func (a *App) getConversation(c *gin.Context) {
