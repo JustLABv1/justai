@@ -1,0 +1,7 @@
+.git
+data
+*.test.go
+*_test.go
+coverage.out
+coverage.html
+config.yaml

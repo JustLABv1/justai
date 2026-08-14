@@ -1,0 +1,80 @@
+name: justai
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg17}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-justai}
+      POSTGRES_USER: ${POSTGRES_USER:-justai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    image: ${JUSTAI_IMAGE_REPOSITORY:-ghcr.io/justlabv1/justai}:backend-${JUSTAI_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_PORT:-8080}:8080"
+    environment:
+      JUSTAI_ENV: ${JUSTAI_ENV:-production}
+      JUSTAI_PORT: "8080"
+      JUSTAI_DATABASE_URL: ${JUSTAI_DATABASE_URL:-postgres://${POSTGRES_USER:-justai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-justai}?sslmode=disable}
+      JUSTAI_JWT_SECRET: ${JUSTAI_JWT_SECRET:?Set JUSTAI_JWT_SECRET in .env}
+      JUSTAI_ENCRYPTION_KEY: ${JUSTAI_ENCRYPTION_KEY:?Set JUSTAI_ENCRYPTION_KEY in .env}
+      JUSTAI_FRONTEND_ORIGINS: ${JUSTAI_FRONTEND_ORIGINS:-http://localhost,http://127.0.0.1}
+      JUSTAI_DEV_SEED: ${JUSTAI_DEV_SEED:-false}
+      JUSTAI_SECURE_COOKIES: ${JUSTAI_SECURE_COOKIES:-true}
+      JUSTAI_COOKIE_SAMESITE: ${JUSTAI_COOKIE_SAMESITE:-lax}
+      JUSTAI_COOKIE_DOMAIN: ${JUSTAI_COOKIE_DOMAIN:-}
+      JUSTAI_OIDC_REDIRECT_URL: ${JUSTAI_OIDC_REDIRECT_URL:-http://localhost/api/v1/auth/oidc/callback}
+      JUSTAI_MCP_OAUTH_REDIRECT_URL: ${JUSTAI_MCP_OAUTH_REDIRECT_URL:-http://localhost/api/v1/mcp/oauth/callback}
+      JUSTAI_ALLOW_PRIVATE_TARGETS: ${JUSTAI_ALLOW_PRIVATE_TARGETS:-false}
+      JUSTAI_TRANSCRIPTION_STORAGE_DRIVER: ${JUSTAI_TRANSCRIPTION_STORAGE_DRIVER:-local}
+      JUSTAI_TRANSCRIPTION_LOCAL_STORAGE_PATH: /app/data/transcription
+      JUSTAI_TRANSCRIPTION_S3_ENDPOINT: ${JUSTAI_TRANSCRIPTION_S3_ENDPOINT:-}
+      JUSTAI_TRANSCRIPTION_S3_REGION: ${JUSTAI_TRANSCRIPTION_S3_REGION:-us-east-1}
+      JUSTAI_TRANSCRIPTION_S3_BUCKET: ${JUSTAI_TRANSCRIPTION_S3_BUCKET:-}
+      JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY: ${JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY:-}
+      JUSTAI_TRANSCRIPTION_S3_SECRET_KEY: ${JUSTAI_TRANSCRIPTION_S3_SECRET_KEY:-}
+    volumes:
+      - ./backend.config.yaml:/etc/justai/config.yaml:ro
+      - uploads-data:/app/data
+
+  frontend:
+    image: ${JUSTAI_IMAGE_REPOSITORY:-ghcr.io/justlabv1/justai}:frontend-${JUSTAI_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+
+  nginx:
+    image: ${NGINX_IMAGE:-nginx:1.31-alpine}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "${EDGE_HTTP_BIND:-0.0.0.0}:${EDGE_HTTP_PORT:-80}:80"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+
+volumes:
+  postgres-data:
+  uploads-data:

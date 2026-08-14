@@ -1,7 +1,14 @@
 import type { AuthConfig } from "@/lib/types"
 
+const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL
+
+// Production images are built for same-origin routing by default. Local
+// development still uses the standalone backend unless an explicit API URL
+// is supplied. An empty NEXT_PUBLIC_API_URL is intentional: it produces
+// relative browser requests such as /api/v1/auth/config.
 export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
+  configuredApiUrl ??
+  (process.env.NODE_ENV === "development" ? "http://localhost:8080" : "")
 const REQUEST_TIMEOUT_MS = 30_000
 
 let selectedOrganizationId = ""
@@ -261,7 +268,10 @@ export const api = {
 }
 
 export function socketURL(path: string, ticket: string) {
-  const httpURL = new URL(API_URL)
+  const httpURL = new URL(
+    API_URL ||
+      (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000")
+  )
   httpURL.protocol = httpURL.protocol === "https:" ? "wss:" : "ws:"
   httpURL.pathname = path
   httpURL.search = `?ticket=${encodeURIComponent(ticket)}`

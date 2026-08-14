@@ -1,0 +1,126 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend_image: ${{ steps.filter.outputs.frontend_image }}
+      backend_image: ${{ steps.filter.outputs.backend_image }}
+      combined_image: ${{ steps.filter.outputs.combined_image }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'services/frontend/**'
+              - '.github/workflows/check-image-build.yml'
+            backend:
+              - 'services/backend/**'
+              - '.github/workflows/check-image-build.yml'
+            frontend_image:
+              - 'services/frontend/Dockerfile'
+            backend_image:
+              - 'services/backend/Dockerfile'
+            combined_image:
+              - 'Dockerfile'
+
+  frontend-compile:
+    name: Frontend — Compile Check
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.21.0
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.19.0'
+          cache: pnpm
+          cache-dependency-path: services/frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: services/frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: services/frontend
+        run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+  backend-compile:
+    name: Backend — Compile Check
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: services/backend/go.mod
+          cache-dependency-path: services/backend/go.sum
+
+      - name: Build
+        working-directory: services/backend
+        run: go build ./...
+
+  frontend-image-build:
+    name: Frontend — Docker Build Check
+    needs: changes
+    if: needs.changes.outputs.frontend_image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: services/frontend
+          file: services/frontend/Dockerfile
+          push: false
+
+  backend-image-build:
+    name: Backend — Docker Build Check
+    needs: changes
+    if: needs.changes.outputs.backend_image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: services/backend
+          file: services/backend/Dockerfile
+          push: false
+
+  combined-image-build:
+    name: Combined — Docker Build Check
+    needs: changes
+    if: needs.changes.outputs.combined_image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: false
