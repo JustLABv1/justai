@@ -961,15 +961,20 @@ function FollowStreamingResponse() {
   const viewport = useThreadViewport((state) => state.element.viewport)
   const scrollToBottom = useThreadViewport((state) => state.scrollToBottom)
   const isRunning = useAuiState((state) => state.thread.isRunning)
-  const followRef = useRef(false)
-  const wasRunningRef = useRef(isRunning)
+  const messageCount = useAuiState((state) => state.thread.messages.length)
+  const followRef = useRef(true)
+  const wasRunningRef = useRef(false)
 
   useEffect(() => {
     if (!viewport) return
 
     let frame: number | null = null
     let settleFrame: number | null = null
+    let intentTimer: number | null = null
+    let touchStartY: number | null = null
+    let userScrollIntent = false
     const wasRunning = wasRunningRef.current
+    const runStarted = isRunning && !wasRunning
     wasRunningRef.current = isRunning
 
     const scrollToLatest = () => {
@@ -996,11 +1001,54 @@ function FollowStreamingResponse() {
       })
     }
 
+    const clearUserScrollIntent = () => {
+      userScrollIntent = false
+      if (intentTimer !== null) window.clearTimeout(intentTimer)
+      intentTimer = null
+    }
+
+    const armUserScrollIntent = () => {
+      userScrollIntent = true
+      if (intentTimer !== null) window.clearTimeout(intentTimer)
+      intentTimer = window.setTimeout(() => {
+        userScrollIntent = false
+        intentTimer = null
+      }, 250)
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      // A negative delta moves the viewport toward older messages. Downward
+      // scrolling is allowed to rejoin the stream and is handled by the
+      // bottom check in updateScrollIntent.
+      if (event.deltaY < 0) armUserScrollIntent()
+    }
+
+    const handleTouchStart = (event: TouchEvent) => {
+      touchStartY = event.touches[0]?.clientY ?? null
+    }
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const currentY = event.touches[0]?.clientY
+      if (
+        touchStartY !== null &&
+        currentY !== undefined &&
+        currentY > touchStartY + 2
+      ) {
+        armUserScrollIntent()
+      }
+    }
+
+    const handleTouchEnd = () => {
+      touchStartY = null
+    }
+
     const cancelFrames = () => {
       if (frame !== null) window.cancelAnimationFrame(frame)
       if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
+      if (intentTimer !== null) window.clearTimeout(intentTimer)
       frame = null
       settleFrame = null
+      intentTimer = null
     }
 
     if (!isRunning) {
@@ -1008,7 +1056,6 @@ function FollowStreamingResponse() {
       return cancelFrames
     }
 
-    const lastScrollTopRef = { current: viewport.scrollTop }
     const updateScrollIntent = () => {
       const distanceFromBottom =
         viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
@@ -1016,18 +1063,29 @@ function FollowStreamingResponse() {
 
       if (atBottom) {
         followRef.current = true
-      } else if (viewport.scrollTop < lastScrollTopRef.current - 1) {
-        // A real upward scroll means the user is reading older content. Stop
-        // following until they return to the bottom themselves.
+        clearUserScrollIntent()
+      } else if (userScrollIntent) {
+        // Layout changes can move scrollTop upward while a new composer or
+        // streamed message is mounting. Only an explicit user gesture opts out
+        // of following the response.
         followRef.current = false
+        clearUserScrollIntent()
       }
-      lastScrollTopRef.current = viewport.scrollTop
     }
 
-    // Sending a new turn should bring the active response into view. A later
-    // upward gesture is what opts the user out of following the stream.
-    followRef.current = true
+    // Every new run starts in follow mode. A later explicit upward gesture is
+    // what opts the user out of following the stream.
+    if (runStarted) {
+      followRef.current = true
+      clearUserScrollIntent()
+    }
+
     viewport.addEventListener("scroll", updateScrollIntent, { passive: true })
+    viewport.addEventListener("wheel", handleWheel, { passive: true })
+    viewport.addEventListener("touchstart", handleTouchStart, { passive: true })
+    viewport.addEventListener("touchmove", handleTouchMove, { passive: true })
+    viewport.addEventListener("touchend", handleTouchEnd, { passive: true })
+    viewport.addEventListener("touchcancel", handleTouchEnd, { passive: true })
 
     const observer = new MutationObserver(scheduleScroll)
     observer.observe(viewport, {
@@ -1037,18 +1095,27 @@ function FollowStreamingResponse() {
     })
 
     const resizeObserver = new ResizeObserver(scheduleScroll)
+    resizeObserver.observe(viewport)
     const content = viewport.firstElementChild
     if (content instanceof HTMLElement) resizeObserver.observe(content)
 
+    // The first turn changes both the message list and the sticky composer.
+    // Schedule after the initial message-count transition as well as on later
+    // streamed DOM/size updates.
     scheduleScroll()
 
     return () => {
       viewport.removeEventListener("scroll", updateScrollIntent)
+      viewport.removeEventListener("wheel", handleWheel)
+      viewport.removeEventListener("touchstart", handleTouchStart)
+      viewport.removeEventListener("touchmove", handleTouchMove)
+      viewport.removeEventListener("touchend", handleTouchEnd)
+      viewport.removeEventListener("touchcancel", handleTouchEnd)
       observer.disconnect()
       resizeObserver.disconnect()
       cancelFrames()
     }
-  }, [isRunning, scrollToBottom, viewport])
+  }, [isRunning, messageCount, scrollToBottom, viewport])
 
   return null
 }
