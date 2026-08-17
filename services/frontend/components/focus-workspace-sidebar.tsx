@@ -6,7 +6,6 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
-  CircleHelp,
   Headphones,
   LogOut,
   MessageSquare,
@@ -274,22 +273,6 @@ export function FocusWorkspaceSidebar({
             <PanelLeftOpen data-icon="inline-start" />
           </Button>
         )}
-        <Button
-          aria-label="Docs and guides"
-          nativeButton={false}
-          render={
-            <a
-              href="https://modelcontextprotocol.io"
-              rel="noreferrer"
-              target="_blank"
-            />
-          }
-          size="icon"
-          title="Docs & guides"
-          variant="ghost"
-        >
-          <CircleHelp data-icon="inline-start" />
-        </Button>
         <ThemeSwitcher />
         <DropdownMenu>
           <DropdownMenuTrigger

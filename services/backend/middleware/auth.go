@@ -26,6 +26,12 @@ type Principal struct {
 
 func RequireAuth(tokens *auth.TokenManager, db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Authenticated API responses contain user/workspace data. Prevent a
+		// browser or intermediary from serving an older conversation list after
+		// another session has changed it.
+		c.Header("Cache-Control", "no-store")
+		c.Header("Pragma", "no-cache")
+
 		value := ""
 		if header := c.GetHeader("Authorization"); strings.HasPrefix(header, "Bearer ") {
 			value = strings.TrimPrefix(header, "Bearer ")

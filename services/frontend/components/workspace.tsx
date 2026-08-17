@@ -119,9 +119,13 @@ export function Workspace() {
   const refreshConversations = useCallback(async () => {
     try {
       const [activeResult, archivedResult] = await Promise.all([
-        api.get<{ conversations: Conversation[] }>("/api/v1/conversations"),
         api.get<{ conversations: Conversation[] }>(
-          "/api/v1/conversations?archived=true"
+          "/api/v1/conversations",
+          { cache: "no-store" }
+        ),
+        api.get<{ conversations: Conversation[] }>(
+          "/api/v1/conversations?archived=true",
+          { cache: "no-store" }
         ),
       ])
       setConversations(activeResult.conversations)
@@ -134,6 +138,52 @@ export function Workspace() {
       throw caught
     }
   }, [redirectToLogin, setConversations])
+
+  useEffect(() => {
+    if (status !== "ready" || activeView === "admin" || !activeOrganizationId) {
+      return
+    }
+
+    let disposed = false
+    let refreshInFlight = false
+
+    const refresh = () => {
+      if (
+        disposed ||
+        refreshInFlight ||
+        document.visibilityState === "hidden"
+      ) {
+        return
+      }
+      refreshInFlight = true
+      void refreshConversations()
+        .catch(() => undefined)
+        .finally(() => {
+          refreshInFlight = false
+        })
+    }
+
+    const handleFocus = () => refresh()
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh()
+    }
+
+    window.addEventListener("focus", handleFocus)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    const interval = window.setInterval(refresh, 15_000)
+
+    // Fetch once after the initial workspace load so a tab that was opened
+    // while another browser was creating a chat immediately converges on the
+    // server's current list.
+    refresh()
+
+    return () => {
+      disposed = true
+      window.removeEventListener("focus", handleFocus)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.clearInterval(interval)
+    }
+  }, [activeOrganizationId, activeView, refreshConversations, status])
 
   const refreshTranscriptionSessions = useCallback(async () => {
     try {
@@ -198,10 +248,12 @@ export function Workspace() {
             ? []
             : await Promise.allSettled([
                 api.get<{ conversations: Conversation[] }>(
-                  "/api/v1/conversations"
+                  "/api/v1/conversations",
+                  { cache: "no-store" }
                 ),
                 api.get<{ conversations: Conversation[] }>(
-                  "/api/v1/conversations?archived=true"
+                  "/api/v1/conversations?archived=true",
+                  { cache: "no-store" }
                 ),
                 api.get<{ sessions: TranscriptionSession[] }>(
                   "/api/v1/transcription/sessions"

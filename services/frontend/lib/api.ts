@@ -70,6 +70,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       credentials: "include",
       headers,
+      cache: init?.cache ?? "no-store",
       signal: controller.signal,
     })
   } catch (caught) {
@@ -157,6 +158,7 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
       ...init,
       credentials: "include",
       headers,
+      cache: init?.cache ?? "no-store",
       signal: controller.signal,
     })
   } catch (caught) {

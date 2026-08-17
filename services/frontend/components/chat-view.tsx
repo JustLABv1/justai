@@ -13,10 +13,7 @@ import {
   Check,
   ChevronDown,
   Copy,
-  FileText,
   History,
-  Link,
-  Mic,
   PanelRightClose,
   Paperclip,
   PanelRightOpen,
@@ -52,7 +49,6 @@ import {
   type FeedbackAdapter,
   type PendingAttachment,
   type SpeechSynthesisAdapter,
-  WebSpeechDictationAdapter,
   useAui,
   useThreadViewport,
   useAuiState,
@@ -1382,8 +1378,6 @@ function Composer({
   onOpenHistory,
   conversationContext,
   toolApproval,
-  onImportURL,
-  onImportText,
 }: {
   endpoints: Endpoint[]
   endpointId: string
@@ -1396,8 +1390,6 @@ function Composer({
   onOpenHistory?: () => void
   conversationContext: ConversationContext
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
-  onImportURL: () => void | Promise<void>
-  onImportText: () => void | Promise<void>
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
   const composerAttachments = useAuiState((state) => state.composer.attachments)
@@ -1597,41 +1589,6 @@ function Composer({
                 >
                   <Paperclip className="size-4" />
                 </ComposerPrimitive.AddAttachment>
-                <Button
-                  aria-label="Import a URL"
-                  className={cn(
-                    "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
-                    compact && "hidden"
-                  )}
-                  onClick={() => void onImportURL()}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Link className="size-4" />
-                </Button>
-                <Button
-                  aria-label="Import text"
-                  className={cn(
-                    "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
-                    compact && "hidden"
-                  )}
-                  onClick={() => void onImportText()}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <FileText className="size-4" />
-                </Button>
-                <ComposerPrimitive.Dictate
-                  aria-label="Dictate message"
-                  className={cn(
-                    "rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground",
-                    compact && "hidden"
-                  )}
-                >
-                  <Mic className="size-4" />
-                </ComposerPrimitive.Dictate>
                 {onOpenHistory && (
                   <Button
                     aria-label="Open conversation history"
@@ -1780,8 +1737,6 @@ function AssistantChatSurface({
   onEnsureConversation,
   onUpload,
   onRemoveUpload,
-  onImportURL,
-  onImportText,
   onConversationCreated,
   onConversationUpdated,
   onConversationSettled,
@@ -1795,8 +1750,6 @@ function AssistantChatSurface({
   onEnsureConversation: () => Promise<string>
   onUpload: (file: File) => Promise<UploadedConversationAttachment>
   onRemoveUpload: (sourceId: string) => Promise<void>
-  onImportURL: () => void | Promise<void>
-  onImportText: () => void | Promise<void>
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
   onConversationSettled?: () => void
@@ -2034,9 +1987,6 @@ function AssistantChatSurface({
       attachments,
       voice,
       speech,
-      dictation: WebSpeechDictationAdapter.isSupported()
-        ? new WebSpeechDictationAdapter()
-        : undefined,
       feedback,
       history,
     },
@@ -2108,8 +2058,6 @@ function AssistantChatSurface({
           models: availableModels,
           modelDiscoveryLoading,
           modelId: selectedModel,
-          onImportText,
-          onImportURL,
           onEndpointChange: setEndpointId,
           onModelChange: (model) =>
             setModelByEndpoint((current) => ({
@@ -2420,34 +2368,6 @@ export function ChatView({
     []
   )
 
-  const importURL = useCallback(async () => {
-    const value = window.prompt("Import URL")?.trim()
-    if (!value) return
-    const id = await ensureConversation()
-    const source = await api.post<KnowledgeSource>(
-      `/api/v1/conversations/${id}/attachments/url`,
-      {
-        url: value,
-        title: value,
-      }
-    )
-    await waitForKnowledgeSource(id, source.id)
-  }, [ensureConversation, waitForKnowledgeSource])
-
-  const importText = useCallback(async () => {
-    const value = window.prompt("Paste text to import")
-    if (!value?.trim()) return
-    const id = await ensureConversation()
-    const source = await api.post<KnowledgeSource>(
-      `/api/v1/conversations/${id}/attachments/text`,
-      {
-        title: "Pasted text",
-        content: value,
-      }
-    )
-    await waitForKnowledgeSource(id, source.id)
-  }, [ensureConversation, waitForKnowledgeSource])
-
   if (historyLoading && conversationId) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -2490,8 +2410,6 @@ export function ChatView({
         onConversationUpdated={onConversationUpdated}
         onConversationSettled={onConversationSettled}
         onEnsureConversation={ensureConversation}
-        onImportText={importText}
-        onImportURL={importURL}
         onOpenHistory={onOpenHistory}
         onRemoveUpload={removeUploadedFile}
         onUpload={uploadFile}
