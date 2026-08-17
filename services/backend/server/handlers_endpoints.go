@@ -27,6 +27,7 @@ type endpointRequest struct {
 	APIVersion         string          `json:"apiVersion"`
 	ChatModel          string          `json:"chatModel"`
 	VisionModel        string          `json:"visionModel"`
+	ImageModel         string          `json:"imageModel"`
 	EmbeddingModel     string          `json:"embeddingModel"`
 	TranscriptionModel string          `json:"transcriptionModel"`
 	DiarizationModel   string          `json:"diarizationModel"`
@@ -42,11 +43,11 @@ type endpointRequest struct {
 
 func (a *App) supportedProviders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"providers": []gin.H{
-		{"id": "openai", "name": "OpenAI", "kind": "native", "capabilities": []string{"chat", "vision", "embeddings", "realtime-transcription", "diarization", "tool-calling", "tts"}},
+		{"id": "openai", "name": "OpenAI", "kind": "native", "capabilities": []string{"chat", "vision", "image-generation", "embeddings", "realtime-transcription", "diarization", "tool-calling", "tts"}},
 		{"id": "gemini", "name": "Google Gemini", "kind": "native", "capabilities": []string{"chat", "vision", "embeddings", "realtime-transcription", "diarization"}},
 		{"id": "anthropic", "name": "Anthropic", "kind": "native", "capabilities": []string{"chat", "vision"}},
 		{"id": "ollama", "name": "Ollama", "kind": "local", "capabilities": []string{"chat", "vision", "embeddings"}},
-		{"id": "openai-compatible", "name": "OpenAI-compatible", "kind": "gateway", "examples": []string{"LiteLLM", "vLLM", "LM Studio", "OpenRouter"}, "capabilities": []string{"chat", "vision", "embeddings", "realtime-transcription", "chunked-transcription", "diarization", "tool-calling", "tts"}},
+		{"id": "openai-compatible", "name": "OpenAI-compatible", "kind": "gateway", "examples": []string{"LiteLLM", "vLLM", "LM Studio", "OpenRouter"}, "capabilities": []string{"chat", "vision", "image-generation", "embeddings", "realtime-transcription", "chunked-transcription", "diarization", "tool-calling", "tts"}},
 		{"id": "mock", "name": "JustAI demo", "kind": "local", "capabilities": []string{"chat"}},
 	}})
 }
@@ -56,7 +57,7 @@ func (a *App) listEndpoints(c *gin.Context) {
 	organizationID, _ := middleware.GetOrganizationID(c)
 	rows, err := a.DB.QueryContext(c, `
 		SELECT e.id, e.scope_type, e.scope_id, e.provider_type, e.name, e.base_url,
-		       COALESCE(e.api_path, ''), COALESCE(e.api_version, ''), COALESCE(e.chat_model, ''), COALESCE(e.vision_model, ''),
+		       COALESCE(e.api_path, ''), COALESCE(e.api_version, ''), COALESCE(e.chat_model, ''), COALESCE(e.vision_model, ''), COALESCE(e.image_model, ''),
 		       COALESCE(e.embedding_model, ''), COALESCE(e.transcription_model, ''),
 		       COALESCE(e.diarization_model, ''), COALESCE(e.speech_model, ''), e.capabilities,
 		       e.credential_ciphertext IS NOT NULL, e.enabled,
@@ -154,7 +155,7 @@ func (a *App) createEndpoint(c *gin.Context) {
 		}
 	}
 	var id uuid.UUID
-	err = transaction.QueryRowContext(c, `INSERT INTO endpoint_settings (scope_type, scope_id, provider_type, name, base_url, api_path, api_version, chat_model, vision_model, embedding_model, transcription_model, diarization_model, speech_model, capabilities, credential_ciphertext, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_by) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), $14, $15, $16, $17, $18, $19, $20, $21) RETURNING id`, scopeType, scopeID, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, jsonRaw(capabilities), nullableBytes(credential), enabled, isDefault, intValue(request.TimeoutSeconds, 120), intValue(request.MaxOutputTokens, 2048), floatValue(request.Temperature, 0.2), principal.UserID).Scan(&id)
+	err = transaction.QueryRowContext(c, `INSERT INTO endpoint_settings (scope_type, scope_id, provider_type, name, base_url, api_path, api_version, chat_model, vision_model, image_model, embedding_model, transcription_model, diarization_model, speech_model, capabilities, credential_ciphertext, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_by) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''), $15, $16, $17, $18, $19, $20, $21, $22) RETURNING id`, scopeType, scopeID, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.ImageModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, jsonRaw(capabilities), nullableBytes(credential), enabled, isDefault, intValue(request.TimeoutSeconds, 120), intValue(request.MaxOutputTokens, 2048), floatValue(request.Temperature, 0.2), principal.UserID).Scan(&id)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -201,7 +202,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 	// the endpoint's optional models or routing fields. The editor sends the
 	// complete form, but callers such as the sidebar intentionally send only a
 	// flag, so hydrate those fields from the stored endpoint in that case.
-	minimalPatch := request.ProviderType == "" && request.Name == "" && request.BaseURL == "" && request.APIPath == "" && request.APIVersion == "" && request.ChatModel == "" && request.VisionModel == "" && request.EmbeddingModel == "" && request.TranscriptionModel == "" && request.DiarizationModel == "" && request.SpeechModel == "" && request.Capabilities == nil && request.Credential == ""
+	minimalPatch := request.ProviderType == "" && request.Name == "" && request.BaseURL == "" && request.APIPath == "" && request.APIVersion == "" && request.ChatModel == "" && request.VisionModel == "" && request.ImageModel == "" && request.EmbeddingModel == "" && request.TranscriptionModel == "" && request.DiarizationModel == "" && request.SpeechModel == "" && request.Capabilities == nil && request.Credential == ""
 	if minimalPatch {
 		request.ProviderType = current.ProviderType
 		request.Name = current.Name
@@ -210,6 +211,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 		request.APIVersion = current.APIVersion
 		request.ChatModel = current.ChatModel
 		request.VisionModel = current.VisionModel
+		request.ImageModel = current.ImageModel
 		request.EmbeddingModel = current.EmbeddingModel
 		request.TranscriptionModel = current.TranscriptionModel
 		request.DiarizationModel = current.DiarizationModel
@@ -290,7 +292,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 			return
 		}
 	}
-	_, err = transaction.ExecContext(c, `UPDATE endpoint_settings SET provider_type = $2, name = $3, base_url = $4, api_path = NULLIF($5, ''), api_version = NULLIF($6, ''), chat_model = NULLIF($7, ''), vision_model = NULLIF($8, ''), embedding_model = NULLIF($9, ''), transcription_model = NULLIF($10, ''), diarization_model = NULLIF($11, ''), speech_model = NULLIF($12, ''), capabilities = $13, credential_ciphertext = COALESCE($14, credential_ciphertext), enabled = $15, is_default = $16, timeout_seconds = $17, max_output_tokens = $18, temperature = $19, updated_at = now() WHERE id = $1`, id, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, capabilities, encrypted, enabled, isDefault, intValue(request.TimeoutSeconds, current.TimeoutSeconds), intValue(request.MaxOutputTokens, current.MaxOutputTokens), floatValue(request.Temperature, current.Temperature))
+	_, err = transaction.ExecContext(c, `UPDATE endpoint_settings SET provider_type = $2, name = $3, base_url = $4, api_path = NULLIF($5, ''), api_version = NULLIF($6, ''), chat_model = NULLIF($7, ''), vision_model = NULLIF($8, ''), image_model = NULLIF($9, ''), embedding_model = NULLIF($10, ''), transcription_model = NULLIF($11, ''), diarization_model = NULLIF($12, ''), speech_model = NULLIF($13, ''), capabilities = $14, credential_ciphertext = COALESCE($15, credential_ciphertext), enabled = $16, is_default = $17, timeout_seconds = $18, max_output_tokens = $19, temperature = $20, updated_at = now() WHERE id = $1`, id, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.ImageModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, capabilities, encrypted, enabled, isDefault, intValue(request.TimeoutSeconds, current.TimeoutSeconds), intValue(request.MaxOutputTokens, current.MaxOutputTokens), floatValue(request.Temperature, current.Temperature))
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -467,7 +469,7 @@ func (a *App) testEndpoint(c *gin.Context) {
 		case "tts":
 			_, _, err = provider.SynthesizeSpeech(testContext, endpoint, "JustAI capability probe", "alloy")
 			result["tested"] = true
-		case "tool-calling", "transcription", "realtime-transcription", "chunked-transcription", "diarization":
+		case "tool-calling", "transcription", "realtime-transcription", "chunked-transcription", "diarization", "image-generation":
 			// These capabilities require a live audio/tool session and cannot be
 			// proven by a harmless chat request. Report them explicitly as
 			// supported-but-not-probed instead of claiming success.
@@ -495,7 +497,7 @@ func (a *App) testEndpoint(c *gin.Context) {
 }
 
 func (a *App) getEndpoint(ctx context.Context, id uuid.UUID) (models.Endpoint, error) {
-	row := a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(vision_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_at, updated_at FROM endpoint_settings WHERE id = $1`, id)
+	row := a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(vision_model, ''), COALESCE(image_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_at, updated_at FROM endpoint_settings WHERE id = $1`, id)
 	return scanEndpoint(row)
 }
 
@@ -503,7 +505,7 @@ func scanEndpoint(scanner interface{ Scan(dest ...any) error }) (models.Endpoint
 	var item models.Endpoint
 	var scopeID sql.NullString
 	var capabilities []byte
-	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.ProviderType, &item.Name, &item.BaseURL, &item.APIPath, &item.APIVersion, &item.ChatModel, &item.VisionModel, &item.EmbeddingModel, &item.TranscriptionModel, &item.DiarizationModel, &item.SpeechModel, &capabilities, &item.CredentialConfigured, &item.Enabled, &item.IsDefault, &item.TimeoutSeconds, &item.MaxOutputTokens, &item.Temperature, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.ProviderType, &item.Name, &item.BaseURL, &item.APIPath, &item.APIVersion, &item.ChatModel, &item.VisionModel, &item.ImageModel, &item.EmbeddingModel, &item.TranscriptionModel, &item.DiarizationModel, &item.SpeechModel, &capabilities, &item.CredentialConfigured, &item.Enabled, &item.IsDefault, &item.TimeoutSeconds, &item.MaxOutputTokens, &item.Temperature, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	if scopeID.Valid {
@@ -520,7 +522,7 @@ func (a *App) providerEndpoint(ctx context.Context, id uuid.UUID) (provider.Endp
 	var endpoint provider.Endpoint
 	var credential []byte
 	var capabilities []byte
-	err := a.DB.QueryRowContext(ctx, `SELECT provider_type, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(vision_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext, timeout_seconds, max_output_tokens, temperature FROM endpoint_settings WHERE id = $1 AND enabled = TRUE`, id).Scan(&endpoint.ProviderType, &endpoint.BaseURL, &endpoint.APIPath, &endpoint.APIVersion, &endpoint.ChatModel, &endpoint.VisionModel, &endpoint.EmbeddingModel, &endpoint.TranscriptionModel, &endpoint.DiarizationModel, &endpoint.SpeechModel, &capabilities, &credential, &endpoint.TimeoutSeconds, &endpoint.MaxOutputTokens, &endpoint.Temperature)
+	err := a.DB.QueryRowContext(ctx, `SELECT provider_type, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(vision_model, ''), COALESCE(image_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext, timeout_seconds, max_output_tokens, temperature FROM endpoint_settings WHERE id = $1 AND enabled = TRUE`, id).Scan(&endpoint.ProviderType, &endpoint.BaseURL, &endpoint.APIPath, &endpoint.APIVersion, &endpoint.ChatModel, &endpoint.VisionModel, &endpoint.ImageModel, &endpoint.EmbeddingModel, &endpoint.TranscriptionModel, &endpoint.DiarizationModel, &endpoint.SpeechModel, &capabilities, &credential, &endpoint.TimeoutSeconds, &endpoint.MaxOutputTokens, &endpoint.Temperature)
 	if err != nil {
 		return endpoint, err
 	}
@@ -633,8 +635,8 @@ func validateEndpointRequest(request *endpointRequest) error {
 func validateProviderCapabilities(providerType string, capabilities map[string]bool) error {
 	allowed := map[string]map[string]bool{
 		"mock":              {"chat": true},
-		"openai":            {"chat": true, "vision": true, "embeddings": true, "transcription": true, "realtime-transcription": true, "diarization": true, "tool-calling": true, "tts": true},
-		"openai-compatible": {"chat": true, "vision": true, "embeddings": true, "transcription": true, "realtime-transcription": true, "chunked-transcription": true, "diarization": true, "tool-calling": true, "tts": true},
+		"openai":            {"chat": true, "vision": true, "image-generation": true, "embeddings": true, "transcription": true, "realtime-transcription": true, "diarization": true, "tool-calling": true, "tts": true},
+		"openai-compatible": {"chat": true, "vision": true, "image-generation": true, "embeddings": true, "transcription": true, "realtime-transcription": true, "chunked-transcription": true, "diarization": true, "tool-calling": true, "tts": true},
 		"gemini":            {"chat": true, "vision": true, "embeddings": true, "transcription": true, "realtime-transcription": true, "diarization": true},
 		"anthropic":         {"chat": true, "vision": true},
 		"ollama":            {"chat": true, "vision": true, "embeddings": true},

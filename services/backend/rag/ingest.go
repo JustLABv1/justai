@@ -331,6 +331,13 @@ func (w *Worker) fetchURL(ctx context.Context, rawURL string) (string, error) {
 	return cleanWebContent(contentType, body), nil
 }
 
+// FetchURL exposes the same validated, public-network URL reader used by the
+// knowledge indexer to interactive browsing handlers. Keeping the safety
+// checks in one place prevents search previews from becoming an SSRF bypass.
+func (w *Worker) FetchURL(ctx context.Context, rawURL string) (string, error) {
+	return w.fetchURL(ctx, rawURL)
+}
+
 func Search(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, query string, limit int) ([]models.Citation, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {

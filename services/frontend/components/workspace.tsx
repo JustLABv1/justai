@@ -6,6 +6,8 @@ import { Info } from "lucide-react"
 import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
+import { MemoryView } from "@/components/memory-view"
+import { NotesView } from "@/components/notes-view"
 import { ProfileView } from "@/components/profile-view"
 import { PlatformAdminShell } from "@/components/platform-admin-shell"
 import { SettingsShell } from "@/components/settings-shell"
@@ -32,6 +34,7 @@ import type {
   ViewId,
   AdminTab,
   TranscriptionSession,
+  Note,
 } from "@/lib/types"
 import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
 import { cn } from "@/lib/utils"
@@ -120,11 +123,11 @@ export function Workspace() {
     try {
       const [activeResult, archivedResult] = await Promise.all([
         api.get<{ conversations: Conversation[] }>(
-          "/api/v1/conversations",
+          "/api/v1/conversations?organized=true",
           { cache: "no-store" }
         ),
         api.get<{ conversations: Conversation[] }>(
-          "/api/v1/conversations?archived=true",
+          "/api/v1/conversations?archived=true&organized=true",
           { cache: "no-store" }
         ),
       ])
@@ -248,11 +251,11 @@ export function Workspace() {
             ? []
             : await Promise.allSettled([
                 api.get<{ conversations: Conversation[] }>(
-                  "/api/v1/conversations",
+                  "/api/v1/conversations?organized=true",
                   { cache: "no-store" }
                 ),
                 api.get<{ conversations: Conversation[] }>(
-                  "/api/v1/conversations?archived=true",
+                  "/api/v1/conversations?archived=true&organized=true",
                   { cache: "no-store" }
                 ),
                 api.get<{ sessions: TranscriptionSession[] }>(
@@ -748,6 +751,18 @@ export function Workspace() {
     }
   }
 
+  const handleUseNoteInChat = useCallback(
+    async (note: Note) => {
+      const conversationId = await ensureConversationForContext()
+      await api.post(`/api/v1/conversations/${conversationId}/attachments/text`, {
+        title: note.title,
+        content: note.content,
+      })
+      navigate("chat", conversationId)
+    },
+    [ensureConversationForContext, navigate]
+  )
+
   const handleTranscriptionSessionCreated = useCallback(
     (session: TranscriptionSession) => {
       setTranscriptionSessions((current) => [
@@ -809,6 +824,7 @@ export function Workspace() {
           onArchiveSession={handleArchiveSession}
           onDeleteConversation={handleDeleteConversation}
           onDeleteSession={handleDeleteSession}
+          onConversationRefresh={() => refreshConversations().then(() => undefined)}
           onRenameConversation={handleRenameConversation}
           onNewTranscriptionSession={handleNewTranscriptionSession}
           onNavigate={(
@@ -952,6 +968,10 @@ export function Workspace() {
               />
             )}
             {activeView === "profile" && <ProfileView user={user} />}
+            {activeView === "notes" && (
+              <NotesView onUseInChat={handleUseNoteInChat} />
+            )}
+            {activeView === "memory" && <MemoryView />}
             {activeView === "admin" && (
               <PlatformAdminShell
                 activeTab={route.adminTab}

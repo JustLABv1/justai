@@ -4,11 +4,16 @@ import {
   Archive,
   ArchiveRestore,
   ChevronDown,
+  Folder,
+  FolderPlus,
   MoreHorizontal,
+  Pin,
+  PinOff,
   Pencil,
+  Tag,
   Trash2,
 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   AssistantRuntimeProvider,
   ThreadListItemPrimitive,
@@ -34,10 +39,19 @@ import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { Conversation } from "@/lib/types"
+import type {
+  Conversation,
+  ConversationFolder,
+  ConversationTag,
+} from "@/lib/types"
 import { API_URL, api } from "@/lib/api"
 
 type AssistantThreadListProps = {
@@ -50,6 +64,7 @@ type AssistantThreadListProps = {
   onDelete: (conversation: Conversation) => void
   onRename: (conversationId: string, title: string) => void | Promise<void>
   onSelect: (conversationId: string) => void
+  onConversationRefresh?: () => void | Promise<void>
 }
 
 function metadata(conversation: Conversation, status: "regular" | "archived") {
@@ -58,7 +73,12 @@ function metadata(conversation: Conversation, status: "regular" | "archived") {
     title: conversation.title,
     status,
     lastMessageAt: new Date(conversation.updatedAt),
-    custom: { messageCount: conversation.messageCount },
+    custom: {
+      messageCount: conversation.messageCount,
+      folderId: conversation.folderId,
+      pinnedAt: conversation.pinnedAt,
+      tags: conversation.tags,
+    },
   } as const
 }
 
@@ -77,6 +97,17 @@ function conversationForThread(thread: {
     createdAt: "",
     updatedAt: "",
     messageCount,
+    folderId:
+      typeof thread.custom?.folderId === "string"
+        ? thread.custom.folderId
+        : null,
+    pinnedAt:
+      typeof thread.custom?.pinnedAt === "string"
+        ? thread.custom.pinnedAt
+        : null,
+    tags: Array.isArray(thread.custom?.tags)
+      ? (thread.custom.tags as ConversationTag[])
+      : [],
   }
 }
 
@@ -103,18 +134,33 @@ function AssistantThreadItem({
   onArchive,
   onDelete,
   onRequestRename,
+  onTogglePinned,
+  onMoveFolder,
+  onToggleTag,
+  folders,
+  tags,
   thread,
 }: {
   archived: boolean
   onArchive: (threadId: string) => void
   onDelete: (threadId: string) => void
   onRequestRename: (threadId: string, title: string) => void
+  onTogglePinned: (threadId: string, pinned: boolean) => void | Promise<void>
+  onMoveFolder: (threadId: string, folderId: string | null) => void | Promise<void>
+  onToggleTag: (threadId: string, tagId: string, attached: boolean) => void | Promise<void>
+  folders: ConversationFolder[]
+  tags: ConversationTag[]
   thread: { id: string; title?: string; custom?: Record<string, unknown> }
 }) {
   const count =
     typeof thread.custom?.messageCount === "number"
       ? thread.custom.messageCount
       : 0
+  const pinned = typeof thread.custom?.pinnedAt === "string"
+  const folderId = typeof thread.custom?.folderId === "string" ? thread.custom.folderId : null
+  const threadTags = Array.isArray(thread.custom?.tags)
+    ? (thread.custom.tags as ConversationTag[])
+    : []
   return (
     <ThreadListItemPrimitive.Root className="group relative rounded-xl data-[active=true]:bg-accent">
       <ThreadListItemPrimitive.Trigger
@@ -144,6 +190,48 @@ function AssistantThreadItem({
           <MoreHorizontal aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem onClick={() => void onTogglePinned(thread.id, !pinned)}>
+            {pinned ? <PinOff data-icon="inline-start" /> : <Pin data-icon="inline-start" />}
+            {pinned ? "Unpin" : "Pin"}
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Folder data-icon="inline-start" />
+              Move to folder
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem onClick={() => void onMoveFolder(thread.id, null)}>
+                No folder
+              </DropdownMenuItem>
+              {folders.map((folder) => (
+                <DropdownMenuItem key={folder.id} onClick={() => void onMoveFolder(thread.id, folder.id)}>
+                  {folder.name}{folder.id === folderId ? " · Current" : ""}
+                </DropdownMenuItem>
+              ))}
+              {!folders.length && <DropdownMenuItem disabled>No folders yet</DropdownMenuItem>}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Tag data-icon="inline-start" />
+              Tags
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {tags.map((tag) => (
+                <DropdownMenuCheckboxItem
+                  checked={threadTags.some((item) => item.id === tag.id)}
+                  key={tag.id}
+                  onCheckedChange={(checked) =>
+                    void onToggleTag(thread.id, tag.id, Boolean(checked))
+                  }
+                >
+                  {tag.name}
+                </DropdownMenuCheckboxItem>
+              ))}
+              {!tags.length && <DropdownMenuItem disabled>No tags yet</DropdownMenuItem>}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => onRequestRename(thread.id, thread.title || "")}
           >
@@ -181,14 +269,38 @@ export function AssistantThreadList({
   onDelete,
   onRename,
   onSelect,
+  onConversationRefresh,
 }: AssistantThreadListProps) {
   const [archivedOpen, setArchivedOpen] = useState(false)
+  const [folderFilter, setFolderFilter] = useState("all")
+  const [folders, setFolders] = useState<ConversationFolder[]>([])
+  const [tags, setTags] = useState<ConversationTag[]>([])
+  const [labelDialog, setLabelDialog] = useState<"folder" | "tag" | null>(null)
+  const [labelName, setLabelName] = useState("")
+  const [labelSaving, setLabelSaving] = useState(false)
   const [renameTarget, setRenameTarget] = useState<{
     id: string
     title: string
   } | null>(null)
   const [renameTitle, setRenameTitle] = useState("")
   const [renameSaving, setRenameSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void Promise.all([
+      api.get<{ folders: ConversationFolder[] }>("/api/v1/conversation-folders"),
+      api.get<{ tags: ConversationTag[] }>("/api/v1/conversation-tags"),
+    ])
+      .then(([folderResult, tagResult]) => {
+        if (cancelled) return
+        setFolders(folderResult.folders)
+        setTags(tagResult.tags)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const allConversations = useMemo(
     () => [...conversations, ...archivedConversations],
@@ -198,8 +310,16 @@ export function AssistantThreadList({
     () => ({
       async list({ after } = {}) {
         const params = new URLSearchParams({ archived: "all" })
+        params.set("organized", "true")
         const query = historyQuery.trim()
         if (query) params.set("q", query)
+        if (folderFilter === "pinned") params.set("pinned", "true")
+        if (folderFilter.startsWith("folder:")) {
+          params.set("folderId", folderFilter.slice("folder:".length))
+        }
+        if (folderFilter.startsWith("tag:")) {
+          params.set("tagId", folderFilter.slice("tag:".length))
+        }
         if (after) params.set("cursor", after)
         const response = await api.get<{
           conversations: Conversation[]
@@ -260,8 +380,54 @@ export function AssistantThreadList({
         return emptyAssistantStream()
       },
     }),
-    [allConversations, historyQuery, onArchive, onDelete, onRename]
+    [allConversations, folderFilter, historyQuery, onArchive, onDelete, onRename]
   )
+
+  async function togglePinned(threadId: string, pinned: boolean) {
+    await api.patch(`/api/v1/conversations/${threadId}`, { pinned })
+    await onConversationRefresh?.()
+  }
+
+  async function moveFolder(threadId: string, folderId: string | null) {
+    await api.patch(`/api/v1/conversations/${threadId}`, {
+      folderId: folderId ?? "",
+    })
+    await onConversationRefresh?.()
+  }
+
+  async function toggleTag(threadId: string, tagId: string, attached: boolean) {
+    if (attached) {
+      await api.post(`/api/v1/conversations/${threadId}/tags/${tagId}`)
+    } else {
+      await api.delete(`/api/v1/conversations/${threadId}/tags/${tagId}`)
+    }
+    await onConversationRefresh?.()
+  }
+
+  async function createLabel() {
+    const name = labelName.trim()
+    if (!name || !labelDialog || labelSaving) return
+    setLabelSaving(true)
+    try {
+      if (labelDialog === "folder") {
+        const response = await api.post<{ folder: ConversationFolder }>(
+          "/api/v1/conversation-folders",
+          { name }
+        )
+        setFolders((current) => [...current, response.folder])
+      } else {
+        const response = await api.post<{ tag: ConversationTag }>(
+          "/api/v1/conversation-tags",
+          { name }
+        )
+        setTags((current) => [...current, response.tag])
+      }
+      setLabelName("")
+      setLabelDialog(null)
+    } finally {
+      setLabelSaving(false)
+    }
+  }
 
   const requestRename = (id: string, title: string) => {
     setRenameTarget({ id, title })
@@ -304,6 +470,62 @@ export function AssistantThreadList({
           type="search"
           value={historyQuery}
         />
+        <div className="flex items-center gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button className="min-w-0 flex-1 justify-start gap-1.5" size="sm" variant="outline" />
+              }
+            >
+              <Folder className="size-3.5 shrink-0" />
+              <span className="truncate">
+                {folderFilter === "all"
+                  ? "All chats"
+                  : folderFilter === "pinned"
+                    ? "Pinned chats"
+                    : folderFilter.startsWith("folder:")
+                      ? folders.find((folder) => folder.id === folderFilter.slice(7))?.name ?? "Folder"
+                      : tags.find((tag) => tag.id === folderFilter.slice(4))?.name ?? "Tag"}
+              </span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuItem onClick={() => setFolderFilter("all")}>All chats</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setFolderFilter("pinned")}>
+                <Pin data-icon="inline-start" /> Pinned chats
+              </DropdownMenuItem>
+              {folders.length > 0 && <DropdownMenuSeparator />}
+              {folders.map((folder) => (
+                <DropdownMenuItem key={folder.id} onClick={() => setFolderFilter(`folder:${folder.id}`)}>
+                  <Folder data-icon="inline-start" /> {folder.name}
+                </DropdownMenuItem>
+              ))}
+              {tags.length > 0 && <DropdownMenuSeparator />}
+              {tags.map((tag) => (
+                <DropdownMenuItem key={tag.id} onClick={() => setFolderFilter(`tag:${tag.id}`)}>
+                  <Tag data-icon="inline-start" /> {tag.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            aria-label="Create folder"
+            onClick={() => setLabelDialog("folder")}
+            size="icon-sm"
+            title="Create folder"
+            variant="outline"
+          >
+            <FolderPlus />
+          </Button>
+          <Button
+            aria-label="Create tag"
+            onClick={() => setLabelDialog("tag")}
+            size="icon-sm"
+            title="Create tag"
+            variant="outline"
+          >
+            <Tag />
+          </Button>
+        </div>
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           <ThreadListPrimitive.Items>
             {({ threadListItem }) => (
@@ -324,6 +546,11 @@ export function AssistantThreadList({
                   )
                 }}
                 onRequestRename={requestRename}
+                onTogglePinned={togglePinned}
+                onMoveFolder={moveFolder}
+                onToggleTag={toggleTag}
+                folders={folders}
+                tags={tags}
                 thread={threadListItem}
               />
             )}
@@ -367,6 +594,11 @@ export function AssistantThreadList({
                           )
                         }}
                         onRequestRename={requestRename}
+                        onTogglePinned={togglePinned}
+                        onMoveFolder={moveFolder}
+                        onToggleTag={toggleTag}
+                        folders={folders}
+                        tags={tags}
                         thread={threadListItem}
                       />
                     )}
@@ -424,6 +656,48 @@ export function AssistantThreadList({
               onClick={() => void submitRename()}
             >
               {renameSaving ? "Saving…" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && !labelSaving) {
+            setLabelDialog(null)
+            setLabelName("")
+          }
+        }}
+        open={labelDialog !== null}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Create {labelDialog === "folder" ? "folder" : "tag"}
+            </DialogTitle>
+            <DialogDescription>
+              Organize chats so they are easier to find later.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label={labelDialog === "folder" ? "Folder name" : "Tag name"}
+            autoFocus
+            maxLength={80}
+            onChange={(event) => setLabelName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                void createLabel()
+              }
+            }}
+            placeholder={labelDialog === "folder" ? "Project work" : "Important"}
+            value={labelName}
+          />
+          <DialogFooter>
+            <Button disabled={labelSaving} onClick={() => setLabelDialog(null)} variant="outline">
+              Cancel
+            </Button>
+            <Button disabled={labelSaving || !labelName.trim()} onClick={() => void createLabel()}>
+              {labelSaving ? "Creating…" : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -22,6 +22,7 @@ type Endpoint struct {
 	Credential         string
 	ChatModel          string
 	VisionModel        string
+	ImageModel         string
 	EmbeddingModel     string
 	TranscriptionModel string
 	DiarizationModel   string

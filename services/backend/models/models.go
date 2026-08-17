@@ -28,15 +28,66 @@ type Organization struct {
 }
 
 type Conversation struct {
-	ID             uuid.UUID  `json:"id"`
-	UserID         uuid.UUID  `json:"-"`
-	OrganizationID uuid.UUID  `json:"-"`
-	Title          string     `json:"title"`
-	EndpointID     *uuid.UUID `json:"endpointId,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
-	ArchivedAt     *time.Time `json:"archivedAt,omitempty"`
-	MessageCount   int        `json:"messageCount"`
+	ID             uuid.UUID         `json:"id"`
+	UserID         uuid.UUID         `json:"-"`
+	OrganizationID uuid.UUID         `json:"-"`
+	Title          string            `json:"title"`
+	EndpointID     *uuid.UUID        `json:"endpointId,omitempty"`
+	CreatedAt      time.Time         `json:"createdAt"`
+	UpdatedAt      time.Time         `json:"updatedAt"`
+	ArchivedAt     *time.Time        `json:"archivedAt,omitempty"`
+	FolderID       *uuid.UUID        `json:"folderId,omitempty"`
+	PinnedAt       *time.Time        `json:"pinnedAt,omitempty"`
+	Tags           []ConversationTag `json:"tags,omitempty"`
+	MessageCount   int               `json:"messageCount"`
+}
+
+type ConversationFolder struct {
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"`
+	Color          string    `json:"color"`
+	OrganizationID uuid.UUID `json:"-"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type ConversationTag struct {
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"`
+	Color          string    `json:"color"`
+	OrganizationID uuid.UUID `json:"-"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type Memory struct {
+	ID             uuid.UUID `json:"id"`
+	Content        string    `json:"content"`
+	Source         string    `json:"source"`
+	Enabled        bool      `json:"enabled"`
+	OrganizationID uuid.UUID `json:"-"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type Note struct {
+	ID                   uuid.UUID  `json:"id"`
+	Title                string     `json:"title"`
+	Content              string     `json:"content"`
+	SourceConversationID *uuid.UUID `json:"sourceConversationId,omitempty"`
+	PinnedAt             *time.Time `json:"pinnedAt,omitempty"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
+}
+
+type GeneratedImage struct {
+	ID         uuid.UUID  `json:"id"`
+	EndpointID *uuid.UUID `json:"endpointId,omitempty"`
+	Prompt     string     `json:"prompt"`
+	Mode       string     `json:"mode"`
+	MimeType   string     `json:"mimeType"`
+	URL        string     `json:"url"`
+	CreatedAt  time.Time  `json:"createdAt"`
 }
 
 type Message struct {
@@ -59,6 +110,7 @@ type Endpoint struct {
 	APIVersion           string          `json:"apiVersion,omitempty"`
 	ChatModel            string          `json:"chatModel,omitempty"`
 	VisionModel          string          `json:"visionModel,omitempty"`
+	ImageModel           string          `json:"imageModel,omitempty"`
 	EmbeddingModel       string          `json:"embeddingModel,omitempty"`
 	TranscriptionModel   string          `json:"transcriptionModel,omitempty"`
 	DiarizationModel     string          `json:"diarizationModel,omitempty"`
@@ -191,6 +243,7 @@ type ConversationContext struct {
 	KnowledgeSources      []KnowledgeSource      `json:"knowledgeSources"`
 	MCPServers            []MCPServer            `json:"mcpServers"`
 	TranscriptionSessions []TranscriptionSession `json:"transcriptionSessions"`
+	Notes                 []Note                 `json:"notes,omitempty"`
 }
 
 type SocketEnvelope struct {

@@ -1867,6 +1867,7 @@ function AssistantChatSurface({
           conversationId: "",
           endpointId: selectedEndpointId,
           model: selectedModel,
+          useMemory: true,
         }),
         resumable: {
           storage: resumableStorage,
@@ -1912,6 +1913,7 @@ function AssistantChatSurface({
               conversationId: id,
               endpointId: selectedEndpointId,
               model: selectedModel,
+              useMemory: true,
               requestId,
             },
           }

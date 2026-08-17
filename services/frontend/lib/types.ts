@@ -4,6 +4,8 @@ export type ViewId =
   | "endpoints"
   | "knowledge"
   | "mcp"
+  | "notes"
+  | "memory"
   | "settings"
   | "admin"
   | "profile"
@@ -105,7 +107,8 @@ export type Endpoint = {
 	chatModel?: string
 	visionModel?: string
 	embeddingModel?: string
-  transcriptionModel?: string
+  imageModel?: string
+	transcriptionModel?: string
   diarizationModel?: string
   speechModel?: string
   capabilities: Record<string, boolean>
@@ -169,6 +172,22 @@ export type ConversationContext = {
   knowledgeSources: KnowledgeSource[]
   mcpServers: MCPServer[]
   transcriptionSessions: TranscriptionSession[]
+  notes?: Note[]
+}
+
+export type ConversationFolder = {
+  id: string
+  name: string
+  color?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type ConversationTag = {
+  id: string
+  name: string
+  color?: string
+  createdAt: string
 }
 
 export type Conversation = {
@@ -179,6 +198,45 @@ export type Conversation = {
   updatedAt: string
   archivedAt?: string | null
   messageCount: number
+  folderId?: string | null
+  pinnedAt?: string | null
+  tags?: ConversationTag[]
+}
+
+export type Memory = {
+  id: string
+  content: string
+  source: "manual" | "chat" | "import" | string
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type Note = {
+  id: string
+  title: string
+  content: string
+  sourceConversationId?: string | null
+  pinnedAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type WebSearchResult = {
+  title: string
+  url: string
+  snippet: string
+  domain?: string
+}
+
+export type GeneratedImage = {
+  id: string
+  endpointId?: string
+  prompt: string
+  mode: "generate" | "edit" | string
+  mimeType: string
+  createdAt: string
+  url: string
 }
 
 export type TranscriptionSession = {

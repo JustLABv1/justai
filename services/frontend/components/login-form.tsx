@@ -36,6 +36,7 @@ export function LoginForm({
   const [displayName, setDisplayName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [adminFallbackRequested, setAdminFallbackRequested] = useState(false)
 
   const { config, loading: configLoading } = usePlatformConfig()
   const oidcProviders = config?.oidcProviders?.length
@@ -58,12 +59,25 @@ export function LoginForm({
   const maintenanceMessage = config?.maintenanceMessage ?? ""
 
   const isRegister = mode === "register"
+  const adminFallbackAvailable =
+    !configLoading && !isRegister && (!localAuthEnabled || !loginEnabled)
+  const adminFallbackActive = adminFallbackAvailable && adminFallbackRequested
+  const localCredentialsVisible = localAuthVisible || adminFallbackActive
   const modeGateEnabled = isRegister ? signupEnabled : loginEnabled
   const modeEnabled =
-    localAuthVisible && (isRegister ? signupEnabled : loginEnabled)
+    localCredentialsVisible &&
+    (adminFallbackActive || (isRegister ? signupEnabled : loginEnabled))
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode)
+    setError("")
+    setPassword("")
+    setConfirmPassword("")
+  }
+
+  function enableAdminFallback() {
+    setMode("login")
+    setAdminFallbackRequested(true)
     setError("")
     setPassword("")
     setConfirmPassword("")
@@ -73,7 +87,7 @@ export function LoginForm({
     event.preventDefault()
     setError("")
 
-    if (!localAuthVisible) {
+    if (!localCredentialsVisible) {
       setError("Local password authentication is unavailable.")
       return
     }
@@ -185,7 +199,7 @@ export function LoginForm({
                   <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
                     <Spinner /> Loading sign-in options…
                   </div>
-                ) : localAuthVisible ? (
+                ) : localCredentialsVisible ? (
                   <>
                     {isRegister && (
                       <Field>
@@ -256,7 +270,19 @@ export function LoginForm({
                       </Field>
                     )}
 
+                    {adminFallbackActive && !error && (
+                      <Alert>
+                        <ShieldCheck aria-hidden="true" />
+                        <AlertTitle>Administrator fallback</AlertTitle>
+                        <AlertDescription>
+                          Password sign-in is available here only for platform
+                          administrators.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
                     {(!modeGateEnabled || (!isRegister && !localAuthEnabled)) &&
+                      !adminFallbackActive &&
                       !error && (
                         <Alert>
                           <ShieldCheck aria-hidden="true" />
@@ -313,7 +339,9 @@ export function LoginForm({
                 {oidcAvailable && (!isRegister || signupEnabled) && (
                   <>
                     <FieldSeparator className={styles.authSeparator}>
-                      {localAuthVisible ? "Or continue with" : "Continue with"}
+                      {localCredentialsVisible
+                        ? "Or continue with"
+                        : "Continue with"}
                     </FieldSeparator>
 
                     {oidcProviders.map((provider) => (
@@ -334,6 +362,19 @@ export function LoginForm({
                       </Field>
                     ))}
                   </>
+                )}
+
+                {adminFallbackAvailable && !adminFallbackActive && (
+                  <Field>
+                    <Button
+                      className="w-full"
+                      type="button"
+                      variant="ghost"
+                      onClick={enableAdminFallback}
+                    >
+                      Platform administrator? Use password fallback
+                    </Button>
+                  </Field>
                 )}
 
                 {signupEnabled && localAuthVisible && (

@@ -75,6 +75,40 @@ func TestAssistantUIRunStatusForTool(t *testing.T) {
 	}
 }
 
+func TestAssistantBuiltinToolDiscoveryIncludesChatCapabilities(t *testing.T) {
+	discovery := assistantBuiltInToolDiscovery()
+	for _, name := range []string{"web_search", "browse_url", "generate_image", "edit_image"} {
+		binding, ok := discovery.Bindings[name]
+		if !ok || !binding.Builtin {
+			t.Fatalf("expected built-in binding for %q: %+v", name, binding)
+		}
+		if len(binding.Definition.Parameters) == 0 || !json.Valid(binding.Definition.Parameters) {
+			t.Fatalf("expected valid JSON schema for %q", name)
+		}
+	}
+}
+
+func TestParseAssistantBuiltinAction(t *testing.T) {
+	toolName, arguments, ok := parseAssistantBuiltinAction(`{
+  "action": "dalle.text2im",
+  "action_input": "{ \"prompt\": \"a raccoon\" }",
+  "thought": "generate it"
+}`)
+	if !ok || toolName != "generate_image" || arguments["prompt"] != "a raccoon" {
+		t.Fatalf("unexpected parsed action: %q %+v %v", toolName, arguments, ok)
+	}
+
+	toolName, arguments, ok = parseAssistantBuiltinAction(`{"action":"web_search","action_input":{"q":"latest news"}}`)
+	if !ok || toolName != "web_search" || arguments["query"] != "latest news" {
+		t.Fatalf("unexpected web action: %q %+v %v", toolName, arguments, ok)
+	}
+
+	toolName, arguments, ok = parseAssistantBuiltinAction(`{ "action": "dalle.text2im", "action_input": "{ "prompt": "A raccoon" }", "thought": "generate it" }`)
+	if !ok || toolName != "generate_image" || arguments["prompt"] != "A raccoon" {
+		t.Fatalf("unexpected malformed action: %q %+v %v", toolName, arguments, ok)
+	}
+}
+
 func TestAssistantUIToolMessagePreservesApprovalAndResult(t *testing.T) {
 	messageID := uuid.New()
 	pending := assistantUIToolMessage(messageID, chatToolEvent{

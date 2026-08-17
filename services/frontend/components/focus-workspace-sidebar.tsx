@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from "react"
 import {
   Archive,
   Bot,
+  Brain,
   ChevronDown,
   ChevronRight,
   Headphones,
+  NotebookPen,
   LogOut,
   MessageSquare,
   MoreHorizontal,
@@ -74,6 +76,8 @@ const railNavigation: Array<{
     icon: Headphones,
     feature: "transcription",
   },
+  { id: "notes", label: "Notes", hint: "Your notes workspace", icon: NotebookPen },
+  { id: "memory", label: "Memory", hint: "Persistent preferences", icon: Brain },
 ]
 
 const sidebarRailStorageKey = "justai.sidebar-rail-expanded"
@@ -107,6 +111,7 @@ type FocusWorkspaceSidebarProps = {
     conversationId: string,
     title: string
   ) => void | Promise<void>
+  onConversationRefresh?: () => void | Promise<void>
   onArchiveSession: (sessionId: string, archived: boolean) => void
   onDeleteSession: (session: TranscriptionSession) => void
   onNewTranscriptionSession: () => void
@@ -139,6 +144,7 @@ export function FocusWorkspaceSidebar({
   onArchiveConversation,
   onDeleteConversation,
   onRenameConversation,
+  onConversationRefresh,
   onArchiveSession,
   onDeleteSession,
   onNewTranscriptionSession,
@@ -548,6 +554,7 @@ export function FocusWorkspaceSidebar({
               onDelete={onDeleteConversation}
               onHistoryQueryChange={setHistoryQuery}
               onRename={onRenameConversation}
+              onConversationRefresh={onConversationRefresh}
               onSelect={(id) => onNavigate("chat", id)}
             />
           </>

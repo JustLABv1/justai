@@ -132,12 +132,11 @@ function ToolGroup({ children }: { children: ReactNode }) {
   )
 }
 
-type AssistantGroupKey =
-  "group-thought" | "group-reasoning" | "group-tool" | "group-retrieval"
+type AssistantGroupKey = "group-reasoning" | "group-tool" | "group-retrieval"
 
 const assistantGroupByType = groupPartByType<AssistantGroupKey>({
-  reasoning: ["group-thought", "group-reasoning"],
-  "tool-call": ["group-thought", "group-tool"],
+  reasoning: ["group-reasoning"],
+  "tool-call": ["group-tool"],
 })
 
 const groupAssistantParts = (
@@ -227,9 +226,6 @@ export function AssistantMessageParts() {
       indicator="no-text"
     >
       {({ part, children }) => {
-        if (part.type === "group-thought") {
-          return <ToolGroup>{children}</ToolGroup>
-        }
         if (part.type === "group-reasoning") {
           return (
             <details className="my-2 rounded-xl border bg-muted/20" open>

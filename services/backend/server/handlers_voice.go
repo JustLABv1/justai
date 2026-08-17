@@ -56,6 +56,7 @@ type voiceToolBinding struct {
 	ServerID          uuid.UUID
 	ServerName        string
 	ToolName          string
+	Builtin           bool
 	MCPAppResourceURI string
 	MCPAppMIMEType    string
 	Definition        provider.ToolDefinition

@@ -98,6 +98,7 @@ type EndpointForm = {
   chatModel: string
   visionModel: string
   embeddingModel: string
+  imageModel: string
   transcriptionModel: string
   diarizationModel: string
   speechModel: string
@@ -131,6 +132,7 @@ const defaults: EndpointForm = {
   chatModel: "",
   visionModel: "",
   embeddingModel: "",
+  imageModel: "gpt-image-1",
   transcriptionModel: "",
   diarizationModel: "",
   speechModel: "",
@@ -335,6 +337,7 @@ export function EndpointsView({
       chatModel: endpoint.chatModel ?? "",
       visionModel: endpoint.visionModel ?? "",
       embeddingModel: endpoint.embeddingModel ?? "",
+      imageModel: endpoint.imageModel ?? "gpt-image-1",
       transcriptionModel: endpoint.transcriptionModel ?? "",
       diarizationModel: endpoint.diarizationModel ?? "",
       speechModel: endpoint.speechModel ?? "",
@@ -407,6 +410,9 @@ export function EndpointsView({
       const capabilities = {
         chat: true,
         embeddings: Boolean(form.embeddingModel),
+        "image-generation":
+          supports(form.providerType, "image-generation") &&
+          Boolean(form.imageModel.trim()),
         "realtime-transcription":
           supports(form.providerType, "realtime-transcription") &&
           form.realtimeTranscription,
@@ -546,6 +552,7 @@ export function EndpointsView({
   const hasAdditionalModels =
     supports(form.providerType, "vision") ||
     supports(form.providerType, "embeddings") ||
+    supports(form.providerType, "image-generation") ||
     supports(form.providerType, "realtime-transcription") ||
     supports(form.providerType, "chunked-transcription") ||
     supports(form.providerType, "diarization") ||
@@ -1009,7 +1016,7 @@ export function EndpointsView({
                             </span>
                             <span className="text-xs font-normal text-muted-foreground">
                               Optional vision, embeddings, transcription, and
-                              speech mappings
+                              image, speech mappings
                             </span>
                           </span>
                           {additionalModelsOpen ? (
@@ -1053,6 +1060,25 @@ export function EndpointsView({
                                   }
                                   placeholder="text-embedding-3-small"
                                 />
+                              </Field>
+                            )}
+                            {supports(form.providerType, "image-generation") && (
+                              <Field>
+                                <FieldLabel htmlFor="endpoint-image-model">
+                                  Image generation model
+                                </FieldLabel>
+                                <Input
+                                  id="endpoint-image-model"
+                                  value={form.imageModel}
+                                  onChange={(event) =>
+                                    update("imageModel", event.target.value)
+                                  }
+                                  placeholder="gpt-image-1"
+                                />
+                                <FieldDescription>
+                                  Used by the Image Studio for generation and
+                                  editing.
+                                </FieldDescription>
                               </Field>
                             )}
                             {(supports(

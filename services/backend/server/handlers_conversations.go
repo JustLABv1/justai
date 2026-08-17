@@ -66,6 +66,28 @@ func (a *App) listConversations(c *gin.Context) {
 	}
 	conditions := []string{"c.user_id = $1", "c.organization_id = $2", archiveFilter}
 	args := []any{principal.UserID, organizationID}
+	organized := strings.EqualFold(strings.TrimSpace(c.Query("organized")), "true")
+	if folderID := strings.TrimSpace(c.Query("folderId")); folderID != "" {
+		parsed, parseErr := uuid.Parse(folderID)
+		if parseErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid folder id"))
+			return
+		}
+		args = append(args, parsed)
+		conditions = append(conditions, fmt.Sprintf("c.folder_id = $%d", len(args)))
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Query("pinned")), "true") {
+		conditions = append(conditions, "c.pinned_at IS NOT NULL")
+	}
+	if tagID := strings.TrimSpace(c.Query("tagId")); tagID != "" {
+		parsed, parseErr := uuid.Parse(tagID)
+		if parseErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid tag id"))
+			return
+		}
+		args = append(args, parsed)
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM conversation_tag_links filter_links WHERE filter_links.conversation_id = c.id AND filter_links.tag_id = $%d)", len(args)))
+	}
 	if query := strings.TrimSpace(c.Query("q")); query != "" {
 		pattern := "%" + strings.ToLower(query) + "%"
 		args = append(args, pattern, query)
@@ -133,6 +155,14 @@ func (a *App) listConversations(c *gin.Context) {
 	if err := rows.Err(); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
+	}
+	if organized {
+		for index := range result {
+			if err := a.hydrateConversationOrganization(c, &result[index]); err != nil {
+				writeError(c, http.StatusInternalServerError, err)
+				return
+			}
+		}
 	}
 	nextCursor := ""
 	if len(result) > 50 {
@@ -208,6 +238,10 @@ func (a *App) getConversation(c *gin.Context) {
 		return
 	}
 	item.EndpointID = parseOptionalUUID(rawEndpointID)
+	if err := a.hydrateConversationOrganization(c, &item); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"conversation": item})
 }
 
@@ -222,12 +256,14 @@ func (a *App) updateConversation(c *gin.Context) {
 	var request struct {
 		Archived *bool   `json:"archived"`
 		Title    *string `json:"title"`
+		Pinned   *bool   `json:"pinned"`
+		FolderID *string `json:"folderId"`
 	}
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if request.Archived == nil && request.Title == nil {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("title or archived is required"))
+	if request.Archived == nil && request.Title == nil && request.Pinned == nil && request.FolderID == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("title, archived, pinned, or folderId is required"))
 		return
 	}
 	title := ""
@@ -239,20 +275,20 @@ func (a *App) updateConversation(c *gin.Context) {
 		}
 	}
 	var result sql.Result
-	if request.Title != nil && request.Archived == nil {
+	if request.Pinned == nil && request.FolderID == nil && request.Title != nil && request.Archived == nil {
 		result, err = a.DB.ExecContext(c, `
 			UPDATE conversations
 			SET title = $4, updated_at = now()
 			WHERE id = $1 AND user_id = $2 AND organization_id = $3
 		`, conversationID, principal.UserID, organizationID, title)
-	} else if request.Title == nil && request.Archived != nil {
+	} else if request.Pinned == nil && request.FolderID == nil && request.Title == nil && request.Archived != nil {
 		result, err = a.DB.ExecContext(c, `
 			UPDATE conversations
 			SET archived_at = CASE WHEN $4 THEN COALESCE(archived_at, now()) ELSE NULL END,
 			    updated_at = now()
 			WHERE id = $1 AND user_id = $2 AND organization_id = $3
 		`, conversationID, principal.UserID, organizationID, *request.Archived)
-	} else {
+	} else if request.Pinned == nil && request.FolderID == nil {
 		result, err = a.DB.ExecContext(c, `
 			UPDATE conversations
 			SET title = $4,
@@ -260,6 +296,46 @@ func (a *App) updateConversation(c *gin.Context) {
 			    updated_at = now()
 			WHERE id = $1 AND user_id = $2 AND organization_id = $3
 		`, conversationID, principal.UserID, organizationID, title, *request.Archived)
+	} else {
+		var folderID any
+		if request.FolderID != nil {
+			value := strings.TrimSpace(*request.FolderID)
+			if value != "" {
+				parsed, parseErr := uuid.Parse(value)
+				if parseErr != nil {
+					writeError(c, http.StatusBadRequest, fmt.Errorf("invalid folder id"))
+					return
+				}
+				var available bool
+				if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM conversation_folders WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, parsed, principal.UserID, organizationID).Scan(&available); err != nil || !available {
+					writeError(c, http.StatusBadRequest, fmt.Errorf("folder is not available"))
+					return
+				}
+				folderID = parsed
+			} else {
+				folderID = ""
+			}
+		}
+		var titleValue any
+		if request.Title != nil {
+			titleValue = title
+		}
+		var archivedValue, pinnedValue any
+		if request.Archived != nil {
+			archivedValue = *request.Archived
+		}
+		if request.Pinned != nil {
+			pinnedValue = *request.Pinned
+		}
+		result, err = a.DB.ExecContext(c, `
+			UPDATE conversations
+			SET title = COALESCE($4::text, title),
+			    archived_at = CASE WHEN $5::boolean IS NULL THEN archived_at WHEN $5 THEN COALESCE(archived_at, now()) ELSE NULL END,
+			    folder_id = CASE WHEN $6::text IS NULL THEN folder_id ELSE NULLIF($6, '')::uuid END,
+			    pinned_at = CASE WHEN $7::boolean IS NULL THEN pinned_at WHEN $7 THEN COALESCE(pinned_at, now()) ELSE NULL END,
+			    updated_at = now()
+			WHERE id = $1 AND user_id = $2 AND organization_id = $3
+		`, conversationID, principal.UserID, organizationID, titleValue, archivedValue, folderID, pinnedValue)
 	}
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)

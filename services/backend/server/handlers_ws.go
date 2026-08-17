@@ -195,7 +195,7 @@ func (a *App) searchKnowledge(ctx context.Context, organizationID, userID, conve
 }
 
 func chatToolInstructions() string {
-	return "Use the connected MCP tools whenever they can provide relevant information for the user's question. Re-evaluate the current question on every turn and make a fresh tool call when the answer may depend on connected sources; do not rely only on an earlier tool result. If a prior call failed or returned incomplete information, try the relevant tool again. Do not claim that you searched a source unless you actually called the tool."
+	return "Use JustAI's built-in tools when they match the user's request: call web_search for current or external web information, browse_url for a specific URL, generate_image when the user asks to create an image, and edit_image when the user asks to change an attached image. Use connected MCP tools whenever they can provide relevant information. Re-evaluate the current question on every turn and make a fresh tool call when the answer may depend on external or connected sources; do not rely only on an earlier tool result. If a prior call failed or returned incomplete information, try the relevant tool again. Do not claim that you searched, browsed, generated, or edited anything unless you actually called the corresponding tool. Never emit action-shaped JSON such as dalle.text2im as plain assistant text; invoke the tool instead."
 }
 
 type storedChatMessage struct {
@@ -344,10 +344,14 @@ func buildConversationToolHistory(stored []storedChatMessage) []provider.ToolMes
 
 func parseChatToolEvent(content string) (chatToolEvent, bool) {
 	var event chatToolEvent
-	if err := json.Unmarshal([]byte(content), &event); err != nil || event.Kind != "mcp_tool" || event.CallID == "" || event.ToolName == "" {
+	if err := json.Unmarshal([]byte(content), &event); err != nil || !isChatToolEventKind(event.Kind) || event.CallID == "" || event.ToolName == "" {
 		return chatToolEvent{}, false
 	}
 	return event, true
+}
+
+func isChatToolEventKind(kind string) bool {
+	return kind == "mcp_tool" || kind == "builtin_tool"
 }
 
 func (a *App) persistChatToolEvent(ctx context.Context, conversationID uuid.UUID, event chatToolEvent) uuid.UUID {

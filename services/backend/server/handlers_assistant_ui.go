@@ -32,6 +32,7 @@ type assistantUIRequest struct {
 	EndpointID     string            `json:"endpointId"`
 	Model          string            `json:"model"`
 	RequestID      string            `json:"requestId"`
+	UseMemory      bool              `json:"useMemory"`
 }
 
 type assistantUIMessage struct {
@@ -156,7 +157,7 @@ func isAssistantUIMCPToolRow(role, content string) bool {
 		return false
 	}
 	var event chatToolEvent
-	return json.Unmarshal([]byte(content), &event) == nil && event.Kind == "mcp_tool" && event.CallID != ""
+	return json.Unmarshal([]byte(content), &event) == nil && isChatToolEventKind(event.Kind) && event.CallID != ""
 }
 
 func (a *App) assistantUIChat(c *gin.Context) {
@@ -468,9 +469,17 @@ func (a *App) assistantUIChat(c *gin.Context) {
 
 	definitions := []provider.ToolDefinition{}
 	bindings := map[string]voiceToolBinding{}
+	builtInTools := assistantBuiltInToolDiscovery()
+	definitions = append(definitions, builtInTools.Definitions...)
+	for name, binding := range builtInTools.Bindings {
+		bindings[name] = binding
+	}
 	if a.platformCapabilityEnabled(c, "mcp") {
 		toolDiscovery := a.discoverConversationTools(c, principal.UserID, organizationID, conversationID)
-		definitions, bindings = toolDiscovery.Definitions, toolDiscovery.Bindings
+		definitions = append(definitions, toolDiscovery.Definitions...)
+		for name, binding := range toolDiscovery.Bindings {
+			bindings[name] = binding
+		}
 	}
 	if len(definitions) > 0 && !provider.SupportsToolCalling(endpoint) {
 		definitions = nil
@@ -504,11 +513,22 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			_ = writeChunk(map[string]any{"type": "error", "errorText": historyErr.Error()})
 			return
 		}
+		if request.UseMemory {
+			memory, memoryErr := a.memoryPrompt(c, principal.UserID, organizationID)
+			if memoryErr != nil {
+				persistError(memoryErr)
+				_ = writeChunk(map[string]any{"type": "error", "errorText": memoryErr.Error()})
+				return
+			}
+			if strings.TrimSpace(memory) != "" {
+				toolHistory = append([]provider.ToolMessage{{Role: "system", Content: memory}}, toolHistory...)
+			}
+		}
 		toolHistory = append([]provider.ToolMessage{{Role: "system", Content: chatToolInstructions()}}, toolHistory...)
 		if len(citations) > 0 {
 			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: citationPrompt(citations)}}, toolHistory...)
 		}
-		requiresAction, streamErr := a.streamAssistantUIWithTools(c, principal.UserID, organizationID, conversationID, runID, &outputParent, endpoint, toolHistory, definitions, bindings, writeChunk, &response, assistantMessageID, textID, &toolParts)
+		requiresAction, streamErr := a.streamAssistantUIWithTools(c, principal.UserID, organizationID, conversationID, runID, &outputParent, endpoint, toolHistory, definitions, bindings, latestUser, writeChunk, &response, assistantMessageID, textID, &toolParts)
 		if streamErr != nil {
 			persistError(streamErr)
 			_ = writeChunk(map[string]any{"type": "error", "errorText": streamErr.Error()})
@@ -537,28 +557,29 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			_ = writeChunk(map[string]any{"type": "error", "errorText": historyErr.Error()})
 			return
 		}
+		if request.UseMemory {
+			memory, memoryErr := a.memoryPrompt(c, principal.UserID, organizationID)
+			if memoryErr != nil {
+				persistError(memoryErr)
+				_ = writeChunk(map[string]any{"type": "error", "errorText": memoryErr.Error()})
+				return
+			}
+			if strings.TrimSpace(memory) != "" {
+				history = append([]provider.Message{{Role: "system", Content: memory}}, history...)
+			}
+		}
+		if !provider.SupportsToolCalling(endpoint) {
+			history = append([]provider.Message{{Role: "system", Content: chatBuiltInFallbackInstructions()}}, history...)
+		}
 		if len(citations) > 0 {
 			history = append([]provider.Message{{Role: "system", Content: citationPrompt(citations)}}, history...)
 		}
-		if err := writeChunk(map[string]any{"type": "text-start", "id": textID}); err != nil {
-			return
-		}
-		streamErr := provider.StreamChat(c, endpoint, provider.ChatOptions{
-			Messages: history,
-			Model:    endpoint.ChatModel,
-			OnUsage: func(usage provider.Usage) {
-				_ = a.recordChatRunUsage(context.Background(), runID, usage)
-			},
-		}, func(delta string) error {
-			response.WriteString(delta)
-			return writeChunk(map[string]any{"type": "text-delta", "id": textID, "delta": delta})
-		})
+		streamErr := a.streamAssistantUIWithoutTools(c, principal.UserID, organizationID, conversationID, runID, &outputParent, endpoint, history, latestUser, writeChunk, &response, textID, &toolParts)
 		if streamErr != nil {
 			persistError(streamErr)
 			_ = writeChunk(map[string]any{"type": "error", "errorText": streamErr.Error()})
 			return
 		}
-		_ = writeChunk(map[string]any{"type": "text-end", "id": textID})
 	}
 
 	timingMetadata := writeTiming()
@@ -1330,7 +1351,7 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 	return &event, messageID, nil
 }
 
-func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizationID, conversationID, runID uuid.UUID, parentID *any, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding, writeChunk func(any) error, response *strings.Builder, messageID, textID string, toolParts *[]map[string]any) (bool, error) {
+func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizationID, conversationID, runID uuid.UUID, parentID *any, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding, latestUser *assistantUserMessage, writeChunk func(any) error, response *strings.Builder, messageID, textID string, toolParts *[]map[string]any) (bool, error) {
 	toolMessages := append([]provider.ToolMessage(nil), history...)
 	textStarted := false
 	for round := 1; round <= 4; round++ {
@@ -1386,13 +1407,13 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			arguments := map[string]any{}
 			if strings.TrimSpace(call.Arguments) != "" {
 				if err := json.Unmarshal([]byte(call.Arguments), &arguments); err != nil {
-					errorText := "The MCP tool arguments were invalid JSON."
-					event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: round, ToolName: call.Name, CallID: call.ID, Error: errorText}
+					errorText := "The tool arguments were invalid JSON."
+					event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, CallID: call.ID, Error: errorText}
 					messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 					if messageRowID != uuid.Nil {
 						*parentID = messageRowID
 					}
-					*toolParts = append(*toolParts, assistantUIDynamicToolPart(event))
+					*toolParts = replaceAssistantUIToolPart(*toolParts, event)
 					_ = writeChunk(map[string]any{"type": "tool-input-error", "toolCallId": call.ID, "toolName": call.Name, "input": map[string]any{}, "errorText": errorText, "dynamic": true, "toolMetadata": map[string]any{"messageId": messageRowID.String()}})
 					toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: errorText})
 					continue
@@ -1400,23 +1421,32 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			}
 			binding, exists := bindings[call.Name]
 			if !exists {
-				errorText := "The requested MCP tool is not available."
-				event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: round, ToolName: call.Name, CallID: call.ID, Arguments: arguments, Error: errorText}
+				errorText := "The requested tool is not available."
+				event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, CallID: call.ID, Arguments: arguments, Error: errorText}
 				messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 				if messageRowID != uuid.Nil {
 					*parentID = messageRowID
 				}
-				*toolParts = append(*toolParts, assistantUIDynamicToolPart(event))
+				*toolParts = replaceAssistantUIToolPart(*toolParts, event)
 				_ = writeChunk(map[string]any{"type": "tool-input-error", "toolCallId": call.ID, "toolName": call.Name, "input": arguments, "errorText": errorText, "dynamic": true, "toolMetadata": map[string]any{"messageId": messageRowID.String()}})
 				toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: errorText})
 				continue
 			}
-			event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
+			eventKind := "mcp_tool"
+			if binding.Builtin {
+				eventKind = "builtin_tool"
+			}
+			event := chatToolEvent{Kind: eventKind, Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
 			messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 			if messageRowID != uuid.Nil {
 				*parentID = messageRowID
 			}
-			toolInput := map[string]any{"type": "tool-input-available", "toolCallId": call.ID, "toolName": call.Name, "input": arguments, "dynamic": true, "toolMetadata": map[string]any{"serverId": binding.ServerID.String(), "serverName": binding.ServerName, "messageId": messageRowID.String()}}
+			toolMetadata := map[string]any{"messageId": messageRowID.String()}
+			if !binding.Builtin {
+				toolMetadata["serverId"] = binding.ServerID.String()
+				toolMetadata["serverName"] = binding.ServerName
+			}
+			toolInput := map[string]any{"type": "tool-input-available", "toolCallId": call.ID, "toolName": call.Name, "input": arguments, "dynamic": true, "toolMetadata": toolMetadata}
 			if app := assistantUIMCPAppMetadata(event); app != nil {
 				toolInput["mcp"] = map[string]any{"app": app}
 			}
@@ -1427,42 +1457,48 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 				event.Status = "awaiting_approval"
 				event.ApprovalID = uuid.NewString()
 				a.updateChatToolEvent(ctx, conversationID, messageRowID, event)
-				*toolParts = append(*toolParts, assistantUIDynamicToolPart(event))
+				*toolParts = replaceAssistantUIToolPart(*toolParts, event)
 				if err := writeChunk(map[string]any{"type": "tool-approval-request", "approvalId": event.ApprovalID, "toolCallId": call.ID}); err != nil {
 					return false, err
 				}
 				return true, nil
 			}
-			a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.auto_approved", binding.ServerID, map[string]any{
-				"conversationId": conversationID,
-				"serverId":       binding.ServerID,
-				"serverName":     binding.ServerName,
-				"tool":           binding.ToolName,
-				"arguments":      arguments,
-				"reason":         "trusted_read_only",
-			})
-			result, callErr := a.executeChatMCPTool(ctx, userID, organizationID, conversationID, binding, arguments)
+			var result json.RawMessage
+			var callErr error
+			if binding.Builtin {
+				result, callErr = a.executeBuiltInChatTool(ctx, userID, organizationID, conversationID, binding.ToolName, arguments, latestUser)
+			} else {
+				a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.auto_approved", binding.ServerID, map[string]any{
+					"conversationId": conversationID,
+					"serverId":       binding.ServerID,
+					"serverName":     binding.ServerName,
+					"tool":           binding.ToolName,
+					"arguments":      arguments,
+					"reason":         "trusted_read_only",
+				})
+				result, callErr = a.executeChatMCPTool(ctx, userID, organizationID, conversationID, binding, arguments)
+			}
 			if callErr != nil {
 				event.Status = "failed"
 				event.Error = callErr.Error()
 				a.updateChatToolEvent(ctx, conversationID, messageRowID, event)
-				*toolParts = append(*toolParts, assistantUIDynamicToolPart(event))
+				*toolParts = replaceAssistantUIToolPart(*toolParts, event)
 				_ = writeChunk(map[string]any{"type": "tool-output-error", "toolCallId": call.ID, "errorText": callErr.Error(), "dynamic": true})
-				toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The MCP tool failed: " + callErr.Error()})
+				toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The tool failed: " + callErr.Error()})
 				continue
 			}
 			event.Status = "completed"
 			event.Result = string(result)
 			event.ResultPreview = toolResultPreview(result)
 			a.updateChatToolEvent(ctx, conversationID, messageRowID, event)
-			*toolParts = append(*toolParts, assistantUIDynamicToolPart(event))
+			*toolParts = replaceAssistantUIToolPart(*toolParts, event)
 			if err := writeChunk(map[string]any{"type": "tool-output-available", "toolCallId": call.ID, "output": json.RawMessage(result), "dynamic": true}); err != nil {
 				return false, err
 			}
 			toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: string(result)})
 		}
 		if round == 4 {
-			message := "\n\nI stopped after four MCP tool rounds to keep this turn bounded."
+			message := "\n\nI stopped after four tool rounds to keep this turn bounded."
 			if !textStarted {
 				textStarted = true
 				_ = writeChunk(map[string]any{"type": "text-start", "id": textID})
@@ -1854,7 +1890,7 @@ func assistantUIToolCallIDs(message map[string]any) []string {
 func (a *App) legacyAssistantUIMessage(ctx context.Context, id uuid.UUID, role, content string, citations []byte, runStatus string, feedback sql.NullString) map[string]any {
 	if role == "tool" {
 		var event chatToolEvent
-		if json.Unmarshal([]byte(content), &event) == nil && event.Kind == "mcp_tool" {
+		if json.Unmarshal([]byte(content), &event) == nil && isChatToolEventKind(event.Kind) {
 			state := "output-available"
 			part := map[string]any{"type": "dynamic-tool", "toolName": event.ToolName, "toolCallId": event.CallID, "input": event.Arguments, "state": state, "dynamic": true}
 			switch event.Status {
