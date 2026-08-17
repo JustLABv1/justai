@@ -217,6 +217,9 @@ func TestAssistantUIMessageRunStatusDefaultsSafely(t *testing.T) {
 	if got := assistantUIMessageRunStatus(map[string]any{"metadata": map[string]any{"runStatus": "requires-action"}}); got != "requires-action" {
 		t.Fatalf("expected requires-action, got %q", got)
 	}
+	if got := assistantUIMessageRunStatus(map[string]any{"metadata": map[string]any{"runStatus": "error"}}); got != "error" {
+		t.Fatalf("expected error, got %q", got)
+	}
 	if got := assistantUIMessageRunStatus(map[string]any{"metadata": map[string]any{"runStatus": "tampered"}}); got != "complete" {
 		t.Fatalf("expected complete fallback, got %q", got)
 	}
@@ -368,16 +371,58 @@ func TestLatestAssistantUserMessageCarriesMessageScopedAttachmentSource(t *testi
 }
 
 func TestAssistantUIImageHelpersAcceptAISDKFileParts(t *testing.T) {
+	validPNG := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 	messages := []assistantUIMessage{{
 		Role:  "user",
-		Parts: []json.RawMessage{json.RawMessage(`{"type":"file","url":"data:image/png;base64,aGVsbG8=","mediaType":"image/png"}`)},
+		Parts: []json.RawMessage{json.RawMessage(`{"type":"file","url":"data:image/png;base64,` + validPNG + `","mediaType":"image/png"}`)},
 	}}
 	if !assistantUIMessageHasImages(messages) {
 		t.Fatal("expected an AI SDK file part with an image media type to be detected")
 	}
 	parts := assistantUIProviderImageParts(messages[0].Parts)
-	if len(parts) != 1 || parts[0].ImageURL == nil || parts[0].ImageURL.URL != "data:image/png;base64,aGVsbG8=" {
+	if len(parts) != 1 || parts[0].ImageURL == nil || parts[0].ImageURL.URL != "data:image/png;base64,"+validPNG {
 		t.Fatalf("unexpected provider image parts: %+v", parts)
+	}
+}
+
+func TestAssistantUIProviderImagePartsSkipsInvalidHistoricalImages(t *testing.T) {
+	validPNG := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	parts := assistantUIProviderImageParts([]json.RawMessage{
+		json.RawMessage(`{"type":"file","url":"data:image/png;base64,aGVsbG8=","mediaType":"image/png"}`),
+		json.RawMessage(`{"type":"file","url":"data:image/png;base64,` + validPNG + `","mediaType":"image/png"}`),
+	})
+	if len(parts) != 1 || parts[0].ImageURL == nil || parts[0].ImageURL.URL != "data:image/png;base64,"+validPNG {
+		t.Fatalf("expected only the decodable image to reach the provider, got %+v", parts)
+	}
+}
+
+func TestValidateAssistantUIImagePartsChecksImageBytes(t *testing.T) {
+	validPNG := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	valid := []assistantUIMessage{{
+		Role:  "user",
+		Parts: []json.RawMessage{json.RawMessage(`{"type":"file","url":"data:image/png;base64,` + validPNG + `","mediaType":"image/png"}`)},
+	}}
+	if err := validateAssistantUIImageParts(valid); err != nil {
+		t.Fatalf("expected a valid PNG to pass validation: %v", err)
+	}
+
+	invalid := []assistantUIMessage{{
+		Role:  "user",
+		Parts: []json.RawMessage{json.RawMessage(`{"type":"file","url":"data:image/png;base64,aGVsbG8=","mediaType":"image/png"}`)},
+	}}
+	if err := validateAssistantUIImageParts(invalid); err == nil {
+		t.Fatal("expected invalid image bytes to be rejected")
+	}
+}
+
+func TestAssistantUIErrorPartIsDurableData(t *testing.T) {
+	part := assistantUIErrorPart("provider unavailable")
+	if part["type"] != "data-justai-error" {
+		t.Fatalf("unexpected error part type: %+v", part)
+	}
+	data, ok := part["data"].(map[string]any)
+	if !ok || data["message"] != "provider unavailable" {
+		t.Fatalf("unexpected error part data: %+v", part)
 	}
 }
 

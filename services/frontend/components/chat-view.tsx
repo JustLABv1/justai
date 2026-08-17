@@ -70,6 +70,7 @@ import {
   AssistantMessageParts,
   UserMessageParts,
 } from "@/components/assistant-ui/message-parts"
+import { ChatAttachmentPreview } from "@/components/assistant-ui/attachment-preview"
 import { VoiceControl } from "@/components/assistant-ui/voice"
 import { createJustAIVoiceAdapter } from "@/components/assistant-ui/voice-adapter"
 import { BrandMark } from "@/components/brand-mark"
@@ -280,7 +281,7 @@ function normalizeHistory(payload: AssistantHistoryResponse): UIMessage[] {
   return Array.isArray(payload.messages) ? payload.messages : []
 }
 
-function readFileAsDataURL(file: File): Promise<string> {
+function readFileAsDataURL(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.addEventListener("load", () => {
@@ -295,6 +296,133 @@ function readFileAsDataURL(file: File): Promise<string> {
     })
     reader.readAsDataURL(file)
   })
+}
+
+type NormalizedImage = {
+  dataURL: string
+  contentType: string
+}
+
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024
+const MAX_IMAGE_DIMENSION = 4096
+
+async function readImageAsDataURL(file: Blob): Promise<NormalizedImage> {
+  const objectURL = URL.createObjectURL(file)
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new window.Image()
+      element.decoding = "async"
+      element.onload = () => resolve(element)
+      element.onerror = () =>
+        reject(new Error("The image could not be decoded in the browser"))
+      element.src = objectURL
+    })
+
+    const sourceWidth = image.naturalWidth || image.width
+    const sourceHeight = image.naturalHeight || image.height
+    if (!sourceWidth || !sourceHeight) {
+      throw new Error("The image has no readable dimensions")
+    }
+
+    const scale = Math.min(
+      1,
+      MAX_IMAGE_DIMENSION / Math.max(sourceWidth, sourceHeight)
+    )
+    const width = Math.max(1, Math.round(sourceWidth * scale))
+    const height = Math.max(1, Math.round(sourceHeight * scale))
+    const canvas = document.createElement("canvas")
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext("2d")
+    if (!context) throw new Error("The image could not be prepared")
+    context.drawImage(image, 0, 0, width, height)
+
+    // vLLM/LiteLLM installations commonly support PNG/JPEG reliably, but not
+    // every format a browser can preview (for example WebP or SVG). Rasterize
+    // every image so the provider receives a real, self-consistent payload.
+    const preferredType = file.type === "image/jpeg" ? "image/jpeg" : "image/png"
+    const toBlob = (type: string) =>
+      new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error("The image could not be prepared"))
+              return
+            }
+            resolve(blob)
+          },
+          type,
+          type === "image/jpeg" ? 0.92 : undefined
+        )
+      })
+
+    let blob = await toBlob(preferredType)
+    if (blob.size > MAX_IMAGE_BYTES && preferredType !== "image/jpeg") {
+      blob = await toBlob("image/jpeg")
+    }
+    if (blob.size > MAX_IMAGE_BYTES) {
+      throw new Error("Images must be smaller than 12 MB")
+    }
+
+    return {
+      dataURL: await readFileAsDataURL(blob),
+      contentType: blob.type || preferredType,
+    }
+  } finally {
+    URL.revokeObjectURL(objectURL)
+  }
+}
+
+async function normalizeOutgoingImageMessages<T extends UIMessage>(
+  messages: T[]
+): Promise<T[]> {
+  let messagesChanged = false
+  const normalized = await Promise.all(
+    messages.map(async (message) => {
+      let messageChanged = false
+      const parts = await Promise.all(
+        message.parts.map(async (part) => {
+          if (
+            part.type !== "file" ||
+            !part.mediaType.toLowerCase().startsWith("image/") ||
+            !part.url.toLowerCase().startsWith("data:image/")
+          ) {
+            return part
+          }
+
+          const mediaType = part.mediaType.toLowerCase()
+          const hasCanonicalWireFormat =
+            (mediaType === "image/png" || mediaType === "image/jpeg") &&
+            new RegExp(`^data:${mediaType};base64,`, "i").test(part.url)
+          if (hasCanonicalWireFormat) return part
+
+          try {
+            // Re-rasterize images that were created by an older client or in a
+            // browser format the hosted vision gateway may not understand.
+            // Invalid historical data is left untouched here and is filtered
+            // by the backend rather than blocking an otherwise valid turn.
+            const response = await fetch(part.url)
+            if (!response.ok) return part
+            const image = await readImageAsDataURL(await response.blob())
+            messageChanged = true
+            return {
+              ...part,
+              url: image.dataURL,
+              mediaType: image.contentType,
+            }
+          } catch {
+            return part
+          }
+        })
+      )
+
+      if (!messageChanged) return message
+      messagesChanged = true
+      return { ...message, parts } as T
+    })
+  )
+
+  return messagesChanged ? normalized : messages
 }
 
 function createAttachmentAdapter(
@@ -354,13 +482,15 @@ function createAttachmentAdapter(
     },
     async send(attachment): Promise<CompleteAttachment> {
       if (attachment.type === "image") {
+        const image = await readImageAsDataURL(attachment.file)
         return {
           ...attachment,
+          contentType: image.contentType,
           status: { type: "complete" },
           content: [
             {
               type: "image",
-              image: await readFileAsDataURL(attachment.file),
+              image: image.dataURL,
               filename: attachment.name,
             },
           ],
@@ -807,27 +937,7 @@ function UserMessage() {
           </MessagePrimitive.Quote>
           <UserMessageParts />
         </div>
-        <MessagePrimitive.Attachments>
-          {({ attachment }) => (
-            <AttachmentPrimitive.Root className="mt-2 flex max-w-full items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs text-foreground">
-              {attachment.contentType?.startsWith("image/") ? (
-                <AttachmentPrimitive.unstable_Thumb className="size-7 shrink-0 rounded-md" />
-              ) : (
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
-                  <FileText className="size-4" aria-hidden="true" />
-                </span>
-              )}
-              <span className="max-w-52 truncate">
-                <AttachmentPrimitive.Name />
-              </span>
-              <span className="text-muted-foreground">
-                {attachment.contentType?.startsWith("image/")
-                  ? "Image"
-                  : "File"}
-              </span>
-            </AttachmentPrimitive.Root>
-          )}
-        </MessagePrimitive.Attachments>
+        <MessageAttachments />
         <div className="flex items-center gap-2">
           <MessageActions assistant={false} />
           <BranchPicker />
@@ -844,27 +954,7 @@ function AssistantMessage() {
         <div className="w-full text-sm leading-7 text-foreground">
           <AssistantMessageParts />
         </div>
-        <MessagePrimitive.Attachments>
-          {({ attachment }) => (
-            <AttachmentPrimitive.Root className="mt-2 flex max-w-full items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs text-foreground">
-              {attachment.contentType?.startsWith("image/") ? (
-                <AttachmentPrimitive.unstable_Thumb className="size-7 shrink-0 rounded-md" />
-              ) : (
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
-                  <FileText className="size-4" aria-hidden="true" />
-                </span>
-              )}
-              <span className="max-w-52 truncate">
-                <AttachmentPrimitive.Name />
-              </span>
-              <span className="text-muted-foreground">
-                {attachment.contentType?.startsWith("image/")
-                  ? "Image"
-                  : "File"}
-              </span>
-            </AttachmentPrimitive.Root>
-          )}
-        </MessagePrimitive.Attachments>
+        <MessageAttachments />
         <MessagePrimitive.Error>
           <ErrorPrimitive.Root className="mt-2 flex max-w-4xl items-center rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             <ErrorPrimitive.Message />
@@ -879,6 +969,20 @@ function AssistantMessage() {
         </div>
       </div>
     </MessagePrimitive.Root>
+  )
+}
+
+function MessageAttachments() {
+  return (
+    <MessagePrimitive.Attachments>
+      {({ attachment }) => {
+        return (
+          <AttachmentPrimitive.Root className="mt-2 max-w-full">
+            <ChatAttachmentPreview attachment={attachment} variant="message" />
+          </AttachmentPrimitive.Root>
+        )
+      }}
+    </MessagePrimitive.Attachments>
   )
 }
 
@@ -1452,25 +1556,12 @@ function Composer({
               >
                 <ComposerPrimitive.Attachments>
                   {({ attachment }) => (
-                    <AttachmentPrimitive.Root className="flex max-w-full items-center gap-2 rounded-xl border bg-muted/40 px-2.5 py-1.5 text-xs">
-                      <span className="max-w-52 truncate">
-                        <AttachmentPrimitive.Name />
-                      </span>
-                      <span className="shrink-0 text-muted-foreground">
-                        {attachment.status.type === "running"
-                          ? "Preparing…"
-                          : attachment.status.type === "complete"
-                            ? "Sent"
-                            : attachment.status.type === "incomplete"
-                              ? "Could not prepare"
-                              : "Ready for this message"}
-                      </span>
-                      <AttachmentPrimitive.Remove
-                        aria-label={`Remove ${attachment.name}`}
-                        className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <X className="size-3.5" />
-                      </AttachmentPrimitive.Remove>
+                    <AttachmentPrimitive.Root className="max-w-full">
+                      <ChatAttachmentPreview
+                        attachment={attachment}
+                        showRemove
+                        variant="composer"
+                      />
                     </AttachmentPrimitive.Root>
                   )}
                 </ComposerPrimitive.Attachments>
@@ -1842,7 +1933,9 @@ function AssistantChatSurface({
         },
         prepareSendMessagesRequest: async ({ body, messages }) => {
           const id = await onEnsureConversation()
-          const requestMessages = Array.isArray(messages) ? messages : []
+          const requestMessages = Array.isArray(messages)
+            ? await normalizeOutgoingImageMessages(messages)
+            : []
           const latestUser = [...requestMessages]
             .reverse()
             .find((message) => message?.role === "user")

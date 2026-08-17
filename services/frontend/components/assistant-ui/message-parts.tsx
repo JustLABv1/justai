@@ -3,6 +3,7 @@
 import Image from "next/image"
 import { Children, type ReactNode } from "react"
 import {
+  CircleAlert,
   ChevronDown,
   FileText,
   LoaderCircle,
@@ -21,6 +22,7 @@ import {
 import { AssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import { AssistantSource } from "@/components/assistant-ui/sources"
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 
 type RetrievalStatus = {
@@ -83,6 +85,23 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
       <span>{label}</span>
       {value.error && <span className="truncate">· {value.error}</span>}
     </div>
+  )
+}
+
+function AssistantErrorPart({ data }: { data: unknown }) {
+  const value = data as { message?: unknown } | null
+  const message =
+    value && typeof value.message === "string"
+      ? value.message
+      : "The assistant could not complete this response."
+
+  return (
+    <Alert className="my-2 max-w-4xl" variant="destructive">
+      <CircleAlert aria-hidden="true" />
+      <AlertDescription className="break-words whitespace-pre-wrap text-destructive/90">
+        {message}
+      </AlertDescription>
+    </Alert>
   )
 }
 
@@ -183,6 +202,8 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
         part.dataRendererUI ??
         (part.name === "retrieval-status" ? (
           <RetrievalStatusPart data={part.data} />
+        ) : part.name === "justai-error" ? (
+          <AssistantErrorPart data={part.data} />
         ) : null)
       )
     case "tool-call":
@@ -248,7 +269,13 @@ export function UserMessageParts() {
   return (
     <MessagePrimitive.Parts>
       {({ part }) =>
-        renderPart(part, "text-accent-foreground dark:text-primary-foreground")}
+        part.type === "file"
+          ? null
+          : renderPart(
+              part,
+              "text-accent-foreground dark:text-primary-foreground"
+            )
+      }
     </MessagePrimitive.Parts>
   )
 }

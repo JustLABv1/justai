@@ -1,11 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"net/http"
 	"strings"
 	"time"
@@ -131,6 +136,8 @@ func mergeAssistantUIToolMessage(target, source map[string]any) {
 
 func assistantUIRunStatusPriority(status string) int {
 	switch status {
+	case "error":
+		return 5
 	case "requires-action":
 		return 4
 	case "running":
@@ -197,23 +204,29 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("endpoint could not be loaded: %w", err))
 		return
 	}
+	// Validate only the active user image. Older assistant-ui clients could
+	// persist browser-supported formats that a hosted vision gateway cannot
+	// decode; those stale parts are omitted when provider history is rebuilt.
+	if latestUser != nil {
+		latestUserMessage := assistantUIMessage{Role: "user", Parts: latestUser.Parts}
+		if assistantUIMessageHasImages([]assistantUIMessage{latestUserMessage}) {
+			if err := validateAssistantUIImageParts([]assistantUIMessage{latestUserMessage}); err != nil {
+				writeError(c, http.StatusBadRequest, err)
+				return
+			}
+		}
+	}
 	// The endpoint's configured chat model is the safe default. A model chosen
 	// from discovery (or entered manually for a compatible gateway) is scoped to
 	// this request and never changes the endpoint's persisted default. When the
 	// history contains an image, switch to the endpoint's dedicated vision model
 	// if one is configured; otherwise retain the chat model for providers where a
 	// single multimodal model handles both modes.
-	hasImages := assistantUIMessageHasImages(requestMessages)
+	hasImages := assistantUIMessageHasProviderImages(requestMessages)
 	endpoint, err = assistantUIEndpointForRequest(endpoint, request.Model, hasImages)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
-	}
-	if hasImages {
-		if err := validateAssistantUIImageParts(requestMessages); err != nil {
-			writeError(c, http.StatusBadRequest, err)
-			return
-		}
 	}
 
 	runStatus := "complete"
@@ -468,11 +481,15 @@ func (a *App) assistantUIChat(c *gin.Context) {
 
 	response := strings.Builder{}
 	historyHead, hasHistoryHead := assistantUIParentUUID(outputParent)
-	persistIncomplete := func() {
-		if response.Len() == 0 && len(toolParts) == 0 {
+	persistError := func(streamErr error) {
+		if streamErr == nil {
 			return
 		}
-		_ = a.persistAssistantUIAssistantAtPartsStatus(c, conversationID, outputParent, assistantMessageID, response.String(), citations, toolParts, writeTiming(), "incomplete")
+		errorParts := append([]map[string]any(nil), toolParts...)
+		errorParts = append(errorParts, assistantUIErrorPart(streamErr.Error()))
+		metadata := writeTiming()
+		metadata["errorText"] = streamErr.Error()
+		_ = a.persistAssistantUIAssistantAtPartsStatus(c, conversationID, outputParent, assistantMessageID, response.String(), citations, errorParts, metadata, "error")
 	}
 	if len(definitions) > 0 && provider.SupportsToolCalling(endpoint) {
 		var toolHistory []provider.ToolMessage
@@ -483,7 +500,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			toolHistory, historyErr = a.conversationToolHistory(c, conversationID)
 		}
 		if historyErr != nil {
-			persistIncomplete()
+			persistError(historyErr)
 			_ = writeChunk(map[string]any{"type": "error", "errorText": historyErr.Error()})
 			return
 		}
@@ -493,7 +510,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		}
 		requiresAction, streamErr := a.streamAssistantUIWithTools(c, principal.UserID, organizationID, conversationID, runID, &outputParent, endpoint, toolHistory, definitions, bindings, writeChunk, &response, assistantMessageID, textID, &toolParts)
 		if streamErr != nil {
-			persistIncomplete()
+			persistError(streamErr)
 			_ = writeChunk(map[string]any{"type": "error", "errorText": streamErr.Error()})
 			return
 		}
@@ -516,7 +533,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			history, historyErr = a.conversationHistory(c, conversationID)
 		}
 		if historyErr != nil {
-			persistIncomplete()
+			persistError(historyErr)
 			_ = writeChunk(map[string]any{"type": "error", "errorText": historyErr.Error()})
 			return
 		}
@@ -537,7 +554,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			return writeChunk(map[string]any{"type": "text-delta", "id": textID, "delta": delta})
 		})
 		if streamErr != nil {
-			persistIncomplete()
+			persistError(streamErr)
 			_ = writeChunk(map[string]any{"type": "error", "errorText": streamErr.Error()})
 			return
 		}
@@ -744,6 +761,18 @@ func assistantUIMessageHasImages(messages []assistantUIMessage) bool {
 	return false
 }
 
+func assistantUIMessageHasProviderImages(messages []assistantUIMessage) bool {
+	for _, message := range messages {
+		if message.Role != "user" {
+			continue
+		}
+		if len(assistantUIProviderImageParts(message.Parts)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func assistantUIProviderImageParts(rawParts []json.RawMessage) []provider.MessageContentPart {
 	result := make([]provider.MessageContentPart, 0)
 	for _, rawPart := range rawParts {
@@ -755,17 +784,27 @@ func assistantUIProviderImageParts(rawParts []json.RawMessage) []provider.Messag
 		if !ok {
 			continue
 		}
+		normalized, normalizedOK := assistantUIProviderSafeImageURL(imageURL)
+		if !normalizedOK {
+			// Older conversations may contain a browser-supported format that the
+			// configured provider cannot decode. Do not let one stale attachment
+			// prevent a later text turn; the active user image is validated before
+			// the request starts.
+			continue
+		}
 		result = append(result, provider.MessageContentPart{
 			Type:     "image_url",
-			ImageURL: &provider.MessageImageURL{URL: imageURL, Detail: "auto"},
+			ImageURL: &provider.MessageImageURL{URL: normalized, Detail: "auto"},
 		})
 	}
 	return result
 }
 
 func validateAssistantUIImageParts(messages []assistantUIMessage) error {
-	const maxImageBytes = 12 * 1024 * 1024
 	for _, message := range messages {
+		if message.Role != "user" {
+			continue
+		}
 		for _, rawPart := range message.Parts {
 			var part assistantUIPart
 			if json.Unmarshal(rawPart, &part) != nil {
@@ -775,20 +814,75 @@ func validateAssistantUIImageParts(messages []assistantUIMessage) error {
 			if !ok {
 				continue
 			}
-			header, encoded, ok := strings.Cut(imageURL, ",")
-			if !ok || !strings.HasPrefix(header, "data:image/") || !strings.HasSuffix(header, ";base64") {
-				return fmt.Errorf("image messages must use base64 data URLs")
-			}
-			decoded, err := base64.StdEncoding.DecodeString(encoded)
-			if err != nil {
-				return fmt.Errorf("image message data is invalid")
-			}
-			if len(decoded) > maxImageBytes {
-				return fmt.Errorf("image messages must be smaller than %d MB", maxImageBytes/(1024*1024))
+			if _, ok := assistantUIProviderSafeImageURL(imageURL); !ok {
+				return fmt.Errorf("image message data could not be decoded; please reattach the image")
 			}
 		}
 	}
 	return nil
+}
+
+func assistantUIImageDataURL(value string) (string, string, bool) {
+	header, encoded, ok := strings.Cut(strings.TrimSpace(value), ",")
+	if !ok {
+		return "", "", false
+	}
+	parameters := strings.Split(header, ";")
+	if len(parameters) < 2 {
+		return "", "", false
+	}
+	scheme := strings.TrimSpace(parameters[0])
+	if len(scheme) < len("data:") || !strings.EqualFold(scheme[:len("data:")], "data:") {
+		return "", "", false
+	}
+	mimeType := strings.TrimSpace(scheme[len("data:"):])
+	if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+		return "", "", false
+	}
+	hasBase64 := false
+	for _, parameter := range parameters[1:] {
+		if strings.EqualFold(strings.TrimSpace(parameter), "base64") {
+			hasBase64 = true
+			break
+		}
+	}
+	if !hasBase64 {
+		return "", "", false
+	}
+	return strings.ToLower(mimeType), strings.TrimSpace(encoded), true
+}
+
+func assistantUICanonicalImageURL(value string) (string, bool) {
+	mimeType, encoded, ok := assistantUIImageDataURL(value)
+	if !ok {
+		return "", false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", false
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(decoded), true
+}
+
+func assistantUIProviderSafeImageURL(value string) (string, bool) {
+	const maxImageBytes = 12 * 1024 * 1024
+
+	normalized, ok := assistantUICanonicalImageURL(value)
+	if !ok {
+		return "", false
+	}
+	_, encoded, ok := assistantUIImageDataURL(normalized)
+	if !ok {
+		return "", false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(decoded) > maxImageBytes {
+		return "", false
+	}
+	if _, _, err := image.DecodeConfig(bytes.NewReader(decoded)); err != nil {
+		return "", false
+	}
+	return normalized, true
 }
 
 func assistantUIImageURL(part assistantUIPart) (string, bool) {
@@ -1047,6 +1141,13 @@ func (a *App) persistAssistantUIAssistantAtStatus(ctx context.Context, conversat
 
 func (a *App) persistAssistantUIAssistantAtParts(ctx context.Context, conversationID uuid.UUID, parentID any, messageID, content string, citations []models.Citation, toolParts []map[string]any, metadata map[string]any) error {
 	return a.persistAssistantUIAssistantAtPartsStatus(ctx, conversationID, parentID, messageID, content, citations, toolParts, metadata, "complete")
+}
+
+func assistantUIErrorPart(message string) map[string]any {
+	return map[string]any{
+		"type": "data-justai-error",
+		"data": map[string]any{"message": message},
+	}
 }
 
 func (a *App) persistAssistantUIAssistantAtPartsStatus(ctx context.Context, conversationID uuid.UUID, parentID any, messageID, content string, citations []models.Citation, toolParts []map[string]any, metadata map[string]any, runStatus string) error {
@@ -1865,6 +1966,21 @@ func (a *App) upsertAssistantMessage(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, lookupErr)
 		return
 	}
+	if lookupErr == nil {
+		var existingRunStatus string
+		if err := a.DB.QueryRowContext(c, `SELECT run_status FROM messages WHERE id = $1 AND conversation_id = $2`, messageID, conversationID).Scan(&existingRunStatus); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		// The stream handler writes the durable error part before the AI SDK's
+		// terminal history callback runs. That callback only knows about the
+		// runtime status and would otherwise overwrite the richer persisted
+		// error with a plain, empty UI message.
+		if existingRunStatus == "error" {
+			c.Status(http.StatusNoContent)
+			return
+		}
+	}
 	_, err = a.DB.ExecContext(c, `
 		INSERT INTO messages AS existing (id, conversation_id, role, content, format, ui_message, parent_id, run_status, updated_at)
 		VALUES ($1, $2, $3, $4, 'ai-sdk-ui', $5, $6::uuid, $7, now())
@@ -1999,7 +2115,7 @@ func assistantUIMessageRunStatus(message map[string]any) string {
 	metadata, _ := message["metadata"].(map[string]any)
 	status, _ := metadata["runStatus"].(string)
 	switch status {
-	case "running", "requires-action", "complete", "incomplete":
+	case "running", "requires-action", "complete", "incomplete", "error":
 		return status
 	default:
 		return "complete"
