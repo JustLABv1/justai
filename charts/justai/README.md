@@ -38,6 +38,12 @@ The default frontend images are built for same-origin `/api/v1` requests. Keep
 Ingress enabled unless you build the frontend image with an explicit
 `NEXT_PUBLIC_API_URL` using `services/frontend/Dockerfile`.
 
+The chart defaults to Kubernetes Pod Security Standards `restricted`: app and
+PostgreSQL containers disable privilege escalation, drop all Linux capabilities,
+use the runtime-default seccomp profile, and run without a privileged data
+directory init container. PostgreSQL volume ownership is handled with `fsGroup`
+(`999`) instead.
+
 The OIDC callback defaults to the first Ingress host:
 
 ```text

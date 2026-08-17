@@ -35,19 +35,6 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      initContainers:
-        - name: prepare-data-directory
-          image: {{ .Values.postgresql.image | quote }}
-          imagePullPolicy: {{ .Values.postgresql.pullPolicy }}
-          command:
-            - sh
-            - -c
-            - mkdir -p {{ .Values.postgresql.mountPath }}/pgdata && chown -R 999:999 {{ .Values.postgresql.mountPath }}
-          securityContext:
-            runAsUser: 0
-          volumeMounts:
-            - name: data
-              mountPath: {{ .Values.postgresql.mountPath }}
       containers:
         - name: postgresql
           image: {{ .Values.postgresql.image | quote }}

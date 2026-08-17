@@ -368,7 +368,9 @@ function createAttachmentAdapter(
       }
       const uploaded = uploadedByAttachmentId.get(attachment.id)
       if (!uploaded) {
-        throw new Error("The file is still being prepared. Wait until it is ready.")
+        throw new Error(
+          "The file is still being prepared. Wait until it is ready."
+        )
       }
       uploadedByAttachmentId.delete(attachment.id)
       return {
@@ -758,9 +760,9 @@ function ContextDisplay({ context }: { context: ConversationContext }) {
     ...context.knowledgeSources
       .filter((source) => source.contextScope !== "message")
       .map((source) => ({
-      id: `knowledge:${source.id}`,
-      label: source.title,
-      detail: source.sourceType || "knowledge",
+        id: `knowledge:${source.id}`,
+        label: source.title,
+        detail: source.sourceType || "knowledge",
       })),
     ...context.mcpServers.map((server) => ({
       id: `mcp:${server.id}`,
@@ -953,6 +955,102 @@ function ScrollToLatest() {
       </div>
     </div>
   )
+}
+
+function FollowStreamingResponse() {
+  const viewport = useThreadViewport((state) => state.element.viewport)
+  const scrollToBottom = useThreadViewport((state) => state.scrollToBottom)
+  const isRunning = useAuiState((state) => state.thread.isRunning)
+  const followRef = useRef(false)
+  const wasRunningRef = useRef(isRunning)
+
+  useEffect(() => {
+    if (!viewport) return
+
+    let frame: number | null = null
+    let settleFrame: number | null = null
+    const wasRunning = wasRunningRef.current
+    wasRunningRef.current = isRunning
+
+    const scrollToLatest = () => {
+      scrollToBottom({ behavior: "auto" })
+      // The assistant-ui scroll listener and the sticky footer can both update
+      // during the same frame. Directly applying the final DOM position here
+      // closes that gap when a streamed response grows between measurements.
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" })
+    }
+
+    const scheduleScroll = () => {
+      if (!followRef.current || frame !== null) return
+
+      frame = window.requestAnimationFrame(() => {
+        frame = null
+        if (!followRef.current) return
+        scrollToLatest()
+
+        // Give markdown/tool UI one more layout pass before the final scroll.
+        settleFrame = window.requestAnimationFrame(() => {
+          settleFrame = null
+          if (followRef.current) scrollToLatest()
+        })
+      })
+    }
+
+    const cancelFrames = () => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
+      if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
+      frame = null
+      settleFrame = null
+    }
+
+    if (!isRunning) {
+      if (wasRunning && followRef.current) scheduleScroll()
+      return cancelFrames
+    }
+
+    const lastScrollTopRef = { current: viewport.scrollTop }
+    const updateScrollIntent = () => {
+      const distanceFromBottom =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+      const atBottom = distanceFromBottom <= 6
+
+      if (atBottom) {
+        followRef.current = true
+      } else if (viewport.scrollTop < lastScrollTopRef.current - 1) {
+        // A real upward scroll means the user is reading older content. Stop
+        // following until they return to the bottom themselves.
+        followRef.current = false
+      }
+      lastScrollTopRef.current = viewport.scrollTop
+    }
+
+    // Sending a new turn should bring the active response into view. A later
+    // upward gesture is what opts the user out of following the stream.
+    followRef.current = true
+    viewport.addEventListener("scroll", updateScrollIntent, { passive: true })
+
+    const observer = new MutationObserver(scheduleScroll)
+    observer.observe(viewport, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    })
+
+    const resizeObserver = new ResizeObserver(scheduleScroll)
+    const content = viewport.firstElementChild
+    if (content instanceof HTMLElement) resizeObserver.observe(content)
+
+    scheduleScroll()
+
+    return () => {
+      viewport.removeEventListener("scroll", updateScrollIntent)
+      observer.disconnect()
+      resizeObserver.disconnect()
+      cancelFrames()
+    }
+  }, [isRunning, scrollToBottom, viewport])
+
+  return null
 }
 
 function EmptyThread({ children }: { children?: ReactNode }) {
@@ -1483,6 +1581,7 @@ function AssistantThreadLayout({
         scrollToBottomOnRunStart
         scrollToBottomOnThreadSwitch
       >
+        <FollowStreamingResponse />
         <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-3 sm:px-8 lg:px-12">
           <EmptyThread>
             {isEmpty && <div className="mt-2 w-full">{composer}</div>}
@@ -2020,7 +2119,9 @@ export function ChatView({
     let cancelled = false
     const refresh = () => {
       void api
-        .get<ConversationContext>(`/api/v1/conversations/${conversationId}/context`)
+        .get<ConversationContext>(
+          `/api/v1/conversations/${conversationId}/context`
+        )
         .then((context) => {
           if (!cancelled) setConversationContext(context)
         })
@@ -2135,7 +2236,9 @@ export function ChatView({
   const removeUploadedFile = useCallback(async (sourceId: string) => {
     const id = activeConversationRef.current
     if (!id) return
-    await api.delete(`/api/v1/conversations/${id}/context/knowledge/${sourceId}`)
+    await api.delete(
+      `/api/v1/conversations/${id}/context/knowledge/${sourceId}`
+    )
     const context = await api.get<ConversationContext>(
       `/api/v1/conversations/${id}/context`
     )
@@ -2164,8 +2267,8 @@ export function ChatView({
     const source = await api.post<KnowledgeSource>(
       `/api/v1/conversations/${id}/attachments/url`,
       {
-      url: value,
-      title: value,
+        url: value,
+        title: value,
       }
     )
     await waitForKnowledgeSource(id, source.id)
@@ -2235,10 +2338,12 @@ export function ChatView({
         conversationContext={conversationContext}
       />
       <span className="sr-only">
-		{conversationContext.knowledgeSources.filter(
-			(source) => source.contextScope !== "message"
-		).length} knowledge sources,{" "}
-        {conversationContext.mcpServers.length} MCP servers,{" "}
+        {
+          conversationContext.knowledgeSources.filter(
+            (source) => source.contextScope !== "message"
+          ).length
+        }{" "}
+        knowledge sources, {conversationContext.mcpServers.length} MCP servers,{" "}
         {conversationContext.transcriptionSessions.length} transcription
         sessions attached.
       </span>

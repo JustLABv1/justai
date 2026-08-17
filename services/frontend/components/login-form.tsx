@@ -36,12 +36,17 @@ export function LoginForm({
   const [loading, setLoading] = useState(false)
 
   const { config } = usePlatformConfig()
-  const oidcProviders =
-    config?.oidcProviders?.length
-      ? config.oidcProviders
-      : config?.oidcEnabled
-        ? [{ id: "legacy", slug: "", displayName: config.oidcLabel || "Continue with OIDC" }]
-        : []
+  const oidcProviders = config?.oidcProviders?.length
+    ? config.oidcProviders
+    : config?.oidcEnabled
+      ? [
+          {
+            id: "legacy",
+            slug: "",
+            displayName: config.oidcLabel || "Continue with OIDC",
+          },
+        ]
+      : []
   const oidcEnabled = config?.oidcEnabled ?? false
   const loginEnabled = config?.loginEnabled !== false
   const localAuthEnabled = config?.localAuthEnabled !== false
@@ -105,7 +110,7 @@ export function LoginForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card className="overflow-hidden p-0">
         <CardContent className="grid p-0 md:grid-cols-2">
-          <form className="p-6 md:p-8" onSubmit={submit}>
+          <form className="p-form md:p-form-lg" onSubmit={submit}>
             <FieldGroup>
               <div className="flex flex-col items-center gap-3 text-center">
                 <BrandMark className="size-10 md:hidden" priority />
@@ -184,20 +189,21 @@ export function LoginForm({
                 </Field>
               )}
 
-              {(!modeGateEnabled || (!isRegister && !localAuthEnabled)) && !error && (
-                <Alert>
-                  <ShieldCheck aria-hidden="true" />
-                  <AlertTitle>Temporarily unavailable</AlertTitle>
-                  <AlertDescription>
-                    {maintenanceMessage ||
-                      (isRegister
-                        ? "Account creation is temporarily disabled."
-                        : !localAuthEnabled
-                          ? "Local password authentication is disabled for regular users. Platform administrators can still sign in for recovery."
-                          : "Sign in is temporarily disabled for regular users. Platform administrators can still sign in for recovery.")}
-                  </AlertDescription>
-                </Alert>
-              )}
+              {(!modeGateEnabled || (!isRegister && !localAuthEnabled)) &&
+                !error && (
+                  <Alert>
+                    <ShieldCheck aria-hidden="true" />
+                    <AlertTitle>Temporarily unavailable</AlertTitle>
+                    <AlertDescription>
+                      {maintenanceMessage ||
+                        (isRegister
+                          ? "Account creation is temporarily disabled."
+                          : !localAuthEnabled
+                            ? "Local password authentication is disabled for regular users. Platform administrators can still sign in for recovery."
+                            : "Sign in is temporarily disabled for regular users. Platform administrators can still sign in for recovery.")}
+                    </AlertDescription>
+                  </Alert>
+                )}
 
               {error && (
                 <Alert variant="destructive">
@@ -224,25 +230,30 @@ export function LoginForm({
                 </Button>
               </Field>
 
-              {oidcEnabled && oidcProviders.length > 0 && (!isRegister || signupEnabled) && (
-                <>
-                  <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
-                    Or continue with
-                  </FieldSeparator>
+              {oidcEnabled &&
+                oidcProviders.length > 0 &&
+                (!isRegister || signupEnabled) && (
+                  <>
+                    <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
+                      Or continue with
+                    </FieldSeparator>
 
-                  {oidcProviders.map((provider) => (
-                    <Field key={provider.id || provider.slug}>
-                      <a
-                        className={buttonVariants({ variant: "outline" })}
-                        href={`${API_URL}${oidcLoginPath(provider.slug, safeNext(typeof window === "undefined" ? "" : window.location.search))}`}
-                      >
-                        <KeyRound data-icon="inline-start" aria-hidden="true" />
-                        {provider.displayName || "Continue with OIDC"}
-                      </a>
-                    </Field>
-                  ))}
-                </>
-              )}
+                    {oidcProviders.map((provider) => (
+                      <Field key={provider.id || provider.slug}>
+                        <a
+                          className={buttonVariants({ variant: "outline" })}
+                          href={`${API_URL}${oidcLoginPath(provider.slug, safeNext(typeof window === "undefined" ? "" : window.location.search))}`}
+                        >
+                          <KeyRound
+                            data-icon="inline-start"
+                            aria-hidden="true"
+                          />
+                          {provider.displayName || "Continue with OIDC"}
+                        </a>
+                      </Field>
+                    ))}
+                  </>
+                )}
 
               {(isRegister || signupEnabled) && (
                 <FieldDescription className="text-center">
@@ -250,7 +261,9 @@ export function LoginForm({
                   <button
                     className="underline underline-offset-4 hover:no-underline"
                     type="button"
-                    onClick={() => switchMode(isRegister ? "login" : "register")}
+                    onClick={() =>
+                      switchMode(isRegister ? "login" : "register")
+                    }
                   >
                     {isRegister ? "Sign in" : "Create an account"}
                   </button>

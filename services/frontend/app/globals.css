@@ -57,6 +57,15 @@
   --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
+  /* Shared component scale. Keep layout spacing on the normal Tailwind scale. */
+  --control-height-sm: 2.25rem;
+  --control-height: 2.5rem;
+  --control-height-lg: 2.75rem;
+  --control-text-size: 0.875rem;
+  --form-padding: 2rem;
+  --form-padding-lg: 2.5rem;
+  --modal-padding: 1.5rem;
+  --modal-max-width: 32rem;
 }
 
 .dark {
@@ -154,6 +163,16 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  --spacing-control-sm: var(--control-height-sm);
+  --spacing-control: var(--control-height);
+  --spacing-control-lg: var(--control-height-lg);
+  --spacing-form: var(--form-padding);
+  --spacing-form-lg: var(--form-padding-lg);
+  --spacing-modal: var(--modal-padding);
+  --size-modal: var(--modal-max-width);
+  --text-control: var(--control-text-size);
+  --text-control--line-height: 1.25;
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
