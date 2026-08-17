@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   Cloud,
   KeyRound,
@@ -37,6 +39,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   Dialog,
   DialogContent,
@@ -201,6 +208,9 @@ export function EndpointsView({
     DiscoveredChatModel[]
   >([])
   const [discoveringModels, setDiscoveringModels] = useState(false)
+  const [advancedConnectionOpen, setAdvancedConnectionOpen] = useState(false)
+  const [additionalModelsOpen, setAdditionalModelsOpen] = useState(false)
+  const [runtimeOpen, setRuntimeOpen] = useState(false)
   const discoveryRequestRef = useRef(0)
   const createRequestRef = useRef(createRequest ?? 0)
   const [capabilityMatrix, setCapabilityMatrix] = useState<
@@ -276,6 +286,9 @@ export function EndpointsView({
     setEditingEndpoint(null)
     setDiscoveredModels([])
     setDiscoveringModels(false)
+    setAdvancedConnectionOpen(false)
+    setAdditionalModelsOpen(false)
+    setRuntimeOpen(false)
     setForm({
       ...defaults,
       scopeType:
@@ -298,6 +311,9 @@ export function EndpointsView({
 
   function openEdit(endpoint: Endpoint) {
     setEditingEndpoint(endpoint)
+    setAdvancedConnectionOpen(false)
+    setAdditionalModelsOpen(false)
+    setRuntimeOpen(false)
     const whisperGateway = isWhisperGateway(
       endpoint.providerType,
       endpoint.transcriptionModel ?? ""
@@ -527,6 +543,14 @@ export function EndpointsView({
       })
   }
 
+  const hasAdditionalModels =
+    supports(form.providerType, "vision") ||
+    supports(form.providerType, "embeddings") ||
+    supports(form.providerType, "realtime-transcription") ||
+    supports(form.providerType, "chunked-transcription") ||
+    supports(form.providerType, "diarization") ||
+    supports(form.providerType, "tts")
+
   return (
     <div className="flex flex-col gap-6">
       {notice && (
@@ -738,15 +762,17 @@ export function EndpointsView({
         open={open}
         onOpenChange={(nextOpen) => (nextOpen ? setOpen(true) : closeEditor())}
       >
-        <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-2xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-2xl">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-3xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>
-              {editingEndpoint ? "Edit LLM endpoint" : "Add an LLM endpoint"}
+              {editingEndpoint
+                ? "Edit LLM endpoint"
+                : "Connect an LLM endpoint"}
             </DialogTitle>
             <DialogDescription>
               {editingEndpoint
-                ? "Update the provider, model, capabilities, or credential for this endpoint."
-                : "Choose a native provider or point JustAI at a compatible gateway such as LiteLLM, Ollama, or OpenRouter."}
+                ? "Update the connection and model routing. Optional behavior is grouped under advanced settings."
+                : "Start with the provider connection and chat model. Optional model mappings and runtime controls are grouped below."}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -755,503 +781,679 @@ export function EndpointsView({
           >
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               <FieldGroup>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-name">
-                      Display name
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-name"
-                      value={form.name}
-                      onChange={(event) => update("name", event.target.value)}
-                      placeholder="Team GPT"
-                      required
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel>Provider</FieldLabel>
-                    <Select
-                      value={form.providerType}
-                      onValueChange={selectProvider}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(providerDetails).map(
-                          ([value, details]) => (
-                            <SelectItem key={value} value={value}>
-                              {details.label}
-                            </SelectItem>
+                <section className="rounded-xl border p-4">
+                  <div className="mb-4 flex flex-col gap-1">
+                    <p className="text-sm font-medium">Connection</p>
+                    <p className="text-sm text-muted-foreground">
+                      The only details needed to connect this provider.
+                    </p>
+                  </div>
+                  <FieldGroup>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field>
+                        <FieldLabel htmlFor="endpoint-name">
+                          Display name
+                        </FieldLabel>
+                        <Input
+                          id="endpoint-name"
+                          value={form.name}
+                          onChange={(event) =>
+                            update("name", event.target.value)
+                          }
+                          placeholder="Team GPT"
+                          required
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel>Provider</FieldLabel>
+                        <Select
+                          value={form.providerType}
+                          onValueChange={selectProvider}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(providerDetails).map(
+                              ([value, details]) => (
+                                <SelectItem key={value} value={value}>
+                                  {details.label}
+                                </SelectItem>
+                              )
+                            )}
+                          </SelectContent>
+                        </Select>
+                        <FieldDescription>
+                          {providerDetails[form.providerType]?.description}
+                        </FieldDescription>
+                      </Field>
+                    </div>
+                    <Field>
+                      <FieldLabel>Visibility</FieldLabel>
+                      <Select
+                        disabled={Boolean(editingEndpoint)}
+                        value={form.scopeType}
+                        onValueChange={(value) =>
+                          update(
+                            "scopeType",
+                            value ??
+                              (canManageOrganization ? "organization" : "user")
                           )
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {canManageOrganization && (
+                            <SelectItem value="organization">
+                              Workspace
+                            </SelectItem>
+                          )}
+                          <SelectItem value="user">Only me</SelectItem>
+                          {platformAdmin && isPlatformCatalog && (
+                            <SelectItem value="global">
+                              Global (platform admin)
+                            </SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>
+                        Choose who can use this endpoint. Its scope cannot be
+                        changed after creation.
+                      </FieldDescription>
+                    </Field>
+                    {platformAdmin && form.scopeType !== "global" && (
+                      <Field>
+                        <FieldLabel htmlFor="endpoint-scope-id">
+                          Scope ID
+                        </FieldLabel>
+                        <Input
+                          id="endpoint-scope-id"
+                          value={form.scopeId}
+                          onChange={(event) =>
+                            update("scopeId", event.target.value)
+                          }
+                          placeholder="Organization or user UUID"
+                          required
+                          readOnly={Boolean(editingEndpoint)}
+                        />
+                        <FieldDescription>
+                          {editingEndpoint
+                            ? "An endpoint's scope is fixed after creation."
+                            : "Platform administrators can assign this endpoint to a specific organization or user."}
+                        </FieldDescription>
+                      </Field>
+                    )}
+                    <Field>
+                      <FieldLabel htmlFor="endpoint-url">Base URL</FieldLabel>
+                      <Input
+                        id="endpoint-url"
+                        value={form.baseUrl}
+                        onChange={(event) =>
+                          update("baseUrl", event.target.value)
+                        }
+                        placeholder="https://api.openai.com/v1"
+                        required
+                      />
+                      <FieldDescription>
+                        Use the suggested URL for a hosted provider, or replace
+                        it with your self-hosted gateway.
+                      </FieldDescription>
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="endpoint-key">
+                        API key or token
+                      </FieldLabel>
+                      <Input
+                        id="endpoint-key"
+                        type="password"
+                        value={form.credential}
+                        onChange={(event) =>
+                          update("credential", event.target.value)
+                        }
+                        placeholder="Stored encrypted by JustAI"
+                        autoComplete="off"
+                      />
+                      <FieldDescription>
+                        Leave empty for local runtimes or providers that use a
+                        different authentication flow.
+                      </FieldDescription>
+                    </Field>
+                  </FieldGroup>
+                </section>
+
+                <section className="rounded-xl border p-4">
+                  <div className="mb-4 flex flex-col gap-1">
+                    <p className="text-sm font-medium">Models</p>
+                    <p className="text-sm text-muted-foreground">
+                      Choose the model JustAI should use for chat by default.
+                    </p>
+                  </div>
+                  <FieldGroup>
+                    <Field>
+                      <div className="flex items-center justify-between gap-3">
+                        <FieldLabel htmlFor="endpoint-chat-model">
+                          Chat model
+                        </FieldLabel>
+                        {editingEndpoint && (
+                          <Button
+                            className="h-7 gap-1.5 px-2.5 text-xs"
+                            disabled={discoveringModels}
+                            onClick={() =>
+                              void discoverModels(editingEndpoint.id)
+                            }
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <RefreshCw
+                              className={
+                                discoveringModels ? "animate-spin" : ""
+                              }
+                              data-icon="inline-start"
+                              aria-hidden="true"
+                            />
+                            {discoveringModels
+                              ? "Discovering…"
+                              : "Discover models"}
+                          </Button>
                         )}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
-                <Field>
-                  <FieldLabel>Visibility</FieldLabel>
-                  <Select
-                    disabled={Boolean(editingEndpoint)}
-                    value={form.scopeType}
-                    onValueChange={(value) =>
-                      update(
-                        "scopeType",
-                        value ??
-                          (canManageOrganization ? "organization" : "user")
-                      )
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {canManageOrganization && (
-                        <SelectItem value="organization">Workspace</SelectItem>
-                      )}
-                      <SelectItem value="user">Only me</SelectItem>
-                      {platformAdmin && isPlatformCatalog && (
-                        <SelectItem value="global">
-                          Global (platform admin)
-                        </SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    Selected endpoints take precedence, followed by personal,
-                    workspace, then platform-managed resources.
-                  </FieldDescription>
-                </Field>
-                {platformAdmin && form.scopeType !== "global" && (
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-scope-id">
-                      Scope ID
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-scope-id"
-                      value={form.scopeId}
-                      onChange={(event) =>
-                        update("scopeId", event.target.value)
-                      }
-                      placeholder="Organization or user UUID"
-                      required
-                      readOnly={Boolean(editingEndpoint)}
-                    />
-                    <FieldDescription>
-                      {editingEndpoint
-                        ? "An endpoint's scope is fixed after creation."
-                        : "Platform administrators can assign this endpoint to a specific organization or user."}
-                    </FieldDescription>
-                  </Field>
-                )}
-                <Field>
-                  <FieldLabel htmlFor="endpoint-url">Base URL</FieldLabel>
-                  <Input
-                    id="endpoint-url"
-                    value={form.baseUrl}
-                    onChange={(event) => update("baseUrl", event.target.value)}
-                    placeholder="https://api.openai.com/v1"
-                    required
-                  />
-                  <FieldDescription>
-                    {providerDetails[form.providerType]?.description}
-                  </FieldDescription>
-                </Field>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-api-path">
-                      API path (optional)
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-api-path"
-                      value={form.apiPath}
-                      onChange={(event) =>
-                        update("apiPath", event.target.value)
-                      }
-                      placeholder="/v1"
-                    />
-                    <FieldDescription>
-                      Override the provider&apos;s default chat route when using
-                      a gateway.
-                    </FieldDescription>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-api-version">
-                      API version (optional)
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-api-version"
-                      value={form.apiVersion}
-                      onChange={(event) =>
-                        update("apiVersion", event.target.value)
-                      }
-                      placeholder="2024-06-20"
-                    />
-                    <FieldDescription>
-                      Used by providers that require an explicit API version
-                      header or path.
-                    </FieldDescription>
-                  </Field>
-                </div>
-                <Field>
-                  <div className="flex items-center justify-between gap-3">
-                    <FieldLabel htmlFor="endpoint-chat-model">
-                      Chat model
-                    </FieldLabel>
-                    {editingEndpoint && (
+                      </div>
+                      <div className="relative">
+                        <Input
+                          id="endpoint-chat-model"
+                          list="endpoint-chat-model-options"
+                          value={form.chatModel}
+                          onChange={(event) =>
+                            update("chatModel", event.target.value)
+                          }
+                          placeholder="e.g. gemma-3-27b-it or gpt-4o-mini"
+                        />
+                        {discoveredModels.length > 0 && (
+                          <datalist id="endpoint-chat-model-options">
+                            {discoveredModels.map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.name ?? model.id}
+                              </option>
+                            ))}
+                          </datalist>
+                        )}
+                      </div>
+                      <FieldDescription>
+                        This is the default chat model. Discovery works when the
+                        provider exposes a model catalog; manual IDs work with
+                        compatible gateways too.
+                      </FieldDescription>
+                    </Field>
+
+                    {hasAdditionalModels && (
+                      <Collapsible
+                        className="rounded-lg border"
+                        open={additionalModelsOpen}
+                        onOpenChange={setAdditionalModelsOpen}
+                      >
+                        <CollapsibleTrigger
+                          render={
+                            <Button
+                              className="h-auto w-full justify-between rounded-lg px-3 py-2.5 text-left hover:bg-muted/50"
+                              size="sm"
+                              type="button"
+                              variant="ghost"
+                            />
+                          }
+                        >
+                          <span className="flex min-w-0 flex-col items-start gap-0.5">
+                            <span className="font-medium">
+                              Additional models
+                            </span>
+                            <span className="text-xs font-normal text-muted-foreground">
+                              Optional vision, embeddings, transcription, and
+                              speech mappings
+                            </span>
+                          </span>
+                          {additionalModelsOpen ? (
+                            <ChevronDown aria-hidden="true" />
+                          ) : (
+                            <ChevronRight aria-hidden="true" />
+                          )}
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="border-t px-3 py-4">
+                          <FieldGroup>
+                            {supports(form.providerType, "vision") && (
+                              <Field>
+                                <FieldLabel htmlFor="endpoint-vision-model">
+                                  Vision model
+                                </FieldLabel>
+                                <Input
+                                  id="endpoint-vision-model"
+                                  list="endpoint-chat-model-options"
+                                  value={form.visionModel}
+                                  onChange={(event) =>
+                                    update("visionModel", event.target.value)
+                                  }
+                                  placeholder="e.g. gpt-4o or gemini-2.5-flash"
+                                />
+                                <FieldDescription>
+                                  Used automatically when a chat includes an
+                                  image. Leave empty to reuse the chat model.
+                                </FieldDescription>
+                              </Field>
+                            )}
+                            {supports(form.providerType, "embeddings") && (
+                              <Field>
+                                <FieldLabel htmlFor="endpoint-embedding">
+                                  Embedding model
+                                </FieldLabel>
+                                <Input
+                                  id="endpoint-embedding"
+                                  value={form.embeddingModel}
+                                  onChange={(event) =>
+                                    update("embeddingModel", event.target.value)
+                                  }
+                                  placeholder="text-embedding-3-small"
+                                />
+                              </Field>
+                            )}
+                            {(supports(
+                              form.providerType,
+                              "realtime-transcription"
+                            ) ||
+                              supports(
+                                form.providerType,
+                                "chunked-transcription"
+                              )) && (
+                              <Field>
+                                <FieldLabel htmlFor="endpoint-transcription">
+                                  Transcription model
+                                </FieldLabel>
+                                <Input
+                                  id="endpoint-transcription"
+                                  value={form.transcriptionModel}
+                                  onChange={(event) => {
+                                    const transcriptionModel =
+                                      event.target.value
+                                    const whisperGateway = isWhisperGateway(
+                                      form.providerType,
+                                      transcriptionModel
+                                    )
+                                    setForm((current) => ({
+                                      ...current,
+                                      transcriptionModel,
+                                      ...(whisperGateway
+                                        ? {
+                                            chunkedTranscription: true,
+                                            realtimeTranscription: false,
+                                          }
+                                        : {}),
+                                    }))
+                                  }}
+                                  placeholder="whisper-large-v3-turbo"
+                                />
+                                <FieldDescription>
+                                  Realtime or /audio/transcriptions model.
+                                </FieldDescription>
+                              </Field>
+                            )}
+                            {supports(form.providerType, "diarization") && (
+                              <Field>
+                                <FieldLabel htmlFor="endpoint-diarization">
+                                  Diarization model
+                                </FieldLabel>
+                                <Input
+                                  id="endpoint-diarization"
+                                  value={form.diarizationModel}
+                                  onChange={(event) =>
+                                    update(
+                                      "diarizationModel",
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="gpt-4o-transcribe-diarize"
+                                />
+                                <FieldDescription>
+                                  Delayed speaker labeling.
+                                </FieldDescription>
+                              </Field>
+                            )}
+                            {supports(form.providerType, "tts") && (
+                              <Field>
+                                <FieldLabel htmlFor="endpoint-speech">
+                                  Speech model
+                                </FieldLabel>
+                                <Input
+                                  id="endpoint-speech"
+                                  value={form.speechModel}
+                                  onChange={(event) =>
+                                    update("speechModel", event.target.value)
+                                  }
+                                  placeholder="gpt-4o-mini-tts"
+                                />
+                                <FieldDescription>
+                                  Optional text-to-speech model.
+                                </FieldDescription>
+                              </Field>
+                            )}
+                          </FieldGroup>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
+                  </FieldGroup>
+                </section>
+
+                <Collapsible
+                  className="rounded-xl border"
+                  open={advancedConnectionOpen}
+                  onOpenChange={setAdvancedConnectionOpen}
+                >
+                  <CollapsibleTrigger
+                    render={
                       <Button
-                        className="h-7 gap-1.5 px-2.5 text-xs"
-                        disabled={discoveringModels}
-                        onClick={() => void discoverModels(editingEndpoint.id)}
+                        className="h-auto w-full justify-between rounded-xl px-4 py-3 text-left hover:bg-muted/50"
                         size="sm"
                         type="button"
-                        variant="outline"
-                      >
-                        <RefreshCw
-                          className={discoveringModels ? "animate-spin" : ""}
-                          data-icon="inline-start"
-                          aria-hidden="true"
-                        />
-                        {discoveringModels ? "Discovering…" : "Discover models"}
-                      </Button>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <Input
-                      id="endpoint-chat-model"
-                      list="endpoint-chat-model-options"
-                      value={form.chatModel}
-                      onChange={(event) =>
-                        update("chatModel", event.target.value)
-                      }
-                      placeholder="e.g. gemma-3-27b-it or gpt-4o-mini"
-                    />
-                    {discoveredModels.length > 0 && (
-                      <datalist id="endpoint-chat-model-options">
-                        {discoveredModels.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.name ?? model.id}
-                          </option>
-                        ))}
-                      </datalist>
-                    )}
-                  </div>
-                  <FieldDescription>
-                    This is the default chat model for the endpoint. Discovery
-                    uses the provider catalog when available; manual model IDs
-                    work with compatible gateways too.
-                  </FieldDescription>
-                </Field>
-                {supports(form.providerType, "vision") && (
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-vision-model">
-                      Vision model
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-vision-model"
-                      list="endpoint-chat-model-options"
-                      value={form.visionModel}
-                      onChange={(event) =>
-                        update("visionModel", event.target.value)
-                      }
-                      placeholder="e.g. gpt-4o or gemini-2.5-flash"
-                    />
-                    <FieldDescription>
-                      Used automatically when a chat includes an image. Leave
-                      empty to reuse the chat model.
-                    </FieldDescription>
-                  </Field>
-                )}
-                {supports(form.providerType, "embeddings") && (
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-embedding">
-                      Embedding model
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-embedding"
-                      value={form.embeddingModel}
-                      onChange={(event) =>
-                        update("embeddingModel", event.target.value)
-                      }
-                      placeholder="text-embedding-3-small"
-                    />
-                  </Field>
-                )}
-                {(supports(form.providerType, "realtime-transcription") ||
-                  supports(form.providerType, "chunked-transcription")) && (
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-transcription">
-                      Transcription model
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-transcription"
-                      value={form.transcriptionModel}
-                      onChange={(event) => {
-                        const transcriptionModel = event.target.value
-                        const whisperGateway = isWhisperGateway(
-                          form.providerType,
-                          transcriptionModel
-                        )
-                        setForm((current) => ({
-                          ...current,
-                          transcriptionModel,
-                          ...(whisperGateway
-                            ? {
-                                chunkedTranscription: true,
-                                realtimeTranscription: false,
-                              }
-                            : {}),
-                        }))
-                      }}
-                      placeholder="whisper-large-v3-turbo"
-                    />
-                    <FieldDescription>
-                      Realtime or /audio/transcriptions model.
-                    </FieldDescription>
-                  </Field>
-                )}
-                {supports(form.providerType, "diarization") && (
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-diarization">
-                      Diarization model
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-diarization"
-                      value={form.diarizationModel}
-                      onChange={(event) =>
-                        update("diarizationModel", event.target.value)
-                      }
-                      placeholder="gpt-4o-transcribe-diarize"
-                    />
-                    <FieldDescription>
-                      Delayed speaker labeling.
-                    </FieldDescription>
-                  </Field>
-                )}
-                {supports(form.providerType, "tts") && (
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-speech">
-                      Speech model
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-speech"
-                      value={form.speechModel}
-                      onChange={(event) =>
-                        update("speechModel", event.target.value)
-                      }
-                      placeholder="gpt-4o-mini-tts"
-                    />
-                    <FieldDescription>Optional TTS model.</FieldDescription>
-                  </Field>
-                )}
-                <div className="grid gap-4 rounded-xl border p-3 sm:grid-cols-3">
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-timeout">
-                      Timeout (seconds)
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-timeout"
-                      type="number"
-                      min={1}
-                      value={form.timeoutSeconds}
-                      onChange={(event) =>
-                        update("timeoutSeconds", Number(event.target.value))
-                      }
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-max-tokens">
-                      Max output tokens
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-max-tokens"
-                      type="number"
-                      min={1}
-                      value={form.maxOutputTokens}
-                      onChange={(event) =>
-                        update("maxOutputTokens", Number(event.target.value))
-                      }
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="endpoint-temperature">
-                      Temperature
-                    </FieldLabel>
-                    <Input
-                      id="endpoint-temperature"
-                      type="number"
-                      min={0}
-                      max={2}
-                      step={0.1}
-                      value={form.temperature}
-                      onChange={(event) =>
-                        update("temperature", Number(event.target.value))
-                      }
-                    />
-                  </Field>
-                  <FieldDescription className="sm:col-span-3">
-                    These runtime settings are shared by organization and
-                    platform-admin endpoint configuration.
-                  </FieldDescription>
-                </div>
-                <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {supports(form.providerType, "realtime-transcription") && (
-                    <label className="flex items-start justify-between gap-3">
-                      <span>
-                        <span className="block text-sm font-medium">
-                          Realtime transcription
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          Native provider WebSocket.
-                        </span>
-                      </span>
-                      <Switch
-                        aria-label="Enable realtime transcription"
-                        checked={form.realtimeTranscription}
-                        onCheckedChange={(checked) =>
-                          setForm((current) => ({
-                            ...current,
-                            realtimeTranscription: checked,
-                            chunkedTranscription: checked
-                              ? false
-                              : current.chunkedTranscription,
-                          }))
-                        }
+                        variant="ghost"
                       />
-                    </label>
-                  )}
-                  {supports(form.providerType, "chunked-transcription") && (
-                    <label className="flex items-start justify-between gap-3">
-                      <span>
-                        <span className="block text-sm font-medium">
-                          Chunked HTTP transcription
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          Rolling Whisper windows.
-                        </span>
-                      </span>
-                      <Switch
-                        aria-label="Enable chunked HTTP transcription"
-                        checked={form.chunkedTranscription}
-                        onCheckedChange={(checked) =>
-                          setForm((current) => ({
-                            ...current,
-                            chunkedTranscription: checked,
-                            realtimeTranscription: checked
-                              ? false
-                              : current.realtimeTranscription,
-                          }))
-                        }
-                      />
-                    </label>
-                  )}
-                  {supports(form.providerType, "diarization") && (
-                    <label className="flex items-start justify-between gap-3">
-                      <span>
-                        <span className="block text-sm font-medium">
-                          Speaker diarization
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          Identify anonymous speakers.
-                        </span>
-                      </span>
-                      <Switch
-                        aria-label="Enable speaker diarization"
-                        checked={form.diarization}
-                        onCheckedChange={(checked) =>
-                          update("diarization", checked)
-                        }
-                      />
-                    </label>
-                  )}
-                  {supports(form.providerType, "tool-calling") && (
-                    <label className="flex items-start justify-between gap-3">
-                      <span>
-                        <span className="block text-sm font-medium">
-                          Tool calling
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          Allow approved MCP actions.
-                        </span>
-                      </span>
-                      <Switch
-                        aria-label="Enable tool calling"
-                        checked={form.toolCalling}
-                        onCheckedChange={(checked) =>
-                          update("toolCalling", checked)
-                        }
-                      />
-                    </label>
-                  )}
-                  {supports(form.providerType, "vision") && (
-                    <label className="flex items-start justify-between gap-3">
-                      <span>
-                        <span className="block text-sm font-medium">
-                          Image input
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          Enable image messages for a vision-capable model.
-                        </span>
-                      </span>
-                      <Switch
-                        aria-label="Enable image input"
-                        checked={form.vision}
-                        onCheckedChange={(checked) => update("vision", checked)}
-                      />
-                    </label>
-                  )}
-                </div>
-                <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
-                  <label className="flex items-center justify-between gap-3">
-                    <span>
-                      <span className="block text-sm font-medium">Enabled</span>
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        Allow this endpoint to be selected.
-                      </span>
-                    </span>
-                    <Switch
-                      aria-label="Enable endpoint"
-                      checked={form.enabled}
-                      onCheckedChange={(checked) => update("enabled", checked)}
-                    />
-                  </label>
-                  <label className="flex items-center justify-between gap-3">
-                    <span>
-                      <span className="block text-sm font-medium">
-                        Default endpoint
-                      </span>
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        Use for new chat sessions.
-                      </span>
-                    </span>
-                    <Switch
-                      aria-label="Set as default endpoint"
-                      checked={form.isDefault}
-                      onCheckedChange={(checked) =>
-                        update("isDefault", checked)
-                      }
-                    />
-                  </label>
-                </div>
-                <Field>
-                  <FieldLabel htmlFor="endpoint-key">
-                    API key or token
-                  </FieldLabel>
-                  <Input
-                    id="endpoint-key"
-                    type="password"
-                    value={form.credential}
-                    onChange={(event) =>
-                      update("credential", event.target.value)
                     }
-                    placeholder="Stored encrypted by JustAI"
-                    autoComplete="off"
-                  />
-                  <FieldDescription>
-                    For local runtimes this can stay empty. OAuth-ready MCP
-                    credentials follow the same encrypted storage boundary.
-                  </FieldDescription>
-                </Field>
+                  >
+                    <span className="flex min-w-0 flex-col items-start gap-0.5">
+                      <span className="font-medium">
+                        Advanced connection settings
+                      </span>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        Custom API paths and version headers for gateways
+                      </span>
+                    </span>
+                    {advancedConnectionOpen ? (
+                      <ChevronDown aria-hidden="true" />
+                    ) : (
+                      <ChevronRight aria-hidden="true" />
+                    )}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="border-t px-4 py-4">
+                    <FieldGroup>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field>
+                          <FieldLabel htmlFor="endpoint-api-path">
+                            API path (optional)
+                          </FieldLabel>
+                          <Input
+                            id="endpoint-api-path"
+                            value={form.apiPath}
+                            onChange={(event) =>
+                              update("apiPath", event.target.value)
+                            }
+                            placeholder="/v1"
+                          />
+                          <FieldDescription>
+                            Override the provider&apos;s default chat route when
+                            using a gateway.
+                          </FieldDescription>
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="endpoint-api-version">
+                            API version (optional)
+                          </FieldLabel>
+                          <Input
+                            id="endpoint-api-version"
+                            value={form.apiVersion}
+                            onChange={(event) =>
+                              update("apiVersion", event.target.value)
+                            }
+                            placeholder="2024-06-20"
+                          />
+                          <FieldDescription>
+                            Used by providers that require an explicit API
+                            version header or path.
+                          </FieldDescription>
+                        </Field>
+                      </div>
+                    </FieldGroup>
+                  </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible
+                  className="rounded-xl border"
+                  open={runtimeOpen}
+                  onOpenChange={setRuntimeOpen}
+                >
+                  <CollapsibleTrigger
+                    render={
+                      <Button
+                        className="h-auto w-full justify-between rounded-xl px-4 py-3 text-left hover:bg-muted/50"
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      />
+                    }
+                  >
+                    <span className="flex min-w-0 flex-col items-start gap-0.5">
+                      <span className="font-medium">
+                        Runtime &amp; capabilities
+                      </span>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        Timeouts, feature switches, and endpoint defaults
+                      </span>
+                    </span>
+                    {runtimeOpen ? (
+                      <ChevronDown aria-hidden="true" />
+                    ) : (
+                      <ChevronRight aria-hidden="true" />
+                    )}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="border-t px-4 py-4">
+                    <FieldGroup>
+                      <div className="grid gap-4 rounded-xl border p-3 sm:grid-cols-3">
+                        <Field>
+                          <FieldLabel htmlFor="endpoint-timeout">
+                            Timeout (seconds)
+                          </FieldLabel>
+                          <Input
+                            id="endpoint-timeout"
+                            type="number"
+                            min={1}
+                            value={form.timeoutSeconds}
+                            onChange={(event) =>
+                              update(
+                                "timeoutSeconds",
+                                Number(event.target.value)
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="endpoint-max-tokens">
+                            Max output tokens
+                          </FieldLabel>
+                          <Input
+                            id="endpoint-max-tokens"
+                            type="number"
+                            min={1}
+                            value={form.maxOutputTokens}
+                            onChange={(event) =>
+                              update(
+                                "maxOutputTokens",
+                                Number(event.target.value)
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="endpoint-temperature">
+                            Temperature
+                          </FieldLabel>
+                          <Input
+                            id="endpoint-temperature"
+                            type="number"
+                            min={0}
+                            max={2}
+                            step={0.1}
+                            value={form.temperature}
+                            onChange={(event) =>
+                              update("temperature", Number(event.target.value))
+                            }
+                          />
+                        </Field>
+                        <FieldDescription className="sm:col-span-3">
+                          These settings are shared by organization and
+                          platform-admin endpoint configuration.
+                        </FieldDescription>
+                      </div>
+                      <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2 lg:grid-cols-4">
+                        {supports(
+                          form.providerType,
+                          "realtime-transcription"
+                        ) && (
+                          <label className="flex items-start justify-between gap-3">
+                            <span>
+                              <span className="block text-sm font-medium">
+                                Realtime transcription
+                              </span>
+                              <span className="mt-1 block text-xs text-muted-foreground">
+                                Native provider WebSocket.
+                              </span>
+                            </span>
+                            <Switch
+                              aria-label="Enable realtime transcription"
+                              checked={form.realtimeTranscription}
+                              onCheckedChange={(checked) =>
+                                setForm((current) => ({
+                                  ...current,
+                                  realtimeTranscription: checked,
+                                  chunkedTranscription: checked
+                                    ? false
+                                    : current.chunkedTranscription,
+                                }))
+                              }
+                            />
+                          </label>
+                        )}
+                        {supports(
+                          form.providerType,
+                          "chunked-transcription"
+                        ) && (
+                          <label className="flex items-start justify-between gap-3">
+                            <span>
+                              <span className="block text-sm font-medium">
+                                Chunked HTTP transcription
+                              </span>
+                              <span className="mt-1 block text-xs text-muted-foreground">
+                                Rolling Whisper windows.
+                              </span>
+                            </span>
+                            <Switch
+                              aria-label="Enable chunked HTTP transcription"
+                              checked={form.chunkedTranscription}
+                              onCheckedChange={(checked) =>
+                                setForm((current) => ({
+                                  ...current,
+                                  chunkedTranscription: checked,
+                                  realtimeTranscription: checked
+                                    ? false
+                                    : current.realtimeTranscription,
+                                }))
+                              }
+                            />
+                          </label>
+                        )}
+                        {supports(form.providerType, "diarization") && (
+                          <label className="flex items-start justify-between gap-3">
+                            <span>
+                              <span className="block text-sm font-medium">
+                                Speaker diarization
+                              </span>
+                              <span className="mt-1 block text-xs text-muted-foreground">
+                                Identify anonymous speakers.
+                              </span>
+                            </span>
+                            <Switch
+                              aria-label="Enable speaker diarization"
+                              checked={form.diarization}
+                              onCheckedChange={(checked) =>
+                                update("diarization", checked)
+                              }
+                            />
+                          </label>
+                        )}
+                        {supports(form.providerType, "tool-calling") && (
+                          <label className="flex items-start justify-between gap-3">
+                            <span>
+                              <span className="block text-sm font-medium">
+                                Tool calling
+                              </span>
+                              <span className="mt-1 block text-xs text-muted-foreground">
+                                Allow approved MCP actions.
+                              </span>
+                            </span>
+                            <Switch
+                              aria-label="Enable tool calling"
+                              checked={form.toolCalling}
+                              onCheckedChange={(checked) =>
+                                update("toolCalling", checked)
+                              }
+                            />
+                          </label>
+                        )}
+                        {supports(form.providerType, "vision") && (
+                          <label className="flex items-start justify-between gap-3">
+                            <span>
+                              <span className="block text-sm font-medium">
+                                Image input
+                              </span>
+                              <span className="mt-1 block text-xs text-muted-foreground">
+                                Enable image messages for a vision-capable
+                                model.
+                              </span>
+                            </span>
+                            <Switch
+                              aria-label="Enable image input"
+                              checked={form.vision}
+                              onCheckedChange={(checked) =>
+                                update("vision", checked)
+                              }
+                            />
+                          </label>
+                        )}
+                      </div>
+                      <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
+                        <label className="flex items-center justify-between gap-3">
+                          <span>
+                            <span className="block text-sm font-medium">
+                              Enabled
+                            </span>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              Allow this endpoint to be selected.
+                            </span>
+                          </span>
+                          <Switch
+                            aria-label="Enable endpoint"
+                            checked={form.enabled}
+                            onCheckedChange={(checked) =>
+                              update("enabled", checked)
+                            }
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-3">
+                          <span>
+                            <span className="block text-sm font-medium">
+                              Default endpoint
+                            </span>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              Use for new chat sessions.
+                            </span>
+                          </span>
+                          <Switch
+                            aria-label="Set as default endpoint"
+                            checked={form.isDefault}
+                            onCheckedChange={(checked) =>
+                              update("isDefault", checked)
+                            }
+                          />
+                        </label>
+                      </div>
+                    </FieldGroup>
+                  </CollapsibleContent>
+                </Collapsible>
               </FieldGroup>
             </div>
             <DialogFooter className="mt-4">
