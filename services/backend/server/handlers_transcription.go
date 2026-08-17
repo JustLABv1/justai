@@ -59,6 +59,10 @@ type transcriptionRecordingRequest struct {
 	MimeType  string `json:"mimeType"`
 }
 
+type transcriptionQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 type transcriptionTicketInfo struct {
 	UserID         uuid.UUID
 	OrganizationID uuid.UUID
@@ -355,13 +359,63 @@ func (a *App) createTranscriptionSource(c *gin.Context) {
 	if request.Kind == "" {
 		request.Kind = "browser"
 	}
-	var source models.TranscriptionSource
-	err = a.DB.QueryRowContext(c, `INSERT INTO transcription_sources (session_id, name, kind, device_label) VALUES ($1, $2, $3, $4) RETURNING id, session_id, name, kind, device_label, status, clock_offset_ms, connected_at, last_seen_at`, sessionID, strings.TrimSpace(request.Name), request.Kind, request.DeviceLabel).Scan(&source.ID, &source.SessionID, &source.Name, &source.Kind, &source.DeviceLabel, &source.Status, &source.ClockOffsetMs, &source.ConnectedAt, &source.LastSeenAt)
+	name := strings.TrimSpace(request.Name)
+	transaction, err := a.DB.BeginTx(c, nil)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	defer transaction.Rollback()
+	if err := lockTranscriptionSourceName(c, transaction, sessionID, name); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	taken, err := transcriptionSourceNameTaken(c, transaction, sessionID, name, uuid.Nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if taken {
+		writeError(c, http.StatusConflict, fmt.Errorf("a microphone with that name is already in this room"))
+		return
+	}
+	var source models.TranscriptionSource
+	err = transaction.QueryRowContext(c, `INSERT INTO transcription_sources (session_id, name, kind, device_label) VALUES ($1, $2, $3, $4) RETURNING id, session_id, name, kind, device_label, status, clock_offset_ms, connected_at, last_seen_at`, sessionID, name, request.Kind, request.DeviceLabel).Scan(&source.ID, &source.SessionID, &source.Name, &source.Kind, &source.DeviceLabel, &source.Status, &source.ClockOffsetMs, &source.ConnectedAt, &source.LastSeenAt)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := transaction.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 	c.JSON(http.StatusCreated, gin.H{"source": source})
+}
+
+func lockTranscriptionSourceName(ctx context.Context, transaction *sql.Tx, sessionID uuid.UUID, name string) error {
+	key := sessionID.String() + ":" + strings.ToLower(strings.TrimSpace(name))
+	var ignored int64
+	return transaction.QueryRowContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key).Scan(&ignored)
+}
+
+func transcriptionSourceNameTaken(ctx context.Context, queryer transcriptionQueryer, sessionID uuid.UUID, name string, excludeRequestID uuid.UUID) (bool, error) {
+	var taken bool
+	err := queryer.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM transcription_sources
+			WHERE session_id = $1
+			  AND status IN ('pending', 'connected', 'paused')
+			  AND lower(btrim(name)) = lower(btrim($2))
+		) OR EXISTS (
+			SELECT 1
+			FROM transcription_join_requests
+			WHERE session_id = $1
+			  AND status IN ('pending', 'approved')
+			  AND id <> $3
+			  AND lower(btrim(source_name)) = lower(btrim($2))
+		)`, sessionID, name, excludeRequestID).Scan(&taken)
+	return taken, err
 }
 
 func (a *App) rotateTranscriptionJoinCode(c *gin.Context) {
@@ -486,6 +540,19 @@ func (a *App) setJoinRequestStatus(c *gin.Context, status string) {
 		return
 	}
 	if status == "approved" && !sourceID.Valid {
+		if err := lockTranscriptionSourceName(c, transaction, sessionID, sourceName); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		taken, err := transcriptionSourceNameTaken(c, transaction, sessionID, sourceName, requestID)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if taken {
+			writeError(c, http.StatusConflict, fmt.Errorf("a microphone with that name is already in this room"))
+			return
+		}
 		if err := transaction.QueryRowContext(c, `INSERT INTO transcription_sources (session_id, name, kind, device_label, status) VALUES ($1, $2, 'browser', $3, 'pending') RETURNING id`, sessionID, strings.TrimSpace(sourceName), strings.TrimSpace(deviceLabel)).Scan(&sourceID.UUID); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
@@ -619,6 +686,7 @@ func (a *App) createTranscriptionJoinRequest(c *gin.Context) {
 	if strings.TrimSpace(request.SourceName) == "" {
 		request.SourceName = "Room microphone"
 	}
+	name := strings.TrimSpace(request.SourceName)
 	pollToken, pollHash, err := auth.NewOpaqueToken()
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -626,11 +694,34 @@ func (a *App) createTranscriptionJoinRequest(c *gin.Context) {
 	}
 	requestID := uuid.New()
 	expiresAt := time.Now().Add(10 * time.Minute)
-	if _, err := a.DB.ExecContext(c, `INSERT INTO transcription_join_requests (id, session_id, request_hash, source_name, device_label, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`, requestID, sessionID, pollHash, strings.TrimSpace(request.SourceName), strings.TrimSpace(request.DeviceLabel), expiresAt); err != nil {
+	transaction, err := a.DB.BeginTx(c, nil)
+	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	a.Live.broadcast(sessionID, "transcription.join-request", ginData{"requestId": requestID, "sourceName": strings.TrimSpace(request.SourceName), "status": "pending"})
+	defer transaction.Rollback()
+	if err := lockTranscriptionSourceName(c, transaction, sessionID, name); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	taken, err := transcriptionSourceNameTaken(c, transaction, sessionID, name, uuid.Nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if taken {
+		writeError(c, http.StatusConflict, fmt.Errorf("a microphone with that name is already in this room"))
+		return
+	}
+	if _, err := transaction.ExecContext(c, `INSERT INTO transcription_join_requests (id, session_id, request_hash, source_name, device_label, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`, requestID, sessionID, pollHash, name, strings.TrimSpace(request.DeviceLabel), expiresAt); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := transaction.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	a.Live.broadcast(sessionID, "transcription.join-request", ginData{"requestId": requestID, "sourceName": name, "status": "pending"})
 	c.JSON(http.StatusCreated, gin.H{"requestId": requestID, "pollToken": pollToken, "sessionTitle": title, "sessionStatus": status, "expiresAt": expiresAt})
 }
 
@@ -788,6 +879,14 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			}
 		}
 	}
+	if info.Kind == "transcription-capture" {
+		snapshot, err := a.transcriptionSnapshot(ctx, info.SessionID)
+		if err != nil {
+			_ = a.Live.send(client, "error", ginData{"message": err.Error()})
+			return
+		}
+		_ = a.Live.send(client, "transcription.snapshot", snapshot)
+	}
 
 	var sessionEndpoint uuid.UUID
 	var language, sessionStatus string
@@ -892,10 +991,20 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			if json.Unmarshal(payload, &event) != nil {
 				continue
 			}
-			switch event.Type {
-			case "source.level":
-				a.Live.updateSourceLevel(info.SessionID, info.SourceID, event.Level)
-			case "transcription.stop":
+				switch event.Type {
+				case "source.level":
+					a.Live.updateSourceLevel(info.SessionID, info.SourceID, event.Level)
+				case "source.pause":
+					if committer, ok := stream.(provider.TurnCommitter); ok {
+						if err := committer.CommitTurn(); err != nil {
+							a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "transcription turn finalization failed: " + err.Error()})
+							return
+						}
+					}
+					a.Live.markSource(info.SessionID, info.SourceID, "paused")
+				case "source.resume":
+					a.Live.markSource(info.SessionID, info.SourceID, "connected")
+				case "transcription.stop":
 				if err := stream.Commit(); err != nil {
 					a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "transcription finalization failed: " + err.Error()})
 				}
@@ -931,7 +1040,15 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			voiceActive = true
 			lastVoiceAt = time.Now()
 		} else if !voiceActive || time.Since(lastVoiceAt) > voiceHangover {
-			voiceActive = false
+			if voiceActive {
+				voiceActive = false
+				if committer, ok := stream.(provider.TurnCommitter); ok {
+					if err := committer.CommitTurn(); err != nil {
+						a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "transcription turn finalization failed: " + err.Error()})
+						return
+					}
+				}
+			}
 			continue
 		}
 		if err := stream.SendPCM(ctx, pcm, frame.SampleRate); err != nil {

@@ -1,7 +1,13 @@
 "use client"
 
 import { AudioLines, ChevronDown, ChevronUp, Mic2, Pencil } from "lucide-react"
-import { useState, type CSSProperties, type ReactNode } from "react"
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -33,6 +39,7 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from "@/components/ui/message-scroller"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
@@ -206,17 +213,20 @@ export function TranscriptTray({
   speakers,
   className,
   transcript = [],
+  segmentCount = transcript.filter((line) => !line.provisional).length,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   speakers: RoomSpeaker[]
   className?: string
+  segmentCount?: number
   transcript?: RoomTranscriptLine[]
 }) {
   const latest = transcript[transcript.length - 1]
   const latestSpeaker = latest
     ? speakers.find((speaker) => speaker.id === latest.speakerId)
     : null
+  const messageCount = transcript.filter((line) => !line.provisional).length
 
   return (
     <Collapsible
@@ -243,8 +253,13 @@ export function TranscriptTray({
             Live transcription
           </span>
           <Badge className="shrink-0" variant="secondary">
-            {transcript.length} segments
+            {segmentCount} segments
           </Badge>
+          {messageCount > 0 && messageCount !== segmentCount ? (
+            <Badge className="shrink-0" variant="outline">
+              {messageCount} messages
+            </Badge>
+          ) : null}
           {latest ? (
             <span className="ml-auto max-w-[45%] min-w-0 truncate text-[11px] text-muted-foreground">
               {latestSpeaker?.name || "Unassigned"} · {latest.timestamp}
@@ -260,77 +275,110 @@ export function TranscriptTray({
       <CollapsibleContent>
         <div className={styles.transcriptTrayBody}>
           <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-            <MessageScroller className="min-h-0 flex-1">
-              <MessageScrollerViewport aria-label="Live transcription">
-                <MessageScrollerContent className="gap-1">
-                  {transcript.map((line) => {
-                    const speaker = speakers.find(
-                      (item) => item.id === line.speakerId
-                    )
-                    return (
-                      <MessageScrollerItem
-                        className="w-full"
-                        key={line.id}
-                        messageId={line.id}
-                      >
-                        <div className={styles.transcriptLine}>
-                          <span className="w-10 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">
-                            {line.timestamp}
-                          </span>
-                          <Avatar className="mt-0.5" size="sm">
-                            <AvatarFallback
-                              style={
-                                {
-                                  background: speaker?.accent,
-                                  color: "var(--background)",
-                                } as CSSProperties
-                              }
-                            >
-                              {speaker?.initials}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                              <span className="text-xs font-semibold">
-                                {speaker?.name || "Unassigned"}
-                              </span>
-                              {speaker?.source ? (
-                                <Badge
-                                  className="max-w-full truncate"
-                                  variant="outline"
-                                >
-                                  {speaker.source}
-                                </Badge>
-                              ) : null}
-                              {line.provisional ? (
-                                <Badge variant="secondary">Listening</Badge>
-                              ) : null}
-                            </div>
-                            <p
-                              className={cn(
-                                "mt-1 min-w-0 text-sm leading-relaxed",
-                                line.provisional &&
-                                  "text-muted-foreground italic"
-                              )}
-                            >
-                              {line.text}
-                            </p>
-                          </div>
-                        </div>
-                      </MessageScrollerItem>
-                    )
-                  })}
-                </MessageScrollerContent>
-              </MessageScrollerViewport>
-              <MessageScrollerButton
-                aria-label="Scroll to latest transcript"
-                direction="end"
-              />
-            </MessageScroller>
+            <TranscriptScroller speakers={speakers} transcript={transcript} />
           </MessageScrollerProvider>
         </div>
       </CollapsibleContent>
     </Collapsible>
+  )
+}
+
+function TranscriptScroller({
+  speakers,
+  transcript,
+}: {
+  speakers: RoomSpeaker[]
+  transcript: RoomTranscriptLine[]
+}) {
+  const { scrollToEnd } = useMessageScroller()
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const followLatestRef = useRef(true)
+
+  useEffect(() => {
+    if (!followLatestRef.current) return
+    const frame = window.requestAnimationFrame(() => {
+      scrollToEnd({ behavior: "auto" })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [scrollToEnd, transcript])
+
+  const handleScroll = () => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const distanceFromEnd =
+      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+    followLatestRef.current = distanceFromEnd <= 32
+  }
+
+  return (
+    <MessageScroller className="min-h-0 flex-1">
+      <MessageScrollerViewport
+        aria-label="Live transcription"
+        onScroll={handleScroll}
+        ref={viewportRef}
+      >
+        <MessageScrollerContent className="gap-1">
+          {transcript.map((line) => {
+            const speaker = speakers.find((item) => item.id === line.speakerId)
+            return (
+              <MessageScrollerItem
+                className="w-full"
+                key={line.id}
+                messageId={line.id}
+              >
+                <div className={styles.transcriptLine}>
+                  <span className="w-10 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">
+                    {line.timestamp}
+                  </span>
+                  <Avatar className="mt-0.5" size="sm">
+                    <AvatarFallback
+                      style={
+                        {
+                          background: speaker?.accent,
+                          color: "var(--background)",
+                        } as CSSProperties
+                      }
+                    >
+                      {speaker?.initials}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-xs font-semibold">
+                        {speaker?.name || "Unassigned"}
+                      </span>
+                      {speaker?.source ? (
+                        <Badge
+                          className="max-w-full truncate"
+                          variant="outline"
+                        >
+                          {speaker.source}
+                        </Badge>
+                      ) : null}
+                      {line.provisional ? (
+                        <Badge variant="secondary">Listening</Badge>
+                      ) : null}
+                    </div>
+                    <p
+                      className={cn(
+                        "mt-1 min-w-0 text-sm leading-relaxed",
+                        line.provisional && "text-muted-foreground italic"
+                      )}
+                    >
+                      {line.text}
+                    </p>
+                  </div>
+                </div>
+              </MessageScrollerItem>
+            )
+          })}
+        </MessageScrollerContent>
+      </MessageScrollerViewport>
+      <MessageScrollerButton
+        aria-label="Scroll to latest transcript"
+        direction="end"
+      />
+    </MessageScroller>
   )
 }
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Archive,
   Bot,
@@ -76,6 +76,8 @@ const railNavigation: Array<{
   },
 ]
 
+const sidebarRailStorageKey = "justai.sidebar-rail-expanded"
+
 type FocusWorkspaceSidebarProps = {
   activeView: ViewId
   activeConversationId: string | null
@@ -145,11 +147,25 @@ export function FocusWorkspaceSidebar({
 }: FocusWorkspaceSidebarProps) {
   const [historyQuery, setHistoryQuery] = useState("")
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
+  const [railExpanded, setRailExpanded] = useState(false)
+  const [railPreferenceLoaded, setRailPreferenceLoaded] = useState(false)
   const historyView = activeView === "chat" || activeView === "transcription"
-  const navigation = user.platformAdmin
-    ? [...railNavigation, { id: "admin" as ViewId, label: "Platform admin", hint: "Global controls", icon: ShieldCheck }]
-    : railNavigation
+  const navigation = railNavigation
   const historyVisible = historyView && historyOpen
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const stored = window.localStorage.getItem(sidebarRailStorageKey)
+      if (stored !== null) setRailExpanded(stored === "true")
+      setRailPreferenceLoaded(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!railPreferenceLoaded) return
+    window.localStorage.setItem(sidebarRailStorageKey, String(railExpanded))
+  }, [railExpanded, railPreferenceLoaded])
   const sessionGroups = useMemo(
     () => groupByRecency(transcriptionSessions),
     [transcriptionSessions]
@@ -192,44 +208,101 @@ export function FocusWorkspaceSidebar({
       className={cn(
         "flex h-full min-h-0 shrink-0 overflow-hidden border-r border-border bg-background transition-[width] duration-200 ease-out",
         historyVisible
-          ? "w-[352px] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:shadow-lg"
-          : "w-16 md:w-16"
+          ? railExpanded
+            ? "w-[32rem] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:w-full max-md:shadow-lg"
+            : "w-[352px] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:w-full max-md:shadow-lg"
+          : railExpanded
+            ? "w-56"
+            : "w-16"
       )}
       data-history-open={historyVisible}
+      data-rail-expanded={railExpanded}
     >
-      <div className="flex w-16 shrink-0 flex-col items-center gap-3 border-r border-border/70 px-2 py-4">
-        <BrandMark className="size-8" />
+      <div
+        className={cn(
+          "flex shrink-0 flex-col gap-3 border-r border-border/70 py-4 transition-[width] duration-200",
+          railExpanded ? "w-56 items-stretch px-3" : "w-16 items-center px-2"
+        )}
+      >
+        <div
+          className={cn(
+            "flex w-full items-center",
+            railExpanded ? "justify-between" : "justify-center"
+          )}
+        >
+          <BrandMark className="size-8 shrink-0" />
+          {railExpanded && (
+            <Button
+              aria-expanded={railExpanded}
+              aria-label="Collapse navigation"
+              className="size-8 rounded-xl text-muted-foreground"
+              onClick={() => setRailExpanded(false)}
+              size="icon"
+              title="Collapse navigation"
+              variant="ghost"
+            >
+              <PanelLeftClose data-icon="inline-start" />
+            </Button>
+          )}
+        </div>
+        {!railExpanded && (
+          <Button
+            aria-expanded={railExpanded}
+            aria-label="Expand navigation"
+            className="size-9 rounded-xl text-muted-foreground"
+            onClick={() => setRailExpanded(true)}
+            size="icon"
+            title="Expand navigation"
+            variant="ghost"
+          >
+            <PanelLeftOpen data-icon="inline-start" />
+          </Button>
+        )}
         <Button
           aria-label="New chat"
-          className="size-9 rounded-xl"
+          className={cn(
+            "rounded-xl",
+            railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
+          )}
           onClick={() => onNavigate("chat")}
           title="New chat"
           size="icon"
         >
           <Plus data-icon="inline-start" />
+          {railExpanded && <span>New chat</span>}
         </Button>
 
         <nav
           aria-label="Workspace navigation"
-          className="flex flex-col items-center gap-1"
+          className={cn(
+            "flex flex-col gap-1",
+            railExpanded ? "w-full items-stretch" : "items-center"
+          )}
         >
           {navigation.map((item) => {
             const Icon = item.icon
             const active = activeView === item.id
-            const disabled = Boolean(item.feature && disabledFeatures[item.feature])
+            const disabled = Boolean(
+              item.feature && disabledFeatures[item.feature]
+            )
             return (
               <Button
                 aria-current={active ? "page" : undefined}
                 aria-label={item.label}
                 className={cn(
-                  "relative size-9 rounded-xl text-muted-foreground",
+                  "relative rounded-xl text-muted-foreground",
+                  railExpanded
+                    ? "h-9 w-full justify-start gap-3 px-3"
+                    : "size-9",
                   active && "bg-accent text-accent-foreground"
                 )}
                 disabled={disabled}
                 key={item.id}
                 onClick={() => navigateFromRail(item.id)}
                 size="icon"
-                title={disabled ? "Disabled by platform administrator" : item.hint}
+                title={
+                  disabled ? "Disabled by platform administrator" : item.hint
+                }
                 variant="ghost"
               >
                 <Icon data-icon="inline-start" />
@@ -241,6 +314,7 @@ export function FocusWorkspaceSidebar({
                         : transcriptionSessions.length}
                     </span>
                   )}
+                {railExpanded && <span className="truncate">{item.label}</span>}
               </Button>
             )
           })}
@@ -248,7 +322,8 @@ export function FocusWorkspaceSidebar({
             aria-current={activeView === "settings" ? "page" : undefined}
             aria-label="Settings"
             className={cn(
-              "size-9 rounded-xl text-muted-foreground",
+              "rounded-xl text-muted-foreground",
+              railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9",
               activeView === "settings" && "bg-accent text-accent-foreground"
             )}
             onClick={() => onNavigate("settings")}
@@ -257,29 +332,57 @@ export function FocusWorkspaceSidebar({
             variant="ghost"
           >
             <Settings2 data-icon="inline-start" />
+            {railExpanded && <span>Settings</span>}
           </Button>
         </nav>
 
         <div className="min-h-0 flex-1" />
+        {user.platformAdmin && (
+          <Button
+            aria-current={activeView === "admin" ? "page" : undefined}
+            aria-label="Platform admin"
+            className={cn(
+              "rounded-xl text-muted-foreground",
+              railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9",
+              activeView === "admin" && "bg-accent text-accent-foreground"
+            )}
+            onClick={() => onNavigate("admin")}
+            size="icon"
+            title="Global controls"
+            variant="ghost"
+          >
+            <ShieldCheck data-icon="inline-start" />
+            {railExpanded && <span>Platform admin</span>}
+          </Button>
+        )}
         {!historyVisible && historyView && (
           <Button
             aria-label="Open chat history"
-            className="size-9 rounded-xl text-muted-foreground"
+            className={cn(
+              "rounded-xl text-muted-foreground",
+              railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
+            )}
             onClick={() => onHistoryOpenChange(true)}
             size="icon"
             title="Open chat history"
             variant="ghost"
           >
             <PanelLeftOpen data-icon="inline-start" />
+            {railExpanded && <span>Chat history</span>}
           </Button>
         )}
-        <ThemeSwitcher />
+        <ThemeSwitcher expanded={railExpanded} />
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button
                 aria-label={`${user.displayName} account menu`}
-                className="size-8 rounded-full p-0"
+                className={cn(
+                  "rounded-full p-0",
+                  railExpanded
+                    ? "h-9 w-full justify-start gap-2 rounded-xl px-1.5"
+                    : "size-8"
+                )}
                 title={`${user.displayName} · ${user.email}`}
                 variant="ghost"
               />
@@ -288,6 +391,11 @@ export function FocusWorkspaceSidebar({
             <Avatar size="sm">
               <AvatarFallback>{userInitials}</AvatarFallback>
             </Avatar>
+            {railExpanded && (
+              <span className="min-w-0 flex-1 truncate text-left text-xs font-medium">
+                {user.displayName}
+              </span>
+            )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56" side="right">
             <DropdownMenuGroup>
@@ -325,7 +433,8 @@ export function FocusWorkspaceSidebar({
 
       <div
         className={cn(
-          "w-[288px] min-w-0 flex-col gap-3 overflow-hidden p-4",
+          "min-w-0 flex-col gap-3 overflow-hidden p-4",
+          railExpanded ? "w-72 max-md:w-[calc(100vw-14rem)]" : "w-72",
           historyVisible ? "flex" : "hidden"
         )}
       >
@@ -341,8 +450,9 @@ export function FocusWorkspaceSidebar({
           </div>
           <Button
             aria-label="Collapse chat history"
+            className="size-8 rounded-xl text-muted-foreground"
             onClick={() => onHistoryOpenChange(false)}
-            size="icon-sm"
+            size="icon"
             title="Collapse chat history"
             variant="ghost"
           >
@@ -410,7 +520,11 @@ export function FocusWorkspaceSidebar({
             className="w-full shrink-0 justify-start"
             disabled={Boolean(disabledFeatures.transcription)}
             onClick={onNewTranscriptionSession}
-            title={disabledFeatures.transcription ? "Disabled by platform administrator" : "New room"}
+            title={
+              disabledFeatures.transcription
+                ? "Disabled by platform administrator"
+                : "New room"
+            }
           >
             <Plus data-icon="inline-start" />
             New room

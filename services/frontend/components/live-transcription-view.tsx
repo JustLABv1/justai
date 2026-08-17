@@ -41,6 +41,10 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { api, socketURL } from "@/lib/api"
+import {
+  mergeTranscriptionSegments,
+  upsertTranscriptionSource,
+} from "@/lib/transcription"
 import type {
   Endpoint,
   TranscriptionJoinRequest,
@@ -110,7 +114,12 @@ export function LiveTranscriptionView({
   const viewerReconnectTimerRef = useRef<number | null>(null)
   const viewerReconnectAttemptsRef = useRef(0)
   const captureAttemptRef = useRef(0)
+  const captureSourceIdRef = useRef<string | null>(null)
   const sessionLoadRef = useRef(0)
+  const pendingFinalSegmentsRef = useRef(
+    new Map<string, TranscriptionSegment>()
+  )
+  const pendingSpeakerUpdatesRef = useRef(new Map<string, string>())
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioStreamRef = useRef<MediaStream | null>(null)
   const workletRef = useRef<AudioWorkletNode | null>(null)
@@ -122,7 +131,10 @@ export function LiveTranscriptionView({
   const levelTimerRef = useRef<number | null>(null)
   const transcriptionEndpoints = useMemo(
     () =>
-      endpoints.filter((endpoint) => endpointSupportsTranscription(endpoint)),
+      endpoints.filter(
+        (endpoint) =>
+          endpoint.enabled && endpointSupportsTranscription(endpoint)
+      ),
     [endpoints]
   )
   const diarizationEndpoints = useMemo(
@@ -191,6 +203,7 @@ export function LiveTranscriptionView({
     }
     captureSocketRef.current?.close()
     captureSocketRef.current = null
+    captureSourceIdRef.current = null
     const recorder = mediaRecorderRef.current
     if (recorder && recorder.state !== "inactive") recorder.stop()
     else if (recordingIdRef.current)
@@ -232,9 +245,32 @@ export function LiveTranscriptionView({
 
   const applySnapshot = useCallback((next: Snapshot) => {
     setSnapshot((current) => {
-      if (!current) return next
+      const sameSession = current?.session.id === next.session.id
+      const pendingSegments = [
+        ...pendingFinalSegmentsRef.current.values(),
+      ].filter((segment) => segment.sessionId === next.session.id)
+      const mergedSegments = mergeTranscriptionSegments(
+        sameSession ? current?.segments || [] : [],
+        next.segments,
+        pendingSegments
+      ).map((segment) => {
+        const speakerId = pendingSpeakerUpdatesRef.current.get(segment.id)
+        return speakerId ? { ...segment, speakerId } : segment
+      })
+      for (const segment of pendingSegments) {
+        pendingFinalSegmentsRef.current.delete(segment.id)
+      }
+      for (const segment of mergedSegments) {
+        if (pendingSpeakerUpdatesRef.current.has(segment.id)) {
+          pendingSpeakerUpdatesRef.current.delete(segment.id)
+        }
+      }
+      if (!sameSession) {
+        return { ...next, segments: mergedSegments }
+      }
       return {
         ...next,
+        segments: mergedSegments,
         sources: next.sources.map((source) => {
           const existing = current.sources.find((item) => item.id === source.id)
           return existing
@@ -302,17 +338,20 @@ export function LiveTranscriptionView({
         return
       }
       if (event.type === "transcription.source") {
+		const sourceId = String(data.sourceId ?? "")
+		const sourceData = data.source as Partial<TranscriptionSource> | undefined
+		const status = String(
+		  data.status ?? sourceData?.status ?? "connected"
+		) as TranscriptionSource["status"]
+		if (!sourceId) return
         setSnapshot((current) =>
           current
             ? {
                 ...current,
-                sources: current.sources.map((source) =>
-                  source.id === data.sourceId
-                    ? {
-                        ...source,
-                        status: data.status as TranscriptionSource["status"],
-                      }
-                    : source
+                sources: upsertTranscriptionSource(
+                  current.sources,
+                  { ...sourceData, id: sourceId },
+                  status
                 ),
               }
             : current
@@ -320,14 +359,15 @@ export function LiveTranscriptionView({
         return
       }
       if (event.type === "transcription.source.level") {
+		const sourceId = String(data.sourceId ?? "")
         const nextLevel = Number(data.level ?? 0)
-        setLevel(nextLevel)
+		if (captureSourceIdRef.current === sourceId) setLevel(nextLevel)
         setSnapshot((current) =>
           current
             ? {
                 ...current,
                 sources: current.sources.map((source) =>
-                  source.id === data.sourceId
+                  source.id === sourceId
                     ? { ...source, signalLevel: nextLevel }
                     : source
                 ),
@@ -348,35 +388,33 @@ export function LiveTranscriptionView({
         setPartial("")
         setPartialSourceId(null)
         setPartialSpeakerId(null)
+        pendingFinalSegmentsRef.current.set(segment.id, segment)
         setSnapshot((current) => {
-          if (!current) return current
-          const hasSegment = current.segments.some(
-            (item) => item.id === segment.id
+          if (
+            !current ||
+            (segment.sessionId && current.session.id !== segment.sessionId)
           )
-          const segments = hasSegment
-            ? current.segments.map((item) =>
-                item.id === segment.id ? { ...item, ...segment } : item
-              )
-            : [...current.segments, segment]
+            return current
+          pendingFinalSegmentsRef.current.delete(segment.id)
           return {
             ...current,
-            segments: segments.sort(
-              (left, right) => left.startOffsetMs - right.startOffsetMs
-            ),
+            segments: mergeTranscriptionSegments(current.segments, [segment]),
           }
         })
         onSessionsChanged()
         return
       }
       if (event.type === "transcription.segment.updated") {
+        const segmentId = String(data.segmentId ?? "")
+        const speakerId = String(data.speakerId ?? "")
+        if (!segmentId || !speakerId) return
+        pendingSpeakerUpdatesRef.current.set(segmentId, speakerId)
         setSnapshot((current) =>
           current
             ? {
                 ...current,
                 segments: current.segments.map((segment) =>
-                  segment.id === data.segmentId
-                    ? { ...segment, speakerId: String(data.speakerId) }
-                    : segment
+                  segment.id === segmentId ? { ...segment, speakerId } : segment
                 ),
               }
             : current
@@ -670,6 +708,7 @@ export function LiveTranscriptionView({
         }
       )
       if (captureAttemptRef.current !== attempt) return
+      captureSourceIdRef.current = source.id
       const socket = new WebSocket(
         socketURL("/api/v1/ws/transcription", ticketResponse.ticket)
       )
@@ -702,7 +741,8 @@ export function LiveTranscriptionView({
         }
         socket.onclose = () => {
           if (openTimer !== null) window.clearTimeout(openTimer)
-          if (captureSocketRef.current === socket) captureSocketRef.current = null
+          if (captureSocketRef.current === socket)
+            captureSocketRef.current = null
           if (captureAttemptRef.current !== attempt) {
             resolve()
             return
@@ -792,6 +832,8 @@ export function LiveTranscriptionView({
       queueMicrotask(() => {
         if (cancelled) return
         closeSockets()
+        pendingFinalSegmentsRef.current.clear()
+        pendingSpeakerUpdatesRef.current.clear()
         setSnapshot(null)
         setPartial("")
         setPartialSourceId(null)
@@ -1364,15 +1406,17 @@ function endpointSupportsTranscription(endpoint: Endpoint) {
   if (Object.prototype.hasOwnProperty.call(capabilities, "transcription")) {
     return Boolean(capabilities.transcription)
   }
+  if (capabilities["chunked-transcription"]) return true
+  if (capabilities["realtime-transcription"]) return true
   if (
     Object.prototype.hasOwnProperty.call(capabilities, "chunked-transcription")
   ) {
-    return Boolean(capabilities["chunked-transcription"])
+    return false
   }
   if (
     Object.prototype.hasOwnProperty.call(capabilities, "realtime-transcription")
   ) {
-    return Boolean(capabilities["realtime-transcription"])
+    return false
   }
   return (
     endpoint.providerType === "openai" || endpoint.providerType === "gemini"

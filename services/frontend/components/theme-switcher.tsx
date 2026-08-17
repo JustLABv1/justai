@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
 
 const themes = [
   { value: "light", label: "Light", icon: Sun },
@@ -23,7 +24,7 @@ const emptySubscribe = () => () => {}
 const getClientSnapshot = () => true
 const getServerSnapshot = () => false
 
-function ThemeSwitcher() {
+function ThemeSwitcher({ expanded = false }: { expanded?: boolean }) {
   const { theme, setTheme } = useTheme()
   const mounted = useSyncExternalStore(
     emptySubscribe,
@@ -37,13 +38,18 @@ function ThemeSwitcher() {
         render={
           <Button
             aria-label="Choose color theme"
-            size="icon-sm"
+            className={cn(
+              "rounded-xl text-muted-foreground",
+              expanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
+            )}
             title="Choose color theme"
-            variant="outline"
+            size={expanded ? "default" : "icon"}
+            variant="ghost"
           />
         }
       >
         <Sun aria-hidden="true" />
+        {expanded && <span>Theme</span>}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
         <DropdownMenuGroup>

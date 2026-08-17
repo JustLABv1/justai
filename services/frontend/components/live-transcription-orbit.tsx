@@ -49,6 +49,7 @@ import type {
   User,
 } from "@/lib/types"
 import { api } from "@/lib/api"
+import { groupTranscriptionSegments } from "@/lib/transcription"
 import { cn } from "@/lib/utils"
 
 export type LiveTranscriptionSnapshot = {
@@ -252,13 +253,13 @@ export function LiveTranscriptionOrbit({
   )
 
   const transcript = useMemo(() => {
-    const lines: RoomTranscriptLine[] = snapshot.segments.map((segment) => ({
-      id: segment.id,
-      timestamp: formatOffset(segment.startOffsetMs),
-      speakerId:
-        segment.speakerId ||
-        (segment.sourceId ? `source:${segment.sourceId}` : "unassigned"),
-      text: segment.text,
+    const lines: RoomTranscriptLine[] = groupTranscriptionSegments(
+      snapshot.segments
+    ).map((message) => ({
+      id: message.id,
+      timestamp: formatOffset(message.startOffsetMs),
+      speakerId: message.speakerKey,
+      text: message.text,
     }))
     if (partial) {
       lines.push({
@@ -651,6 +652,7 @@ export function LiveTranscriptionOrbit({
           onOpenChange={setTranscriptOpen}
           open={transcriptOpen}
           speakers={transcriptSpeakers}
+          segmentCount={snapshot.segments.length}
           transcript={transcript}
         />
       </div>

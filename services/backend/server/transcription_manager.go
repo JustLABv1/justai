@@ -256,6 +256,11 @@ func (m *TranscriptionManager) send(client *transcriptionClient, eventType strin
 func (m *TranscriptionManager) markSource(sessionID, sourceID uuid.UUID, status string) {
 	now := time.Now().UTC()
 	_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = $2, connected_at = CASE WHEN $2 = 'connected' THEN COALESCE(connected_at, $3) ELSE connected_at END, last_seen_at = $3, updated_at = $3 WHERE id = $1`, sourceID, status, now)
+	var source models.TranscriptionSource
+	if err := m.DB.QueryRow(`SELECT id, session_id, name, kind, device_label, status, clock_offset_ms, connected_at, last_seen_at FROM transcription_sources WHERE id = $1 AND session_id = $2`, sourceID, sessionID).Scan(&source.ID, &source.SessionID, &source.Name, &source.Kind, &source.DeviceLabel, &source.Status, &source.ClockOffsetMs, &source.ConnectedAt, &source.LastSeenAt); err == nil {
+		m.broadcast(sessionID, "transcription.source", ginData{"sourceId": sourceID, "status": source.Status, "lastSeenAt": now, "source": source})
+		return
+	}
 	m.broadcast(sessionID, "transcription.source", ginData{"sourceId": sourceID, "status": status, "lastSeenAt": now})
 }
 

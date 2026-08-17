@@ -1,7 +1,20 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
-import { CheckCircle2, ExternalLink, Info, TriangleAlert, X } from "lucide-react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
+import {
+  CheckCircle2,
+  ExternalLink,
+  Info,
+  TriangleAlert,
+  X,
+} from "lucide-react"
 
 import { api } from "@/lib/api"
 import {
@@ -30,7 +43,11 @@ const PlatformConfigContext = createContext<PlatformConfigContextValue>({
   refresh: async () => undefined,
 })
 
-export function PlatformConfigProvider({ children }: { children: React.ReactNode }) {
+export function PlatformConfigProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   const [config, setConfig] = useState<AuthConfig | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -98,7 +115,10 @@ export function PlatformBannerStack() {
     const timer = window.setTimeout(() => {
       const stored = new Set<string>()
       banners.forEach((banner) => {
-        if (banner.dismissible && window.localStorage.getItem(dismissedStorageKey(banner)) === "true") {
+        if (
+          banner.dismissible &&
+          window.localStorage.getItem(dismissedStorageKey(banner)) === "true"
+        ) {
           stored.add(banner.id)
         }
       })
@@ -130,18 +150,18 @@ export function PlatformBannerStack() {
         return (
           <Alert
             className={cn(
-              "rounded-none border-x-0 border-t-0 px-4 py-2 pr-12 shadow-none sm:px-6",
+              "flex items-center justify-center rounded-none border-x-0 border-t-0 px-4 py-2 pr-12 text-center shadow-none sm:px-6 sm:pr-12",
               classForSeverity(banner.severity)
             )}
             key={banner.id}
           >
-            <Icon aria-hidden="true" />
             <AlertTitle className="sr-only">Platform announcement</AlertTitle>
-            <AlertDescription className="text-current">
+            <AlertDescription className="flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-current">
+              <Icon aria-hidden="true" className="size-3.5 shrink-0" />
               <span>{banner.message}</span>
               {banner.linkUrl && (
                 <a
-                  className="ml-2 inline-flex items-center gap-1 font-medium underline underline-offset-3 hover:no-underline"
+                  className="inline-flex items-center gap-1 font-medium underline underline-offset-3 hover:no-underline"
                   href={banner.linkUrl}
                   rel="noreferrer"
                   target="_blank"
