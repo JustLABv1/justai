@@ -199,7 +199,7 @@ export function FocusWorkspaceSidebar({
       data-history-open={historyVisible}
     >
       <div className="flex w-16 shrink-0 flex-col items-center gap-3 border-r border-border/70 px-2 py-4">
-        <BrandMark className="size-8" priority />
+        <BrandMark className="size-8" />
         <Button
           aria-label="New chat"
           className="size-9 rounded-xl"

@@ -12,18 +12,7 @@ export const metadata: Metadata = {
   title: "JustAI",
   description: "JustLAB workspace for endpoints, chat, MCP, and RAG.",
   icons: {
-    icon: [
-      {
-        url: "/images/logos/logo-dark.png",
-        media: "(prefers-color-scheme: light)",
-        type: "image/png",
-      },
-      {
-        url: "/images/logos/logo-light.png",
-        media: "(prefers-color-scheme: dark)",
-        type: "image/png",
-      },
-    ],
+    icon: "/images/logos/justai-logo.svg",
   },
 }
 
@@ -34,15 +23,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className="antialiased"
-      >
+      <body className="antialiased">
         <ThemeProvider>
           <TooltipProvider>
             <PlatformConfigProvider>
               <div className="flex h-svh min-h-svh flex-col">
                 <PlatformBannerStack />
-                <div className="flex h-full min-h-0 flex-1 flex-col">{children}</div>
+                <div className="flex h-full min-h-0 flex-1 flex-col">
+                  {children}
+                </div>
               </div>
             </PlatformConfigProvider>
           </TooltipProvider>

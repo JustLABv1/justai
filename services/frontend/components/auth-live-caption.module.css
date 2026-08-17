@@ -1,0 +1,373 @@
+.captionPreview {
+  --caption-muted: var(--muted-foreground);
+  position: relative;
+  display: flex;
+  min-height: 100%;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: clamp(1.5rem, 4vw, 4rem) clamp(1.5rem, 6vw, 6rem) 2rem;
+  border-right: 1px solid var(--border);
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.captionPreview::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(
+      color-mix(in oklch, var(--foreground) 5%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--foreground) 5%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 42px 42px;
+  mask-image: linear-gradient(to bottom, black, transparent 86%);
+  content: "";
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.captionPreview::after {
+  position: absolute;
+  top: -16rem;
+  left: -12rem;
+  width: 38rem;
+  height: 38rem;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklch, var(--primary) 12%, transparent),
+    transparent 68%
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.captionTopbar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.captionWordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--foreground);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.captionLogoMark {
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 auto;
+  border-radius: 0.5rem;
+}
+
+.captionSession {
+  color: var(--caption-muted);
+  font-size: 0.67rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.captionContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: min(100%, 43rem);
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  padding-block: 3rem;
+  animation: captionEnter 260ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.captionEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--foreground);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.captionEyebrowRule {
+  display: inline-block;
+  width: 1.7rem;
+  height: 1px;
+  background: var(--primary);
+}
+
+.captionHeadline {
+  max-width: 34rem;
+  margin: 1.15rem 0 0;
+  font-size: clamp(3rem, 5.8vw, 6rem);
+  font-weight: 600;
+  letter-spacing: -0.07em;
+  line-height: 0.9;
+}
+
+.captionHeadline span {
+  color: var(--primary);
+}
+
+.captionLead {
+  max-width: 31rem;
+  margin: 1.4rem 0 0;
+  color: var(--caption-muted);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.captionConsole {
+  width: min(100%, 42rem);
+  margin-top: 2.4rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  background: var(--card);
+  box-shadow: 0 1.5rem 4rem
+    color-mix(in oklch, var(--foreground) 8%, transparent);
+  animation: captionConsoleEnter 280ms 70ms cubic-bezier(0.23, 1, 0.32, 1)
+    both;
+}
+
+.captionConsoleHeader,
+.captionConsoleFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.captionConsoleHeader {
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.captionLiveLabel,
+.captionConsoleFooter span,
+.captionTrustRow span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.captionLiveLabel {
+  color: var(--primary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.captionLiveLabel svg,
+.captionConsoleFooter svg,
+.captionTrustRow svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.captionTimer,
+.captionTime {
+  color: var(--caption-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.captionWaveform {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.28rem;
+  height: 5rem;
+  padding: 0 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.captionWaveform span {
+  width: 0.22rem;
+  min-height: 0.55rem;
+  border-radius: 999px;
+  background: var(--primary);
+  transform-origin: center;
+  animation: captionWave 1.6s ease-in-out infinite;
+}
+
+.captionTranscript {
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem 1.1rem;
+}
+
+.captionLine {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  gap: 0.8rem;
+}
+
+.captionLine strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+}
+
+.captionLine p {
+  margin: 0.25rem 0 0;
+  color: var(--caption-muted);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.captionSpeakerAi {
+  color: var(--primary);
+}
+
+.captionSpeakerAi svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.captionWordActive {
+  padding: 0.08rem 0.25rem;
+  border-radius: 0.25rem;
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  color: var(--foreground);
+  animation: captionWord 1.8s ease-in-out infinite;
+}
+
+.captionLine:nth-child(2) .captionWordActive:last-child {
+  animation-delay: 220ms;
+}
+
+.captionConsoleFooter {
+  justify-content: flex-start;
+  gap: 1.2rem;
+  padding: 0.85rem 1.1rem;
+  border-top: 1px solid var(--border);
+  color: var(--caption-muted);
+  font-size: 0.68rem;
+}
+
+.captionTrustRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+  margin-top: 1.2rem;
+  color: var(--caption-muted);
+  font-size: 0.68rem;
+}
+
+.captionTrustRow svg {
+  color: var(--primary);
+}
+
+@keyframes captionEnter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes captionConsoleEnter {
+  from {
+    opacity: 0;
+    transform: translateY(0.65rem) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes captionWave {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scaleY(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes captionWord {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: translateY(0);
+  }
+  45%,
+  65% {
+    opacity: 1;
+    transform: translateY(-0.08rem);
+  }
+}
+
+@media (max-width: 1023px) {
+  .captionPreview {
+    min-height: 44rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 640px) {
+  .captionTopbar {
+    align-items: flex-start;
+  }
+
+  .captionSession {
+    max-width: 8rem;
+  }
+
+  .captionContent {
+    padding-block: 2.5rem;
+  }
+
+  .captionHeadline {
+    font-size: clamp(2.7rem, 13vw, 4rem);
+  }
+
+  .captionWaveform {
+    gap: 0.16rem;
+  }
+
+  .captionWaveform span:nth-child(n + 17) {
+    display: none;
+  }
+
+  .captionConsoleFooter {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .captionContent,
+  .captionConsole,
+  .captionWaveform span,
+  .captionWordActive {
+    animation: none;
+  }
+}

@@ -1,37 +1,25 @@
-import Image from "next/image"
-
 import { cn } from "@/lib/utils"
 
 type BrandMarkProps = {
   className?: string
-  priority?: boolean
 }
 
-export function BrandMark({ className, priority = false }: BrandMarkProps) {
+export function BrandMark({ className }: BrandMarkProps) {
   return (
     <span
       aria-hidden="true"
       className={cn(
-        "relative block size-9 shrink-0 overflow-hidden rounded-xl border border-border bg-background shadow-sm dark:border-transparent",
+        "relative block size-9 shrink-0 overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-sm dark:border-transparent",
         className
       )}
     >
-      <Image
-        alt=""
-        className="object-contain dark:hidden"
-        fill
-        priority={priority}
-        sizes="40px"
-        src="/images/logos/logo-dark.png"
-      />
-      <Image
-        alt=""
-        className="hidden object-contain dark:block"
-        fill
-        priority={priority}
-        sizes="40px"
-        src="/images/logos/logo-light.png"
-      />
+      <svg
+        aria-hidden="true"
+        className="size-full p-1.5"
+        viewBox="245 268 770 720"
+      >
+        <use href="/images/logos/justai-logo.svg#justai-logo" />
+      </svg>
     </span>
   )
 }

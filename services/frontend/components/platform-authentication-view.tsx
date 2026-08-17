@@ -1,10 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ExternalLink,
   LoaderCircle,
-  Plus,
   RefreshCw,
   ShieldCheck,
   TestTube2,
@@ -46,6 +45,10 @@ type ProviderForm = {
   enabled: boolean
 }
 
+type Props = {
+  createRequest?: number
+}
+
 const emptyForm: ProviderForm = {
   slug: "",
   displayName: "",
@@ -56,7 +59,7 @@ const emptyForm: ProviderForm = {
   enabled: true,
 }
 
-export function PlatformAuthenticationView() {
+export function PlatformAuthenticationView({ createRequest }: Props) {
   const [providers, setProviders] = useState<AdminOIDCProvider[]>([])
   const [callbackUrl, setCallbackUrl] = useState("")
   const [loading, setLoading] = useState(true)
@@ -66,6 +69,7 @@ export function PlatformAuthenticationView() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<ProviderForm>(emptyForm)
+  const createRequestRef = useRef(createRequest ?? 0)
 
   const load = useCallback(async () => {
     setError("")
@@ -88,12 +92,18 @@ export function PlatformAuthenticationView() {
     return () => window.clearTimeout(timer)
   }, [load])
 
-  function openCreate() {
+  const openCreate = useCallback(() => {
     setEditingId(null)
     setForm(emptyForm)
     setError("")
     setDialogOpen(true)
-  }
+  }, [])
+
+  useEffect(() => {
+    if (!createRequest || createRequest === createRequestRef.current) return
+    createRequestRef.current = createRequest
+    openCreate()
+  }, [createRequest, openCreate])
 
   function openEdit(provider: AdminOIDCProvider) {
     setEditingId(provider.id)
@@ -186,9 +196,6 @@ export function PlatformAuthenticationView() {
             <div className="flex gap-2">
               <Button aria-label="Refresh OIDC providers" onClick={() => void load()} size="icon-sm" variant="outline">
                 <RefreshCw />
-              </Button>
-              <Button onClick={openCreate} size="sm">
-                <Plus data-icon="inline-start" /> Add provider
               </Button>
             </div>
           </CardAction>

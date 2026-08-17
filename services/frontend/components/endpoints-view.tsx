@@ -1,14 +1,14 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   CheckCircle2,
   CircleAlert,
   Cloud,
   KeyRound,
+  LockKeyhole,
   MoreHorizontal,
   Pencil,
-  Plus,
   Radio,
   RefreshCw,
   Server,
@@ -77,6 +77,7 @@ type Props = {
   platformAdmin?: boolean
   apiBasePath?: string
   defaultScopeType?: "global" | "organization" | "user"
+  createRequest?: number
 }
 
 type EndpointForm = {
@@ -187,6 +188,7 @@ export function EndpointsView({
   platformAdmin = false,
   apiBasePath = "/api/v1/endpoints",
   defaultScopeType,
+  createRequest,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [editingEndpoint, setEditingEndpoint] = useState<Endpoint | null>(null)
@@ -200,10 +202,12 @@ export function EndpointsView({
   >([])
   const [discoveringModels, setDiscoveringModels] = useState(false)
   const discoveryRequestRef = useRef(0)
+  const createRequestRef = useRef(createRequest ?? 0)
   const [capabilityMatrix, setCapabilityMatrix] = useState<
     Record<string, string[]>
   >({})
   const endpointPath = apiBasePath.replace(/\/+$/, "")
+  const isPlatformCatalog = apiBasePath.startsWith("/api/v1/admin/")
 
   useEffect(() => {
     void api
@@ -235,11 +239,14 @@ export function EndpointsView({
     organizationRole === "owner" ||
     organizationRole === "admin"
   const canManageEndpoint = (endpoint: Endpoint) => {
+    if (endpoint.scopeType === "global") {
+      return platformAdmin && isPlatformCatalog
+    }
     if (platformAdmin) return true
     if (userId === undefined && organizationRole === undefined) return true
     if (endpoint.scopeType === "user") return endpoint.scopeId === userId
     if (endpoint.scopeType === "organization") return canManageOrganization
-    return platformAdmin
+    return false
   }
 
   function update<K extends keyof EndpointForm>(
@@ -264,7 +271,7 @@ export function EndpointsView({
     setDiscoveredModels([])
   }
 
-  function resetEditor() {
+  const resetEditor = useCallback(() => {
     discoveryRequestRef.current += 1
     setEditingEndpoint(null)
     setDiscoveredModels([])
@@ -272,15 +279,22 @@ export function EndpointsView({
     setForm({
       ...defaults,
       scopeType:
-        defaultScopeType ?? (canManageOrganization ? defaults.scopeType : "user"),
+        defaultScopeType ??
+        (canManageOrganization ? defaults.scopeType : "user"),
     })
-  }
+  }, [canManageOrganization, defaultScopeType])
 
-  function openCreate() {
+  const openCreate = useCallback(() => {
     resetEditor()
     setNotice("")
     setOpen(true)
-  }
+  }, [resetEditor])
+
+  useEffect(() => {
+    if (!createRequest || createRequest === createRequestRef.current) return
+    createRequestRef.current = createRequest
+    openCreate()
+  }, [createRequest, openCreate])
 
   function openEdit(endpoint: Endpoint) {
     setEditingEndpoint(endpoint)
@@ -515,18 +529,28 @@ export function EndpointsView({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex justify-end">
-        <Button onClick={openCreate}>
-          <Plus data-icon="inline-start" aria-hidden="true" />
-          Add endpoint
-        </Button>
-      </div>
-
       {notice && (
         <div className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
           {notice}
         </div>
       )}
+
+      {!isPlatformCatalog &&
+        endpoints.some((item) => item.scopeType === "global") && (
+          <div className="flex items-start gap-3 rounded-xl border border-dashed bg-muted/30 px-4 py-3 text-sm">
+            <LockKeyhole
+              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <div>
+              <p className="font-medium">Platform-managed endpoints</p>
+              <p className="mt-1 text-muted-foreground">
+                These endpoints are inherited by this workspace and can only be
+                changed from the Platform Admin catalog.
+              </p>
+            </div>
+          </div>
+        )}
 
       <div className="grid gap-3 lg:grid-cols-2">
         {endpoints.map((endpoint) => {
@@ -554,7 +578,10 @@ export function EndpointsView({
                     </span>
                     {endpoint.capabilities?.vision && (
                       <span className="text-xs">
-                        Vision: {endpoint.visionModel || endpoint.chatModel || "uses chat model"}
+                        Vision:{" "}
+                        {endpoint.visionModel ||
+                          endpoint.chatModel ||
+                          "uses chat model"}
                       </span>
                     )}
                   </CardDescription>
@@ -562,7 +589,20 @@ export function EndpointsView({
               </CardHeader>
               <CardContent className="space-y-4 pt-3">
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <Badge variant="secondary">{endpoint.scopeType}</Badge>
+                  {endpoint.scopeType === "global" ? (
+                    <Badge variant="outline" className="gap-1.5">
+                      <LockKeyhole aria-hidden="true" />
+                      {isPlatformCatalog
+                        ? "Platform catalog"
+                        : "Platform-managed"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">
+                      {endpoint.scopeType === "organization"
+                        ? "Workspace"
+                        : "Personal"}
+                    </Badge>
+                  )}
                   <Badge variant="outline" className="gap-1.5">
                     <span
                       className={`size-1.5 rounded-full ${endpoint.enabled ? "bg-primary" : "bg-muted-foreground"}`}
@@ -613,7 +653,7 @@ export function EndpointsView({
                         <Button
                           variant="outline"
                           size="sm"
-                          aria-label={`Actions for ${endpoint.name}`}
+                          aria-label={`${manageable ? "Actions" : "Test"} for ${endpoint.name}`}
                         />
                       }
                     >
@@ -621,7 +661,7 @@ export function EndpointsView({
                         data-icon="inline-start"
                         aria-hidden="true"
                       />
-                      Actions
+                      {manageable ? "Actions" : "Test"}
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
@@ -751,9 +791,9 @@ export function EndpointsView({
                 </div>
                 <Field>
                   <FieldLabel>Visibility</FieldLabel>
-                    <Select
-                      disabled={Boolean(editingEndpoint)}
-                      value={form.scopeType}
+                  <Select
+                    disabled={Boolean(editingEndpoint)}
+                    value={form.scopeType}
                     onValueChange={(value) =>
                       update(
                         "scopeType",
@@ -767,12 +807,10 @@ export function EndpointsView({
                     </SelectTrigger>
                     <SelectContent>
                       {canManageOrganization && (
-                        <SelectItem value="organization">
-                          Organization
-                        </SelectItem>
+                        <SelectItem value="organization">Workspace</SelectItem>
                       )}
                       <SelectItem value="user">Only me</SelectItem>
-                      {platformAdmin && (
+                      {platformAdmin && isPlatformCatalog && (
                         <SelectItem value="global">
                           Global (platform admin)
                         </SelectItem>
@@ -780,17 +818,21 @@ export function EndpointsView({
                     </SelectContent>
                   </Select>
                   <FieldDescription>
-                    Routing precedence is explicit selection, personal,
-                    organization, then global.
+                    Selected endpoints take precedence, followed by personal,
+                    workspace, then platform-managed resources.
                   </FieldDescription>
                 </Field>
                 {platformAdmin && form.scopeType !== "global" && (
                   <Field>
-                    <FieldLabel htmlFor="endpoint-scope-id">Scope ID</FieldLabel>
+                    <FieldLabel htmlFor="endpoint-scope-id">
+                      Scope ID
+                    </FieldLabel>
                     <Input
                       id="endpoint-scope-id"
                       value={form.scopeId}
-                      onChange={(event) => update("scopeId", event.target.value)}
+                      onChange={(event) =>
+                        update("scopeId", event.target.value)
+                      }
                       placeholder="Organization or user UUID"
                       required
                       readOnly={Boolean(editingEndpoint)}
@@ -823,11 +865,14 @@ export function EndpointsView({
                     <Input
                       id="endpoint-api-path"
                       value={form.apiPath}
-                      onChange={(event) => update("apiPath", event.target.value)}
+                      onChange={(event) =>
+                        update("apiPath", event.target.value)
+                      }
                       placeholder="/v1"
                     />
                     <FieldDescription>
-                      Override the provider&apos;s default chat route when using a gateway.
+                      Override the provider&apos;s default chat route when using
+                      a gateway.
                     </FieldDescription>
                   </Field>
                   <Field>
@@ -843,7 +888,8 @@ export function EndpointsView({
                       placeholder="2024-06-20"
                     />
                     <FieldDescription>
-                      Used by providers that require an explicit API version header or path.
+                      Used by providers that require an explicit API version
+                      header or path.
                     </FieldDescription>
                   </Field>
                 </div>
@@ -911,7 +957,8 @@ export function EndpointsView({
                       placeholder="e.g. gpt-4o or gemini-2.5-flash"
                     />
                     <FieldDescription>
-                      Used automatically when a chat includes an image. Leave empty to reuse the chat model.
+                      Used automatically when a chat includes an image. Leave
+                      empty to reuse the chat model.
                     </FieldDescription>
                   </Field>
                 )}
@@ -999,7 +1046,9 @@ export function EndpointsView({
                 )}
                 <div className="grid gap-4 rounded-xl border p-3 sm:grid-cols-3">
                   <Field>
-                    <FieldLabel htmlFor="endpoint-timeout">Timeout (seconds)</FieldLabel>
+                    <FieldLabel htmlFor="endpoint-timeout">
+                      Timeout (seconds)
+                    </FieldLabel>
                     <Input
                       id="endpoint-timeout"
                       type="number"
@@ -1041,7 +1090,8 @@ export function EndpointsView({
                     />
                   </Field>
                   <FieldDescription className="sm:col-span-3">
-                    These runtime settings are shared by organization and platform-admin endpoint configuration.
+                    These runtime settings are shared by organization and
+                    platform-admin endpoint configuration.
                   </FieldDescription>
                 </div>
                 <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2 lg:grid-cols-4">

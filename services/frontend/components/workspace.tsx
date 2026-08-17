@@ -911,7 +911,7 @@ function WorkspaceLoading() {
   return (
     <main className="flex min-h-full flex-1 items-center justify-center bg-background p-6">
       <div className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
-        <BrandMark className="size-10" priority />
+        <BrandMark className="size-10" />
         <p className="text-sm text-muted-foreground">Loading JustAI…</p>
       </div>
     </main>

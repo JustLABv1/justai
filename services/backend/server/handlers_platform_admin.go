@@ -13,6 +13,18 @@ import (
 	"justai-backend/middleware"
 )
 
+const platformCatalogRouteKey = "justai.platform_catalog_route"
+
+func markPlatformCatalogRoute(c *gin.Context) {
+	c.Set(platformCatalogRouteKey, true)
+}
+
+func isPlatformCatalogRoute(c *gin.Context) bool {
+	value, exists := c.Get(platformCatalogRouteKey)
+	marked, ok := value.(bool)
+	return exists && ok && marked
+}
+
 type platformSettingsRequest struct {
 	LoginEnabled         *bool   `json:"loginEnabled"`
 	LocalAuthEnabled     *bool   `json:"localAuthEnabled"`
@@ -646,6 +658,7 @@ func (a *App) createPlatformEndpoint(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
+	markPlatformCatalogRoute(c)
 	if raw := strings.TrimSpace(c.GetHeader("X-Organization-ID")); raw != "" {
 		if organizationID, err := uuid.Parse(raw); err == nil {
 			c.Set(middleware.OrgIDKey, organizationID)
@@ -662,6 +675,7 @@ func (a *App) updatePlatformEndpoint(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
+	markPlatformCatalogRoute(c)
 	a.updateEndpoint(c)
 	if c.Writer.Status() < http.StatusBadRequest {
 		if id, err := uuid.Parse(c.Param("id")); err == nil {
@@ -674,6 +688,7 @@ func (a *App) deletePlatformEndpoint(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
+	markPlatformCatalogRoute(c)
 	if id, err := uuid.Parse(c.Param("id")); err == nil {
 		a.deleteEndpoint(c)
 		if c.Writer.Status() < http.StatusBadRequest {
@@ -734,6 +749,7 @@ func (a *App) createPlatformMCPServer(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
+	markPlatformCatalogRoute(c)
 	a.createMCPServer(c)
 	if c.Writer.Status() < http.StatusBadRequest {
 		a.writePlatformAudit(c, "platform.mcp.created", "mcp_server", nil, nil)
@@ -744,6 +760,7 @@ func (a *App) updatePlatformMCPServer(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
+	markPlatformCatalogRoute(c)
 	a.updateMCPServer(c)
 	if c.Writer.Status() < http.StatusBadRequest {
 		if id, err := uuid.Parse(c.Param("id")); err == nil {
@@ -756,6 +773,7 @@ func (a *App) deletePlatformMCPServer(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
+	markPlatformCatalogRoute(c)
 	if id, err := uuid.Parse(c.Param("id")); err == nil {
 		a.deleteMCPServer(c)
 		if c.Writer.Status() < http.StatusBadRequest {
@@ -770,6 +788,7 @@ func (a *App) testPlatformMCPServer(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
+	markPlatformCatalogRoute(c)
 	a.testMCPServer(c)
 	if c.Writer.Status() < http.StatusBadRequest {
 		if id, err := uuid.Parse(c.Param("id")); err == nil {
@@ -782,6 +801,7 @@ func (a *App) discoverPlatformMCPTools(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
+	markPlatformCatalogRoute(c)
 	a.listMCPTools(c)
 	if c.Writer.Status() < http.StatusBadRequest {
 		if id, err := uuid.Parse(c.Param("id")); err == nil {

@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { CalendarClock, LoaderCircle, Megaphone, Plus, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { CalendarClock, LoaderCircle, Megaphone, Trash2 } from "lucide-react"
 
 import { api } from "@/lib/api"
 import { sortPlatformBanners } from "@/lib/platform-config-logic"
@@ -11,7 +11,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -96,7 +95,11 @@ function badgeVariant(state: string): "default" | "secondary" | "outline" | "des
   return "secondary"
 }
 
-export function PlatformAnnouncementsView() {
+type Props = {
+  createRequest?: number
+}
+
+export function PlatformAnnouncementsView({ createRequest }: Props) {
   const [banners, setBanners] = useState<PlatformBanner[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -104,6 +107,7 @@ export function PlatformAnnouncementsView() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<BannerForm>(emptyForm)
+  const createRequestRef = useRef(createRequest ?? 0)
 
   const load = useCallback(async () => {
     setError("")
@@ -124,12 +128,18 @@ export function PlatformAnnouncementsView() {
 
   const sortedBanners = useMemo(() => sortPlatformBanners(banners), [banners])
 
-  function openCreate() {
+  const openCreate = useCallback(() => {
     setEditingId(null)
     setForm({ ...emptyForm, startsAt: toDateTimeInput(new Date()) })
     setError("")
     setDialogOpen(true)
-  }
+  }, [])
+
+  useEffect(() => {
+    if (!createRequest || createRequest === createRequestRef.current) return
+    createRequestRef.current = createRequest
+    openCreate()
+  }, [createRequest, openCreate])
 
   function openEdit(banner: PlatformBanner) {
     setEditingId(banner.id)
@@ -213,11 +223,6 @@ export function PlatformAnnouncementsView() {
           <CardDescription>
             Scheduled messages appear above login, workspace, administration, and public pages. Higher priority messages appear first.
           </CardDescription>
-          <CardAction>
-            <Button onClick={openCreate} size="sm">
-              <Plus data-icon="inline-start" /> Add announcement
-            </Button>
-          </CardAction>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {loading ? (

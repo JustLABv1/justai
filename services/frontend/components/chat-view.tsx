@@ -1059,7 +1059,7 @@ function EmptyThread({ children }: { children?: ReactNode }) {
       <div className="flex min-h-[calc(100svh-8rem)] w-full flex-col items-center justify-center px-5 py-12 text-center">
         <div className="flex w-full max-w-3xl flex-col items-center">
           <div className="mb-3 flex w-full items-center justify-center gap-3">
-            <BrandMark className="size-12 rounded-full" priority />
+            <BrandMark className="size-12 rounded-full" />
             <span className="text-2xl font-semibold tracking-[-0.04em]">
               JustAI
             </span>

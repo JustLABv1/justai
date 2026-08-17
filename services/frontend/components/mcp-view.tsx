@@ -1,14 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Check,
   KeyRound,
   LoaderCircle,
+  LockKeyhole,
   MoreHorizontal,
   Pencil,
   Plug,
-  Plus,
   ShieldCheck,
   TerminalSquare,
   Trash2,
@@ -73,6 +73,7 @@ type Props = {
   organizationRole?: string
   userId?: string
   platformAdmin?: boolean
+  createRequest?: number
 }
 
 type MCPForm = {
@@ -109,6 +110,7 @@ export function MCPView({
   organizationRole,
   userId,
   platformAdmin = false,
+  createRequest,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<MCPForm>(emptyForm)
@@ -120,16 +122,33 @@ export function MCPView({
   const [busyId, setBusyId] = useState("")
   const [saving, setSaving] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<MCPServer | null>(null)
+  const createRequestRef = useRef(createRequest ?? 0)
   const canManageOrganization =
     platformAdmin ||
     organizationRole === "owner" ||
     organizationRole === "admin"
 
   const canManageServer = (server: MCPServer) => {
+    if (server.scopeType === "global") return false
     if (userId === undefined && organizationRole === undefined) return true
     if (server.scopeType === "user") return server.scopeId === userId
     return server.scopeType === "organization" && canManageOrganization
   }
+
+  const openCreate = useCallback(() => {
+    setEditingServer(null)
+    setForm({
+      ...emptyForm,
+      scopeType: canManageOrganization ? "organization" : "user",
+    })
+    setOpen(true)
+  }, [canManageOrganization])
+
+  useEffect(() => {
+    if (!createRequest || createRequest === createRequestRef.current) return
+    createRequestRef.current = createRequest
+    openCreate()
+  }, [createRequest, openCreate])
 
   function update<K extends keyof MCPForm>(key: K, value: MCPForm[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -308,24 +327,24 @@ export function MCPView({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <Button
-          onClick={() => {
-            setEditingServer(null)
-            setForm({
-              ...emptyForm,
-              scopeType: canManageOrganization ? "organization" : "user",
-            })
-            setOpen(true)
-          }}
-        >
-          <Plus data-icon="inline-start" aria-hidden="true" />
-          Add MCP server
-        </Button>
-      </div>
       {notice && (
         <div className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
           {notice}
+        </div>
+      )}
+      {servers.some((server) => server.scopeType === "global") && (
+        <div className="flex items-start gap-3 rounded-xl border border-dashed bg-muted/30 px-4 py-3 text-sm">
+          <LockKeyhole
+            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <div>
+            <p className="font-medium">Platform-managed MCP servers</p>
+            <p className="mt-1 text-muted-foreground">
+              These servers are inherited by this workspace and can only be
+              changed from the Platform Admin catalog.
+            </p>
+          </div>
         </div>
       )}
       <div className="grid gap-3 lg:grid-cols-2">
@@ -353,7 +372,17 @@ export function MCPView({
             </CardHeader>
             <CardContent className="space-y-4 pt-3">
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <Badge variant="secondary">{server.scopeType}</Badge>
+                {server.scopeType === "global" ? (
+                  <Badge variant="outline" className="gap-1.5">
+                    <LockKeyhole aria-hidden="true" /> Platform-managed
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">
+                    {server.scopeType === "organization"
+                      ? "Workspace"
+                      : "Personal"}
+                  </Badge>
+                )}
                 {!server.enabled && <Badge variant="outline">Disabled</Badge>}
                 {server.trustedReadOnly && (
                   <Badge variant="outline" className="gap-1.5">
@@ -522,17 +551,7 @@ export function MCPView({
                 Add a remote server over Streamable HTTP or legacy HTTP+SSE.
                 JustAI does not run arbitrary stdio processes from the web app.
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setForm({
-                    ...emptyForm,
-                    scopeType: canManageOrganization ? "organization" : "user",
-                  })
-                  setOpen(true)
-                }}
-              >
+              <Button variant="outline" size="sm" onClick={openCreate}>
                 Add a server
               </Button>
             </CardContent>
@@ -658,9 +677,7 @@ export function MCPView({
                     </SelectTrigger>
                     <SelectContent>
                       {canManageOrganization && (
-                        <SelectItem value="organization">
-                          Organization
-                        </SelectItem>
+                        <SelectItem value="organization">Workspace</SelectItem>
                       )}
                       <SelectItem value="user">Only me</SelectItem>
                     </SelectContent>

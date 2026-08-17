@@ -193,7 +193,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("endpoint not found"))
 		return
 	}
-	if err := a.canManageEndpoint(current, principal, organizationID, middleware.GetOrganizationRole(c)); err != nil {
+	if err := a.canManageEndpoint(c, current, principal, organizationID, middleware.GetOrganizationRole(c)); err != nil {
 		writeError(c, http.StatusForbidden, err)
 		return
 	}
@@ -324,7 +324,7 @@ func (a *App) deleteEndpoint(c *gin.Context) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("endpoint not found"))
 		return
 	}
-	if err := a.canManageEndpoint(current, principal, organizationID, middleware.GetOrganizationRole(c)); err != nil {
+	if err := a.canManageEndpoint(c, current, principal, organizationID, middleware.GetOrganizationRole(c)); err != nil {
 		writeError(c, http.StatusForbidden, err)
 		return
 	}
@@ -537,8 +537,8 @@ func (a *App) providerEndpoint(ctx context.Context, id uuid.UUID) (provider.Endp
 func (a *App) authorizeEndpointScope(c *gin.Context, scopeType string, principal middleware.Principal, organizationID uuid.UUID, requestedScopeID *uuid.UUID) (any, error) {
 	switch scopeType {
 	case "global":
-		if !principal.PlatformAdmin {
-			return nil, fmt.Errorf("global endpoints require platform admin access")
+		if !principal.PlatformAdmin || !isPlatformCatalogRoute(c) {
+			return nil, fmt.Errorf("global endpoints can only be managed from the platform admin catalog")
 		}
 		return nil, nil
 	case "organization":
@@ -568,7 +568,7 @@ func (a *App) authorizeEndpointScope(c *gin.Context, scopeType string, principal
 	}
 }
 
-func (a *App) canManageEndpoint(item models.Endpoint, principal middleware.Principal, organizationID uuid.UUID, role string) error {
+func (a *App) canManageEndpoint(c *gin.Context, item models.Endpoint, principal middleware.Principal, organizationID uuid.UUID, role string) error {
 	if err := a.canUseEndpoint(item, principal, organizationID); err != nil {
 		return err
 	}
@@ -581,7 +581,7 @@ func (a *App) canManageEndpoint(item models.Endpoint, principal middleware.Princ
 		}
 		return fmt.Errorf("organization endpoints require owner or admin access")
 	}
-	if item.ScopeType == "global" && principal.PlatformAdmin {
+	if item.ScopeType == "global" && principal.PlatformAdmin && isPlatformCatalogRoute(c) {
 		return nil
 	}
 	return fmt.Errorf("endpoint cannot be managed by this user")

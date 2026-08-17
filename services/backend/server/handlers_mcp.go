@@ -82,8 +82,8 @@ func (a *App) createMCPServer(c *gin.Context) {
 			scopeID = principal.UserID
 		}
 	} else if scopeType == "global" {
-		if !principal.PlatformAdmin {
-			writeError(c, http.StatusForbidden, fmt.Errorf("global MCP servers require platform admin access"))
+		if !principal.PlatformAdmin || !isPlatformCatalogRoute(c) {
+			writeError(c, http.StatusForbidden, fmt.Errorf("global MCP servers can only be managed from the platform admin catalog"))
 			return
 		}
 		scopeID = nil
@@ -471,11 +471,14 @@ func (a *App) authorizeMCPServerManage(c *gin.Context, rawID string) error {
 		}
 		return nil
 	}
+	if scopeType == "global" {
+		if principal.PlatformAdmin && isPlatformCatalogRoute(c) {
+			return nil
+		}
+		return fmt.Errorf("global MCP servers can only be managed from the platform admin catalog")
+	}
 	if principal.PlatformAdmin {
 		return nil
-	}
-	if scopeType == "global" {
-		return fmt.Errorf("global MCP servers can only be managed by a platform administrator")
 	}
 	if role := middleware.GetOrganizationRole(c); role != "owner" && role != "admin" {
 		return fmt.Errorf("organization MCP servers require owner or admin access")

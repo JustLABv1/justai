@@ -1,11 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Check,
   LoaderCircle,
   Pencil,
-  Plus,
   Trash2,
   UserPlus,
   Users,
@@ -65,6 +64,8 @@ type SettingsViewProps = {
   onOrganizationSelect: (organizationId: string) => void
   onOrganizationCreated: (organization: Organization) => void
   onOrganizationUpdated: (organization: Organization) => void
+  workspaceCreateRequest?: number
+  memberCreateRequest?: number
   section?: "workspace" | "members"
 }
 
@@ -75,6 +76,8 @@ export function SettingsView({
   onOrganizationSelect,
   onOrganizationCreated,
   onOrganizationUpdated,
+  workspaceCreateRequest,
+  memberCreateRequest,
   section = "workspace",
 }: SettingsViewProps) {
   const [members, setMembers] = useState<OrganizationMember[]>([])
@@ -91,6 +94,8 @@ export function SettingsView({
   const [removeTarget, setRemoveTarget] = useState<OrganizationMember | null>(
     null
   )
+  const workspaceCreateRequestRef = useRef(workspaceCreateRequest ?? 0)
+  const memberCreateRequestRef = useRef(memberCreateRequest ?? 0)
 
   const activeOrganization =
     organizations.find(
@@ -146,6 +151,17 @@ export function SettingsView({
         .toUpperCase(),
     []
   )
+
+  const openWorkspaceDialog = useCallback(() => {
+    setWorkspaceName("")
+    setWorkspaceDialogOpen(true)
+  }, [])
+
+  const openMemberDialog = useCallback(() => {
+    setMemberEmail("")
+    setMemberRole("member")
+    setMemberDialogOpen(true)
+  }, [])
 
   function resetWorkspaceDialog() {
     setWorkspaceName("")
@@ -268,6 +284,26 @@ export function SettingsView({
     }
   }
 
+  useEffect(() => {
+    if (
+      !workspaceCreateRequest ||
+      workspaceCreateRequest === workspaceCreateRequestRef.current
+    )
+      return
+    workspaceCreateRequestRef.current = workspaceCreateRequest
+    openWorkspaceDialog()
+  }, [openWorkspaceDialog, workspaceCreateRequest])
+
+  useEffect(() => {
+    if (
+      !memberCreateRequest ||
+      memberCreateRequest === memberCreateRequestRef.current
+    )
+      return
+    memberCreateRequestRef.current = memberCreateRequest
+    openMemberDialog()
+  }, [memberCreateRequest, openMemberDialog])
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-5">
       {actionError && (
@@ -279,7 +315,7 @@ export function SettingsView({
 
       {!isMembersSection && (
         <Card size="sm">
-          <CardHeader className="flex flex-row items-start justify-between gap-6">
+          <CardHeader className="flex flex-row items-start gap-6">
             <div>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Users aria-hidden="true" /> Workspaces
@@ -288,12 +324,6 @@ export function SettingsView({
                 Each workspace keeps conversations and integrations separate.
               </CardDescription>
             </div>
-            <Button
-              className="shrink-0"
-              onClick={() => setWorkspaceDialogOpen(true)}
-            >
-              <Plus data-icon="inline-start" /> New workspace
-            </Button>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -370,22 +400,13 @@ export function SettingsView({
               </div>
             ) : (
               <>
-                <div className="mb-5 flex items-center justify-between gap-4">
+                <div className="mb-5">
                   <div>
                     <h3 className="text-base font-medium">Members</h3>
                     <p className="mt-1 text-sm text-muted-foreground">
                       People with access to this workspace.
                     </p>
                   </div>
-                  {canManageMembers && (
-                    <Button
-                      className="shrink-0"
-                      onClick={() => setMemberDialogOpen(true)}
-                      variant="outline"
-                    >
-                      <UserPlus data-icon="inline-start" /> Add member
-                    </Button>
-                  )}
                 </div>
                 {membersError && (
                   <Alert className="mb-4" variant="destructive">
