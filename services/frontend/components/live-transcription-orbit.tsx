@@ -258,6 +258,7 @@ export function LiveTranscriptionOrbit({
     ).map((message) => ({
       id: message.id,
       timestamp: formatOffset(message.startOffsetMs),
+      startOffsetMs: message.startOffsetMs,
       speakerId: message.speakerKey,
       text: message.text,
     }))
@@ -265,6 +266,7 @@ export function LiveTranscriptionOrbit({
       lines.push({
         id: "partial",
         timestamp: formatOffset(snapshot.segments.at(-1)?.endOffsetMs ?? 0),
+        startOffsetMs: snapshot.segments.at(-1)?.endOffsetMs ?? 0,
         speakerId:
           partialSpeakerId ||
           (partialSourceId

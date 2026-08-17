@@ -1,7 +1,8 @@
 .productionVariant {
   display: flex;
   min-width: 0;
-  min-height: calc(100svh - 4rem);
+  min-height: 0;
+  height: 100%;
   flex-direction: column;
   overflow: hidden;
 }
@@ -12,7 +13,8 @@
   flex: 1;
   flex-direction: column;
   gap: 12px;
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
 }
 
@@ -37,7 +39,7 @@
 .orbitWorkspace {
   display: grid;
   min-height: 0;
-  flex: 1;
+  flex: 1 1 auto;
   grid-template-columns: minmax(0, 1fr) 252px;
   gap: 16px;
 }
@@ -45,13 +47,14 @@
 .orbitCanvas {
   position: relative;
   min-height: 0;
+  height: 100%;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   background: color-mix(in oklch, var(--card) 82%, var(--background));
   box-shadow: var(--shadow-sm);
   --orbit-radius: min(27vw, 248px);
-  min-height: 510px;
+  min-height: 360px;
 }
 
 .orbitCanvas::before {
@@ -252,9 +255,11 @@
   display: flex;
   min-width: 0;
   min-height: 0;
+  max-height: 100%;
   flex-direction: column;
   gap: 12px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .selectedSpeakerCard {
@@ -268,7 +273,7 @@
   display: flex;
   min-width: 0;
   max-width: 100%;
-  max-height: min(calc(42svh + 64px), 424px);
+  max-height: min(calc(36svh + 56px), 360px);
   flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
@@ -288,8 +293,8 @@
   min-height: 0;
   min-width: 0;
   max-width: 100%;
-  height: min(42svh, 360px);
-  max-height: min(42svh, 360px);
+  height: min(34svh, 300px);
+  max-height: min(34svh, 300px);
   flex-direction: column;
   gap: 1px;
   overflow: hidden;
@@ -322,7 +327,7 @@
 @media (max-width: 720px) {
   .sessionHeader { min-height: 64px; padding-inline: 14px; }
   .productionContent { padding: 10px 10px 14px; }
-  .orbitCanvas { --orbit-radius: min(34vw, 168px); min-height: 470px; }
+  .orbitCanvas { --orbit-radius: min(34vw, 168px); min-height: 430px; }
   .productionVariant .orbitCanvas { --orbit-radius: min(27vw, 150px); }
   .speakerNode { width: 116px; }
   .speakerAvatar { transform: translate(-50%, -50%) scale(0.88); }

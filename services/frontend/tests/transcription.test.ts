@@ -1,11 +1,12 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import type { TranscriptionSegment } from "../lib/types.ts"
+import type { TranscriptionSegment, TranscriptionSource } from "../lib/types.ts"
 import {
   groupTranscriptionSegments,
   joinTranscriptText,
   mergeTranscriptionSegments,
+  upsertTranscriptionSource,
 } from "../lib/transcription.ts"
 
 function segment(
@@ -100,4 +101,28 @@ test("reconciles snapshot and event segments without dropping either", () => {
 test("joins punctuation without inserting an unwanted space", () => {
   assert.equal(joinTranscriptText("hello", ", world"), "hello, world")
   assert.equal(joinTranscriptText("hello", " world"), "hello world")
+})
+
+test("clears a source signal when a participant pauses or disconnects", () => {
+  const source: TranscriptionSource = {
+    id: "source-a",
+    sessionId: "session",
+    name: "Conference mic",
+    kind: "browser",
+    deviceLabel: "Laptop",
+    status: "connected",
+    clockOffsetMs: 0,
+    connectedAt: null,
+    lastSeenAt: null,
+    signalLevel: 0.8,
+  }
+
+  const paused = upsertTranscriptionSource(
+    [source],
+    { id: source.id },
+    "paused"
+  )
+
+  assert.equal(paused[0]?.status, "paused")
+  assert.equal(paused[0]?.signalLevel, 0)
 })

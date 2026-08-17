@@ -68,6 +68,7 @@ export type RoomSpeaker = {
 export type RoomTranscriptLine = {
   id: string
   timestamp: string
+  startOffsetMs: number
   speakerId: string
   text: string
   provisional?: boolean
@@ -327,9 +328,12 @@ function TranscriptScroller({
                 messageId={line.id}
               >
                 <div className={styles.transcriptLine}>
-                  <span className="w-10 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">
+                  <time
+                    className="w-12 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground"
+                    dateTime={`PT${Math.max(0, Math.floor(line.startOffsetMs / 1000))}S`}
+                  >
                     {line.timestamp}
-                  </span>
+                  </time>
                   <Avatar className="mt-0.5" size="sm">
                     <AvatarFallback
                       style={

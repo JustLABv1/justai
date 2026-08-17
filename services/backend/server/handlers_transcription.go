@@ -394,7 +394,7 @@ func (a *App) createTranscriptionSource(c *gin.Context) {
 
 func lockTranscriptionSourceName(ctx context.Context, transaction *sql.Tx, sessionID uuid.UUID, name string) error {
 	key := sessionID.String() + ":" + strings.ToLower(strings.TrimSpace(name))
-	var ignored int64
+	var ignored any
 	return transaction.QueryRowContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key).Scan(&ignored)
 }
 
@@ -409,11 +409,25 @@ func transcriptionSourceNameTaken(ctx context.Context, queryer transcriptionQuer
 			  AND lower(btrim(name)) = lower(btrim($2))
 		) OR EXISTS (
 			SELECT 1
-			FROM transcription_join_requests
-			WHERE session_id = $1
-			  AND status IN ('pending', 'approved')
-			  AND id <> $3
-			  AND lower(btrim(source_name)) = lower(btrim($2))
+			FROM transcription_join_requests AS join_request
+			WHERE join_request.session_id = $1
+			  AND join_request.id <> $3
+			  AND lower(btrim(join_request.source_name)) = lower(btrim($2))
+			  AND (
+				(
+					join_request.status = 'pending'
+					AND join_request.expires_at > now()
+				)
+				OR (
+					join_request.status = 'approved'
+					AND EXISTS (
+						SELECT 1
+						FROM transcription_sources AS source
+						WHERE source.id = join_request.source_id
+						  AND source.status IN ('pending', 'connected', 'paused')
+					)
+				)
+			  )
 		)`, sessionID, name, excludeRequestID).Scan(&taken)
 	return taken, err
 }
@@ -991,20 +1005,20 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			if json.Unmarshal(payload, &event) != nil {
 				continue
 			}
-				switch event.Type {
-				case "source.level":
-					a.Live.updateSourceLevel(info.SessionID, info.SourceID, event.Level)
-				case "source.pause":
-					if committer, ok := stream.(provider.TurnCommitter); ok {
-						if err := committer.CommitTurn(); err != nil {
-							a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "transcription turn finalization failed: " + err.Error()})
-							return
-						}
+			switch event.Type {
+			case "source.level":
+				a.Live.updateSourceLevel(info.SessionID, info.SourceID, event.Level)
+			case "source.pause":
+				if committer, ok := stream.(provider.TurnCommitter); ok {
+					if err := committer.CommitTurn(); err != nil {
+						a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "transcription turn finalization failed: " + err.Error()})
+						return
 					}
-					a.Live.markSource(info.SessionID, info.SourceID, "paused")
-				case "source.resume":
-					a.Live.markSource(info.SessionID, info.SourceID, "connected")
-				case "transcription.stop":
+				}
+				a.Live.markSource(info.SessionID, info.SourceID, "paused")
+			case "source.resume":
+				a.Live.markSource(info.SessionID, info.SourceID, "connected")
+			case "transcription.stop":
 				if err := stream.Commit(); err != nil {
 					a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "transcription finalization failed: " + err.Error()})
 				}

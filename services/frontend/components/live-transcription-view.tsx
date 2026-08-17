@@ -43,6 +43,7 @@ import { Switch } from "@/components/ui/switch"
 import { api, socketURL } from "@/lib/api"
 import {
   mergeTranscriptionSegments,
+  transcriptionJoinPath,
   upsertTranscriptionSource,
 } from "@/lib/transcription"
 import type {
@@ -91,6 +92,7 @@ export function LiveTranscriptionView({
   const [createOpen, setCreateOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [joinLinkCopied, setJoinLinkCopied] = useState(false)
   const [joinRequests, setJoinRequests] = useState<TranscriptionJoinRequest[]>(
     []
   )
@@ -338,12 +340,13 @@ export function LiveTranscriptionView({
         return
       }
       if (event.type === "transcription.source") {
-		const sourceId = String(data.sourceId ?? "")
-		const sourceData = data.source as Partial<TranscriptionSource> | undefined
-		const status = String(
-		  data.status ?? sourceData?.status ?? "connected"
-		) as TranscriptionSource["status"]
-		if (!sourceId) return
+        const sourceId = String(data.sourceId ?? "")
+        const sourceData =
+          (data.source as Partial<TranscriptionSource> | undefined) ?? {}
+        const status = String(
+          data.status ?? sourceData?.status ?? "connected"
+        ) as TranscriptionSource["status"]
+        if (!sourceId) return
         setSnapshot((current) =>
           current
             ? {
@@ -359,9 +362,9 @@ export function LiveTranscriptionView({
         return
       }
       if (event.type === "transcription.source.level") {
-		const sourceId = String(data.sourceId ?? "")
+        const sourceId = String(data.sourceId ?? "")
         const nextLevel = Number(data.level ?? 0)
-		if (captureSourceIdRef.current === sourceId) setLevel(nextLevel)
+        if (captureSourceIdRef.current === sourceId) setLevel(nextLevel)
         setSnapshot((current) =>
           current
             ? {
@@ -1095,6 +1098,25 @@ export function LiveTranscriptionView({
     }
   }
 
+  const copyJoinLink = async () => {
+    if (!snapshot?.session.joinCode) return
+    try {
+      const joinURL = new URL(
+        transcriptionJoinPath(snapshot.session.joinCode),
+        window.location.origin
+      ).toString()
+      await navigator.clipboard.writeText(joinURL)
+      setJoinLinkCopied(true)
+      window.setTimeout(() => setJoinLinkCopied(false), 1600)
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The room link could not be copied."
+      )
+    }
+  }
+
   const rotateJoinCode = async () => {
     if (!snapshot) return
     try {
@@ -1348,10 +1370,30 @@ export function LiveTranscriptionView({
           <DialogHeader>
             <DialogTitle>Join this room</DialogTitle>
             <DialogDescription>
-              Open /transcription/join on another device. The microphone
-              connects only after you approve it here.
+              Share this persistent link. The microphone connects only after you
+              approve the request here.
             </DialogDescription>
           </DialogHeader>
+          {snapshot?.session.joinCode ? (
+            <div className="flex min-w-0 items-center gap-2 rounded-xl border bg-muted/30 p-3">
+              <code className="min-w-0 flex-1 text-xs break-all text-muted-foreground">
+                {new URL(
+                  transcriptionJoinPath(snapshot.session.joinCode),
+                  typeof window === "undefined"
+                    ? "http://localhost"
+                    : window.location.origin
+                ).toString()}
+              </code>
+              <Button
+                aria-label="Copy room link"
+                onClick={() => void copyJoinLink()}
+                size="icon-sm"
+                variant="outline"
+              >
+                {joinLinkCopied ? <Check /> : <Copy />}
+              </Button>
+            </div>
+          ) : null}
           <div className="flex items-center justify-between rounded-xl border bg-muted/30 p-4">
             <span className="font-mono text-2xl font-semibold tracking-[0.32em]">
               {snapshot?.session.joinCode ?? "--------"}

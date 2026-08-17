@@ -18,17 +18,22 @@ export function upsertTranscriptionSource(
   status?: TranscriptionSource["status"]
 ) {
   const existing = sources.find((item) => item.id === source.id)
+  const nextStatus =
+    status ?? source.status ?? existing?.status ?? ("pending" as const)
+  const inactive = ["paused", "disconnected", "stopped"].includes(nextStatus)
   const next: TranscriptionSource = {
     id: source.id,
     sessionId: source.sessionId ?? existing?.sessionId ?? "",
     name: source.name ?? existing?.name ?? "Room microphone",
     kind: source.kind ?? existing?.kind ?? "browser",
     deviceLabel: source.deviceLabel ?? existing?.deviceLabel ?? "",
-    status: status ?? source.status ?? existing?.status ?? "pending",
+    status: nextStatus,
     clockOffsetMs: source.clockOffsetMs ?? existing?.clockOffsetMs ?? 0,
     connectedAt: source.connectedAt ?? existing?.connectedAt ?? null,
     lastSeenAt: source.lastSeenAt ?? existing?.lastSeenAt ?? null,
-    signalLevel: existing?.signalLevel ?? source.signalLevel ?? 0,
+    signalLevel: inactive
+      ? 0
+      : (existing?.signalLevel ?? source.signalLevel ?? 0),
   }
   if (!existing) return [...sources, next]
   return sources.map((item) => (item.id === source.id ? next : item))

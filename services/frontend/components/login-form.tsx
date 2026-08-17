@@ -37,7 +37,7 @@ export function LoginForm({
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
-  const { config } = usePlatformConfig()
+  const { config, loading: configLoading } = usePlatformConfig()
   const oidcProviders = config?.oidcProviders?.length
     ? config.oidcProviders
     : config?.oidcEnabled
@@ -50,17 +50,17 @@ export function LoginForm({
         ]
       : []
   const oidcEnabled = config?.oidcEnabled ?? false
+  const oidcAvailable = oidcEnabled && oidcProviders.length > 0
   const loginEnabled = config?.loginEnabled !== false
   const localAuthEnabled = config?.localAuthEnabled !== false
+  const localAuthVisible = !configLoading && localAuthEnabled
   const signupEnabled = config?.signupEnabled !== false
   const maintenanceMessage = config?.maintenanceMessage ?? ""
 
   const isRegister = mode === "register"
-  // Keep the sign-in form usable even when the platform gate is closed. The
-  // backend intentionally allows platform administrators to recover the
-  // deployment while rejecting regular users.
   const modeGateEnabled = isRegister ? signupEnabled : loginEnabled
-  const modeEnabled = isRegister ? signupEnabled && localAuthEnabled : true
+  const modeEnabled =
+    localAuthVisible && (isRegister ? signupEnabled : loginEnabled)
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode)
@@ -72,6 +72,11 @@ export function LoginForm({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError("")
+
+    if (!localAuthVisible) {
+      setError("Local password authentication is unavailable.")
+      return
+    }
 
     if (isRegister && (!signupEnabled || !localAuthEnabled)) {
       setError(
@@ -141,7 +146,7 @@ export function LoginForm({
               </p>
             </div>
 
-            {signupEnabled && (
+            {signupEnabled && localAuthVisible && (
               <div
                 aria-label="Authentication mode"
                 className={styles.authModeSwitch}
@@ -176,142 +181,162 @@ export function LoginForm({
 
             <form className={styles.authForm} onSubmit={submit}>
               <FieldGroup>
-                {isRegister && (
-                  <Field>
-                    <FieldLabel htmlFor="display-name">Display name</FieldLabel>
-                    <Input
-                      id="display-name"
-                      autoComplete="name"
-                      placeholder="Justin"
-                      value={displayName}
-                      onChange={(event) => setDisplayName(event.target.value)}
-                      required
-                    />
-                  </Field>
-                )}
-
-                <Field>
-                  <FieldLabel htmlFor="email">Email</FieldLabel>
-                  <Input
-                    id="email"
-                    type="email"
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    required
-                  />
-                </Field>
-
-                <Field>
-                  <FieldLabel htmlFor="password">Password</FieldLabel>
-                  <Input
-                    id="password"
-                    type="password"
-                    autoComplete={
-                      isRegister ? "new-password" : "current-password"
-                    }
-                    placeholder="At least 8 characters"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    required
-                  />
-                  {isRegister && (
-                    <FieldDescription>
-                      Use at least 8 characters.
-                    </FieldDescription>
-                  )}
-                </Field>
-
-                {isRegister && (
-                  <Field>
-                    <FieldLabel htmlFor="confirm-password">
-                      Confirm password
-                    </FieldLabel>
-                    <Input
-                      id="confirm-password"
-                      type="password"
-                      autoComplete="new-password"
-                      value={confirmPassword}
-                      onChange={(event) =>
-                        setConfirmPassword(event.target.value)
-                      }
-                      required
-                    />
-                  </Field>
-                )}
-
-                {(!modeGateEnabled || (!isRegister && !localAuthEnabled)) &&
-                  !error && (
-                    <Alert>
-                      <ShieldCheck aria-hidden="true" />
-                      <AlertTitle>Temporarily unavailable</AlertTitle>
-                      <AlertDescription>
-                        {maintenanceMessage ||
-                          (isRegister
-                            ? "Account creation is temporarily disabled."
-                            : !localAuthEnabled
-                              ? "Local password authentication is disabled for regular users. Platform administrators can still sign in for recovery."
-                              : "Sign in is temporarily disabled for regular users. Platform administrators can still sign in for recovery.")}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                {error && (
-                  <Alert variant="destructive">
-                    <ShieldCheck aria-hidden="true" />
-                    <AlertTitle>Could not continue</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
-
-                <Field className={styles.authSubmitField}>
-                  <Button
-                    className={styles.authSubmit}
-                    type="submit"
-                    disabled={loading || (isRegister && !modeEnabled)}
-                  >
-                    {loading && <Spinner data-icon="inline-start" />}
-                    {loading
-                      ? "Working…"
-                      : isRegister
-                        ? "Create workspace"
-                        : "Continue to workspace"}
-                    {!loading && (
-                      <ArrowRight data-icon="inline-end" aria-hidden="true" />
+                {configLoading && !config ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Spinner /> Loading sign-in options…
+                  </div>
+                ) : localAuthVisible ? (
+                  <>
+                    {isRegister && (
+                      <Field>
+                        <FieldLabel htmlFor="display-name">
+                          Display name
+                        </FieldLabel>
+                        <Input
+                          id="display-name"
+                          autoComplete="name"
+                          placeholder="Justin"
+                          value={displayName}
+                          onChange={(event) =>
+                            setDisplayName(event.target.value)
+                          }
+                          required
+                        />
+                      </Field>
                     )}
-                  </Button>
-                </Field>
 
-                {oidcEnabled &&
-                  oidcProviders.length > 0 &&
-                  (!isRegister || signupEnabled) && (
-                    <>
-                      <FieldSeparator className={styles.authSeparator}>
-                        Or continue with
-                      </FieldSeparator>
+                    <Field>
+                      <FieldLabel htmlFor="email">Email</FieldLabel>
+                      <Input
+                        id="email"
+                        type="email"
+                        autoComplete="email"
+                        placeholder="you@example.com"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        required
+                      />
+                    </Field>
 
-                      {oidcProviders.map((provider) => (
-                        <Field key={provider.id || provider.slug}>
-                          <a
-                            className={buttonVariants({
-                              variant: "outline",
-                              className: styles.authSso,
-                            })}
-                            href={`${API_URL}${oidcLoginPath(provider.slug, safeNext(typeof window === "undefined" ? "" : window.location.search))}`}
-                          >
-                            <KeyRound
-                              data-icon="inline-start"
-                              aria-hidden="true"
-                            />
-                            {provider.displayName || "Continue with OIDC"}
-                          </a>
-                        </Field>
-                      ))}
-                    </>
-                  )}
+                    <Field>
+                      <FieldLabel htmlFor="password">Password</FieldLabel>
+                      <Input
+                        id="password"
+                        type="password"
+                        autoComplete={
+                          isRegister ? "new-password" : "current-password"
+                        }
+                        placeholder="At least 8 characters"
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        required
+                      />
+                      {isRegister && (
+                        <FieldDescription>
+                          Use at least 8 characters.
+                        </FieldDescription>
+                      )}
+                    </Field>
 
-                {signupEnabled && (
+                    {isRegister && (
+                      <Field>
+                        <FieldLabel htmlFor="confirm-password">
+                          Confirm password
+                        </FieldLabel>
+                        <Input
+                          id="confirm-password"
+                          type="password"
+                          autoComplete="new-password"
+                          value={confirmPassword}
+                          onChange={(event) =>
+                            setConfirmPassword(event.target.value)
+                          }
+                          required
+                        />
+                      </Field>
+                    )}
+
+                    {(!modeGateEnabled || (!isRegister && !localAuthEnabled)) &&
+                      !error && (
+                        <Alert>
+                          <ShieldCheck aria-hidden="true" />
+                          <AlertTitle>Temporarily unavailable</AlertTitle>
+                          <AlertDescription>
+                            {maintenanceMessage ||
+                              (isRegister
+                                ? "Account creation is temporarily disabled."
+                                : "Sign in is temporarily disabled for regular users.")}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
+                    {error && (
+                      <Alert variant="destructive">
+                        <ShieldCheck aria-hidden="true" />
+                        <AlertTitle>Could not continue</AlertTitle>
+                        <AlertDescription>{error}</AlertDescription>
+                      </Alert>
+                    )}
+
+                    <Field className={styles.authSubmitField}>
+                      <Button
+                        className={styles.authSubmit}
+                        type="submit"
+                        disabled={loading || !modeEnabled}
+                      >
+                        {loading && <Spinner data-icon="inline-start" />}
+                        {loading
+                          ? "Working…"
+                          : isRegister
+                            ? "Create workspace"
+                            : "Continue to workspace"}
+                        {!loading && (
+                          <ArrowRight
+                            data-icon="inline-end"
+                            aria-hidden="true"
+                          />
+                        )}
+                      </Button>
+                    </Field>
+                  </>
+                ) : !oidcAvailable ? (
+                  <Alert>
+                    <ShieldCheck aria-hidden="true" />
+                    <AlertTitle>No sign-in methods available</AlertTitle>
+                    <AlertDescription>
+                      {maintenanceMessage ||
+                        "Local password authentication is disabled. Contact your platform administrator."}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {oidcAvailable && (!isRegister || signupEnabled) && (
+                  <>
+                    <FieldSeparator className={styles.authSeparator}>
+                      {localAuthVisible ? "Or continue with" : "Continue with"}
+                    </FieldSeparator>
+
+                    {oidcProviders.map((provider) => (
+                      <Field key={provider.id || provider.slug}>
+                        <a
+                          className={buttonVariants({
+                            variant: "outline",
+                            className: styles.authSso,
+                          })}
+                          href={`${API_URL}${oidcLoginPath(provider.slug, safeNext(typeof window === "undefined" ? "" : window.location.search))}`}
+                        >
+                          <KeyRound
+                            data-icon="inline-start"
+                            aria-hidden="true"
+                          />
+                          {provider.displayName || "Continue with OIDC"}
+                        </a>
+                      </Field>
+                    ))}
+                  </>
+                )}
+
+                {signupEnabled && localAuthVisible && (
                   <FieldDescription className={styles.authModeDescription}>
                     {isRegister ? "Already have an account?" : "New to JustAI?"}{" "}
                     <button
