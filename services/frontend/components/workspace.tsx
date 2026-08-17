@@ -342,6 +342,20 @@ export function Workspace() {
   }, [pendingConversationId, requestedConversationId])
 
   useEffect(() => {
+    // The native History API updates the pathname without a server
+    // navigation. Clear the local handoff state only after usePathname has
+    // confirmed that the durable conversation route is active.
+    if (
+      !requestedConversationId ||
+      pendingConversationIdRef.current !== requestedConversationId
+    ) {
+      return
+    }
+    pendingConversationIdRef.current = null
+    setPendingConversationId(null)
+  }, [requestedConversationId])
+
+  useEffect(() => {
     if (
       !requestedConversationId ||
       status !== "ready" ||
@@ -418,16 +432,43 @@ export function Workspace() {
       adminTab: AdminTab = "overview"
     ) => {
       if (view !== "chat") setContextOpen(false)
+      const isInternalChatReplace =
+        view === "chat" && replace && conversationId !== null
       if (view === "chat") {
         activeConversationRef.current = conversationId
-        pendingConversationIdRef.current = null
-        setPendingConversationId(null)
+        if (!isInternalChatReplace) {
+          pendingConversationIdRef.current = null
+          setPendingConversationId(null)
+        }
       }
-      const path = workspacePath(view, conversationId, sessionId, settingsTab, adminTab)
+      const path = workspacePath(
+        view,
+        conversationId,
+        sessionId,
+        settingsTab,
+        adminTab
+      )
+
+      // A newly-created chat is already mounted in the current Assistant UI
+      // runtime. Replacing the URL through the App Router would request a new
+      // RSC payload while a response is streaming, which looks like a page
+      // refresh and can briefly rebuild the thread. The native History API is
+      // integrated with Next's App Router and keeps this same-view handoff
+      // client-side.
+      if (isInternalChatReplace) {
+        if (
+          typeof window !== "undefined" &&
+          `${window.location.pathname}${window.location.search}` !== path
+        ) {
+          window.history.replaceState(window.history.state, "", path)
+        }
+        return
+      }
+
       if (replace) {
-        router.replace(path)
+        router.replace(path, { scroll: false })
       } else {
-        router.push(path)
+        router.push(path, { scroll: false })
       }
     },
     [router]
@@ -457,6 +498,10 @@ export function Workspace() {
           result.conversation,
           ...current.filter((item) => item.id !== result.conversation.id),
         ])
+        // Put the durable conversation URL in place as soon as the server
+        // conversation exists. This lets the first response stream directly
+        // on its final route instead of waiting for onFinish to navigate.
+        navigate("chat", result.conversation.id, true)
         return result.conversation.id
       })
       .finally(() => {
@@ -464,13 +509,17 @@ export function Workspace() {
       })
     conversationCreationRef.current = creation
     return creation
-  }, [pendingConversationId, requestedConversationId])
+  }, [navigate, pendingConversationId, requestedConversationId])
 
   const settlePendingConversation = useCallback(() => {
     const id = pendingConversationIdRef.current
-    if (!id || requestedConversationId) return
-    pendingConversationIdRef.current = null
-    setPendingConversationId(null)
+    if (!id) return
+    if (requestedConversationId === id) {
+      pendingConversationIdRef.current = null
+      setPendingConversationId(null)
+      return
+    }
+    if (requestedConversationId) return
     navigate("chat", id, true)
   }, [navigate, requestedConversationId])
 
