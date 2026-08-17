@@ -549,6 +549,7 @@ export function FocusWorkspaceSidebar({
               activeConversationId={activeConversationId}
               archivedConversations={archivedConversations}
               conversations={conversations}
+              organizationId={activeOrganization?.id ?? null}
               historyQuery={historyQuery}
               onArchive={onArchiveConversation}
               onDelete={onDeleteConversation}

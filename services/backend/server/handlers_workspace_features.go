@@ -306,6 +306,10 @@ func (a *App) updateConversationFolder(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			writeError(c, http.StatusConflict, fmt.Errorf("a folder with that name already exists"))
+			return
+		}
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -392,6 +396,57 @@ func (a *App) createConversationTag(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"tag": item})
+}
+
+func (a *App) updateConversationTag(c *gin.Context) {
+	principal, organizationID, err := workspaceScope(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid tag id"))
+		return
+	}
+	var request struct {
+		Name  *string `json:"name"`
+		Color *string `json:"color"`
+	}
+	if !decodeJSON(c, &request) {
+		return
+	}
+	if request.Name == nil && request.Color == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("name or color is required"))
+		return
+	}
+	name, color := any(nil), any(nil)
+	if request.Name != nil {
+		value := strings.TrimSpace(*request.Name)
+		if value == "" || len([]rune(value)) > 40 {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("tag name must contain between 1 and 40 characters"))
+			return
+		}
+		name = value
+	}
+	if request.Color != nil {
+		color = strings.TrimSpace(*request.Color)
+	}
+	var item models.ConversationTag
+	err = a.DB.QueryRowContext(c, `UPDATE conversation_tags SET name = COALESCE($4::text, name), color = COALESCE($5::text, color), updated_at = now() WHERE id = $1 AND user_id = $2 AND organization_id = $3 RETURNING id, name, color, created_at, updated_at`, id, principal.UserID, organizationID, name, color).Scan(&item.ID, &item.Name, &item.Color, &item.CreatedAt, &item.UpdatedAt)
+	if err == sql.ErrNoRows {
+		writeError(c, http.StatusNotFound, fmt.Errorf("tag not found"))
+		return
+	}
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			writeError(c, http.StatusConflict, fmt.Errorf("a tag with that name already exists"))
+			return
+		}
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"tag": item})
 }
 
 func (a *App) deleteConversationTag(c *gin.Context) {

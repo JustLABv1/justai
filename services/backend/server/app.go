@@ -183,6 +183,7 @@ func (a *App) Router() *gin.Engine {
 	org.DELETE("/conversation-folders/:id", a.deleteConversationFolder)
 	org.GET("/conversation-tags", a.listConversationTags)
 	org.POST("/conversation-tags", a.createConversationTag)
+	org.PATCH("/conversation-tags/:id", a.updateConversationTag)
 	org.DELETE("/conversation-tags/:id", a.deleteConversationTag)
 	org.POST("/conversations/:id/tags/:tagId", a.attachConversationTag)
 	org.DELETE("/conversations/:id/tags/:tagId", a.detachConversationTag)
