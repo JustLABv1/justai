@@ -1,6 +1,13 @@
 "use client"
 
-import { AudioLines, ChevronDown, ChevronUp, Mic2, Pencil } from "lucide-react"
+import {
+  AudioLines,
+  ChevronDown,
+  ChevronUp,
+  Mic2,
+  Pencil,
+  Search,
+} from "lucide-react"
 import {
   useEffect,
   useRef,
@@ -214,6 +221,7 @@ export function TranscriptTray({
   speakers,
   className,
   transcript = [],
+  label = "Live transcription",
   segmentCount = transcript.filter((line) => !line.provisional).length,
 }: {
   open: boolean
@@ -222,12 +230,25 @@ export function TranscriptTray({
   className?: string
   segmentCount?: number
   transcript?: RoomTranscriptLine[]
+  label?: string
 }) {
+  const [search, setSearch] = useState("")
   const latest = transcript[transcript.length - 1]
   const latestSpeaker = latest
     ? speakers.find((speaker) => speaker.id === latest.speakerId)
     : null
-  const messageCount = transcript.filter((line) => !line.provisional).length
+  const normalizedSearch = search.trim().toLocaleLowerCase()
+  const filteredTranscript = normalizedSearch
+    ? transcript.filter((line) => {
+        const speaker = speakers.find((item) => item.id === line.speakerId)
+        return [line.text, line.timestamp, speaker?.name || ""].some((value) =>
+          value.toLocaleLowerCase().includes(normalizedSearch)
+        )
+      })
+    : transcript
+  const messageCount = filteredTranscript.filter(
+    (line) => !line.provisional
+  ).length
 
   return (
     <Collapsible
@@ -241,8 +262,8 @@ export function TranscriptTray({
             <Button
               aria-label={
                 open
-                  ? "Collapse live transcription"
-                  : "Expand live transcription"
+                  ? `Collapse ${label.toLocaleLowerCase()}`
+                  : `Expand ${label.toLocaleLowerCase()}`
               }
               className="min-w-0 flex-1 justify-start gap-2 px-1.5 text-left"
               variant="ghost"
@@ -251,7 +272,7 @@ export function TranscriptTray({
         >
           <span className={cn(styles.liveDot, open && styles.liveDotActive)} />
           <span className="truncate text-xs font-semibold">
-            Live transcription
+            {label}
           </span>
           <Badge className="shrink-0" variant="secondary">
             {segmentCount} segments
@@ -275,8 +296,27 @@ export function TranscriptTray({
       </div>
       <CollapsibleContent>
         <div className={styles.transcriptTrayBody}>
+          <div className="relative px-1 pb-2">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              aria-label={`Search ${label.toLocaleLowerCase()}`}
+              className="h-8 pl-8 text-xs"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search transcript"
+              value={search}
+            />
+          </div>
           <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-            <TranscriptScroller speakers={speakers} transcript={transcript} />
+            <TranscriptScroller
+              emptyMessage={
+                normalizedSearch ? "No matching transcript segments." : undefined
+              }
+              speakers={speakers}
+              transcript={filteredTranscript}
+            />
           </MessageScrollerProvider>
         </div>
       </CollapsibleContent>
@@ -287,9 +327,11 @@ export function TranscriptTray({
 function TranscriptScroller({
   speakers,
   transcript,
+  emptyMessage,
 }: {
   speakers: RoomSpeaker[]
   transcript: RoomTranscriptLine[]
+  emptyMessage?: string
 }) {
   const { scrollToEnd } = useMessageScroller()
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -319,6 +361,11 @@ function TranscriptScroller({
         ref={viewportRef}
       >
         <MessageScrollerContent className="gap-1">
+          {transcript.length === 0 && emptyMessage ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              {emptyMessage}
+            </p>
+          ) : null}
           {transcript.map((line) => {
             const speaker = speakers.find((item) => item.id === line.speakerId)
             return (
@@ -329,7 +376,7 @@ function TranscriptScroller({
               >
                 <div className={styles.transcriptLine}>
                   <time
-                    className="w-12 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground"
+                    className="w-14 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground"
                     dateTime={`PT${Math.max(0, Math.floor(line.startOffsetMs / 1000))}S`}
                   >
                     {line.timestamp}

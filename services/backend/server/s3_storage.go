@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,13 +53,20 @@ func newS3Storage(cfg config.Config) (*s3Storage, error) {
 	if region == "" {
 		region = "us-east-1"
 	}
+	clientTimeout := 30 * time.Minute
+	if cfg.Transcription.VideoMaxDurationHours > 0 {
+		videoTimeout := time.Duration(cfg.Transcription.VideoMaxDurationHours+2) * time.Hour
+		if videoTimeout > clientTimeout {
+			clientTimeout = videoTimeout
+		}
+	}
 	return &s3Storage{
 		endpoint: endpoint,
 		region:   region,
 		bucket:   cfg.Transcription.S3Bucket,
 		access:   cfg.Transcription.S3AccessKey,
 		secret:   cfg.Transcription.S3SecretKey,
-		client:   &http.Client{Timeout: 90 * time.Second},
+		client:   &http.Client{Timeout: clientTimeout},
 	}, nil
 }
 
@@ -95,6 +103,121 @@ func (s *s3Storage) request(ctx context.Context, method, key string, query url.V
 	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+s.access+"/"+scope+", SignedHeaders="+signedHeaders+", Signature="+signature)
 	request.Host = object.Host
 	return s.client.Do(request)
+}
+
+func (s *s3Storage) presignURL(method, key string, query url.Values, lifetime time.Duration) string {
+	object := s.objectURL(key)
+	if lifetime <= 0 {
+		lifetime = 15 * time.Minute
+	}
+	if lifetime > 7*24*time.Hour {
+		lifetime = 7 * 24 * time.Hour
+	}
+	now := time.Now().UTC()
+	date := now.Format("20060102")
+	scope := date + "/" + s.region + "/s3/aws4_request"
+	values := cloneURLValues(query)
+	values.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+	values.Set("X-Amz-Credential", s.access+"/"+scope)
+	values.Set("X-Amz-Date", now.Format("20060102T150405Z"))
+	values.Set("X-Amz-Expires", strconv.FormatInt(int64(lifetime/time.Second), 10))
+	values.Set("X-Amz-SignedHeaders", "host")
+	canonicalHeaders := "host:" + object.Host + "\n"
+	canonicalQueryValue := canonicalQuery(values)
+	canonicalRequest := strings.Join([]string{
+		method,
+		object.EscapedPath(),
+		canonicalQueryValue,
+		canonicalHeaders,
+		"host",
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		now.Format("20060102T150405Z"),
+		scope,
+		hashBytes([]byte(canonicalRequest)),
+	}, "\n")
+	signingKey := hmacSHA256(hmacSHA256(hmacSHA256(hmacSHA256([]byte("AWS4"+s.secret), date), s.region), "s3"), "aws4_request")
+	values.Set("X-Amz-Signature", hex.EncodeToString(hmacSHA256(signingKey, stringToSign)))
+	object.RawQuery = canonicalQuery(values)
+	return object.String()
+}
+
+func cloneURLValues(values url.Values) url.Values {
+	result := make(url.Values, len(values))
+	for key, items := range values {
+		result[key] = append([]string(nil), items...)
+	}
+	return result
+}
+
+type s3MultipartInitiation struct {
+	UploadID string `xml:"UploadId"`
+}
+
+type s3MultipartPart struct {
+	PartNumber int    `xml:"PartNumber"`
+	ETag       string `xml:"ETag"`
+}
+
+type s3MultipartCompletion struct {
+	XMLName xml.Name          `xml:"CompleteMultipartUpload"`
+	Parts   []s3MultipartPart `xml:"Part"`
+}
+
+func (s *s3Storage) initiateMultipart(ctx context.Context, key, contentType string) (string, error) {
+	query := url.Values{}
+	query.Set("uploads", "")
+	response, err := s.request(ctx, http.MethodPost, key, query, nil, contentType)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= http.StatusMultipleChoices {
+		return "", s3ErrorFromResponse(response)
+	}
+	var result s3MultipartInitiation
+	if err := xml.NewDecoder(response.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(result.UploadID) == "" {
+		return "", fmt.Errorf("s3 multipart initiation returned no upload id")
+	}
+	return result.UploadID, nil
+}
+
+func (s *s3Storage) presignMultipartPart(key, uploadID string, partNumber int, lifetime time.Duration) string {
+	query := url.Values{}
+	query.Set("partNumber", strconv.Itoa(partNumber))
+	query.Set("uploadId", uploadID)
+	return s.presignURL(http.MethodPut, key, query, lifetime)
+}
+
+func (s *s3Storage) completeMultipart(ctx context.Context, key, uploadID string, parts []s3MultipartPart) error {
+	payload, err := xml.Marshal(s3MultipartCompletion{Parts: parts})
+	if err != nil {
+		return err
+	}
+	query := url.Values{}
+	query.Set("uploadId", uploadID)
+	response, err := s.request(ctx, http.MethodPost, key, query, payload, "application/xml")
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	return readS3Response(response)
+}
+
+func (s *s3Storage) abortMultipart(ctx context.Context, key, uploadID string) error {
+	query := url.Values{}
+	query.Set("uploadId", uploadID)
+	response, err := s.request(ctx, http.MethodDelete, key, query, nil, "")
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	return readS3Response(response)
 }
 
 func (s *s3Storage) put(ctx context.Context, key string, body []byte, contentType string) error {

@@ -68,6 +68,9 @@ config:
     diarizationWindowSeconds: 30
     diarizationOverlapSeconds: 5
     maxSessionHours: 8
+    videoUploadMaxBytes: 5368709120
+    videoUploadPartBytes: 16777216
+    videoMaxDurationHours: 4
 
 monolith:
   image:

@@ -7,6 +7,7 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  FileVideo,
   Headphones,
   NotebookPen,
   LogOut,
@@ -76,8 +77,25 @@ const railNavigation: Array<{
     icon: Headphones,
     feature: "transcription",
   },
-  { id: "notes", label: "Notes", hint: "Your notes workspace", icon: NotebookPen },
-  { id: "memory", label: "Memory", hint: "Persistent preferences", icon: Brain },
+  {
+    id: "video-transcription",
+    label: "Video transcription",
+    hint: "Upload and transcribe videos",
+    icon: FileVideo,
+    feature: "transcription",
+  },
+  {
+    id: "notes",
+    label: "Notes",
+    hint: "Your notes workspace",
+    icon: NotebookPen,
+  },
+  {
+    id: "memory",
+    label: "Memory",
+    hint: "Persistent preferences",
+    icon: Brain,
+  },
 ]
 
 const sidebarRailStorageKey = "justai.sidebar-rail-expanded"
@@ -115,6 +133,7 @@ type FocusWorkspaceSidebarProps = {
   onArchiveSession: (sessionId: string, archived: boolean) => void
   onDeleteSession: (session: TranscriptionSession) => void
   onNewTranscriptionSession: () => void
+  onNewVideoTranscription: () => void
   onSignOut: () => void
   disabledFeatures: Record<string, string>
 }
@@ -148,6 +167,7 @@ export function FocusWorkspaceSidebar({
   onArchiveSession,
   onDeleteSession,
   onNewTranscriptionSession,
+  onNewVideoTranscription,
   onSignOut,
   disabledFeatures,
 }: FocusWorkspaceSidebarProps) {
@@ -155,7 +175,10 @@ export function FocusWorkspaceSidebar({
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
   const [railExpanded, setRailExpanded] = useState(false)
   const [railPreferenceLoaded, setRailPreferenceLoaded] = useState(false)
-  const historyView = activeView === "chat" || activeView === "transcription"
+  const historyView =
+    activeView === "chat" ||
+    activeView === "transcription" ||
+    activeView === "video-transcription"
   const navigation = railNavigation
   const historyVisible = historyView && historyOpen
 
@@ -172,13 +195,41 @@ export function FocusWorkspaceSidebar({
     if (!railPreferenceLoaded) return
     window.localStorage.setItem(sidebarRailStorageKey, String(railExpanded))
   }, [railExpanded, railPreferenceLoaded])
-  const sessionGroups = useMemo(
-    () => groupByRecency(transcriptionSessions),
+  const liveSessions = useMemo(
+    () => transcriptionSessions.filter((session) => session.kind !== "video"),
     [transcriptionSessions]
   )
-  const archivedSessionGroups = useMemo(
-    () => groupByRecency(archivedTranscriptionSessions),
+  const videoSessions = useMemo(
+    () => transcriptionSessions.filter((session) => session.kind === "video"),
+    [transcriptionSessions]
+  )
+  const archivedLiveSessions = useMemo(
+    () =>
+      archivedTranscriptionSessions.filter(
+        (session) => session.kind !== "video"
+      ),
     [archivedTranscriptionSessions]
+  )
+  const archivedVideoSessions = useMemo(
+    () =>
+      archivedTranscriptionSessions.filter(
+        (session) => session.kind === "video"
+      ),
+    [archivedTranscriptionSessions]
+  )
+  const visibleSessions =
+    activeView === "video-transcription" ? videoSessions : liveSessions
+  const visibleArchivedSessions =
+    activeView === "video-transcription"
+      ? archivedVideoSessions
+      : archivedLiveSessions
+  const sessionGroups = useMemo(
+    () => groupByRecency(visibleSessions),
+    [visibleSessions]
+  )
+  const archivedSessionGroups = useMemo(
+    () => groupByRecency(visibleArchivedSessions),
+    [visibleArchivedSessions]
   )
 
   function navigateFromRail(view: ViewId) {
@@ -201,7 +252,18 @@ export function FocusWorkspaceSidebar({
         null,
         activeView === "transcription"
           ? activeSessionId
-          : (transcriptionSessions[0]?.id ?? null)
+          : (liveSessions[0]?.id ?? null)
+      )
+      return
+    }
+
+    if (view === "video-transcription") {
+      onNavigate(
+        "video-transcription",
+        null,
+        activeView === "video-transcription"
+          ? activeSessionId
+          : (videoSessions[0]?.id ?? null)
       )
       return
     }
@@ -312,12 +374,19 @@ export function FocusWorkspaceSidebar({
                 variant="ghost"
               >
                 <Icon data-icon="inline-start" />
-                {item.id === "transcription" &&
-                  transcriptionSessions.length > 0 && (
+                {(item.id === "transcription" ||
+                  item.id === "video-transcription") &&
+                  (item.id === "video-transcription"
+                    ? videoSessions.length
+                    : liveSessions.length) > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-medium text-primary-foreground">
-                      {transcriptionSessions.length > 9
+                      {(item.id === "video-transcription"
+                        ? videoSessions.length
+                        : liveSessions.length) > 9
                         ? "9+"
-                        : transcriptionSessions.length}
+                        : item.id === "video-transcription"
+                          ? videoSessions.length
+                          : liveSessions.length}
                     </span>
                   )}
                 {railExpanded && <span className="truncate">{item.label}</span>}
@@ -449,9 +518,11 @@ export function FocusWorkspaceSidebar({
             <h2 className="text-sm font-semibold tracking-tight">
               {activeView === "transcription"
                 ? "Live sessions"
-                : activeView === "chat"
-                  ? "Chat history"
-                  : "Workspace"}
+                : activeView === "video-transcription"
+                  ? "Video transcripts"
+                  : activeView === "chat"
+                    ? "Chat history"
+                    : "Workspace"}
             </h2>
           </div>
           <Button
@@ -535,6 +606,20 @@ export function FocusWorkspaceSidebar({
             <Plus data-icon="inline-start" />
             New room
           </Button>
+        ) : activeView === "video-transcription" ? (
+          <Button
+            className="w-full shrink-0 justify-start"
+            disabled={Boolean(disabledFeatures.transcription)}
+            onClick={onNewVideoTranscription}
+            title={
+              disabledFeatures.transcription
+                ? "Disabled by platform administrator"
+                : "New video transcription"
+            }
+          >
+            <Plus data-icon="inline-start" />
+            New video transcription
+          </Button>
         ) : (
           <>
             <Button
@@ -561,17 +646,27 @@ export function FocusWorkspaceSidebar({
           </>
         )}
 
-        {activeView === "transcription" && (
+        {(activeView === "transcription" ||
+          activeView === "video-transcription") && (
           <TranscriptionHistoryPanel
             activeSessionId={activeSessionId}
             archivedSessionGroups={archivedSessionGroups}
-            archivedSessions={archivedTranscriptionSessions}
+            archivedSessions={visibleArchivedSessions}
             archivedOpen={archivedSessionsOpen}
             onArchive={onArchiveSession}
             onDelete={onDeleteSession}
-            onSelect={(id) => onNavigate("transcription", null, id)}
+            onSelect={(id) =>
+              onNavigate(
+                activeView === "video-transcription"
+                  ? "video-transcription"
+                  : "transcription",
+                null,
+                id
+              )
+            }
             sessionGroups={sessionGroups}
             setArchivedOpen={setArchivedSessionsOpen}
+            video={activeView === "video-transcription"}
           />
         )}
       </div>
@@ -589,6 +684,7 @@ function TranscriptionHistoryPanel({
   onSelect,
   sessionGroups,
   setArchivedOpen,
+  video,
 }: {
   activeSessionId: string | null
   archivedSessionGroups: RecencyGroup<TranscriptionSession>[]
@@ -599,10 +695,13 @@ function TranscriptionHistoryPanel({
   onSelect: (id: string) => void
   sessionGroups: RecencyGroup<TranscriptionSession>[]
   setArchivedOpen: (open: boolean) => void
+  video: boolean
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-      <p className="text-xs font-semibold">Recent sessions</p>
+      <p className="text-xs font-semibold">
+        {video ? "Recent videos" : "Recent sessions"}
+      </p>
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {sessionGroups.length > 0 ? (
           <div className="flex flex-col gap-4 pt-1">
@@ -620,9 +719,13 @@ function TranscriptionHistoryPanel({
         ) : (
           <Empty className="min-h-0 rounded-lg border-0 p-4">
             <EmptyHeader>
-              <EmptyTitle>No sessions yet</EmptyTitle>
+              <EmptyTitle>
+                {video ? "No videos yet" : "No sessions yet"}
+              </EmptyTitle>
               <EmptyDescription>
-                Start listening to create one.
+                {video
+                  ? "Upload a video to create one."
+                  : "Start listening to create one."}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>

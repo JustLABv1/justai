@@ -55,6 +55,9 @@ dev_seed: false
 	if loaded.Transcription.StreamingChunkMs != 2500 || loaded.Transcription.StreamingOverlapMs != 500 || loaded.Transcription.StreamingPromptChars != 160 {
 		t.Fatalf("unexpected streaming transcription defaults: %+v", loaded.Transcription)
 	}
+	if loaded.Transcription.VideoUploadMaxBytes != 5*1024*1024*1024 || loaded.Transcription.VideoUploadPartBytes != 16*1024*1024 || loaded.Transcription.VideoMaxDurationHours != 4 {
+		t.Fatalf("unexpected video transcription defaults: %+v", loaded.Transcription)
+	}
 }
 
 func TestEnvironmentOverridesYAML(t *testing.T) {
@@ -113,6 +116,9 @@ func clearConfigEnv(t *testing.T) {
 		"JUSTAI_SECURE_COOKIES",
 		"JUSTAI_COOKIE_SAMESITE",
 		"JUSTAI_COOKIE_DOMAIN",
+		"JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_MAX_BYTES",
+		"JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_PART_BYTES",
+		"JUSTAI_TRANSCRIPTION_VIDEO_MAX_DURATION_HOURS",
 	} {
 		t.Setenv(key, "")
 	}

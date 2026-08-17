@@ -131,6 +131,7 @@ type TranscriptionSession struct {
 	UserID                uuid.UUID  `json:"-"`
 	OrganizationID        uuid.UUID  `json:"-"`
 	Title                 string     `json:"title"`
+	Kind                  string     `json:"kind"`
 	Status                string     `json:"status"`
 	TranscriptionEndpoint *uuid.UUID `json:"transcriptionEndpointId,omitempty"`
 	DiarizationEndpoint   *uuid.UUID `json:"diarizationEndpointId,omitempty"`
@@ -191,6 +192,26 @@ type TranscriptionRecording struct {
 	Bytes       int64      `json:"bytes"`
 	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
+}
+
+type TranscriptionVideoUpload struct {
+	ID            uuid.UUID  `json:"id"`
+	SessionID     uuid.UUID  `json:"sessionId"`
+	FileName      string     `json:"fileName"`
+	MimeType      string     `json:"mimeType"`
+	ExpectedBytes int64      `json:"expectedBytes"`
+	Bytes         int64      `json:"bytes"`
+	PartSize      int64      `json:"partSize"`
+	PartCount     int        `json:"partCount"`
+	Status        string     `json:"status"`
+	Progress      int        `json:"progress"`
+	Stage         string     `json:"stage,omitempty"`
+	DurationMs    int64      `json:"durationMs,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+	CompletedAt   *time.Time `json:"completedAt,omitempty"`
+	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
 }
 
 type KnowledgeSource struct {

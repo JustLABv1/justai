@@ -29,6 +29,7 @@ RUN apk add --upgrade --no-cache \
     libcrypto3 \
     libssl3 \
     poppler-utils \
+    ffmpeg \
     tzdata \
     wget
 

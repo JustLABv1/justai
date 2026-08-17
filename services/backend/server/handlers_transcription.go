@@ -83,7 +83,8 @@ func (a *App) listTranscriptionSessions(c *gin.Context) {
 		       s.transcription_endpoint_id, s.diarization_endpoint_id, s.language,
 		       s.record_audio, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at,
 		       (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id),
-		       (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE)
+		       (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE),
+		       EXISTS (SELECT 1 FROM transcription_video_uploads video WHERE video.session_id = s.id)
 		FROM transcription_sessions s
 		WHERE s.user_id = $1 AND s.organization_id = $2 AND `+archiveFilter+`
 		ORDER BY s.updated_at DESC`, principal.UserID, organizationID)
@@ -156,6 +157,7 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 	if diarizationEndpointID.Valid {
 		item.DiarizationEndpoint = &diarizationEndpointID.UUID
 	}
+	item.Kind = "live"
 	item.JoinCode = code
 	c.JSON(http.StatusCreated, gin.H{"session": item, "joinCode": code})
 }
@@ -1325,7 +1327,11 @@ func (a *App) transcriptionSnapshot(ctx context.Context, sessionID uuid.UUID) (g
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"session": session, "sources": sources, "speakers": speakers, "segments": segments, "recordings": recordings}, nil
+	videoUpload, err := loadLatestVideoUpload(ctx, a.DB, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"session": session, "sources": sources, "speakers": speakers, "segments": segments, "recordings": recordings, "videoUpload": videoUpload}, nil
 }
 
 func (a *App) listTranscriptionRecordings(c *gin.Context) {
@@ -1640,14 +1646,15 @@ func transcriptionMode(endpoint provider.Endpoint) string {
 }
 
 func loadTranscriptionSession(ctx context.Context, db *sql.DB, sessionID uuid.UUID) (models.TranscriptionSession, error) {
-	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.language, s.record_audio, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
+	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.language, s.record_audio, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE), EXISTS (SELECT 1 FROM transcription_video_uploads video WHERE video.session_id = s.id) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
 	return scanTranscriptionSession(row)
 }
 
 func scanTranscriptionSession(scanner interface{ Scan(dest ...any) error }) (models.TranscriptionSession, error) {
 	var item models.TranscriptionSession
 	var transcriptionEndpoint, diarizationEndpoint uuid.NullUUID
-	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &item.Language, &item.RecordAudio, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.SourceCount, &item.SegmentCount); err != nil {
+	var hasVideoUpload bool
+	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &item.Language, &item.RecordAudio, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.SourceCount, &item.SegmentCount, &hasVideoUpload); err != nil {
 		return item, err
 	}
 	if transcriptionEndpoint.Valid {
@@ -1655,6 +1662,10 @@ func scanTranscriptionSession(scanner interface{ Scan(dest ...any) error }) (mod
 	}
 	if diarizationEndpoint.Valid {
 		item.DiarizationEndpoint = &diarizationEndpoint.UUID
+	}
+	item.Kind = "live"
+	if hasVideoUpload {
+		item.Kind = "video"
 	}
 	return item, nil
 }

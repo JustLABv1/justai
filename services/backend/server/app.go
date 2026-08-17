@@ -74,6 +74,14 @@ func (a *App) Router() *gin.Engine {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "pdftotext is unavailable"})
 			return
 		}
+		if _, err := exec.LookPath("ffmpeg"); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "ffmpeg is unavailable"})
+			return
+		}
+		if _, err := exec.LookPath("ffprobe"); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "ffprobe is unavailable"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	}
 	router.GET("/api/v1/health", healthHandler)
@@ -156,6 +164,11 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/sessions/:id/pause", a.platformFeature("transcription"), a.pauseTranscriptionSession)
 	org.POST("/transcription/sessions/:id/resume", a.platformFeature("transcription"), a.resumeTranscriptionSession)
 	org.POST("/transcription/sessions/:id/stop", a.platformFeature("transcription"), a.stopTranscriptionSession)
+	org.POST("/transcription/sessions/:id/video-uploads", a.platformFeature("transcription"), a.initVideoTranscriptionUpload)
+	org.GET("/transcription/video-uploads/:id", a.platformFeature("transcription"), a.getVideoTranscriptionUpload)
+	org.POST("/transcription/video-uploads/:id/complete", a.platformFeature("transcription"), a.completeVideoTranscriptionUpload)
+	org.POST("/transcription/video-uploads/:id/retry", a.platformFeature("transcription"), a.retryVideoTranscription)
+	org.POST("/transcription/video-uploads/:id/cancel", a.platformFeature("transcription"), a.cancelVideoTranscription)
 	org.POST("/transcription/sessions/:id/sources", a.platformFeature("transcription"), a.createTranscriptionSource)
 	org.POST("/transcription/sessions/:id/join-code", a.platformFeature("transcription"), a.rotateTranscriptionJoinCode)
 	org.GET("/transcription/sessions/:id/join-requests", a.platformFeature("transcription"), a.listTranscriptionJoinRequests)

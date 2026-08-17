@@ -28,4 +28,12 @@ http://localhost/api/v1/auth/oidc/callback
 The backend config file contains only non-secret defaults. Runtime
 `JUSTAI_*` environment variables override it. For S3 transcription storage,
 set `JUSTAI_TRANSCRIPTION_STORAGE_DRIVER=s3` and the corresponding S3
-variables in `.env`.
+variables in `.env`. Prerecorded video uploads use browser-to-S3 multipart
+uploads, so configure the bucket CORS policy for the public frontend origin,
+allow `PUT` and `GET`, allow the `Content-Type` request header, and expose the
+`ETag` response header. The configured S3 endpoint must also be reachable by
+browsers (an internal Docker hostname is not sufficient). The backend defaults
+to a 5 GiB upload limit and a four-hour duration limit; override
+`JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_MAX_BYTES` or
+`JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_PART_BYTES` or
+`JUSTAI_TRANSCRIPTION_VIDEO_MAX_DURATION_HOURS` when needed.

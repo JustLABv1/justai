@@ -35,3 +35,6 @@ transcription:
   streaming_overlap_ms: 500
   streaming_prompt_chars: 160
   max_session_hours: 8
+  video_upload_max_bytes: 5368709120
+  video_upload_part_bytes: 16777216
+  video_max_duration_hours: 4

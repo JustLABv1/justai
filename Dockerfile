@@ -56,6 +56,7 @@ WORKDIR /app
 
 RUN apk add --upgrade --no-cache \
     ca-certificates \
+    ffmpeg \
     tini \
     tzdata \
     wget \

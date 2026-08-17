@@ -145,6 +145,13 @@ func OpenRealtime(ctx context.Context, endpoint Endpoint, model, language string
 }
 
 func (s *RealtimeStream) SendPCM(ctx context.Context, pcm []byte, sampleRate int) error {
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
 	if sampleRate <= 0 {
 		sampleRate = s.inputRate
 	}

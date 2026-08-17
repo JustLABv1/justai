@@ -33,7 +33,7 @@ func TestRunMigrationsIntegration(t *testing.T) {
 	}
 
 	checks := map[string]string{
-		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '016_persistent_chat_errors.sql')`,
+		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '018_video_transcription.sql')`,
 		"platform settings":                    `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'platform_settings')`,
 		"organization endpoint default":        `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'organization_default_endpoints')`,
 		"chat runs":                            `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_runs')`,
@@ -49,6 +49,8 @@ func TestRunMigrationsIntegration(t *testing.T) {
 		"OIDC provider catalog":                `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'oidc_providers')`,
 		"OIDC authorization state":             `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'oidc_auth_states')`,
 		"platform banners":                     `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'platform_banners')`,
+		"video upload table":                   `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transcription_video_uploads')`,
+		"video job lease":                      `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'transcription_jobs' AND column_name = 'lease_until')`,
 	}
 	for name, query := range checks {
 		var present bool

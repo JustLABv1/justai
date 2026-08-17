@@ -655,6 +655,7 @@ export function LiveTranscriptionOrbit({
           open={transcriptOpen}
           speakers={transcriptSpeakers}
           segmentCount={snapshot.segments.length}
+          label="Live transcription"
           transcript={transcript}
         />
       </div>
@@ -837,7 +838,13 @@ function initials(value: string) {
 
 function formatOffset(value: number) {
   const seconds = Math.max(0, Math.floor(value / 1000))
-  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const formattedMinutes = String(minutes).padStart(2, "0")
+  const formattedSeconds = String(seconds % 60).padStart(2, "0")
+  return hours > 0
+    ? `${hours}:${formattedMinutes}:${formattedSeconds}`
+    : `${formattedMinutes}:${formattedSeconds}`
 }
 
 function averageConfidence(segments: TranscriptionSegment[]) {

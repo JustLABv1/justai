@@ -51,3 +51,10 @@ https://justai.example.com/api/v1/auth/oidc/callback
 ```
 
 Override `config.oidc.redirectUrl` when the backend uses another public host.
+
+Prerecorded video transcription uses direct S3-compatible multipart uploads.
+Set `config.transcription.storageDriver: s3`, provide the S3 credentials through
+the backend environment or Secret, and configure bucket CORS for the public
+frontend origin with `PUT`, `Content-Type`, and exposed `ETag`. The configured
+S3 endpoint must be reachable by browsers; internal cluster DNS names will not
+work for the upload URLs.

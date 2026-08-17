@@ -1,6 +1,7 @@
 export type ViewId =
   | "chat"
   | "transcription"
+  | "video-transcription"
   | "endpoints"
   | "knowledge"
   | "mcp"
@@ -242,6 +243,7 @@ export type GeneratedImage = {
 export type TranscriptionSession = {
   id: string
   title: string
+  kind: "live" | "video"
   status: "waiting" | "live" | "paused" | "processing" | "completed" | "failed"
   transcriptionEndpointId?: string | null
   diarizationEndpointId?: string | null
@@ -303,6 +305,33 @@ export type TranscriptionRecording = {
   bytes: number
   expiresAt?: string | null
   completedAt?: string | null
+}
+
+export type TranscriptionVideoUpload = {
+  id: string
+  sessionId: string
+  fileName: string
+  mimeType: string
+  expectedBytes: number
+  bytes: number
+  partSize: number
+  partCount: number
+  status:
+    | "uploading"
+    | "uploaded"
+    | "queued"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "cancelled"
+  progress: number
+  stage?: string
+  durationMs?: number
+  error?: string
+  createdAt: string
+  updatedAt: string
+  completedAt?: string | null
+  expiresAt?: string | null
 }
 
 export type TranscriptionJoinRequest = {

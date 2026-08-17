@@ -29,20 +29,23 @@ type Config struct {
 }
 
 type TranscriptionConfig struct {
-	StorageDriver        string
-	LocalStoragePath     string
-	S3Endpoint           string
-	S3Region             string
-	S3Bucket             string
-	S3AccessKey          string
-	S3SecretKey          string
-	AudioRetentionDays   int
-	DiarizationWindow    int
-	DiarizationOverlap   int
-	StreamingChunkMs     int
-	StreamingOverlapMs   int
-	StreamingPromptChars int
-	MaxSessionHours      int
+	StorageDriver         string
+	LocalStoragePath      string
+	S3Endpoint            string
+	S3Region              string
+	S3Bucket              string
+	S3AccessKey           string
+	S3SecretKey           string
+	AudioRetentionDays    int
+	DiarizationWindow     int
+	DiarizationOverlap    int
+	StreamingChunkMs      int
+	StreamingOverlapMs    int
+	StreamingPromptChars  int
+	MaxSessionHours       int
+	VideoUploadMaxBytes   int64
+	VideoUploadPartBytes  int64
+	VideoMaxDurationHours int
 }
 
 type OIDCConfig struct {
@@ -69,20 +72,23 @@ type fileConfig struct {
 }
 
 type fileTranscriptionConfig struct {
-	StorageDriver        string `yaml:"storage_driver"`
-	LocalStoragePath     string `yaml:"local_storage_path"`
-	S3Endpoint           string `yaml:"s3_endpoint"`
-	S3Region             string `yaml:"s3_region"`
-	S3Bucket             string `yaml:"s3_bucket"`
-	S3AccessKey          string `yaml:"s3_access_key"`
-	S3SecretKey          string `yaml:"s3_secret_key"`
-	AudioRetentionDays   int    `yaml:"audio_retention_days"`
-	DiarizationWindow    int    `yaml:"diarization_window_seconds"`
-	DiarizationOverlap   int    `yaml:"diarization_overlap_seconds"`
-	StreamingChunkMs     int    `yaml:"streaming_chunk_ms"`
-	StreamingOverlapMs   int    `yaml:"streaming_overlap_ms"`
-	StreamingPromptChars int    `yaml:"streaming_prompt_chars"`
-	MaxSessionHours      int    `yaml:"max_session_hours"`
+	StorageDriver         string `yaml:"storage_driver"`
+	LocalStoragePath      string `yaml:"local_storage_path"`
+	S3Endpoint            string `yaml:"s3_endpoint"`
+	S3Region              string `yaml:"s3_region"`
+	S3Bucket              string `yaml:"s3_bucket"`
+	S3AccessKey           string `yaml:"s3_access_key"`
+	S3SecretKey           string `yaml:"s3_secret_key"`
+	AudioRetentionDays    int    `yaml:"audio_retention_days"`
+	DiarizationWindow     int    `yaml:"diarization_window_seconds"`
+	DiarizationOverlap    int    `yaml:"diarization_overlap_seconds"`
+	StreamingChunkMs      int    `yaml:"streaming_chunk_ms"`
+	StreamingOverlapMs    int    `yaml:"streaming_overlap_ms"`
+	StreamingPromptChars  int    `yaml:"streaming_prompt_chars"`
+	MaxSessionHours       int    `yaml:"max_session_hours"`
+	VideoUploadMaxBytes   int64  `yaml:"video_upload_max_bytes"`
+	VideoUploadPartBytes  int64  `yaml:"video_upload_part_bytes"`
+	VideoMaxDurationHours int    `yaml:"video_max_duration_hours"`
 }
 
 type fileOIDCConfig struct {
@@ -159,20 +165,23 @@ func Load(configPath string) (Config, error) {
 
 func transcriptionConfig(values fileTranscriptionConfig) TranscriptionConfig {
 	result := TranscriptionConfig{
-		StorageDriver:        getenvOrFile("JUSTAI_TRANSCRIPTION_STORAGE_DRIVER", values.StorageDriver, "local"),
-		LocalStoragePath:     getenvOrFile("JUSTAI_TRANSCRIPTION_LOCAL_STORAGE_PATH", values.LocalStoragePath, "./data/transcription"),
-		S3Endpoint:           getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ENDPOINT", values.S3Endpoint, ""),
-		S3Region:             getenvOrFile("JUSTAI_TRANSCRIPTION_S3_REGION", values.S3Region, "us-east-1"),
-		S3Bucket:             getenvOrFile("JUSTAI_TRANSCRIPTION_S3_BUCKET", values.S3Bucket, ""),
-		S3AccessKey:          getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY", values.S3AccessKey, ""),
-		S3SecretKey:          getenvOrFile("JUSTAI_TRANSCRIPTION_S3_SECRET_KEY", values.S3SecretKey, ""),
-		AudioRetentionDays:   values.AudioRetentionDays,
-		DiarizationWindow:    values.DiarizationWindow,
-		DiarizationOverlap:   values.DiarizationOverlap,
-		StreamingChunkMs:     values.StreamingChunkMs,
-		StreamingOverlapMs:   values.StreamingOverlapMs,
-		StreamingPromptChars: values.StreamingPromptChars,
-		MaxSessionHours:      values.MaxSessionHours,
+		StorageDriver:         getenvOrFile("JUSTAI_TRANSCRIPTION_STORAGE_DRIVER", values.StorageDriver, "local"),
+		LocalStoragePath:      getenvOrFile("JUSTAI_TRANSCRIPTION_LOCAL_STORAGE_PATH", values.LocalStoragePath, "./data/transcription"),
+		S3Endpoint:            getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ENDPOINT", values.S3Endpoint, ""),
+		S3Region:              getenvOrFile("JUSTAI_TRANSCRIPTION_S3_REGION", values.S3Region, "us-east-1"),
+		S3Bucket:              getenvOrFile("JUSTAI_TRANSCRIPTION_S3_BUCKET", values.S3Bucket, ""),
+		S3AccessKey:           getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY", values.S3AccessKey, ""),
+		S3SecretKey:           getenvOrFile("JUSTAI_TRANSCRIPTION_S3_SECRET_KEY", values.S3SecretKey, ""),
+		AudioRetentionDays:    values.AudioRetentionDays,
+		DiarizationWindow:     values.DiarizationWindow,
+		DiarizationOverlap:    values.DiarizationOverlap,
+		StreamingChunkMs:      values.StreamingChunkMs,
+		StreamingOverlapMs:    values.StreamingOverlapMs,
+		StreamingPromptChars:  values.StreamingPromptChars,
+		MaxSessionHours:       values.MaxSessionHours,
+		VideoUploadMaxBytes:   int64OrFile("JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_MAX_BYTES", values.VideoUploadMaxBytes, 5*1024*1024*1024),
+		VideoUploadPartBytes:  int64OrFile("JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_PART_BYTES", values.VideoUploadPartBytes, 16*1024*1024),
+		VideoMaxDurationHours: intOrFile("JUSTAI_TRANSCRIPTION_VIDEO_MAX_DURATION_HOURS", values.VideoMaxDurationHours, 4),
 	}
 	if result.AudioRetentionDays <= 0 {
 		result.AudioRetentionDays = 30
@@ -194,6 +203,15 @@ func transcriptionConfig(values fileTranscriptionConfig) TranscriptionConfig {
 	}
 	if result.MaxSessionHours <= 0 {
 		result.MaxSessionHours = 8
+	}
+	if result.VideoUploadMaxBytes <= 0 {
+		result.VideoUploadMaxBytes = 5 * 1024 * 1024 * 1024
+	}
+	if result.VideoUploadPartBytes < 5*1024*1024 {
+		result.VideoUploadPartBytes = 16 * 1024 * 1024
+	}
+	if result.VideoMaxDurationHours <= 0 {
+		result.VideoMaxDurationHours = 4
 	}
 	if result.StorageDriver != "s3" {
 		result.StorageDriver = "local"
@@ -258,6 +276,32 @@ func getenvBoolOrFile(key string, fileValue *bool, fallback bool) bool {
 	}
 	if fileValue != nil {
 		return *fileValue
+	}
+	return fallback
+}
+
+func intOrFile(key string, fileValue, fallback int) int {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err == nil {
+			return parsed
+		}
+	}
+	if fileValue != 0 {
+		return fileValue
+	}
+	return fallback
+}
+
+func int64OrFile(key string, fileValue, fallback int64) int64 {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err == nil {
+			return parsed
+		}
+	}
+	if fileValue != 0 {
+		return fileValue
 	}
 	return fallback
 }

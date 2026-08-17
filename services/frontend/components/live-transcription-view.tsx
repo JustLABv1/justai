@@ -404,7 +404,7 @@ export function LiveTranscriptionView({
             segments: mergeTranscriptionSegments(current.segments, [segment]),
           }
         })
-        onSessionsChanged()
+        if (segment.sourceId) onSessionsChanged()
         return
       }
       if (event.type === "transcription.segment.updated") {

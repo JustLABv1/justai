@@ -3,6 +3,7 @@ import type { AdminTab, SettingsTab, ViewId } from "@/lib/types"
 const validViews: ViewId[] = [
   "chat",
   "transcription",
+  "video-transcription",
   "endpoints",
   "knowledge",
   "mcp",
@@ -90,10 +91,10 @@ export function workspacePath(
     return conversationId ? `/${encodeURIComponent(conversationId)}` : "/"
   }
 
-  if (view === "transcription") {
+  if (view === "transcription" || view === "video-transcription") {
     return sessionId
-      ? `/transcription/${encodeURIComponent(sessionId)}`
-      : "/transcription"
+      ? `/${view}/${encodeURIComponent(sessionId)}`
+      : `/${view}`
   }
 
   if (view === "settings") {
@@ -135,6 +136,16 @@ export function parseWorkspaceRoute(
   if (section === "transcription" && segments[1] !== "join") {
     return {
       view: "transcription",
+      conversationId: null,
+      sessionId: decodeSegment(segments[1]),
+      settingsTab: "workspace",
+      adminTab: "overview",
+    }
+  }
+
+  if (section === "video-transcription") {
+    return {
+      view: "video-transcription",
       conversationId: null,
       sessionId: decodeSegment(segments[1]),
       settingsTab: "workspace",
@@ -208,7 +219,10 @@ export function parseWorkspaceRoute(
   return {
     view,
     conversationId: view === "chat" ? searchParams.get("conversation") : null,
-    sessionId: view === "transcription" ? searchParams.get("session") : null,
+    sessionId:
+      view === "transcription" || view === "video-transcription"
+        ? searchParams.get("session")
+        : null,
     settingsTab: parseSettingsTab(searchParams.get("tab")),
     adminTab: parseAdminTab(searchParams.get("tab")),
   }

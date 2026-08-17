@@ -38,3 +38,8 @@ transcription:
   # Keep the decoder prompt well below Whisper's small text context window.
   streaming_prompt_chars: 160
   max_session_hours: 8
+  # Direct-to-S3 multipart video uploads and their processing bounds. Video
+  # uploads require storage_driver: s3.
+  video_upload_max_bytes: 5368709120
+  video_upload_part_bytes: 16777216
+  video_max_duration_hours: 4

@@ -81,6 +81,7 @@ func (m *TranscriptionManager) SetApp(application *App) {
 
 func (m *TranscriptionManager) Start(ctx context.Context) {
 	go m.cleanupLoop(ctx)
+	m.startVideoWorker(ctx)
 }
 
 func (m *TranscriptionManager) cleanupLoop(ctx context.Context) {
@@ -92,6 +93,7 @@ func (m *TranscriptionManager) cleanupLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.expireRecordings(ctx)
+			m.expireVideoUploads(ctx)
 			m.expireSessions(ctx)
 			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_join_requests SET status = 'expired', updated_at = now() WHERE status = 'pending' AND expires_at <= now()`)
 		}

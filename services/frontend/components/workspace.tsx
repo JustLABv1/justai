@@ -11,6 +11,7 @@ import { NotesView } from "@/components/notes-view"
 import { ProfileView } from "@/components/profile-view"
 import { PlatformAdminShell } from "@/components/platform-admin-shell"
 import { SettingsShell } from "@/components/settings-shell"
+import { VideoTranscriptionView } from "@/components/video-transcription-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -61,7 +62,9 @@ export function Workspace() {
   const [status, setStatus] = useState<WorkspaceStatus>("loading")
   const [loadError, setLoadError] = useState("")
   const [featureErrors, setFeatureErrors] = useState<Record<string, string>>({})
-  const [disabledFeatures, setDisabledFeatures] = useState<Record<string, string>>({})
+  const [disabledFeatures, setDisabledFeatures] = useState<
+    Record<string, string>
+  >({})
   const [reloadToken, setReloadToken] = useState(0)
   const [user, setUser] = useState<User | null>(null)
   const [organizations, setOrganizations] = useState<Organization[]>([])
@@ -84,6 +87,10 @@ export function Workspace() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [createTranscriptionRequested, setCreateTranscriptionRequested] =
     useState(false)
+  const [
+    createVideoTranscriptionRequested,
+    setCreateVideoTranscriptionRequested,
+  ] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(true)
   const [historyPreferenceLoaded, setHistoryPreferenceLoaded] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
@@ -467,6 +474,28 @@ export function Workspace() {
   ].some((session) => session.id === requestedSessionId)
     ? requestedSessionId
     : null
+  const activeSession = [
+    ...transcriptionSessions,
+    ...archivedTranscriptionSessions,
+  ].find((session) => session.id === activeSessionId)
+  const sessionViewMatches =
+    !activeSession ||
+    (activeView === "video-transcription"
+      ? activeSession.kind === "video"
+      : activeView === "transcription"
+        ? activeSession.kind !== "video"
+        : true)
+
+  useEffect(() => {
+    if (status !== "ready" || !activeSession || !requestedSessionId) return
+    const expectedView =
+      activeSession.kind === "video" ? "video-transcription" : "transcription"
+    if (activeView === expectedView) return
+    router.replace(workspacePath(expectedView, null, activeSession.id), {
+      scroll: false,
+    })
+  }, [activeSession, activeView, requestedSessionId, router, status])
+
   const initials = useMemo(() => {
     if (!user) return "?"
     return user.displayName
@@ -689,7 +718,11 @@ export function Workspace() {
         })
         await refreshTranscriptionSessions()
         if (archived && requestedSessionId === sessionId) {
-          navigate("transcription")
+          navigate(
+            activeView === "video-transcription"
+              ? "video-transcription"
+              : "transcription"
+          )
         }
       } catch (caught) {
         setActionError(
@@ -699,7 +732,7 @@ export function Workspace() {
         )
       }
     },
-    [navigate, refreshTranscriptionSessions, requestedSessionId]
+    [activeView, navigate, refreshTranscriptionSessions, requestedSessionId]
   )
 
   const handleDeleteSession = useCallback((session: TranscriptionSession) => {
@@ -723,7 +756,13 @@ export function Workspace() {
       } else {
         await api.delete(`/api/v1/transcription/sessions/${target.id}`)
         await refreshTranscriptionSessions()
-        if (requestedSessionId === target.id) navigate("transcription")
+        if (requestedSessionId === target.id) {
+          navigate(
+            activeView === "video-transcription"
+              ? "video-transcription"
+              : "transcription"
+          )
+        }
       }
     } catch (caught) {
       setActionError(
@@ -736,6 +775,7 @@ export function Workspace() {
     }
   }, [
     deleteTarget,
+    activeView,
     navigate,
     refreshConversations,
     refreshTranscriptionSessions,
@@ -754,17 +794,23 @@ export function Workspace() {
   const handleUseNoteInChat = useCallback(
     async (note: Note) => {
       const conversationId = await ensureConversationForContext()
-      await api.post(`/api/v1/conversations/${conversationId}/attachments/text`, {
-        title: note.title,
-        content: note.content,
-      })
+      await api.post(
+        `/api/v1/conversations/${conversationId}/attachments/text`,
+        {
+          title: note.title,
+          content: note.content,
+        }
+      )
       navigate("chat", conversationId)
     },
     [ensureConversationForContext, navigate]
   )
 
   const handleTranscriptionSessionCreated = useCallback(
-    (session: TranscriptionSession) => {
+    (
+      session: TranscriptionSession,
+      view: "transcription" | "video-transcription" = "transcription"
+    ) => {
       setTranscriptionSessions((current) => [
         session,
         ...current.filter((item) => item.id !== session.id),
@@ -772,7 +818,7 @@ export function Workspace() {
       setArchivedTranscriptionSessions((current) =>
         current.filter((item) => item.id !== session.id)
       )
-      navigate("transcription", null, true, session.id)
+      navigate(view, null, true, session.id)
     },
     [navigate]
   )
@@ -784,6 +830,11 @@ export function Workspace() {
   const handleNewTranscriptionSession = useCallback(() => {
     setCreateTranscriptionRequested(true)
     navigate("transcription")
+  }, [navigate])
+
+  const handleNewVideoTranscription = useCallback(() => {
+    setCreateVideoTranscriptionRequested(true)
+    navigate("video-transcription")
   }, [navigate])
 
   if (status === "loading") return <WorkspaceLoading />
@@ -824,9 +875,12 @@ export function Workspace() {
           onArchiveSession={handleArchiveSession}
           onDeleteConversation={handleDeleteConversation}
           onDeleteSession={handleDeleteSession}
-          onConversationRefresh={() => refreshConversations().then(() => undefined)}
+          onConversationRefresh={() =>
+            refreshConversations().then(() => undefined)
+          }
           onRenameConversation={handleRenameConversation}
           onNewTranscriptionSession={handleNewTranscriptionSession}
+          onNewVideoTranscription={handleNewVideoTranscription}
           onNavigate={(
             view,
             conversationId = null,
@@ -841,7 +895,8 @@ export function Workspace() {
               sessionId,
               settingsTab,
               adminTab
-            )}
+            )
+          }
           historyOpen={historyOpen}
           onHistoryOpenChange={setHistoryOpen}
           onOrganizationSelect={selectOrganization}
@@ -872,32 +927,43 @@ export function Workspace() {
               </AlertDescription>
             </Alert>
           )}
-          {activeView === "transcription" && disabledFeatures.transcription && (
-            <Alert className="m-4 mb-0 shrink-0 border-muted-foreground/20 bg-muted/30">
-              <Info />
-              <AlertTitle>Live transcription is disabled</AlertTitle>
-              <AlertDescription>
-                This capability was intentionally disabled by a platform administrator.
-              </AlertDescription>
-            </Alert>
-          )}
+          {(activeView === "transcription" ||
+            activeView === "video-transcription") &&
+            disabledFeatures.transcription && (
+              <Alert className="m-4 mb-0 shrink-0 border-muted-foreground/20 bg-muted/30">
+                <Info />
+                <AlertTitle>
+                  {activeView === "video-transcription"
+                    ? "Video transcription is disabled"
+                    : "Live transcription is disabled"}
+                </AlertTitle>
+                <AlertDescription>
+                  This capability was intentionally disabled by a platform
+                  administrator.
+                </AlertDescription>
+              </Alert>
+            )}
           {activeView === "settings" &&
-            (route.settingsTab === "knowledge" || route.settingsTab === "mcp") &&
+            (route.settingsTab === "knowledge" ||
+              route.settingsTab === "mcp") &&
             disabledFeatures[route.settingsTab] && (
               <Alert className="m-4 mb-0 shrink-0 border-muted-foreground/20 bg-muted/30">
                 <Info />
                 <AlertTitle>
-                  {route.settingsTab === "knowledge" ? "Knowledge" : "MCP"} is disabled
+                  {route.settingsTab === "knowledge" ? "Knowledge" : "MCP"} is
+                  disabled
                 </AlertTitle>
                 <AlertDescription>
-                  This capability was intentionally disabled by a platform administrator.
+                  This capability was intentionally disabled by a platform
+                  administrator.
                 </AlertDescription>
               </Alert>
             )}
           <div
             className={cn(
               "min-h-0 w-full flex-1",
-              activeView === "transcription"
+              activeView === "transcription" ||
+                activeView === "video-transcription"
                 ? "flex overflow-hidden"
                 : activeView === "chat"
                   ? "flex flex-col overflow-hidden"
@@ -929,8 +995,9 @@ export function Workspace() {
                 contextOpen={contextOpen}
               />
             )}
-            {activeView === "transcription" && (
-              disabledFeatures.transcription ? (
+            {activeView === "transcription" &&
+              sessionViewMatches &&
+              (disabledFeatures.transcription ? (
                 <FeatureDisabledPanel label="Live transcription" />
               ) : (
                 <LiveTranscriptionView
@@ -942,11 +1009,34 @@ export function Workspace() {
                   }
                   createSessionRequested={createTranscriptionRequested}
                   sessionId={activeSessionId}
-                  sessions={transcriptionSessions}
+                  sessions={transcriptionSessions.filter(
+                    (session) => session.kind !== "video"
+                  )}
                   user={user}
                 />
-              )
-            )}
+              ))}
+            {activeView === "video-transcription" &&
+              sessionViewMatches &&
+              (disabledFeatures.transcription ? (
+                <FeatureDisabledPanel label="Video transcription" />
+              ) : (
+                <VideoTranscriptionView
+                  endpoints={endpoints}
+                  onSessionCreated={(session) =>
+                    handleTranscriptionSessionCreated(
+                      session,
+                      "video-transcription"
+                    )
+                  }
+                  onSessionsChanged={handleTranscriptionSessionsChanged}
+                  onCreateSessionRequestHandled={() =>
+                    setCreateVideoTranscriptionRequested(false)
+                  }
+                  createSessionRequested={createVideoTranscriptionRequested}
+                  sessionId={activeSessionId}
+                  user={user}
+                />
+              ))}
             {activeView === "settings" && (
               <SettingsShell
                 activeOrganizationId={activeOrganization?.id ?? null}
@@ -975,7 +1065,9 @@ export function Workspace() {
             {activeView === "admin" && (
               <PlatformAdminShell
                 activeTab={route.adminTab}
-                onTabChange={(tab) => navigate("admin", null, false, null, "workspace", tab)}
+                onTabChange={(tab) =>
+                  navigate("admin", null, false, null, "workspace", tab)
+                }
                 user={user}
               />
             )}
