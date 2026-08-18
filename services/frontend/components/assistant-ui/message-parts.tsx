@@ -1,10 +1,9 @@
 "use client"
 
 import Image from "next/image"
-import { Children, type ReactNode } from "react"
+import { Children, useMemo } from "react"
 import {
   CircleAlert,
-  ChevronDown,
   FileText,
   LoaderCircle,
   Quote,
@@ -13,6 +12,7 @@ import {
 import {
   groupPartByType,
   MessagePrimitive,
+  useAui,
   useAuiState,
   type GroupByContext,
   type PartState,
@@ -21,9 +21,15 @@ import {
 
 import { AssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import { AssistantSource } from "@/components/assistant-ui/sources"
-import { ToolFallback } from "@/components/assistant-ui/tool-fallback"
+import { ToolResultContent } from "@/components/assistant-ui/tool-fallback"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { CompactMarkdown } from "@/components/ui/compact-markdown"
+import {
+  ToolCallsSection,
+  type ToolCallEntry,
+} from "@/components/ui/tool-calls-section"
 import { cn } from "@/lib/utils"
+import { formatToolName } from "@/lib/utils/tool-icons"
 
 type RetrievalStatus = {
   status?: string
@@ -117,18 +123,132 @@ function ReasoningPart({ text }: { text: string }) {
   )
 }
 
-function ToolGroup({ children }: { children: ReactNode }) {
+type ToolCallPart = Extract<PartState, { type: "tool-call" }>
+
+const toolLabels: Record<string, string> = {
+  web_search: "Web search",
+  browse_url: "Browse URL",
+  generate_image: "Generate image",
+  edit_image: "Edit image",
+}
+
+function toolCategory(toolName: string) {
+  if (toolName === "web_search") return "web_search"
+  if (toolName === "browse_url") return "browse_url"
+  if (toolName === "generate_image") return "generate_image"
+  if (toolName === "edit_image") return "edit_image"
+  if (toolName.toLowerCase().includes("memory")) return "memory"
+  return "integrations"
+}
+
+function toolLabel(toolName: string) {
+  return toolLabels[toolName] ?? formatToolName(toolName)
+}
+
+function parseToolInputs(
+  part: ToolCallPart
+): Record<string, unknown> | undefined {
+  if (part.args && typeof part.args === "object" && !Array.isArray(part.args)) {
+    return part.args as Record<string, unknown>
+  }
+
+  const argsText = part.argsText.trim()
+  if (!argsText) return undefined
+
+  try {
+    const parsed = JSON.parse(argsText) as unknown
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    // Arguments can still be incomplete while the model is streaming.
+  }
+
+  return { raw: argsText }
+}
+
+function formatToolValue(value: unknown) {
+  if (typeof value === "string") return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function toolCallStatus(part: ToolCallPart): ToolCallEntry["status"] {
+  if (
+    part.approval?.resolution === "cancelled" ||
+    part.approval?.resolution === "expired"
+  ) {
+    return "cancelled"
+  }
+  if (
+    part.approval &&
+    part.approval.approved === undefined &&
+    !part.approval.resolution
+  ) {
+    return "waiting"
+  }
+  if (part.status.type === "requires-action") return "waiting"
+  if (part.isError || part.status.type === "incomplete") return "failed"
+  if (part.status.type === "running") return "running"
+  return "completed"
+}
+
+function toolCallError(part: ToolCallPart) {
+  if (part.status.type !== "incomplete" || part.status.error === undefined) {
+    return undefined
+  }
+  return formatToolValue(part.status.error)
+}
+
+function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
+  const aui = useAui()
+  const messageParts = useAuiState((state) => state.message.parts)
+  const toolCalls = useMemo(
+    () =>
+      indices.flatMap((index): ToolCallEntry[] => {
+        const part = messageParts[index]
+        if (!part || part.type !== "tool-call") return []
+
+        return [
+          {
+            tool_name: part.toolName,
+            tool_category: toolCategory(part.toolName),
+            message: toolLabel(part.toolName),
+            show_category: true,
+            tool_call_id: part.toolCallId,
+            inputs: parseToolInputs(part),
+            output:
+              part.result === undefined
+                ? undefined
+                : formatToolValue(part.result),
+            error: toolCallError(part),
+            status: toolCallStatus(part),
+            approval: part.approval,
+            respondToApproval: (response) =>
+              aui.message.part({ index }).respondToToolApproval(response),
+          },
+        ]
+      }),
+    [aui, indices, messageParts]
+  )
+
+  if (toolCalls.length === 0) return null
+
   return (
-    <details
-      className="my-2 overflow-hidden rounded-xl border bg-muted/20"
-      open
-    >
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
-        <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-        Tool activity
-      </summary>
-      <div className="border-t px-2 py-1">{children}</div>
-    </details>
+    <ToolCallsSection
+      className="my-2 w-full max-w-2xl"
+      toolCalls={toolCalls}
+      renderContent={(content, call, kind) =>
+        kind === "output" ? (
+          <ToolResultContent toolName={call.tool_name} value={content} />
+        ) : (
+          <CompactMarkdown content={content} />
+        )
+      }
+    />
   )
 }
 
@@ -206,7 +326,7 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
         ) : null)
       )
     case "tool-call":
-      return part.toolUI ?? <ToolFallback {...part} />
+      return part.toolUI
     case "generative-ui":
       return (
         <div className="my-2 rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
@@ -238,7 +358,7 @@ export function AssistantMessageParts() {
           )
         }
         if (part.type === "group-tool") {
-          return <ToolGroup>{children}</ToolGroup>
+          return <ToolActivityGroup indices={part.indices} />
         }
         if (part.type === "group-retrieval") {
           const statuses = Children.toArray(children)

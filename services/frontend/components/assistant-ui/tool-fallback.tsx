@@ -3,12 +3,12 @@
 import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
 import {
-	Check,
-	ChevronDown,
-	CircleAlert,
-	Download,
-	LoaderCircle,
-	Shield,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  Download,
+  LoaderCircle,
+  Shield,
 } from "lucide-react"
 import type {
   ToolCallMessagePartComponent,
@@ -159,7 +159,8 @@ function GeneratedImageResult({ value }: { value: unknown }) {
   const parsed = parseResult(value) as ImageToolResult | null
   const image = parsed?.image
   const imageURL = typeof image?.url === "string" ? image.url : ""
-  const prompt = typeof image?.prompt === "string" ? image.prompt : "Generated image"
+  const prompt =
+    typeof image?.prompt === "string" ? image.prompt : "Generated image"
   const mode = image?.mode === "edit" ? "Edited image" : "Generated image"
   const [preview, setPreview] = useState({ source: "", url: "" })
   const [loadError, setLoadError] = useState({ source: "", message: "" })
@@ -264,14 +265,19 @@ function WebSearchResult({ value }: { value: unknown }) {
   const results = Array.isArray(parsed?.results) ? parsed.results : []
   if (results.length === 0) {
     if (typeof parsed?.content === "string") {
-      return <p className="rounded-lg border bg-background/60 px-2 py-1.5 whitespace-pre-wrap text-muted-foreground">{parsed.content}</p>
+      return (
+        <p className="rounded-lg border bg-background/60 px-2 py-1.5 whitespace-pre-wrap text-muted-foreground">
+          {parsed.content}
+        </p>
+      )
     }
     return <StructuredToolResult value={value} />
   }
   return (
     <div className="space-y-1.5">
       {results.slice(0, 8).map((result, index) => {
-        const title = typeof result.title === "string" ? result.title : "Search result"
+        const title =
+          typeof result.title === "string" ? result.title : "Search result"
         const url = typeof result.url === "string" ? result.url : ""
         const snippet = typeof result.snippet === "string" ? result.snippet : ""
         return (
@@ -283,13 +289,37 @@ function WebSearchResult({ value }: { value: unknown }) {
             target="_blank"
           >
             <span className="block font-medium text-foreground">{title}</span>
-            {url && <span className="block truncate text-[11px] text-primary">{url}</span>}
-            {snippet && <span className="mt-0.5 block line-clamp-2 text-muted-foreground">{snippet}</span>}
+            {url && (
+              <span className="block truncate text-[11px] text-primary">
+                {url}
+              </span>
+            )}
+            {snippet && (
+              <span className="mt-0.5 line-clamp-2 block text-muted-foreground">
+                {snippet}
+              </span>
+            )}
           </a>
         )
       })}
     </div>
   )
+}
+
+export function ToolResultContent({
+  toolName,
+  value,
+}: {
+  toolName: string
+  value: unknown
+}) {
+  if (toolName === "generate_image" || toolName === "edit_image") {
+    return <GeneratedImageResult value={value} />
+  }
+  if (toolName === "web_search" || toolName === "browse_url") {
+    return <WebSearchResult value={value} />
+  }
+  return <StructuredToolResult value={value} />
 }
 
 export const ToolFallback: ToolCallMessagePartComponent = (
@@ -410,9 +440,11 @@ export const ToolFallback: ToolCallMessagePartComponent = (
             </p>
           )}
           {hasResult &&
-            (props.toolName === "generate_image" || props.toolName === "edit_image" ? (
+            (props.toolName === "generate_image" ||
+            props.toolName === "edit_image" ? (
               <GeneratedImageResult value={props.result} />
-            ) : props.toolName === "web_search" || props.toolName === "browse_url" ? (
+            ) : props.toolName === "web_search" ||
+              props.toolName === "browse_url" ? (
               <WebSearchResult value={props.result} />
             ) : (
               <StructuredToolResult value={props.result} />
