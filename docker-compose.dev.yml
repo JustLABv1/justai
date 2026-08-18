@@ -58,10 +58,11 @@ services:
       PYANNOTE_DEVICE: ${PYANNOTE_DEVICE:-auto}
       PYANNOTE_MIN_AUDIO_SECONDS: ${PYANNOTE_MIN_AUDIO_SECONDS:-1}
       PYANNOTE_TORCH_THREADS: ${PYANNOTE_TORCH_THREADS:-2}
+      HF_HOME: /tmp/huggingface
     ports:
       - "8001:8000"
     volumes:
-      - justai-pyannote-cache:/root/.cache/huggingface
+      - justai-pyannote-cache:/tmp
 
   justai-frontend:
     build:

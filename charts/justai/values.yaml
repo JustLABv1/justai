@@ -132,6 +132,74 @@ frontend:
       cpu: 100m
       memory: 256Mi
 
+# Speaker diarization is an optional, heavyweight service. It downloads a
+# gated Hugging Face model on first start and should only be enabled for
+# installations that have accepted the pyannote model terms.
+pyannote:
+  enabled: false
+  image:
+    repository: ghcr.io/justlabv1/justai
+    pullPolicy: IfNotPresent
+    # Release workflows publish pyannote images with this tag convention.
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 8000
+  modelId: pyannote/speaker-diarization-3.1
+  device: auto
+  minAudioSeconds: 1
+  torchThreads: 2
+  downloadTimeoutSeconds: 1800
+  maxSourceBytes: "21474836480"
+  # Prefer an external Secret. The inline values are intended only for a
+  # private values file and are converted into a generated Secret.
+  hfToken: ""
+  serviceToken: ""
+  hfTokenSecret:
+    name: ""
+    key: hf-token
+  serviceTokenSecret:
+    name: ""
+    key: service-token
+  cache:
+    persistence:
+      enabled: false
+      storageClassName: ""
+      size: 20Gi
+  podAnnotations: {}
+  # Minimus Python runs as UID/GID 1000. fsGroup makes an optional persistent
+  # Hugging Face cache writable without weakening the non-root runtime.
+  podSecurityContext:
+    runAsNonRoot: true
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext: {}
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  resources:
+    limits:
+      cpu: 2
+      memory: 8Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi
+  startupProbe:
+    failureThreshold: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+  livenessProbe:
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  readinessProbe:
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
 ingress:
   enabled: true
   className: ""

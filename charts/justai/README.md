@@ -52,6 +52,35 @@ https://justai.example.com/api/v1/auth/oidc/callback
 
 Override `config.oidc.redirectUrl` when the backend uses another public host.
 
+## Optional pyannote diarization
+
+The Helm chart includes the self-hosted pyannote service, disabled by default
+because it downloads a gated model and needs substantially more memory than
+the core JustAI services. Enable it after accepting the Hugging Face terms for
+`pyannote/segmentation-3.0` and `pyannote/speaker-diarization-3.1`:
+
+```bash
+helm upgrade --install justai ./charts/justai \
+  --set pyannote.enabled=true \
+  --set pyannote.hfTokenSecret.name=justai-pyannote-secrets \
+  --set pyannote.hfTokenSecret.key=hf-token
+```
+
+The secret must contain the configured `hf-token` key. If the diarizer should
+authenticate requests from the backend, also configure
+`pyannote.serviceTokenSecret`; the generated Kubernetes Service is reachable
+inside the namespace at:
+
+```text
+http://<release-name>-justai-pyannote:8000
+```
+
+Create a JustAI endpoint using that URL, provider `Pyannote`, model
+`pyannote/speaker-diarization-3.1`, and capability `Speaker diarization`.
+Override `pyannote.image.repository` and `pyannote.image.tag` when using a
+private image registry. The release workflow publishes the default image as a
+`pyannote-*` tag alongside the backend and frontend images.
+
 Prerecorded video transcription uses direct S3-compatible multipart uploads.
 Set `config.transcription.storageDriver: s3`, provide the S3 credentials through
 the backend environment or Secret, and configure bucket CORS for the public

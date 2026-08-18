@@ -14,6 +14,8 @@ jobs:
       frontend_image: ${{ steps.filter.outputs.frontend_image }}
       backend_image: ${{ steps.filter.outputs.backend_image }}
       combined_image: ${{ steps.filter.outputs.combined_image }}
+      pyannote: ${{ steps.filter.outputs.pyannote }}
+      pyannote_image: ${{ steps.filter.outputs.pyannote_image }}
     steps:
       - uses: actions/checkout@v7
 
@@ -33,6 +35,13 @@ jobs:
               - 'services/backend/Dockerfile'
             combined_image:
               - 'Dockerfile'
+            pyannote:
+              - 'services/pyannote-diarizer/**'
+              - '.github/workflows/check-image-build.yml'
+            pyannote_image:
+              - 'services/pyannote-diarizer/Dockerfile'
+              - 'services/pyannote-diarizer/requirements.txt'
+              - 'services/pyannote-diarizer/app.py'
 
   frontend-compile:
     name: Frontend — Compile Check
@@ -123,4 +132,32 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          push: false
+
+  pyannote-compile:
+    name: Pyannote — Compile Check
+    needs: changes
+    if: needs.changes.outputs.pyannote == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Compile service
+        run: python -m py_compile services/pyannote-diarizer/app.py
+
+  pyannote-image-build:
+    name: Pyannote — Docker Build Check
+    needs: changes
+    if: needs.changes.outputs.pyannote_image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: services/pyannote-diarizer
+          file: services/pyannote-diarizer/Dockerfile
           push: false

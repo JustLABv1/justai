@@ -65,8 +65,9 @@ services:
       PYANNOTE_DEVICE: ${PYANNOTE_DEVICE:-auto}
       PYANNOTE_MIN_AUDIO_SECONDS: ${PYANNOTE_MIN_AUDIO_SECONDS:-1}
       PYANNOTE_TORCH_THREADS: ${PYANNOTE_TORCH_THREADS:-2}
+      HF_HOME: /tmp/huggingface
     volumes:
-      - pyannote-hf-cache:/root/.cache/huggingface
+      - pyannote-hf-cache:/tmp
 
   frontend:
     image: ${JUSTAI_IMAGE_REPOSITORY:-ghcr.io/justlabv1/justai}:frontend-${JUSTAI_VERSION:-latest}
