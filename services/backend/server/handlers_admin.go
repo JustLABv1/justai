@@ -306,24 +306,79 @@ func (a *App) getPlatformAnalytics(c *gin.Context) {
 	a.writeAnalytics(c, nil)
 }
 
+type adminAnalyticsSummary struct {
+	Requests       int     `json:"requests"`
+	Succeeded      int     `json:"succeeded"`
+	Failed         int     `json:"failed"`
+	Cancelled      int     `json:"cancelled"`
+	AverageLatency float64 `json:"averageLatencyMs"`
+	P95Latency     float64 `json:"p95LatencyMs"`
+	AverageTTFT    float64 `json:"averageTtftMs"`
+	InputTokens    *int64  `json:"inputTokens"`
+	OutputTokens   *int64  `json:"outputTokens"`
+	TotalTokens    *int64  `json:"totalTokens"`
+	ToolCalls      int     `json:"toolCalls"`
+}
+
+type adminAnalyticsEndpoint struct {
+	EndpointID       string  `json:"endpointId"`
+	EndpointName     string  `json:"endpointName"`
+	Model            string  `json:"model"`
+	Requests         int     `json:"requests"`
+	Errors           int     `json:"errors"`
+	AverageLatencyMs float64 `json:"averageLatencyMs"`
+}
+
+type adminAnalyticsDay struct {
+	Date             string  `json:"date"`
+	Requests         int     `json:"requests"`
+	Succeeded        int     `json:"succeeded"`
+	Failed           int     `json:"failed"`
+	Cancelled        int     `json:"cancelled"`
+	AverageLatencyMs float64 `json:"averageLatencyMs"`
+	ToolCalls        int     `json:"toolCalls"`
+	InputTokens      *int64  `json:"inputTokens"`
+	OutputTokens     *int64  `json:"outputTokens"`
+	TotalTokens      *int64  `json:"totalTokens"`
+}
+
+type adminAnalytics struct {
+	Summary    adminAnalyticsSummary    `json:"summary"`
+	ByEndpoint []adminAnalyticsEndpoint `json:"byEndpoint"`
+	TimeSeries []adminAnalyticsDay      `json:"timeSeries"`
+}
+
 func (a *App) writeAnalytics(c *gin.Context, organizationID *uuid.UUID) {
+	analytics, err := a.readAnalytics(c, organizationID)
+	if err != nil {
+		writeError(c, analyticsErrorStatus(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, analytics)
+}
+
+func analyticsErrorStatus(err error) int {
+	if strings.HasPrefix(err.Error(), "invalid ") || strings.HasPrefix(err.Error(), "days ") || strings.HasPrefix(err.Error(), "from ") || strings.HasPrefix(err.Error(), "to ") {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
+
+func (a *App) readAnalytics(c *gin.Context, organizationID *uuid.UUID) (adminAnalytics, error) {
 	start, end, err := analyticsRange(c)
 	if err != nil {
-		writeError(c, http.StatusBadRequest, err)
-		return
+		return adminAnalytics{}, err
 	}
 	endpointID, err := parseAnalyticsEndpointID(c.Query("endpointId"))
 	if err != nil {
-		writeError(c, http.StatusBadRequest, err)
-		return
+		return adminAnalytics{}, err
 	}
 	model := strings.TrimSpace(c.Query("model"))
 	status := strings.ToLower(strings.TrimSpace(c.Query("status")))
 	if status != "" {
 		validStatuses := map[string]bool{"running": true, "requires-action": true, "complete": true, "error": true, "cancelled": true, "incomplete": true}
 		if !validStatuses[status] {
-			writeError(c, http.StatusBadRequest, fmt.Errorf("status must be running, requires-action, complete, error, cancelled, or incomplete"))
-			return
+			return adminAnalytics{}, fmt.Errorf("status must be running, requires-action, complete, error, cancelled, or incomplete")
 		}
 	}
 
@@ -367,69 +422,55 @@ func (a *App) writeAnalytics(c *gin.Context, organizationID *uuid.UUID) {
 		}
 		return strings.Join(parts, " AND ")
 	}
-	var summary struct {
-		Requests       int     `json:"requests"`
-		Succeeded      int     `json:"succeeded"`
-		Failed         int     `json:"failed"`
-		Cancelled      int     `json:"cancelled"`
-		AverageLatency float64 `json:"averageLatencyMs"`
-		P95Latency     float64 `json:"p95LatencyMs"`
-		AverageTTFT    float64 `json:"averageTtftMs"`
-		InputTokens    *int64  `json:"inputTokens"`
-		OutputTokens   *int64  `json:"outputTokens"`
-		TotalTokens    *int64  `json:"totalTokens"`
-		ToolCalls      int     `json:"toolCalls"`
-	}
+	var summary adminAnalyticsSummary
 	query := `SELECT COUNT(*)::int, COUNT(*) FILTER (WHERE status = 'complete')::int, COUNT(*) FILTER (WHERE status = 'error')::int, COUNT(*) FILTER (WHERE status = 'cancelled')::int, COALESCE(AVG(EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000) FILTER (WHERE finished_at IS NOT NULL), 0), COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at)) * 1000) FILTER (WHERE finished_at IS NOT NULL), 0), COALESCE(AVG(EXTRACT(EPOCH FROM (first_token_at - started_at)) * 1000) FILTER (WHERE first_token_at IS NOT NULL), 0), SUM(input_tokens), SUM(output_tokens), SUM(total_tokens), COALESCE(SUM(tool_call_count), 0)::int FROM chat_runs WHERE ` + whereFor("")
 	if err := a.DB.QueryRowContext(c, query, args...).Scan(&summary.Requests, &summary.Succeeded, &summary.Failed, &summary.Cancelled, &summary.AverageLatency, &summary.P95Latency, &summary.AverageTTFT, &summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens, &summary.ToolCalls); err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
+		return adminAnalytics{}, err
 	}
 	byEndpointQuery := `SELECT COALESCE(r.endpoint_id::text, ''), COALESCE(e.name, 'Unknown endpoint'), r.model, COUNT(*)::int, COUNT(*) FILTER (WHERE r.status IN ('error', 'incomplete'))::int, COALESCE(AVG(EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.finished_at IS NOT NULL), 0) FROM chat_runs r LEFT JOIN endpoint_settings e ON e.id = r.endpoint_id WHERE ` + whereFor("r") + ` GROUP BY r.endpoint_id, e.name, r.model ORDER BY COUNT(*) DESC`
 	rows, err := a.DB.QueryContext(c, byEndpointQuery, args...)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
+		return adminAnalytics{}, err
 	}
 	defer rows.Close()
-	byEndpoint := []gin.H{}
+	byEndpoint := []adminAnalyticsEndpoint{}
 	for rows.Next() {
 		var endpointID, name, model string
 		var requests, errors int
 		var latency float64
 		if err := rows.Scan(&endpointID, &name, &model, &requests, &errors, &latency); err != nil {
-			writeError(c, http.StatusInternalServerError, err)
-			return
+			return adminAnalytics{}, err
 		}
-		byEndpoint = append(byEndpoint, gin.H{"endpointId": endpointID, "endpointName": name, "model": model, "requests": requests, "errors": errors, "averageLatencyMs": latency})
+		byEndpoint = append(byEndpoint, adminAnalyticsEndpoint{EndpointID: endpointID, EndpointName: name, Model: model, Requests: requests, Errors: errors, AverageLatencyMs: latency})
 	}
 	if err := rows.Err(); err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
+		return adminAnalytics{}, err
 	}
-	timeSeriesQuery := `SELECT TO_CHAR(r.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), COUNT(*)::int, COUNT(*) FILTER (WHERE r.status = 'complete')::int, COUNT(*) FILTER (WHERE r.status IN ('error', 'incomplete'))::int, COUNT(*) FILTER (WHERE r.status = 'cancelled')::int, COALESCE(AVG(EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.finished_at IS NOT NULL), 0), COALESCE(SUM(r.tool_call_count), 0)::int FROM chat_runs r WHERE ` + whereFor("r") + ` GROUP BY 1 ORDER BY 1`
+	timeSeriesQuery := `SELECT TO_CHAR(r.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'), COUNT(*)::int, COUNT(*) FILTER (WHERE r.status = 'complete')::int, COUNT(*) FILTER (WHERE r.status IN ('error', 'incomplete'))::int, COUNT(*) FILTER (WHERE r.status = 'cancelled')::int, COALESCE(AVG(EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000) FILTER (WHERE r.finished_at IS NOT NULL), 0), COALESCE(SUM(r.tool_call_count), 0)::int, SUM(r.input_tokens), SUM(r.output_tokens), SUM(r.total_tokens) FROM chat_runs r WHERE ` + whereFor("r") + ` GROUP BY 1 ORDER BY 1`
 	timeRows, err := a.DB.QueryContext(c, timeSeriesQuery, args...)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
+		return adminAnalytics{}, err
 	}
 	defer timeRows.Close()
-	timeSeries := []gin.H{}
+	timeSeries := []adminAnalyticsDay{}
 	for timeRows.Next() {
 		var date string
 		var requests, succeeded, failed, cancelled, toolCalls int
 		var latency float64
-		if err := timeRows.Scan(&date, &requests, &succeeded, &failed, &cancelled, &latency, &toolCalls); err != nil {
-			writeError(c, http.StatusInternalServerError, err)
-			return
+		var inputTokens, outputTokens, totalTokens sql.NullInt64
+		if err := timeRows.Scan(&date, &requests, &succeeded, &failed, &cancelled, &latency, &toolCalls, &inputTokens, &outputTokens, &totalTokens); err != nil {
+			return adminAnalytics{}, err
 		}
-		timeSeries = append(timeSeries, gin.H{"date": date, "requests": requests, "succeeded": succeeded, "failed": failed, "cancelled": cancelled, "averageLatencyMs": latency, "toolCalls": toolCalls})
+		timeSeries = append(timeSeries, adminAnalyticsDay{
+			Date: date, Requests: requests, Succeeded: succeeded, Failed: failed, Cancelled: cancelled,
+			AverageLatencyMs: latency, ToolCalls: toolCalls,
+			InputTokens: nullableInt64(inputTokens), OutputTokens: nullableInt64(outputTokens), TotalTokens: nullableInt64(totalTokens),
+		})
 	}
 	if err := timeRows.Err(); err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
+		return adminAnalytics{}, err
 	}
-	c.JSON(http.StatusOK, gin.H{"summary": summary, "byEndpoint": byEndpoint, "timeSeries": timeSeries})
+	return adminAnalytics{Summary: summary, ByEndpoint: byEndpoint, TimeSeries: timeSeries}, nil
 }
 
 func analyticsRange(c *gin.Context) (time.Time, time.Time, error) {

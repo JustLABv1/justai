@@ -109,6 +109,7 @@ func (a *App) Router() *gin.Engine {
 	protected.GET("/admin/defaults", a.getGlobalAdminDefaults)
 	protected.PUT("/admin/defaults", a.putGlobalAdminDefaults)
 	protected.GET("/admin/analytics", a.getPlatformAnalytics)
+	protected.GET("/admin/dashboard", a.getPlatformDashboard)
 	protected.GET("/admin/overview", a.getPlatformOverview)
 	protected.GET("/admin/settings", a.getPlatformSettings)
 	protected.PUT("/admin/settings", a.putPlatformSettings)

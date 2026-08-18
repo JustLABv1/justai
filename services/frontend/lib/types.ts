@@ -27,6 +27,101 @@ export type AdminTab =
   | "analytics"
   | "audit"
 
+export type PlatformSettings = {
+  loginEnabled: boolean
+  localAuthEnabled: boolean
+  signupEnabled: boolean
+  aiEnabled: boolean
+  voiceEnabled: boolean
+  transcriptionEnabled: boolean
+  mcpEnabled: boolean
+  knowledgeEnabled: boolean
+  attachmentsEnabled: boolean
+  maintenanceMessage: string
+  updatedAt?: string | null
+}
+
+export type AdminAnalyticsSummary = {
+  requests: number
+  succeeded: number
+  failed: number
+  cancelled: number
+  averageLatencyMs: number
+  p95LatencyMs: number
+  averageTtftMs: number
+  inputTokens: number | null
+  outputTokens: number | null
+  totalTokens: number | null
+  toolCalls: number
+}
+
+export type AdminAnalyticsDay = {
+  date: string
+  requests: number
+  succeeded: number
+  failed: number
+  cancelled: number
+  averageLatencyMs: number
+  toolCalls: number
+  inputTokens: number | null
+  outputTokens: number | null
+  totalTokens: number | null
+}
+
+export type AdminAnalyticsEndpoint = {
+  endpointId: string
+  endpointName: string
+  model: string
+  requests: number
+  errors: number
+  averageLatencyMs: number
+}
+
+export type AdminAnalyticsResponse = {
+  summary: AdminAnalyticsSummary
+  byEndpoint: AdminAnalyticsEndpoint[]
+  timeSeries: AdminAnalyticsDay[]
+}
+
+export type PlatformHealth = {
+  database: { ok: boolean }
+  workers: { rag: boolean; transcription: boolean }
+  providers: {
+    ok: boolean
+    total: number
+    enabled: number
+    recentFailures: number
+  }
+  mcp: { ok: boolean; total: number; enabled: number; failures: number }
+  checkedAt: string
+}
+
+export type AdminAttentionItem = {
+  id: string
+  severity: "critical" | "warning" | "info"
+  title: string
+  description: string
+  tab: AdminTab
+  metric?: number
+}
+
+export type AdminActivityItem = {
+  id: number
+  action: string
+  resourceType: string
+  createdAt: string
+}
+
+export type AdminDashboardResponse = {
+  generatedAt: string
+  counts: Record<string, number>
+  settings: PlatformSettings
+  health: PlatformHealth
+  usage: AdminAnalyticsResponse
+  attention: AdminAttentionItem[]
+  recentActivity: AdminActivityItem[]
+}
+
 export type OIDCProviderSummary = {
   id: string
   slug: string

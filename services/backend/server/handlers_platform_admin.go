@@ -38,6 +38,53 @@ type platformSettingsRequest struct {
 	MaintenanceMessage   *string `json:"maintenanceMessage"`
 }
 
+type platformHealthSnapshot struct {
+	Database  platformDatabaseHealth `json:"database"`
+	Workers   platformWorkerHealth   `json:"workers"`
+	Providers platformProviderHealth `json:"providers"`
+	MCP       platformMCPHealth      `json:"mcp"`
+	CheckedAt time.Time              `json:"checkedAt"`
+}
+
+type platformDatabaseHealth struct {
+	OK bool `json:"ok"`
+}
+
+type platformWorkerHealth struct {
+	RAG           bool `json:"rag"`
+	Transcription bool `json:"transcription"`
+}
+
+type platformProviderHealth struct {
+	OK             bool `json:"ok"`
+	Total          int  `json:"total"`
+	Enabled        int  `json:"enabled"`
+	RecentFailures int  `json:"recentFailures"`
+}
+
+type platformMCPHealth struct {
+	OK       bool `json:"ok"`
+	Total    int  `json:"total"`
+	Enabled  int  `json:"enabled"`
+	Failures int  `json:"failures"`
+}
+
+type platformAttentionItem struct {
+	ID          string `json:"id"`
+	Severity    string `json:"severity"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Tab         string `json:"tab"`
+	Metric      any    `json:"metric,omitempty"`
+}
+
+type platformActivityItem struct {
+	ID           int64     `json:"id"`
+	Action       string    `json:"action"`
+	ResourceType string    `json:"resourceType"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 func (a *App) platformSettingsJSON(c *gin.Context) (platformSettings, bool) {
 	if !a.requirePlatformAdmin(c) {
 		return platformSettings{}, false
@@ -113,7 +160,23 @@ func (a *App) getPlatformOverview(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
-	counts := gin.H{}
+	counts, err := a.readPlatformCounts(c)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	settings, err := a.readPlatformSettings(c)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	var databaseReady bool
+	databaseReady = a.DB.PingContext(c) == nil
+	c.JSON(http.StatusOK, gin.H{"counts": counts, "settings": settings, "readiness": gin.H{"database": databaseReady, "ragWorker": a.RAG != nil, "transcriptionWorker": a.Live != nil}})
+}
+
+func (a *App) readPlatformCounts(c *gin.Context) (map[string]int, error) {
+	counts := map[string]int{}
 	queries := map[string]string{
 		"users":          `SELECT COUNT(*) FROM users`,
 		"workspaces":     `SELECT COUNT(*) FROM organizations`,
@@ -126,19 +189,51 @@ func (a *App) getPlatformOverview(c *gin.Context) {
 	for name, query := range queries {
 		var count int
 		if err := a.DB.QueryRowContext(c, query).Scan(&count); err != nil {
-			writeError(c, http.StatusInternalServerError, err)
-			return
+			return nil, err
 		}
 		counts[name] = count
+	}
+	return counts, nil
+}
+
+func (a *App) getPlatformDashboard(c *gin.Context) {
+	if !a.requirePlatformAdmin(c) {
+		return
+	}
+	counts, err := a.readPlatformCounts(c)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
 	}
 	settings, err := a.readPlatformSettings(c)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	var databaseReady bool
-	databaseReady = a.DB.PingContext(c) == nil
-	c.JSON(http.StatusOK, gin.H{"counts": counts, "settings": settings, "readiness": gin.H{"database": databaseReady, "ragWorker": a.RAG != nil, "transcriptionWorker": a.Live != nil}})
+	health, err := a.readPlatformHealth(c)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	analytics, err := a.readAnalytics(c, nil)
+	if err != nil {
+		writeError(c, analyticsErrorStatus(err), err)
+		return
+	}
+	activity, err := a.readRecentPlatformActivity(c)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"generatedAt":    time.Now().UTC(),
+		"counts":         counts,
+		"settings":       settings,
+		"health":         health,
+		"usage":          analytics,
+		"attention":      platformAttentionItems(counts, settings, health),
+		"recentActivity": activity,
+	})
 }
 
 func pageValues(c *gin.Context) (int, int, int) {
@@ -889,18 +984,91 @@ func (a *App) listPlatformAudit(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"events": events, "page": page, "pageSize": pageSize, "total": total})
 }
 
+func (a *App) readPlatformHealth(c *gin.Context) (platformHealthSnapshot, error) {
+	databaseOK := a.DB != nil && a.DB.PingContext(c) == nil
+	var recentFailures, endpointTotal, endpointEnabled, mcpTotal, mcpEnabled, mcpFailures int
+	if databaseOK {
+		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM api_request_logs WHERE status_code >= 500 AND created_at >= now() - interval '1 hour'`).Scan(&recentFailures); err != nil {
+			return platformHealthSnapshot{}, err
+		}
+		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE enabled = TRUE) FROM endpoint_settings`).Scan(&endpointTotal, &endpointEnabled); err != nil {
+			return platformHealthSnapshot{}, err
+		}
+		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE enabled = TRUE), COUNT(*) FILTER (WHERE last_error IS NOT NULL AND last_error <> '') FROM mcp_servers`).Scan(&mcpTotal, &mcpEnabled, &mcpFailures); err != nil {
+			return platformHealthSnapshot{}, err
+		}
+	}
+	return platformHealthSnapshot{
+		Database:  platformDatabaseHealth{OK: databaseOK},
+		Workers:   platformWorkerHealth{RAG: a.RAG != nil, Transcription: a.Live != nil},
+		Providers: platformProviderHealth{OK: databaseOK && endpointEnabled > 0, Total: endpointTotal, Enabled: endpointEnabled, RecentFailures: recentFailures},
+		MCP:       platformMCPHealth{OK: databaseOK && mcpFailures == 0, Total: mcpTotal, Enabled: mcpEnabled, Failures: mcpFailures},
+		CheckedAt: time.Now().UTC(),
+	}, nil
+}
+
 func (a *App) getPlatformHealth(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
 	}
-	databaseOK := a.DB != nil && a.DB.PingContext(c) == nil
-	var recentFailures, endpointTotal, endpointEnabled, mcpTotal, mcpEnabled, mcpFailures int
-	if databaseOK {
-		_ = a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM api_request_logs WHERE status_code >= 500 AND created_at >= now() - interval '1 hour'`).Scan(&recentFailures)
-		_ = a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE enabled = TRUE) FROM endpoint_settings`).Scan(&endpointTotal, &endpointEnabled)
-		_ = a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE enabled = TRUE), COUNT(*) FILTER (WHERE last_error IS NOT NULL AND last_error <> '') FROM mcp_servers`).Scan(&mcpTotal, &mcpEnabled, &mcpFailures)
+	health, err := a.readPlatformHealth(c)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
 	}
-	c.JSON(http.StatusOK, gin.H{"database": gin.H{"ok": databaseOK}, "workers": gin.H{"rag": a.RAG != nil, "transcription": a.Live != nil}, "providers": gin.H{"ok": databaseOK && endpointEnabled > 0, "total": endpointTotal, "enabled": endpointEnabled, "recentFailures": recentFailures}, "mcp": gin.H{"ok": databaseOK && mcpFailures == 0, "total": mcpTotal, "enabled": mcpEnabled, "failures": mcpFailures}, "checkedAt": time.Now().UTC()})
+	c.JSON(http.StatusOK, health)
+}
+
+func (a *App) readRecentPlatformActivity(c *gin.Context) ([]platformActivityItem, error) {
+	rows, err := a.DB.QueryContext(c, `SELECT id, action, resource_type, created_at FROM audit_events ORDER BY created_at DESC LIMIT 6`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	activity := []platformActivityItem{}
+	for rows.Next() {
+		var item platformActivityItem
+		if err := rows.Scan(&item.ID, &item.Action, &item.ResourceType, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		activity = append(activity, item)
+	}
+	return activity, rows.Err()
+}
+
+func platformAttentionItems(counts map[string]int, settings platformSettings, health platformHealthSnapshot) []platformAttentionItem {
+	items := []platformAttentionItem{}
+	add := func(id, severity, title, description, tab string, metric any) {
+		items = append(items, platformAttentionItem{ID: id, Severity: severity, Title: title, Description: description, Tab: tab, Metric: metric})
+	}
+	if !health.Database.OK {
+		add("database-unavailable", "critical", "Database unavailable", "The platform cannot confirm database connectivity.", "health", nil)
+	}
+	if !health.Workers.RAG {
+		add("rag-worker-offline", "warning", "RAG worker is offline", "Knowledge indexing and retrieval jobs may be delayed.", "health", nil)
+	}
+	if !health.Workers.Transcription {
+		add("transcription-worker-offline", "warning", "Transcription worker is offline", "Live and video transcription processing may be unavailable.", "health", nil)
+	}
+	if health.Providers.Enabled == 0 {
+		add("no-enabled-endpoints", "critical", "No enabled model endpoints", "New AI requests have no enabled provider available for routing.", "endpoints", counts["endpoints"])
+	}
+	if health.Providers.RecentFailures > 0 {
+		add("provider-failures", "warning", "Provider failures detected", "One or more model requests failed in the last hour.", "health", health.Providers.RecentFailures)
+	}
+	if health.MCP.Failures > 0 {
+		add("mcp-failures", "warning", "MCP failures detected", "One or more configured MCP servers reported a recent error.", "mcp", health.MCP.Failures)
+	}
+	if counts["recentErrors"] > 0 {
+		add("recent-api-errors", "warning", "Recent API errors", "Requests returned errors during the last 24 hours.", "analytics", counts["recentErrors"])
+	}
+	if !settings.AIEnabled {
+		add("ai-disabled", "info", "AI chat is disabled", "Model requests are currently blocked by platform controls.", "controls", nil)
+	}
+	if !settings.LoginEnabled {
+		add("login-disabled", "info", "Login is disabled", "Existing sessions may continue, but new sign-ins are blocked.", "controls", nil)
+	}
+	return items
 }
 
 func (a *App) writePlatformAudit(c *gin.Context, action, resourceType string, resourceID *uuid.UUID, details any) {

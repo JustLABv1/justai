@@ -35,8 +35,18 @@ import {
 } from "lucide-react"
 
 import { api } from "@/lib/api"
-import type { AdminTab, Endpoint, User } from "@/lib/types"
+import type {
+  AdminAnalyticsResponse,
+  AdminDashboardResponse,
+  AdminTab,
+  Endpoint,
+  PlatformSettings,
+  User,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { notifyError, notifySuccess } from "@/lib/feedback"
+import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
+import { AdminUsageCharts, compactNumber } from "@/components/admin-usage-charts"
 import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAnnouncementsView } from "@/components/platform-announcements-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
@@ -93,18 +103,27 @@ const tabs: Array<{ id: AdminTab; label: string; icon: typeof ShieldCheck }> = [
   { id: "audit", label: "Audit", icon: KeyRound },
 ]
 
-type PlatformSettings = {
-  loginEnabled: boolean
-  localAuthEnabled: boolean
-  signupEnabled: boolean
-  aiEnabled: boolean
-  voiceEnabled: boolean
-  transcriptionEnabled: boolean
-  mcpEnabled: boolean
-  knowledgeEnabled: boolean
-  attachmentsEnabled: boolean
-  maintenanceMessage: string
+const tabGroups: Array<{ label: string; ids: AdminTab[] }> = [
+  { label: "Overview", ids: ["overview"] },
+  { label: "Operations", ids: ["users", "workspaces", "endpoints", "mcp"] },
+  {
+    label: "Configuration",
+    ids: ["controls", "authentication", "announcements"],
+  },
+  { label: "Observability", ids: ["health", "analytics", "audit"] },
+]
+
+function settingLabel(key: string) {
+  return key
+    .replace(/Enabled$/, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^./, (value) => value.toUpperCase())
 }
+
+type PlatformControlKey = Exclude<
+  keyof PlatformSettings,
+  "maintenanceMessage" | "updatedAt"
+>
 
 type PlatformAdminShellProps = {
   activeTab: AdminTab
@@ -132,14 +151,18 @@ export function PlatformAdminShell({
 }: PlatformAdminShellProps) {
   const [error, setError] = useState("")
   const [settings, setSettings] = useState<PlatformSettings>(emptySettings)
-  const [overview, setOverview] = useState<Record<string, unknown> | null>(null)
+  const [dashboard, setDashboard] = useState<AdminDashboardResponse | null>(
+    null
+  )
   const [users, setUsers] = useState<any[]>([])
   const [workspaces, setWorkspaces] = useState<any[]>([])
   const [endpoints, setEndpoints] = useState<Endpoint[]>([])
   const [servers, setServers] = useState<any[]>([])
   const [health, setHealth] = useState<Record<string, any> | null>(null)
   const [audit, setAudit] = useState<any[]>([])
-  const [analytics, setAnalytics] = useState<Record<string, any> | null>(null)
+  const [analytics, setAnalytics] = useState<AdminAnalyticsResponse | null>(
+    null
+  )
   const [query, setQuery] = useState("")
   const [listStatus, setListStatus] = useState("")
   const [listPage, setListPage] = useState(1)
@@ -164,7 +187,10 @@ export function PlatformAdminShell({
     model: "",
     status: "",
   })
-  const [saving, setSaving] = useState(false)
+  const [savingMaintenance, setSavingMaintenance] = useState(false)
+  const [savingControl, setSavingControl] = useState<PlatformControlKey | null>(
+    null
+  )
   const [endpointCreateRequest, setEndpointCreateRequest] = useState(0)
   const [mcpCreateRequest, setMcpCreateRequest] = useState(0)
   const [authenticationCreateRequest, setAuthenticationCreateRequest] =
@@ -176,11 +202,11 @@ export function PlatformAdminShell({
     setError("")
     try {
       if (activeTab === "overview") {
-        const result = await api.get<Record<string, any>>(
-          "/api/v1/admin/overview"
+        const result = await api.get<AdminDashboardResponse>(
+          "/api/v1/admin/dashboard?days=30"
         )
-        setOverview(result)
-        if (result.settings) setSettings(result.settings as PlatformSettings)
+        setDashboard(result)
+        setSettings(result.settings)
       } else if (activeTab === "controls") {
         setSettings(await api.get<PlatformSettings>("/api/v1/admin/settings"))
       } else if (activeTab === "users") {
@@ -213,7 +239,7 @@ export function PlatformAdminShell({
           if (value) params.set(key, value)
         })
         setAnalytics(
-          await api.get<Record<string, any>>(
+          await api.get<AdminAnalyticsResponse>(
             `/api/v1/admin/analytics?${params.toString()}`
           )
         )
@@ -245,23 +271,45 @@ export function PlatformAdminShell({
     return () => window.clearTimeout(timer)
   }, [load])
 
-  async function saveSettings() {
-    setSaving(true)
+  async function saveMaintenanceMessage() {
+    setSavingMaintenance(true)
     setError("")
     try {
       const result = await api.put<PlatformSettings>(
         "/api/v1/admin/settings",
-        settings
+        { maintenanceMessage: settings.maintenanceMessage }
       )
       setSettings(result)
+      notifySuccess("Maintenance message saved")
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Platform settings could not be saved."
-      )
+      setError(notifyError("Maintenance message could not be saved", caught, "Platform settings could not be saved."))
     } finally {
-      setSaving(false)
+      setSavingMaintenance(false)
+    }
+  }
+
+  async function updateSetting(
+    key: PlatformControlKey,
+    value: boolean
+  ) {
+    const previousValue = settings[key]
+    setSettings((current) => ({ ...current, [key]: value }))
+    setSavingControl(key)
+    setError("")
+    try {
+      const result = await api.put<PlatformSettings>("/api/v1/admin/settings", {
+        [key]: value,
+      })
+      setSettings((current) => ({
+        ...result,
+        maintenanceMessage: current.maintenanceMessage,
+      }))
+      notifySuccess(`${settingLabel(key)} ${value ? "enabled" : "disabled"}`)
+    } catch (caught) {
+      setSettings((current) => ({ ...current, [key]: previousValue }))
+      setError(notifyError("Platform control could not be updated", caught, "The control could not be updated."))
+    } finally {
+      setSavingControl(null)
     }
   }
 
@@ -269,11 +317,10 @@ export function PlatformAdminShell({
     setError("")
     try {
       await api.patch(`/api/v1/admin/users/${id}`, patch)
+      notifySuccess("User updated")
       await load()
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "User could not be updated."
-      )
+      setError(notifyError("User could not be updated", caught, "User could not be updated."))
     }
   }
 
@@ -281,13 +328,10 @@ export function PlatformAdminShell({
     setError("")
     try {
       await api.patch(`/api/v1/admin/organizations/${id}`, patch)
+      notifySuccess("Workspace updated")
       await load()
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Workspace could not be updated."
-      )
+      setError(notifyError("Workspace could not be updated", caught, "Workspace could not be updated."))
     }
   }
 
@@ -363,50 +407,66 @@ export function PlatformAdminShell({
         </div>
       </header>
 
-      <nav
-        aria-label="Platform administration"
-        className="flex gap-1 overflow-x-auto rounded-xl border bg-card p-1"
-      >
-        {tabs.map((tab) => {
-          const Icon = tab.icon
-          return (
-            <button
-              className={cn(
-                "inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                tab.id === activeTab &&
-                  "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
-              )}
-              key={tab.id}
-              onClick={() => {
-                setListPage(1)
-                setListStatus("")
-                onTabChange(tab.id)
-              }}
-              type="button"
-            >
-              <Icon className="size-3.5" /> {tab.label}
-            </button>
-          )
-        })}
-      </nav>
+      <div className="grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start">
+        <nav
+          aria-label="Platform administration"
+          className="flex gap-4 overflow-x-auto rounded-xl border bg-card p-2 lg:sticky lg:top-4 lg:flex-col lg:gap-5"
+        >
+          {tabGroups.map((group) => (
+            <div className="flex min-w-max flex-col gap-1 lg:min-w-0" key={group.label}>
+              <p className="px-2 text-[0.65rem] font-medium tracking-[0.16em] text-muted-foreground uppercase">
+                {group.label}
+              </p>
+              <div className="flex gap-1 lg:flex-col">
+                {group.ids.map((id) => {
+                  const tab = tabs.find((candidate) => candidate.id === id)
+                  if (!tab) return null
+                  const Icon = tab.icon
+                  return (
+                    <button
+                      aria-current={tab.id === activeTab ? "page" : undefined}
+                      className={cn(
+                        "inline-flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                        tab.id === activeTab &&
+                          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
+                      )}
+                      key={tab.id}
+                      onClick={() => {
+                        setListPage(1)
+                        setListStatus("")
+                        onTabChange(tab.id)
+                      }}
+                      type="button"
+                    >
+                      <Icon className="size-3.5 shrink-0" /> {tab.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertTriangle />
-          <AlertTitle>Admin request failed</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+        <div className="min-w-0">
+          {error && (
+            <Alert className="mb-4" variant="destructive">
+              <AlertTriangle />
+              <AlertTitle>Admin request failed</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
       {activeTab === "overview" && (
-        <OverviewView overview={overview} onTabChange={onTabChange} />
+        <PlatformAdminDashboard dashboard={dashboard} onTabChange={onTabChange} />
       )}
       {activeTab === "controls" && (
         <ControlsView
           settings={settings}
-          saving={saving}
+          savingMaintenance={savingMaintenance}
+          savingControl={savingControl}
           onChange={setSettings}
-          onSave={() => void saveSettings()}
+          onToggle={(key, value) => void updateSetting(key, value)}
+          onSave={() => void saveMaintenanceMessage()}
         />
       )}
       {activeTab === "authentication" && (
@@ -526,84 +586,31 @@ export function PlatformAdminShell({
           onPageChange={setListPage}
         />
       )}
-    </div>
-  )
-}
-
-function OverviewView({
-  overview,
-  onTabChange,
-}: {
-  overview: Record<string, any> | null
-  onTabChange: (tab: AdminTab) => void
-}) {
-  const counts = overview?.counts ?? {}
-  const cards = [
-    ["Users", counts.users, UsersRound, "users"],
-    ["Workspaces", counts.workspaces, Network, "workspaces"],
-    ["Conversations", counts.conversations, Activity, "analytics"],
-    ["MCP servers", counts.mcpServers, Wrench, "mcp"],
-    ["Transcriptions", counts.transcriptions, BarChart3, "analytics"],
-    ["Errors (24h)", counts.recentErrors, AlertTriangle, "health"],
-  ] as const
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {cards.map(([label, value, Icon, tab]) => (
-          <button
-            className="text-left"
-            key={label}
-            onClick={() => onTabChange(tab as AdminTab)}
-            type="button"
-          >
-            <Card className="h-full transition-colors hover:bg-muted/40">
-              <CardHeader className="flex-row items-center justify-between gap-0 pb-2">
-                <CardTitle>{label}</CardTitle>
-                <Icon className="size-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-semibold">{value ?? "—"}</p>
-              </CardContent>
-            </Card>
-          </button>
-        ))}
+        </div>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Deployment readiness</CardTitle>
-          <CardDescription>
-            Database and background workers available to the platform.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          {Object.entries(overview?.readiness ?? {}).map(([key, value]) => (
-            <Badge key={key} variant={value ? "default" : "destructive"}>
-              {value ? (
-                <CheckCircle2 data-icon="inline-start" />
-              ) : (
-                <AlertTriangle data-icon="inline-start" />
-              )}{" "}
-              {key}
-            </Badge>
-          ))}
-        </CardContent>
-      </Card>
     </div>
   )
 }
 
 function ControlsView({
   settings,
-  saving,
+  savingMaintenance,
+  savingControl,
   onChange,
+  onToggle,
   onSave,
 }: {
   settings: PlatformSettings
-  saving: boolean
+  savingMaintenance: boolean
+  savingControl: PlatformControlKey | null
   onChange: (settings: PlatformSettings) => void
+  onToggle: (
+    key: PlatformControlKey,
+    value: boolean
+  ) => void
   onSave: () => void
 }) {
-  const controls: Array<[keyof PlatformSettings, string, string]> = [
+  const controls: Array<[PlatformControlKey, string, string]> = [
     ["loginEnabled", "Login", "Allow existing users to sign in."],
     [
       "localAuthEnabled",
@@ -636,7 +643,7 @@ function ControlsView({
         <CardHeader>
           <CardTitle>Platform controls</CardTitle>
           <CardDescription>
-            Changes apply immediately to product APIs. Existing sessions remain
+            Switches are saved as soon as they change. Existing sessions remain
             valid when login is disabled.
           </CardDescription>
         </CardHeader>
@@ -650,13 +657,17 @@ function ControlsView({
                 <p className="text-sm font-medium">{label}</p>
                 <p className="text-xs text-muted-foreground">{description}</p>
               </div>
-              <Switch
-                aria-label={label}
-                checked={Boolean(settings[key])}
-                onCheckedChange={(checked) =>
-                  onChange({ ...settings, [key]: checked })
-                }
-              />
+              <div className="flex shrink-0 items-center gap-2">
+                {savingControl === key && (
+                  <span className="text-[11px] text-muted-foreground">Saving…</span>
+                )}
+                <Switch
+                  aria-label={label}
+                  checked={Boolean(settings[key])}
+                  disabled={savingControl !== null}
+                  onCheckedChange={(checked) => onToggle(key, checked)}
+                />
+              </div>
             </div>
           ))}
         </CardContent>
@@ -676,8 +687,8 @@ function ControlsView({
             placeholder="We’re performing maintenance…"
             value={settings.maintenanceMessage}
           />
-          <Button disabled={saving} onClick={onSave}>
-            {saving ? "Saving…" : "Save platform controls"}
+          <Button disabled={savingMaintenance} onClick={onSave}>
+            {savingMaintenance ? "Saving…" : "Save maintenance message"}
           </Button>
         </CardContent>
       </Card>
@@ -1413,18 +1424,22 @@ function InventoryView({
     scopeId: "",
   })
   const createRequestRef = useRef(createRequest ?? 0)
+  const resourceLabel = kind === "endpoint" ? "Endpoint" : "MCP server"
 
   async function runAction(id: string, action: () => Promise<void>) {
     setBusyId(id)
     setActionError("")
     try {
       await action()
+      notifySuccess(`${resourceLabel} action completed`)
       onRefresh()
     } catch (caught) {
       setActionError(
-        caught instanceof Error
-          ? caught.message
-          : "The action could not be completed."
+        notifyError(
+          `${resourceLabel} action failed`,
+          caught,
+          "The action could not be completed."
+        )
       )
     } finally {
       setBusyId("")
@@ -1506,12 +1521,15 @@ function InventoryView({
         oauthScopes: "",
         scopeId: "",
       }))
+      notifySuccess(`${resourceLabel} created`, `${name} is now in the catalog.`)
       onRefresh()
     } catch (caught) {
       setCreateError(
-        caught instanceof Error
-          ? caught.message
-          : "The resource could not be created."
+        notifyError(
+          `${resourceLabel} could not be created`,
+          caught,
+          "The resource could not be created."
+        )
       )
     } finally {
       setCreateBusy(false)
@@ -2219,12 +2237,12 @@ function AnalyticsView({
   onFiltersChange,
   onRefresh,
 }: {
-  analytics: Record<string, any> | null
+  analytics: AdminAnalyticsResponse | null
   filters: Record<string, string>
   onFiltersChange: (filters: Record<string, string>) => void
   onRefresh: () => void
 }) {
-  const summary = analytics?.summary ?? {}
+  const summary = analytics?.summary
   const setFilter = (key: string, value: string) =>
     onFiltersChange({ ...filters, [key]: value })
   const timeSeries = analytics?.timeSeries ?? []
@@ -2305,15 +2323,18 @@ function AnalyticsView({
       </Card>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          ["Requests", summary.requests],
-          ["Success", summary.succeeded],
-          ["Errors", summary.failed],
+          ["Requests", summary?.requests],
+          ["Success", summary?.succeeded],
+          ["Errors", summary?.failed],
           [
             "P95 latency",
-            summary.p95LatencyMs
+            summary?.p95LatencyMs
               ? `${Math.round(summary.p95LatencyMs)} ms`
               : "—",
           ],
+          ["Total tokens", compactNumber(summary?.totalTokens)],
+          ["Average TTFT", summary?.averageTtftMs ? `${Math.round(summary.averageTtftMs)} ms` : "—"],
+          ["Tool calls", summary?.toolCalls],
         ].map(([label, value]) => (
           <Card key={String(label)}>
             <CardHeader className="pb-2">
@@ -2327,6 +2348,7 @@ function AnalyticsView({
           </Card>
         ))}
       </div>
+      <AdminUsageCharts analytics={analytics} showLatency />
       <Card>
         <CardHeader>
           <CardTitle>Endpoint and model breakdown</CardTitle>

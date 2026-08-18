@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 
 import { ThemeProvider } from "@/components/theme-provider"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Toaster } from "@/components/ui/toast"
 import {
   PlatformBannerStack,
   PlatformConfigProvider,
@@ -33,6 +34,7 @@ export default function RootLayout({
                   {children}
                 </div>
               </div>
+              <Toaster />
             </PlatformConfigProvider>
           </TooltipProvider>
         </ThemeProvider>

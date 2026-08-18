@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react"
 import { BarChart3, Check, LoaderCircle, ShieldCheck } from "lucide-react"
 
 import { api } from "@/lib/api"
-import type { Endpoint, MCPServer } from "@/lib/types"
+import { notifyError, notifySuccess } from "@/lib/feedback"
+import type { AdminAnalyticsResponse, Endpoint, MCPServer } from "@/lib/types"
+import { AdminUsageCharts } from "@/components/admin-usage-charts"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,39 +27,6 @@ import {
 type DefaultsResponse = {
   endpointId: string | null
   mcpServerIds: string[]
-}
-
-type AnalyticsResponse = {
-  summary: {
-    requests: number
-    succeeded: number
-    failed: number
-    cancelled: number
-    averageLatencyMs: number
-    p95LatencyMs: number
-    averageTtftMs: number
-    inputTokens: number | null
-    outputTokens: number | null
-    totalTokens: number | null
-    toolCalls: number
-  }
-  byEndpoint: Array<{
-    endpointId: string
-    endpointName: string
-    model: string
-    requests: number
-    errors: number
-    averageLatencyMs: number
-  }>
-  timeSeries: Array<{
-    date: string
-    requests: number
-    succeeded: number
-    failed: number
-    cancelled: number
-    averageLatencyMs: number
-    toolCalls: number
-  }>
 }
 
 type AdminViewProps = {
@@ -87,7 +56,7 @@ export function AdminView({
     endpointId: null,
     mcpServerIds: [],
   })
-  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null)
+  const [analytics, setAnalytics] = useState<AdminAnalyticsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingGlobal, setSavingGlobal] = useState(false)
@@ -135,7 +104,7 @@ export function AdminView({
         : api.get<DefaultsResponse>(
             `/api/v1/organizations/${organizationId}/admin/defaults`
           ),
-      api.get<AnalyticsResponse>(
+      api.get<AdminAnalyticsResponse>(
         platformAdmin
           ? `/api/v1/admin/analytics?days=${analyticsDays}`
           : `/api/v1/organizations/${organizationId}/admin/analytics?days=${analyticsDays}`
@@ -177,12 +146,9 @@ export function AdminView({
         defaults
       )
       setNotice("Workspace defaults saved.")
+      notifySuccess("Workspace defaults saved")
     } catch (caught) {
-      setNotice(
-        caught instanceof Error
-          ? caught.message
-          : "Defaults could not be saved."
-      )
+      setNotice(notifyError("Workspace defaults could not be saved", caught, "Defaults could not be saved."))
     } finally {
       setSaving(false)
     }
@@ -198,12 +164,9 @@ export function AdminView({
       })
       setGlobalDefaults(next)
       setNotice("Platform defaults saved.")
+      notifySuccess("Platform defaults saved")
     } catch (caught) {
-      setNotice(
-        caught instanceof Error
-          ? caught.message
-          : "Platform defaults could not be saved."
-      )
+      setNotice(notifyError("Platform defaults could not be saved", caught, "Platform defaults could not be saved."))
     } finally {
       setSavingGlobal(false)
     }
@@ -446,6 +409,9 @@ export function AdminView({
                 <p className="mt-1 text-xl font-semibold">{value}</p>
               </div>
             ))}
+          </div>
+          <div className="mt-6">
+            <AdminUsageCharts analytics={analytics} />
           </div>
           {analytics?.byEndpoint && analytics.byEndpoint.length > 0 && (
             <div className="mt-6 overflow-x-auto">

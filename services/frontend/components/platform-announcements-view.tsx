@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CalendarClock, LoaderCircle, Megaphone, Trash2 } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { notifyError, notifySuccess } from "@/lib/feedback"
 import { sortPlatformBanners } from "@/lib/platform-config-logic"
 import type { PlatformBanner } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -187,9 +188,16 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
         await api.post("/api/v1/admin/banners", payload)
       }
       setDialogOpen(false)
+      notifySuccess(editingId ? "Announcement updated" : "Announcement published")
       await load()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Announcement could not be saved.")
+      setError(
+        notifyError(
+          "Announcement could not be saved",
+          caught,
+          "Announcement could not be saved."
+        )
+      )
     } finally {
       setSaving(false)
     }
@@ -200,9 +208,16 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
     setError("")
     try {
       await api.delete(`/api/v1/admin/banners/${banner.id}`)
+      notifySuccess("Announcement removed")
       await load()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Announcement could not be deleted.")
+      setError(
+        notifyError(
+          "Announcement could not be deleted",
+          caught,
+          "Announcement could not be deleted."
+        )
+      )
     }
   }
 

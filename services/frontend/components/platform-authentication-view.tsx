@@ -11,6 +11,7 @@ import {
 } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { AdminOIDCProvider } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -142,9 +143,18 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
         await api.post("/api/v1/admin/oidc/providers", payload)
       }
       setDialogOpen(false)
+      notifySuccess(
+        editingId ? "Identity provider updated" : "Identity provider added"
+      )
       await load()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Provider could not be saved.")
+      setError(
+        notifyError(
+          "Identity provider could not be saved",
+          caught,
+          "Provider could not be saved."
+        )
+      )
     } finally {
       setSaving(false)
     }
@@ -155,9 +165,12 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
     setError("")
     try {
       await api.post(`/api/v1/admin/oidc/providers/${provider.id}/test`)
+      notifySuccess("OIDC discovery succeeded", provider.displayName)
       await load()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "OIDC discovery failed.")
+      setError(
+        notifyError("OIDC discovery failed", caught, "OIDC discovery failed.")
+      )
       await load()
     } finally {
       setTestingId("")
@@ -169,9 +182,16 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
     setError("")
     try {
       await api.delete(`/api/v1/admin/oidc/providers/${provider.id}`)
+      notifySuccess("Identity provider removed", provider.displayName)
       await load()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Provider could not be deleted.")
+      setError(
+        notifyError(
+          "Identity provider could not be deleted",
+          caught,
+          "Provider could not be deleted."
+        )
+      )
     }
   }
 
