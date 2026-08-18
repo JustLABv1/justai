@@ -88,6 +88,40 @@ func TestVideoMultipartPresignIncludesUploadScope(t *testing.T) {
 	}
 }
 
+func TestVideoPlaybackPresignUsesAuthorizedObjectKey(t *testing.T) {
+	application := &App{Config: config.Config{Transcription: config.TranscriptionConfig{
+		S3Endpoint:  "https://storage.example.test",
+		S3Region:    "eu-central-1",
+		S3Bucket:    "videos",
+		S3AccessKey: "access",
+		S3SecretKey: "secret",
+	}}}
+	value, expiresAt, err := application.videoPlaybackURL(nil, videoUploadRecord{
+		storageDriver: "s3",
+		storageKey:    "transcription-video/session/video.mp4",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expiresAt.IsZero() || !expiresAt.After(time.Now()) {
+		t.Fatalf("playback URL did not receive a future expiration: %s", expiresAt)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Path != "/videos/transcription-video/session/video.mp4" {
+		t.Fatalf("playback URL does not target the expected object: %s", value)
+	}
+	query := parsed.Query()
+	if query.Get("X-Amz-SignedHeaders") != "host" || query.Get("X-Amz-Signature") == "" {
+		t.Fatalf("playback URL is missing its signature: %s", value)
+	}
+	if query.Get("X-Amz-Expires") != "86400" {
+		t.Fatalf("unexpected playback URL lifetime: %s", value)
+	}
+}
+
 func TestMultipartCompletionUsesS3RootElement(t *testing.T) {
 	payload, err := xml.Marshal(s3MultipartCompletion{Parts: []s3MultipartPart{{PartNumber: 1, ETag: `"etag"`}}})
 	if err != nil {
@@ -95,5 +129,24 @@ func TestMultipartCompletionUsesS3RootElement(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(payload), `<CompleteMultipartUpload>`) {
 		t.Fatalf("unexpected multipart completion XML: %s", payload)
+	}
+}
+
+func TestFFmpegVideoAudioArgsUseSeekableAudioInput(t *testing.T) {
+	args := ffmpegVideoAudioArgs("https://storage.example.test/video.mp4")
+	joined := strings.Join(args, " ")
+	for _, expected := range []string{
+		"-err_detect ignore_err",
+		"-fflags +discardcorrupt",
+		"-i https://storage.example.test/video.mp4",
+		"-map 0:a:0?",
+		"-f s16le pipe:1",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("ffmpeg args are missing %q: %s", expected, joined)
+		}
+	}
+	if strings.Contains(joined, "pipe:0") {
+		t.Fatalf("ffmpeg should not receive video through stdin: %s", joined)
 	}
 }

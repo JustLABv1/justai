@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -21,6 +22,8 @@ import (
 )
 
 const videoTranscriptionJobType = "video_transcription"
+
+const videoProcessingURLLifetime = 24 * time.Hour
 
 var errVideoTranscriptionCancelled = errors.New("video transcription was cancelled")
 var errVideoTranscriptionPermanent = errors.New("permanent video transcription error")
@@ -185,6 +188,7 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 	if attempts < maxAttempts {
 		delay := time.Duration(attempts*10) * time.Second
 		_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL`, sessionID)
+		_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'queued', lease_until = NULL, run_after = now() + $2 * interval '1 second', error_message = $3, updated_at = now() WHERE id = $1`, jobID, int64(delay/time.Second), processingErr.Error())
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', stage = 'retrying', error_message = $2, updated_at = now() WHERE id = $1`, uploadID, processingErr.Error())
 		m.broadcast(sessionID, "transcription.session", ginData{"status": "processing"})
@@ -230,7 +234,7 @@ func (m *TranscriptionManager) queueVideoTranscription(ctx context.Context, uplo
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', progress = 0, stage = 'queued', bytes = expected_bytes, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', started_at = COALESCE(started_at, now()), ended_at = NULL, join_code_hash = NULL, join_code_expires_at = NULL, updated_at = now() WHERE id = $1`, sessionID); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', polish_status = CASE WHEN grammar_endpoint_id IS NULL THEN 'not_requested' ELSE 'queued' END, started_at = COALESCE(started_at, now()), ended_at = NULL, join_code_hash = NULL, join_code_expires_at = NULL, updated_at = now() WHERE id = $1`, sessionID); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
 	if err := transaction.Commit(); err != nil {
@@ -256,6 +260,7 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 		return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("only failed video uploads can be retried")
 	}
 	_, _ = transaction.ExecContext(ctx, `DELETE FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL`, sessionID)
+	_, _ = transaction.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
 	payload, _ := json.Marshal(videoJobPayload{UploadID: uploadID.String()})
 	jobID := uuid.New()
 	if _, err := transaction.ExecContext(ctx, `INSERT INTO transcription_jobs (id, session_id, job_type, payload) VALUES ($1, $2, $3, $4)`, jobID, sessionID, videoTranscriptionJobType, payload); err != nil {
@@ -264,7 +269,7 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', progress = 0, stage = 'queued', duration_ms = 0, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', started_at = COALESCE(started_at, now()), ended_at = NULL, updated_at = now() WHERE id = $1`, sessionID); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', polish_status = CASE WHEN grammar_endpoint_id IS NULL THEN 'not_requested' ELSE 'queued' END, started_at = COALESCE(started_at, now()), ended_at = NULL, updated_at = now() WHERE id = $1`, sessionID); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
 	if err := transaction.Commit(); err != nil {
@@ -317,8 +322,9 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 		return fmt.Errorf("%w: video upload storage driver %q is not supported", errVideoTranscriptionPermanent, record.storageDriver)
 	}
 	var sessionEndpoint uuid.UUID
+	var diarizationEndpoint, grammarEndpoint uuid.NullUUID
 	var language string
-	if err := m.DB.QueryRowContext(jobCtx, `SELECT transcription_endpoint_id, language FROM transcription_sessions WHERE id = $1`, record.model.SessionID).Scan(&sessionEndpoint, &language); err != nil {
+	if err := m.DB.QueryRowContext(jobCtx, `SELECT transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, language FROM transcription_sessions WHERE id = $1`, record.model.SessionID).Scan(&sessionEndpoint, &diarizationEndpoint, &grammarEndpoint, &language); err != nil {
 		return err
 	}
 	if m.app == nil {
@@ -336,11 +342,11 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 	if err != nil {
 		return err
 	}
-	probeInput, err := storage.get(jobCtx, record.storageKey)
-	if err != nil {
-		return err
-	}
-	duration, err := probeVideoDuration(jobCtx, probeInput)
+	// Keep the media seekable. Piping a large MP4 through one S3 response can
+	// make ffmpeg lose the input when it needs to seek or when realtime
+	// transcription applies backpressure to the decoder.
+	videoURL := storage.presignURL(http.MethodGet, record.storageKey, nil, videoProcessingURLLifetime)
+	duration, err := probeVideoDuration(jobCtx, videoURL)
 	if err != nil {
 		return err
 	}
@@ -406,21 +412,14 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 		providerEvents <- eventErr
 	}()
 
-	input, err := storage.get(processCtx, record.storageKey)
-	if err != nil {
-		return err
-	}
-	ffmpeg := exec.CommandContext(processCtx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
-	ffmpeg.Stdin = input
+	ffmpeg := exec.CommandContext(processCtx, "ffmpeg", ffmpegVideoAudioArgs(videoURL)...)
 	var stderr bytes.Buffer
 	ffmpeg.Stderr = &stderr
 	stdout, err := ffmpeg.StdoutPipe()
 	if err != nil {
-		_ = input.Close()
 		return err
 	}
 	if err := ffmpeg.Start(); err != nil {
-		_ = input.Close()
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 	buffer := make([]byte, 64*1024)
@@ -435,7 +434,6 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 			processedPCM.Add(processed)
 			if err := stream.SendPCM(processCtx, chunk, 16000); err != nil {
 				cancel()
-				_ = input.Close()
 				_ = ffmpeg.Wait()
 				return err
 			}
@@ -446,7 +444,6 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 					case <-time.After(delay):
 					case <-processCtx.Done():
 						cancel()
-						_ = input.Close()
 						_ = ffmpeg.Wait()
 						return processCtx.Err()
 					}
@@ -464,13 +461,11 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 				var status string
 				if statusErr := m.DB.QueryRowContext(processCtx, `SELECT status FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&status); statusErr != nil {
 					cancel()
-					_ = input.Close()
 					_ = ffmpeg.Wait()
 					return statusErr
 				}
 				if status == "cancelled" {
 					cancel()
-					_ = input.Close()
 					_ = ffmpeg.Wait()
 					return errVideoTranscriptionCancelled
 				}
@@ -482,12 +477,10 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 		}
 		if readErr != nil {
 			cancel()
-			_ = input.Close()
 			_ = ffmpeg.Wait()
 			return readErr
 		}
 	}
-	_ = input.Close()
 	if err := ffmpeg.Wait(); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
@@ -513,6 +506,28 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 			return errVideoTranscriptionCancelled
 		}
 		return err
+	}
+	if diarizationEndpoint.Valid {
+		if err := m.updateVideoProgress(jobCtx, uploadID, 86, "diarizing", ""); err != nil {
+			return err
+		}
+		if err := m.diarizeVideoAudio(jobCtx, uploadID, record.model.SessionID, record.storageKey, diarizationEndpoint.UUID, language, durationMs, storage); err != nil {
+			if errors.Is(err, errVideoTranscriptionCancelled) || jobCtx.Err() != nil {
+				return err
+			}
+			m.broadcast(record.model.SessionID, "transcription.diarization-error", ginData{"message": err.Error()})
+		}
+	}
+	if grammarEndpoint.Valid {
+		if err := m.updateVideoProgress(jobCtx, uploadID, 95, "polishing", ""); err != nil {
+			return err
+		}
+		if err := m.polishVideoTranscript(jobCtx, uploadID, record.model.SessionID, grammarEndpoint.UUID); err != nil {
+			if errors.Is(err, errVideoTranscriptionCancelled) || jobCtx.Err() != nil {
+				return err
+			}
+			m.broadcast(record.model.SessionID, "transcription.polish-error", ginData{"message": err.Error()})
+		}
 	}
 	if err := m.updateVideoProgress(jobCtx, uploadID, 99, "finalizing", ""); err != nil {
 		return err
@@ -557,10 +572,8 @@ func (m *TranscriptionManager) renewVideoJobLease(ctx context.Context, jobID uui
 	return nil
 }
 
-func probeVideoDuration(ctx context.Context, input io.ReadCloser) (float64, error) {
-	defer input.Close()
-	command := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", "-i", "pipe:0")
-	command.Stdin = input
+func probeVideoDuration(ctx context.Context, videoURL string) (float64, error) {
+	command := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", "-i", videoURL)
 	output, err := command.Output()
 	if err != nil {
 		return 0, fmt.Errorf("ffprobe could not inspect the video: %w", err)
@@ -570,6 +583,32 @@ func probeVideoDuration(ctx context.Context, input io.ReadCloser) (float64, erro
 		return 0, fmt.Errorf("video duration could not be determined")
 	}
 	return duration, nil
+}
+
+func ffmpegVideoAudioArgs(videoURL string) []string {
+	return []string{
+		"-hide_banner",
+		"-loglevel",
+		"error",
+		"-err_detect",
+		"ignore_err",
+		"-fflags",
+		"+discardcorrupt",
+		"-i",
+		videoURL,
+		"-map",
+		"0:a:0?",
+		"-vn",
+		"-sn",
+		"-dn",
+		"-ac",
+		"1",
+		"-ar",
+		"16000",
+		"-f",
+		"s16le",
+		"pipe:1",
+	}
 }
 
 func (m *TranscriptionManager) updateVideoProgress(ctx context.Context, uploadID uuid.UUID, progress int, stage, errorMessage string) error {

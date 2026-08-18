@@ -1,0 +1,351 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"justai-backend/models"
+	"justai-backend/provider"
+)
+
+const (
+	videoDiarizationWindowMs  int64 = 60_000
+	videoDiarizationOverlapMs int64 = 2_000
+	videoAudioBytesPerMs      int64 = 32 // 16 kHz, mono, PCM16
+)
+
+// diarizeVideoAudio runs a second, bounded audio pass. Keeping diarization
+// separate from ASR means a long video never has to be held in memory and the
+// existing streaming transcription transport remains unchanged.
+func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, sessionID uuid.UUID, storageKey string, endpointID uuid.UUID, language string, durationMs int64, storage *s3Storage) error {
+	if m.app == nil {
+		return fmt.Errorf("transcription manager is not attached to the app")
+	}
+	endpoint, err := m.app.providerEndpoint(ctx, endpointID)
+	if err != nil {
+		return err
+	}
+	if !endpointSupports(endpoint, "diarization") {
+		return fmt.Errorf("endpoint does not support diarization")
+	}
+
+	videoURL := storage.presignURL(http.MethodGet, storageKey, nil, videoProcessingURLLifetime)
+	command := exec.CommandContext(ctx, "ffmpeg", ffmpegVideoAudioArgs(videoURL)...)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("start ffmpeg for diarization: %w", err)
+	}
+
+	windowBytes := int(videoDiarizationWindowMs * videoAudioBytesPerMs)
+	overlapBytes := int(videoDiarizationOverlapMs * videoAudioBytesPerMs)
+	advanceBytes := windowBytes - overlapBytes
+	audio := make([]byte, 0, windowBytes+64*1024)
+	buffer := make([]byte, 64*1024)
+	windowStartMs := int64(0)
+	for {
+		read, readErr := stdout.Read(buffer)
+		if read > 0 {
+			audio = append(audio, buffer[:read]...)
+			for len(audio) >= windowBytes {
+				if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
+					_ = command.Process.Kill()
+					_ = command.Wait()
+					return err
+				}
+				window := append([]byte(nil), audio[:windowBytes]...)
+				if err := m.applyVideoDiarizationWindow(ctx, sessionID, endpoint, language, windowStartMs, window); err != nil {
+					_ = command.Process.Kill()
+					_ = command.Wait()
+					return err
+				}
+				if durationMs > 0 {
+					progress := 86 + int(minInt64(8, windowStartMs*8/durationMs))
+					_ = m.updateVideoProgress(ctx, uploadID, progress, "diarizing", "")
+				}
+				audio = append([]byte(nil), audio[advanceBytes:]...)
+				windowStartMs += int64(advanceBytes) * 1000 / videoAudioBytesPerMs
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = command.Process.Kill()
+			_ = command.Wait()
+			return readErr
+		}
+	}
+	if len(audio) >= int(250*videoAudioBytesPerMs) {
+		if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
+			_ = command.Process.Kill()
+			_ = command.Wait()
+			return err
+		}
+		if err := m.applyVideoDiarizationWindow(ctx, sessionID, endpoint, language, windowStartMs, audio); err != nil {
+			_ = command.Process.Kill()
+			_ = command.Wait()
+			return err
+		}
+	}
+	if err := command.Wait(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("ffmpeg could not extract audio for diarization: %s", message)
+	}
+	return nil
+}
+
+func (m *TranscriptionManager) applyVideoDiarizationWindow(ctx context.Context, sessionID uuid.UUID, endpoint provider.Endpoint, language string, startOffsetMs int64, pcm []byte) error {
+	windowCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	segments, err := provider.Diarize(windowCtx, endpoint, pcm, language)
+	cancel()
+	if err != nil {
+		return err
+	}
+	for _, item := range segments {
+		if strings.TrimSpace(item.Speaker) == "" {
+			continue
+		}
+		start := startOffsetMs + int64(item.Start*1000)
+		end := startOffsetMs + int64(item.End*1000)
+		if start < startOffsetMs {
+			start = startOffsetMs
+		}
+		if end <= start {
+			end = start + 250
+		}
+		speakerID, err := m.app.ensureTranscriptionSpeaker(ctx, sessionID, strings.TrimSpace(item.Speaker))
+		if err != nil {
+			continue
+		}
+		var segmentID uuid.UUID
+		err = m.DB.QueryRowContext(ctx, `SELECT id FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL AND canonical = TRUE AND start_offset_ms <= $2 AND end_offset_ms >= $3 ORDER BY ABS(start_offset_ms - $4) LIMIT 1`, sessionID, end+2500, start-2500, start).Scan(&segmentID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				continue
+			}
+			return err
+		}
+		if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_segments SET speaker_id = $2, updated_at = now() WHERE id = $1`, segmentID, speakerID); err != nil {
+			return err
+		}
+		m.broadcast(sessionID, "transcription.segment.updated", ginData{"segmentId": segmentID, "speakerId": speakerID})
+	}
+	return nil
+}
+
+type videoPolishInput struct {
+	ID      string `json:"id"`
+	Speaker string `json:"speaker,omitempty"`
+	Text    string `json:"text"`
+}
+
+type videoPolishOutput struct {
+	Segments []struct {
+		ID   string `json:"id"`
+		Text string `json:"text"`
+	} `json:"segments"`
+}
+
+func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, uploadID, sessionID, endpointID uuid.UUID) error {
+	if m.app == nil {
+		return fmt.Errorf("transcription manager is not attached to the app")
+	}
+	endpoint, err := m.app.providerEndpoint(ctx, endpointID)
+	if err != nil {
+		return m.finishVideoPolish(ctx, sessionID, fmt.Errorf("grammar endpoint could not be loaded: %w", err))
+	}
+	if !endpointSupports(endpoint, "chat") {
+		return m.finishVideoPolish(ctx, sessionID, fmt.Errorf("grammar endpoint does not support chat"))
+	}
+	segments, err := loadTranscriptionSegments(ctx, m.DB, sessionID)
+	if err != nil {
+		return m.finishVideoPolish(ctx, sessionID, err)
+	}
+	if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET polish_status = 'processing', updated_at = now() WHERE id = $1`, sessionID); err != nil {
+		return err
+	}
+	m.broadcast(sessionID, "transcription.polish", ginData{"status": "processing"})
+	if len(segments) == 0 {
+		return m.finishVideoPolish(ctx, sessionID, nil)
+	}
+
+	if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+		return m.finishVideoPolish(ctx, sessionID, err)
+	}
+
+	totalBatches := 0
+	for index := 0; index < len(segments); {
+		batch := make([]models.TranscriptionSegment, 0, 20)
+		characters := 0
+		for index < len(segments) && len(batch) < 20 {
+			segment := segments[index]
+			raw := strings.TrimSpace(segment.RawText)
+			if raw == "" {
+				raw = strings.TrimSpace(segment.Text)
+			}
+			if raw == "" {
+				index++
+				continue
+			}
+			if len(batch) > 0 && characters+len(raw) > 9000 {
+				break
+			}
+			batch = append(batch, segment)
+			characters += len(raw)
+			index++
+		}
+		if len(batch) == 0 {
+			continue
+		}
+		totalBatches++
+		if err := m.polishVideoTranscriptBatch(ctx, endpoint, sessionID, batch); err != nil {
+			return m.finishVideoPolish(ctx, sessionID, err)
+		}
+		if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
+			return m.finishVideoPolish(ctx, sessionID, err)
+		}
+		progress := 95 + int(float64(totalBatches)*4/float64(maxInt64(1, int64((len(segments)+19)/20))))
+		if progress > 99 {
+			progress = 99
+		}
+		_ = m.updateVideoProgress(ctx, uploadID, progress, "polishing", "")
+	}
+	return m.finishVideoPolish(ctx, sessionID, nil)
+}
+
+func (m *TranscriptionManager) polishVideoTranscriptBatch(ctx context.Context, endpoint provider.Endpoint, sessionID uuid.UUID, segments []models.TranscriptionSegment) error {
+	items := make([]videoPolishInput, 0, len(segments))
+	speakerNames := map[uuid.UUID]string{}
+	speakers, _ := loadTranscriptionSpeakers(ctx, m.DB, sessionID)
+	for _, speaker := range speakers {
+		speakerNames[speaker.ID] = firstNonEmptyString(speaker.DisplayName, speaker.Label)
+	}
+	for _, segment := range segments {
+		raw := strings.TrimSpace(segment.RawText)
+		if raw == "" {
+			raw = strings.TrimSpace(segment.Text)
+		}
+		item := videoPolishInput{ID: segment.ID.String(), Text: raw}
+		if segment.SpeakerID != nil {
+			item.Speaker = speakerNames[*segment.SpeakerID]
+		}
+		items = append(items, item)
+	}
+	input, err := json.Marshal(struct {
+		Segments []videoPolishInput `json:"segments"`
+	}{Segments: items})
+	if err != nil {
+		return err
+	}
+	system := `You are a transcript editor. Correct spelling, punctuation, capitalization, and grammar in the same language as each segment. Return JSON only in the shape {"segments":[{"id":"...","text":"..."}]}. Preserve the meaning, names, numbers, speaker boundaries, and order. Do not summarize, translate, add facts, or remove meaningful words. Keep natural filler words unless they are clearly transcription noise.`
+	var output strings.Builder
+	err = provider.StreamChat(ctx, endpoint, provider.ChatOptions{
+		Model: endpoint.ChatModel,
+		Messages: []provider.Message{
+			{Role: "system", Content: system},
+			{Role: "user", Content: string(input)},
+		},
+	}, func(delta string) error {
+		output.WriteString(delta)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	polished, err := decodeVideoPolishOutput(output.String())
+	if err != nil {
+		return err
+	}
+	for id, text := range polished {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = $2, updated_at = now() WHERE id = $1 AND session_id = $3 AND source_id IS NULL`, id, strings.TrimSpace(text), sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *TranscriptionManager) finishVideoPolish(ctx context.Context, sessionID uuid.UUID, polishErr error) error {
+	status := "completed"
+	if polishErr != nil {
+		status = "failed"
+	}
+	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET polish_status = $2, updated_at = now() WHERE id = $1`, sessionID, status)
+	m.broadcast(sessionID, "transcription.polish", ginData{"status": status, "message": errorMessage(polishErr)})
+	return polishErr
+}
+
+func decodeVideoPolishOutput(value string) (map[uuid.UUID]string, error) {
+	trimmed := strings.TrimSpace(value)
+	trimmed = strings.TrimPrefix(trimmed, "```json")
+	trimmed = strings.TrimPrefix(trimmed, "```")
+	trimmed = strings.TrimSuffix(strings.TrimSpace(trimmed), "```")
+	if start := strings.Index(trimmed, "{"); start >= 0 {
+		if end := strings.LastIndex(trimmed, "}"); end >= start {
+			trimmed = trimmed[start : end+1]
+		}
+	}
+	var decoded videoPolishOutput
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return nil, fmt.Errorf("grammar endpoint returned invalid JSON: %w", err)
+	}
+	result := make(map[uuid.UUID]string, len(decoded.Segments))
+	for _, item := range decoded.Segments {
+		id, err := uuid.Parse(item.ID)
+		if err != nil {
+			continue
+		}
+		result[id] = item.Text
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("grammar endpoint returned no transcript segments")
+	}
+	return result, nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func errorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func (m *TranscriptionManager) ensureVideoUploadActive(ctx context.Context, uploadID uuid.UUID) error {
+	var status string
+	if err := m.DB.QueryRowContext(ctx, `SELECT status FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&status); err != nil {
+		return err
+	}
+	if status == "cancelled" {
+		return errVideoTranscriptionCancelled
+	}
+	return nil
+}

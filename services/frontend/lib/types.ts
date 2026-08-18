@@ -103,13 +103,13 @@ export type Endpoint = {
   providerType: string
   name: string
   baseUrl: string
-	apiPath?: string
-	apiVersion?: string
-	chatModel?: string
-	visionModel?: string
-	embeddingModel?: string
+  apiPath?: string
+  apiVersion?: string
+  chatModel?: string
+  visionModel?: string
+  embeddingModel?: string
   imageModel?: string
-	transcriptionModel?: string
+  transcriptionModel?: string
   diarizationModel?: string
   speechModel?: string
   capabilities: Record<string, boolean>
@@ -247,8 +247,11 @@ export type TranscriptionSession = {
   status: "waiting" | "live" | "paused" | "processing" | "completed" | "failed"
   transcriptionEndpointId?: string | null
   diarizationEndpointId?: string | null
+  grammarEndpointId?: string | null
   language: string
   recordAudio: boolean
+  polishStatus?:
+    "not_requested" | "queued" | "processing" | "completed" | "failed"
   joinCode?: string
   joinCodeExpiresAt?: string
   startedAt?: string | null
@@ -287,6 +290,8 @@ export type TranscriptionSegment = {
   sourceId?: string | null
   speakerId?: string | null
   text: string
+  rawText?: string
+  polishedText?: string | null
   startOffsetMs: number
   endOffsetMs: number
   confidence?: number | null
@@ -332,6 +337,7 @@ export type TranscriptionVideoUpload = {
   updatedAt: string
   completedAt?: string | null
   expiresAt?: string | null
+  playbackUrl?: string
 }
 
 export type TranscriptionJoinRequest = {

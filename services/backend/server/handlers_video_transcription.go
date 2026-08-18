@@ -43,6 +43,8 @@ type videoUploadResponse struct {
 	JobID    *uuid.UUID                      `json:"jobId,omitempty"`
 }
 
+const videoPlaybackURLLifetime = 24 * time.Hour
+
 func (a *App) initVideoTranscriptionUpload(c *gin.Context) {
 	if a.Config.Transcription.StorageDriver != "s3" {
 		writeError(c, http.StatusServiceUnavailable, fmt.Errorf("video uploads require S3-compatible transcription storage"))
@@ -134,6 +136,7 @@ func (a *App) getVideoTranscriptionUpload(c *gin.Context) {
 		return
 	}
 	response := videoUploadResponse{Upload: upload.model}
+	a.attachVideoPlaybackURL(c, &response.Upload)
 	if upload.model.Status == "uploading" {
 		storage, storageErr := newS3Storage(a.Config)
 		if storageErr == nil {
@@ -141,6 +144,33 @@ func (a *App) getVideoTranscriptionUpload(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func (a *App) getVideoTranscriptionPlayback(c *gin.Context) {
+	uploadID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid video upload id"))
+		return
+	}
+	record, err := a.authorizedVideoUpload(c, uploadID)
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	if record.model.Status == "uploading" {
+		writeError(c, http.StatusConflict, fmt.Errorf("video upload is still in progress"))
+		return
+	}
+	if record.model.Status == "cancelled" {
+		writeError(c, http.StatusGone, fmt.Errorf("video upload was cancelled"))
+		return
+	}
+	urlValue, expiresAt, err := a.videoPlaybackURL(c, record)
+	if err != nil {
+		writeError(c, http.StatusServiceUnavailable, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"url": urlValue, "expiresAt": expiresAt})
 }
 
 func (a *App) completeVideoTranscriptionUpload(c *gin.Context) {
@@ -159,6 +189,7 @@ func (a *App) completeVideoTranscriptionUpload(c *gin.Context) {
 		return
 	}
 	if upload.model.Status == "queued" || upload.model.Status == "processing" || upload.model.Status == "completed" {
+		a.attachVideoPlaybackURL(c, &upload.model)
 		c.JSON(http.StatusAccepted, videoUploadResponse{Upload: upload.model})
 		return
 	}
@@ -195,6 +226,7 @@ func (a *App) completeVideoTranscriptionUpload(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	a.attachVideoPlaybackURL(c, &updated)
 	c.JSON(http.StatusAccepted, videoUploadResponse{Upload: updated, JobID: &jobID})
 }
 
@@ -213,6 +245,7 @@ func (a *App) retryVideoTranscription(c *gin.Context) {
 		writeError(c, http.StatusConflict, err)
 		return
 	}
+	a.attachVideoPlaybackURL(c, &upload)
 	c.JSON(http.StatusAccepted, videoUploadResponse{Upload: upload, JobID: &jobID})
 }
 
@@ -261,6 +294,32 @@ func (a *App) authorizedVideoUpload(c *gin.Context, id uuid.UUID) (videoUploadRe
 		return videoUploadRecord{}, err
 	}
 	return record, nil
+}
+
+func (a *App) attachVideoPlaybackURL(ctx context.Context, upload *models.TranscriptionVideoUpload) {
+	if upload == nil || upload.PlaybackURL != "" || upload.Status == "uploading" || upload.Status == "cancelled" {
+		return
+	}
+	record, err := loadVideoUploadRecord(ctx, a.DB, upload.ID)
+	if err != nil {
+		return
+	}
+	urlValue, _, err := a.videoPlaybackURL(ctx, record)
+	if err == nil {
+		upload.PlaybackURL = urlValue
+	}
+}
+
+func (a *App) videoPlaybackURL(ctx context.Context, record videoUploadRecord) (string, time.Time, error) {
+	if record.storageDriver != "s3" || strings.TrimSpace(record.storageKey) == "" {
+		return "", time.Time{}, fmt.Errorf("video playback is not available for this storage driver")
+	}
+	storage, err := newS3Storage(a.Config)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expiresAt := time.Now().UTC().Add(videoPlaybackURLLifetime)
+	return storage.presignURL(http.MethodGet, record.storageKey, nil, videoPlaybackURLLifetime), expiresAt, nil
 }
 
 func (a *App) videoUploadPartURLs(storage *s3Storage, storageKey, multipartID string, partCount int) []videoUploadPartURL {

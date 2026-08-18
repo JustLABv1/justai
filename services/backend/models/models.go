@@ -135,8 +135,10 @@ type TranscriptionSession struct {
 	Status                string     `json:"status"`
 	TranscriptionEndpoint *uuid.UUID `json:"transcriptionEndpointId,omitempty"`
 	DiarizationEndpoint   *uuid.UUID `json:"diarizationEndpointId,omitempty"`
+	GrammarEndpoint       *uuid.UUID `json:"grammarEndpointId,omitempty"`
 	Language              string     `json:"language"`
 	RecordAudio           bool       `json:"recordAudio"`
+	PolishStatus          string     `json:"polishStatus"`
 	JoinCode              string     `json:"joinCode,omitempty"`
 	StartedAt             *time.Time `json:"startedAt,omitempty"`
 	EndedAt               *time.Time `json:"endedAt,omitempty"`
@@ -174,6 +176,8 @@ type TranscriptionSegment struct {
 	SourceID         *uuid.UUID  `json:"sourceId,omitempty"`
 	SpeakerID        *uuid.UUID  `json:"speakerId,omitempty"`
 	Text             string      `json:"text"`
+	RawText          string      `json:"rawText,omitempty"`
+	PolishedText     *string     `json:"polishedText,omitempty"`
 	StartOffsetMs    int64       `json:"startOffsetMs"`
 	EndOffsetMs      int64       `json:"endOffsetMs"`
 	Confidence       *float64    `json:"confidence,omitempty"`
@@ -212,6 +216,7 @@ type TranscriptionVideoUpload struct {
 	UpdatedAt     time.Time  `json:"updatedAt"`
 	CompletedAt   *time.Time `json:"completedAt,omitempty"`
 	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
+	PlaybackURL   string     `json:"playbackUrl,omitempty"`
 }
 
 type KnowledgeSource struct {
