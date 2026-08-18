@@ -326,6 +326,72 @@ export function FocusWorkspaceSidebar({
             <PanelLeftOpen data-icon="inline-start" />
           </Button>
         )}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                aria-label={`Select workspace (${activeOrganization?.name ?? "Workspace"})`}
+                className={cn(
+                  "shrink-0",
+                  railExpanded
+                    ? "h-auto w-full justify-start gap-2 border px-2.5 py-2"
+                    : "size-9 rounded-xl"
+                )}
+                title={activeOrganization?.name ?? "Select workspace"}
+                variant={railExpanded ? "outline" : "ghost"}
+              />
+            }
+          >
+            <span
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground",
+                railExpanded ? "size-7" : "size-8"
+              )}
+            >
+              <Bot aria-hidden="true" />
+            </span>
+            {railExpanded && (
+              <span className="min-w-0 flex-1 text-left">
+                <span className="block truncate text-xs font-medium">
+                  {activeOrganization?.name ?? "Workspace"}
+                </span>
+              </span>
+            )}
+            {railExpanded && (
+              <ChevronDown className="size-4 text-muted-foreground" />
+            )}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="w-64"
+            side={railExpanded ? "bottom" : "right"}
+          >
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+              {organizations.map((organization) => (
+                <DropdownMenuItem
+                  key={organization.id}
+                  onClick={() => onOrganizationSelect(organization.id)}
+                >
+                  <Bot data-icon="inline-start" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {organization.name}
+                  </span>
+                  {organization.id === activeOrganization?.id && (
+                    <span className="text-xs text-muted-foreground">
+                      Current
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onNavigate("settings")}>
+              <Settings2 data-icon="inline-start" />
+              Manage workspaces
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           aria-label="New chat"
           className={cn(
@@ -374,21 +440,6 @@ export function FocusWorkspaceSidebar({
                 variant="ghost"
               >
                 <Icon data-icon="inline-start" />
-                {(item.id === "transcription" ||
-                  item.id === "video-transcription") &&
-                  (item.id === "video-transcription"
-                    ? videoSessions.length
-                    : liveSessions.length) > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-medium text-primary-foreground">
-                      {(item.id === "video-transcription"
-                        ? videoSessions.length
-                        : liveSessions.length) > 9
-                        ? "9+"
-                        : item.id === "video-transcription"
-                          ? videoSessions.length
-                          : liveSessions.length}
-                    </span>
-                  )}
                 {railExpanded && <span className="truncate">{item.label}</span>}
               </Button>
             )
@@ -536,53 +587,6 @@ export function FocusWorkspaceSidebar({
             <PanelLeftClose data-icon="inline-start" />
           </Button>
         </div>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                className="h-auto w-full justify-start gap-2 border px-2.5 py-2"
-                variant="outline"
-              />
-            }
-          >
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-              <Bot aria-hidden="true" />
-            </span>
-            <span className="min-w-0 flex-1 text-left">
-              <span className="block truncate text-xs font-medium">
-                {activeOrganization?.name ?? "Workspace"}
-              </span>
-            </span>
-            <ChevronDown className="size-4 text-muted-foreground" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-64">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
-              {organizations.map((organization) => (
-                <DropdownMenuItem
-                  key={organization.id}
-                  onClick={() => onOrganizationSelect(organization.id)}
-                >
-                  <Bot data-icon="inline-start" />
-                  <span className="min-w-0 flex-1 truncate">
-                    {organization.name}
-                  </span>
-                  {organization.id === activeOrganization?.id && (
-                    <span className="text-xs text-muted-foreground">
-                      Current
-                    </span>
-                  )}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onNavigate("settings")}>
-              <Settings2 data-icon="inline-start" />
-              Manage workspaces
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
 
         {actionError && (
           <Alert className="shrink-0" variant="destructive">
