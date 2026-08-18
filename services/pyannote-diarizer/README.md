@@ -4,6 +4,12 @@ This service hosts `pyannote/speaker-diarization-3.1` outside the Go backend.
 It is intentionally a separate service because pyannote is a PyTorch pipeline,
 not an OpenAI-compatible language model.
 
+The image uses the versioned Minimus Python build/runtime pair
+(`reg.mini.dev/python:3.14-dev` and `reg.mini.dev/python:3.14`). It installs the
+matching CPU `torch`/`torchaudio` 2.9.1 wheels. FFmpeg is installed only in the
+build stage; the final image contains the executable and its resolved runtime
+libraries without a shell or package manager.
+
 ## Hugging Face setup
 
 Before starting the service, accept the user conditions for:
@@ -30,7 +36,7 @@ with the NVIDIA container runtime:
 
 ```bash
 docker build \
-  --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124 \
+  --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126 \
   -t justai-pyannote services/pyannote-diarizer
 ```
 

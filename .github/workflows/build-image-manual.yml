@@ -62,3 +62,13 @@ jobs:
           tags: ${{ env.IMAGE }}:${{ github.event.inputs.branch }}
           cache-from: type=gha,scope=combined
           cache-to: type=gha,scope=combined,mode=max
+
+      - name: Build & Push Pyannote
+        uses: docker/build-push-action@v7
+        with:
+          context: services/pyannote-diarizer
+          file: services/pyannote-diarizer/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}:pyannote-${{ github.event.inputs.branch }}
+          cache-from: type=gha,scope=pyannote
+          cache-to: type=gha,scope=pyannote,mode=max
