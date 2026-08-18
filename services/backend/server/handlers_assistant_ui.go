@@ -293,6 +293,12 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			}
 		}
 	}
+	attachedNotes, notesErr := a.attachedNotesPrompt(c, conversationID)
+	if notesErr != nil {
+		runStatus = "error"
+		writeError(c, http.StatusInternalServerError, notesErr)
+		return
+	}
 	streamID := uuid.New()
 	if err := a.createChatStream(context.Background(), streamID, conversationID, principal.UserID, organizationID, runID); err != nil {
 		runStatus = "error"
@@ -524,6 +530,9 @@ func (a *App) assistantUIChat(c *gin.Context) {
 				toolHistory = append([]provider.ToolMessage{{Role: "system", Content: memory}}, toolHistory...)
 			}
 		}
+		if strings.TrimSpace(attachedNotes) != "" {
+			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: attachedNotes}}, toolHistory...)
+		}
 		toolHistory = append([]provider.ToolMessage{{Role: "system", Content: chatToolInstructions()}}, toolHistory...)
 		if len(citations) > 0 {
 			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: citationPrompt(citations)}}, toolHistory...)
@@ -567,6 +576,9 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			if strings.TrimSpace(memory) != "" {
 				history = append([]provider.Message{{Role: "system", Content: memory}}, history...)
 			}
+		}
+		if strings.TrimSpace(attachedNotes) != "" {
+			history = append([]provider.Message{{Role: "system", Content: attachedNotes}}, history...)
 		}
 		if !provider.SupportsToolCalling(endpoint) {
 			history = append([]provider.Message{{Role: "system", Content: chatBuiltInFallbackInstructions()}}, history...)

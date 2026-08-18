@@ -7,6 +7,7 @@ import {
   Database,
   Headphones,
   LoaderCircle,
+  NotebookPen,
   Pin,
   Plug,
   Plus,
@@ -29,6 +30,7 @@ import type {
   ConversationContext,
   KnowledgeSource,
   MCPServer,
+  Note,
   TranscriptionSession,
   ViewId,
 } from "@/lib/types"
@@ -42,6 +44,7 @@ type WorkspaceContextProps = {
   onEnsureConversation?: () => Promise<string>
   sources: KnowledgeSource[]
   servers: MCPServer[]
+  notes: Note[]
   transcriptionSessions: TranscriptionSession[]
   onNavigate: (view: ViewId) => void
   onClose: () => void
@@ -52,6 +55,7 @@ export function WorkspaceContext({
   onEnsureConversation,
   sources,
   servers,
+  notes,
   transcriptionSessions,
   onNavigate,
   onClose,
@@ -61,6 +65,7 @@ export function WorkspaceContext({
     knowledgeSources: [],
     mcpServers: [],
     transcriptionSessions: [],
+    notes: [],
   })
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState("")
@@ -126,7 +131,12 @@ export function WorkspaceContext({
   const visibleContext =
     conversationId && loadedConversationId === conversationId
       ? context
-      : { knowledgeSources: [], mcpServers: [], transcriptionSessions: [] }
+      : {
+          knowledgeSources: [],
+          mcpServers: [],
+          transcriptionSessions: [],
+          notes: [],
+        }
   const visibleNotice =
     conversationId && loadedConversationId === conversationId ? notice : ""
 
@@ -164,9 +174,14 @@ export function WorkspaceContext({
   // Completed sessions remain searchable and can be attached for timestamped
   // citations; the context picker is not limited to currently live rooms.
   const liveSessions = availableSessions
+  const availableNotes = Array.from(
+    new Map(
+      [...notes, ...(visibleContext.notes ?? [])].map((note) => [note.id, note])
+    ).values()
+  )
 
   async function toggle(
-    resource: "knowledge" | "mcp" | "transcription",
+    resource: "knowledge" | "mcp" | "note" | "transcription",
     id: string,
     attached: boolean
   ) {
@@ -177,7 +192,9 @@ export function WorkspaceContext({
         ? "knowledge"
         : resource === "mcp"
           ? "mcp"
-          : "transcription"
+          : resource === "note"
+            ? "notes"
+            : "transcription"
     try {
       const targetConversationId =
         conversationId ?? (await onEnsureConversation?.())
@@ -373,6 +390,55 @@ export function WorkspaceContext({
           >
             Manage knowledge
           </Button>
+          <div className="mt-3 flex flex-col gap-2 border-t pt-3">
+            <ContextHeading
+              icon={NotebookPen}
+              label="Notes"
+              meta={`${visibleContext.notes?.length ?? 0}/${availableNotes.length} attached`}
+            />
+            {availableNotes.length > 0 ? (
+              availableNotes.slice(0, 6).map((note) => {
+                const attached = (visibleContext.notes ?? []).some(
+                  (item) => item.id === note.id
+                )
+                return (
+                  <ContextItem
+                    detail={`${note.content ? `${note.content.length} characters` : "Empty note"} · updated ${new Date(note.updatedAt).toLocaleDateString()}`}
+                    icon={NotebookPen}
+                    key={note.id}
+                    label={note.title}
+                    action={
+                      <Button
+                        aria-label={`${attached ? "Detach" : "Attach"} ${note.title}`}
+                        disabled={busy === note.id}
+                        onClick={() => void toggle("note", note.id, attached)}
+                        size="icon-xs"
+                        variant="ghost"
+                      >
+                        {busy === note.id ? (
+                          <LoaderCircle className="animate-spin" />
+                        ) : attached ? (
+                          <CheckCircle2 />
+                        ) : (
+                          <Plus />
+                        )}
+                      </Button>
+                    }
+                  />
+                )
+              })
+            ) : (
+              <ContextEmpty icon={NotebookPen} text="No workspace notes yet." />
+            )}
+            <Button
+              className="mt-1 w-full"
+              onClick={() => onNavigate("notes")}
+              size="sm"
+              variant="outline"
+            >
+              Open notes
+            </Button>
+          </div>
         </div>
       )}
 
@@ -435,8 +501,8 @@ export function WorkspaceContext({
           <div className="rounded-lg border border-dashed p-3 text-xs leading-relaxed text-muted-foreground">
             Organization-default MCP servers are attached to new chats
             automatically. Other connected servers stay opt-in for this
-            conversation. Tool calls and their bounded results stay attached
-            to the relevant chat turn.
+            conversation. Tool calls and their bounded results stay attached to
+            the relevant chat turn.
           </div>
           <Button
             className="mt-1 w-full"
@@ -529,15 +595,12 @@ export function WorkspaceContext({
             if (!open) onClose()
           }}
         >
-          <SheetContent
-            className="w-[min(100vw,304px)] gap-0 p-0"
-            side="right"
-          >
+          <SheetContent className="w-[min(100vw,304px)] gap-0 p-0" side="right">
             <SheetHeader className="sr-only">
               <SheetTitle>Conversation context</SheetTitle>
               <SheetDescription>
-                Attach Knowledge sources, MCP servers, and transcription sessions
-                to this conversation.
+                Attach Knowledge sources, Notes, MCP servers, and transcription
+                sessions to this conversation.
               </SheetDescription>
             </SheetHeader>
             {panel}

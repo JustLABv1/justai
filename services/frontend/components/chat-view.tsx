@@ -13,6 +13,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  FileText,
   History,
   PanelRightClose,
   Paperclip,
@@ -91,6 +92,7 @@ import type {
   Endpoint,
   KnowledgeSource,
   MCPServer,
+  Note,
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -99,6 +101,7 @@ type Props = {
   conversationId: string | null
   endpoints: Endpoint[]
   mcpServers: MCPServer[]
+  notes: Note[]
   onEnsureConversation?: () => Promise<string>
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
@@ -248,6 +251,7 @@ const EMPTY_CONTEXT: ConversationContext = {
   knowledgeSources: [],
   mcpServers: [],
   transcriptionSessions: [],
+  notes: [],
 }
 
 function normalizeHistory(payload: AssistantHistoryResponse): UIMessage[] {
@@ -892,17 +896,21 @@ function MessageTiming() {
 function ContextDisplay({
   context,
   onRemoveMCP,
+  onRemoveNote,
 }: {
   context: ConversationContext
   onRemoveMCP?: (serverId: string) => Promise<void>
+  onRemoveNote?: (noteId: string) => Promise<void>
 }) {
-  const [removingMcpId, setRemovingMcpId] = useState<string | null>(null)
+  const [removingContextId, setRemovingContextId] = useState<string | null>(
+    null
+  )
   const [removeError, setRemoveError] = useState<string | null>(null)
   const items: Array<{
     id: string
     label: string
     detail: string
-    kind: "knowledge" | "mcp" | "transcription"
+    kind: "knowledge" | "mcp" | "note" | "transcription"
     resourceId?: string
   }> = [
     ...context.knowledgeSources
@@ -920,6 +928,13 @@ function ContextDisplay({
       kind: "mcp" as const,
       resourceId: server.id,
     })),
+    ...(context.notes ?? []).map((note) => ({
+      id: `note:${note.id}`,
+      label: note.title,
+      detail: "note",
+      kind: "note" as const,
+      resourceId: note.id,
+    })),
     ...context.transcriptionSessions.map((session) => ({
       id: `transcription:${session.id}`,
       label: session.title,
@@ -928,21 +943,26 @@ function ContextDisplay({
     })),
   ]
 
-  const handleRemoveMCP = async (serverId: string) => {
-    if (!onRemoveMCP || removingMcpId) return
+  const handleRemoveContext = async (
+    kind: "mcp" | "note",
+    resourceId: string
+  ) => {
+    if (removingContextId) return
+    const onRemove = kind === "mcp" ? onRemoveMCP : onRemoveNote
+    if (!onRemove) return
 
     setRemoveError(null)
-    setRemovingMcpId(serverId)
+    setRemovingContextId(resourceId)
     try {
-      await onRemoveMCP(serverId)
+      await onRemove(resourceId)
     } catch (error) {
       setRemoveError(
         error instanceof Error
           ? error.message
-          : "The MCP server could not be removed from this chat."
+          : "The context could not be removed from this chat."
       )
     } finally {
-      setRemovingMcpId(null)
+      setRemovingContextId(null)
     }
   }
 
@@ -960,18 +980,22 @@ function ContextDisplay({
           >
             <span className="size-1.5 shrink-0 rounded-full bg-primary/70" />
             <span className="truncate">{item.label}</span>
-            {item.kind === "mcp" && item.resourceId && onRemoveMCP ? (
+            {item.resourceId &&
+            ((item.kind === "mcp" && onRemoveMCP) ||
+              (item.kind === "note" && onRemoveNote)) ? (
               <button
                 type="button"
                 className="shrink-0 rounded-full p-0.5 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 aria-label={`Remove ${item.label} from this chat`}
                 title={`Remove ${item.label} from this chat`}
-                disabled={removingMcpId !== null}
+                disabled={removingContextId !== null}
                 onClick={() => {
-                  void handleRemoveMCP(item.resourceId!)
+                  if (item.kind === "mcp" || item.kind === "note") {
+                    void handleRemoveContext(item.kind, item.resourceId!)
+                  }
                 }}
               >
-                {removingMcpId === item.resourceId ? (
+                {removingContextId === item.resourceId ? (
                   <RefreshCw className="size-3 animate-spin" />
                 ) : (
                   <X className="size-3" />
@@ -999,7 +1023,8 @@ function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
       {(items) =>
         items.map((item, index) => {
           const isMCP = item.type === "mcp"
-          const isAttached = isMCP && item.metadata?.attached === true
+          const isNote = item.type === "note"
+          const isAttached = item.metadata?.attached === true
           return (
             <ComposerPrimitive.Unstable_TriggerPopoverItem
               className="group/trigger flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-muted data-[highlighted]:bg-muted"
@@ -1012,11 +1037,15 @@ function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
                   "flex size-7 shrink-0 items-center justify-center rounded-lg",
                   isMCP
                     ? "bg-primary/10 text-primary"
-                    : "bg-muted text-muted-foreground"
+                    : isNote
+                      ? "bg-amber-500/10 text-amber-600 dark:text-amber-300"
+                      : "bg-muted text-muted-foreground"
                 )}
               >
                 {isMCP ? (
                   <Plug className="size-3.5" aria-hidden="true" />
+                ) : isNote ? (
+                  <FileText className="size-3.5" aria-hidden="true" />
                 ) : (
                   <span className="size-1.5 rounded-full bg-current" />
                 )}
@@ -1528,6 +1557,7 @@ function ModelEndpointPicker({
 function Composer({
   endpoints,
   mcpServers,
+  notes,
   endpointId,
   onEndpointChange,
   models,
@@ -1539,10 +1569,13 @@ function Composer({
   conversationContext,
   onAttachMCP,
   onRemoveMCP,
+  onAttachNote,
+  onRemoveNote,
   toolApproval,
 }: {
   endpoints: Endpoint[]
   mcpServers: MCPServer[]
+  notes: Note[]
   endpointId: string
   onEndpointChange: (id: string) => void
   models: DiscoveredChatModel[]
@@ -1554,6 +1587,8 @@ function Composer({
   conversationContext: ConversationContext
   onAttachMCP: (serverId: string) => Promise<void>
   onRemoveMCP: (serverId: string) => Promise<void>
+  onAttachNote: (noteId: string) => Promise<void>
+  onRemoveNote: (noteId: string) => Promise<void>
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
@@ -1598,6 +1633,33 @@ function Composer({
       })
   }, [conversationContext.mcpServers, mcpServers])
 
+  const noteItems = useMemo<Unstable_TriggerItem[]>(() => {
+    const attachedNoteIds = new Set(
+      (conversationContext.notes ?? []).map((note) => note.id)
+    )
+    const notesById = new Map<string, Note>()
+    for (const note of notes) notesById.set(note.id, note)
+    for (const note of conversationContext.notes ?? []) {
+      if (!notesById.has(note.id)) notesById.set(note.id, note)
+    }
+
+    return Array.from(notesById.values())
+      .sort((left, right) => left.title.localeCompare(right.title))
+      .map((note) => {
+        const attached = attachedNoteIds.has(note.id)
+        return {
+          id: `note:${note.id}`,
+          type: "note",
+          label: note.title,
+          description: attached ? "Already attached" : "Add to this chat",
+          metadata: {
+            resourceId: note.id,
+            attached,
+          },
+        }
+      })
+  }, [conversationContext.notes, notes])
+
   const contextTriggerAdapter = useMemo(() => {
     const groups = [
       {
@@ -1610,6 +1672,11 @@ function Composer({
           description: source.status,
           metadata: { resourceId: source.id },
         })),
+      },
+      {
+        id: "notes",
+        label: "Notes",
+        items: noteItems,
       },
       {
         id: "mcp",
@@ -1645,7 +1712,7 @@ function Composer({
         )
       },
     }
-  }, [conversationContext, mcpItems])
+  }, [conversationContext, mcpItems, noteItems])
 
   const mcpTriggerAdapter = useMemo(
     () => ({
@@ -1666,7 +1733,7 @@ function Composer({
   const contextDirectiveFormatter = useMemo<Unstable_DirectiveFormatter>(
     () => ({
       serialize: (item) =>
-        item.type === "mcp"
+        item.type === "mcp" || item.type === "note"
           ? ""
           : unstable_defaultDirectiveFormatter.serialize(item),
       parse: unstable_defaultDirectiveFormatter.parse,
@@ -1676,6 +1743,8 @@ function Composer({
 
   const [attachingMcpId, setAttachingMcpId] = useState<string | null>(null)
   const [mcpAttachError, setMcpAttachError] = useState<string | null>(null)
+  const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null)
+  const [noteAttachError, setNoteAttachError] = useState<string | null>(null)
   const attachingMcpName =
     mcpItems.find((item) => item.metadata?.resourceId === attachingMcpId)
       ?.label ?? "MCP server"
@@ -1704,6 +1773,44 @@ function Composer({
     },
     [onAttachMCP]
   )
+  const attachingNoteName =
+    noteItems.find((item) => item.metadata?.resourceId === attachingNoteId)
+      ?.label ?? "note"
+  const attachNoteFromTrigger = useCallback(
+    (item: Unstable_TriggerItem) => {
+      if (item.type !== "note") return
+      const resourceId = item.metadata?.resourceId
+      if (typeof resourceId !== "string" || item.metadata?.attached === true) {
+        return
+      }
+      setNoteAttachError(null)
+      setAttachingNoteId(resourceId)
+      void onAttachNote(resourceId)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof APIError || error instanceof Error
+              ? error.message
+              : "The note could not be added to this chat."
+          setNoteAttachError(message)
+        })
+        .finally(() => {
+          setAttachingNoteId((current) =>
+            current === resourceId ? null : current
+          )
+        })
+    },
+    [onAttachNote]
+  )
+  const attachContextFromTrigger = useCallback(
+    (item: Unstable_TriggerItem) => {
+      if (item.type === "mcp") {
+        attachMcpFromTrigger(item)
+      } else if (item.type === "note") {
+        attachNoteFromTrigger(item)
+      }
+    },
+    [attachMcpFromTrigger, attachNoteFromTrigger]
+  )
 
   return (
     <div
@@ -1721,7 +1828,7 @@ function Composer({
           >
             <ComposerPrimitive.Unstable_TriggerPopover.Directive
               formatter={contextDirectiveFormatter}
-              onInserted={attachMcpFromTrigger}
+              onInserted={attachContextFromTrigger}
             />
             <ComposerPrimitive.Unstable_TriggerPopoverCategories className="flex flex-col gap-1">
               {(categories) =>
@@ -1824,6 +1931,7 @@ function Composer({
               <ContextDisplay
                 context={conversationContext}
                 onRemoveMCP={onRemoveMCP}
+                onRemoveNote={onRemoveNote}
               />
               {attachingMcpId && (
                 <div
@@ -1851,6 +1959,32 @@ function Composer({
                   {mcpAttachError}
                 </div>
               )}
+              {attachingNoteId && (
+                <div
+                  className="mx-1 mb-1 flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-muted-foreground"
+                  role="status"
+                >
+                  <RefreshCw
+                    className="size-3 shrink-0 animate-spin text-amber-500"
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">
+                    Adding{" "}
+                    <span className="font-medium text-foreground">
+                      {attachingNoteName}
+                    </span>
+                    …
+                  </span>
+                </div>
+              )}
+              {noteAttachError && (
+                <div
+                  className="mx-1 mb-1 rounded-xl border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-[11px] text-destructive"
+                  role="alert"
+                >
+                  {noteAttachError}
+                </div>
+              )}
               <ComposerPrimitive.Input
                 className={cn(
                   "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
@@ -1859,8 +1993,8 @@ function Composer({
                 )}
                 placeholder={
                   compact
-                    ? "What do you want to know? (type /, $ or @ for MCPs)"
-                    : "Message JustAI… (type /, $ or @ to add MCPs)"
+                    ? "What do you want to know? (type @ for notes, MCPs or context)"
+                    : "Message JustAI… (type @ for notes, MCPs or context; / and $ for MCPs)"
                 }
                 submitMode="enter"
               />
@@ -2029,10 +2163,13 @@ function AssistantChatSurface({
   initialMessages,
   endpoints,
   mcpServers,
+  notes,
   activeEndpoint,
   onEnsureConversation,
   onAttachMCP,
   onRemoveMCP,
+  onAttachNote,
+  onRemoveNote,
   onUpload,
   onRemoveUpload,
   onConversationCreated,
@@ -2045,10 +2182,13 @@ function AssistantChatSurface({
   initialMessages: UIMessage[]
   endpoints: Endpoint[]
   mcpServers: MCPServer[]
+  notes: Note[]
   activeEndpoint?: Endpoint
   onEnsureConversation: () => Promise<string>
   onAttachMCP: (serverId: string) => Promise<void>
   onRemoveMCP: (serverId: string) => Promise<void>
+  onAttachNote: (noteId: string) => Promise<void>
+  onRemoveNote: (noteId: string) => Promise<void>
   onUpload: (file: File) => Promise<UploadedConversationAttachment>
   onRemoveUpload: (sourceId: string) => Promise<void>
   onConversationCreated?: (conversation: Conversation) => void
@@ -2357,6 +2497,7 @@ function AssistantChatSurface({
         composerProps={{
           conversationContext,
           mcpServers,
+          notes,
           endpointId: selectedEndpointId,
           endpoints,
           models: availableModels,
@@ -2371,6 +2512,8 @@ function AssistantChatSurface({
           onOpenHistory,
           onAttachMCP,
           onRemoveMCP,
+          onAttachNote,
+          onRemoveNote,
           toolApproval: voiceApproval,
         }}
         onVoiceErrorClear={() => setVoiceError(null)}
@@ -2385,6 +2528,7 @@ export function ChatView({
   conversationId,
   endpoints,
   mcpServers,
+  notes,
   onConversationCreated,
   onConversationUpdated,
   onConversationSettled,
@@ -2615,6 +2759,25 @@ export function ChatView({
     [refreshConversationContext]
   )
 
+  const attachNote = useCallback(
+    async (noteId: string) => {
+      const id = await ensureConversation()
+      await api.post(`/api/v1/conversations/${id}/context/notes/${noteId}`)
+      await refreshConversationContext(id)
+    },
+    [ensureConversation, refreshConversationContext]
+  )
+
+  const removeNote = useCallback(
+    async (noteId: string) => {
+      const id = activeConversationRef.current
+      if (!id) return
+      await api.delete(`/api/v1/conversations/${id}/context/notes/${noteId}`)
+      await refreshConversationContext(id)
+    },
+    [refreshConversationContext]
+  )
+
   const waitForKnowledgeSource = useCallback(
     async (id: string, sourceId: string): Promise<KnowledgeSource> => {
       for (let attempt = 0; attempt < 90; attempt += 1) {
@@ -2732,6 +2895,7 @@ export function ChatView({
         conversationId={activeConversationId}
         endpoints={activeChatEndpoints}
         mcpServers={mcpServers}
+        notes={notes}
         initialMessages={initialMessages}
         onConversationCreated={handleSurfaceConversationCreated}
         onConversationUpdated={onConversationUpdated}
@@ -2739,6 +2903,8 @@ export function ChatView({
         onEnsureConversation={ensureConversation}
         onAttachMCP={attachMCPServer}
         onRemoveMCP={removeMCPServer}
+        onAttachNote={attachNote}
+        onRemoveNote={removeNote}
         onOpenHistory={onOpenHistory}
         onRemoveUpload={removeUploadedFile}
         onUpload={uploadFile}
@@ -2751,6 +2917,7 @@ export function ChatView({
           ).length
         }{" "}
         knowledge sources, {conversationContext.mcpServers.length} MCP servers,{" "}
+        {conversationContext.notes?.length ?? 0} notes,{" "}
         {conversationContext.transcriptionSessions.length} transcription
         sessions attached.
       </span>

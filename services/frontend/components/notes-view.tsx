@@ -14,16 +14,22 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 
 type NotesViewProps = {
   onUseInChat?: (note: Note) => void | Promise<void>
+  onNotesChange?: (notes: Note[]) => void
 }
 
-export function NotesView({ onUseInChat }: NotesViewProps) {
+export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
   const [notes, setNotes] = useState<Note[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [title, setTitle] = useState("")
@@ -42,17 +48,20 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
         `/api/v1/notes${params.size ? `?${params.toString()}` : ""}`
       )
       setNotes(response.notes)
+      onNotesChange?.(response.notes)
       const next = response.notes[0] ?? null
       setSelectedId(next?.id ?? null)
       setTitle(next?.title ?? "")
       setContent(next?.content ?? "")
       setError("")
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Notes could not be loaded.")
+      setError(
+        caught instanceof Error ? caught.message : "Notes could not be loaded."
+      )
     } finally {
       setLoading(false)
     }
-  }, [query])
+  }, [onNotesChange, query])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -78,10 +87,15 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
         content: "",
       })
       setNotes((current) => [response.note, ...current])
+      onNotesChange?.([response.note, ...notes])
       selectNote(response.note)
       setError("")
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The note could not be created.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The note could not be created."
+      )
     } finally {
       setSaving(false)
     }
@@ -91,14 +105,26 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
     if (!selected || saving) return
     setSaving(true)
     try {
-      const response = await api.patch<{ note: Note }>(`/api/v1/notes/${selected.id}`, {
-        title: title.trim() || "Untitled note",
-        content,
-      })
-      setNotes((current) => current.map((note) => (note.id === selected.id ? response.note : note)))
+      const response = await api.patch<{ note: Note }>(
+        `/api/v1/notes/${selected.id}`,
+        {
+          title: title.trim() || "Untitled note",
+          content,
+        }
+      )
+      setNotes((current) =>
+        current.map((note) => (note.id === selected.id ? response.note : note))
+      )
+      onNotesChange?.(
+        notes.map((note) => (note.id === selected.id ? response.note : note))
+      )
       setError("")
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The note could not be saved.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The note could not be saved."
+      )
     } finally {
       setSaving(false)
     }
@@ -108,12 +134,24 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
     if (!selected || saving) return
     setSaving(true)
     try {
-      const response = await api.patch<{ note: Note }>(`/api/v1/notes/${selected.id}`, {
-        pinned: !selected.pinnedAt,
-      })
-      setNotes((current) => current.map((note) => (note.id === selected.id ? response.note : note)))
+      const response = await api.patch<{ note: Note }>(
+        `/api/v1/notes/${selected.id}`,
+        {
+          pinned: !selected.pinnedAt,
+        }
+      )
+      setNotes((current) =>
+        current.map((note) => (note.id === selected.id ? response.note : note))
+      )
+      onNotesChange?.(
+        notes.map((note) => (note.id === selected.id ? response.note : note))
+      )
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The note could not be updated.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The note could not be updated."
+      )
     } finally {
       setSaving(false)
     }
@@ -125,6 +163,7 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
       await api.delete(`/api/v1/notes/${selected.id}`)
       const remaining = notes.filter((note) => note.id !== selected.id)
       setNotes(remaining)
+      onNotesChange?.(remaining)
       if (remaining[0]) selectNote(remaining[0])
       else {
         setSelectedId(null)
@@ -132,20 +171,27 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
         setContent("")
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The note could not be deleted.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The note could not be deleted."
+      )
     }
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl min-h-0 flex-col gap-6">
+    <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <FileText className="size-5 text-primary" />
-            <h1 className="text-xl font-semibold tracking-tight">Notes workspace</h1>
+            <h1 className="text-xl font-semibold tracking-tight">
+              Notes workspace
+            </h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Keep durable working notes, then bring any note back into a chat as context.
+            Keep durable working notes, then bring any note back into a chat as
+            context.
           </p>
         </div>
         <Button onClick={() => void createNote()} disabled={saving}>
@@ -177,12 +223,16 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
           </CardHeader>
           <CardContent className="min-h-0 overflow-y-auto p-2">
             {loading ? (
-              <p className="p-4 text-center text-xs text-muted-foreground">Loading notes…</p>
+              <p className="p-4 text-center text-xs text-muted-foreground">
+                Loading notes…
+              </p>
             ) : notes.length === 0 ? (
               <Empty className="min-h-48 border-0 p-4">
                 <EmptyHeader>
                   <EmptyTitle>No notes yet</EmptyTitle>
-                  <EmptyDescription>Create a note to start a workspace.</EmptyDescription>
+                  <EmptyDescription>
+                    Create a note to start a workspace.
+                  </EmptyDescription>
                 </EmptyHeader>
               </Empty>
             ) : (
@@ -197,8 +247,12 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
                     type="button"
                   >
                     <span className="flex items-center gap-2 text-sm font-medium">
-                      <span className="min-w-0 flex-1 truncate">{note.title || "Untitled note"}</span>
-                      {note.pinnedAt && <Pin className="size-3 shrink-0 text-primary" />}
+                      <span className="min-w-0 flex-1 truncate">
+                        {note.title || "Untitled note"}
+                      </span>
+                      {note.pinnedAt && (
+                        <Pin className="size-3 shrink-0 text-primary" />
+                      )}
                     </span>
                     <span className="mt-1 block truncate text-xs text-muted-foreground">
                       {note.content || "Empty note"}
@@ -221,10 +275,20 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
                   </CardDescription>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button onClick={() => void togglePin()} size="icon-sm" title={selected.pinnedAt ? "Unpin note" : "Pin note"} variant="ghost">
+                  <Button
+                    onClick={() => void togglePin()}
+                    size="icon-sm"
+                    title={selected.pinnedAt ? "Unpin note" : "Pin note"}
+                    variant="ghost"
+                  >
                     {selected.pinnedAt ? <PinOff /> : <Pin />}
                   </Button>
-                  <Button onClick={() => void deleteNote()} size="icon-sm" title="Delete note" variant="ghost">
+                  <Button
+                    onClick={() => void deleteNote()}
+                    size="icon-sm"
+                    title="Delete note"
+                    variant="ghost"
+                  >
                     <Trash2 />
                   </Button>
                 </div>
@@ -247,10 +311,17 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
                 />
                 <Separator />
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-xs text-muted-foreground">{content.length} characters</span>
+                  <span className="text-xs text-muted-foreground">
+                    {content.length} characters
+                  </span>
                   <div className="flex items-center gap-2">
                     {onUseInChat && (
-                      <Button onClick={() => void onUseInChat({ ...selected, title, content })} variant="outline">
+                      <Button
+                        onClick={() =>
+                          void onUseInChat({ ...selected, title, content })
+                        }
+                        variant="outline"
+                      >
                         Use in chat
                       </Button>
                     )}
@@ -266,7 +337,9 @@ export function NotesView({ onUseInChat }: NotesViewProps) {
             <Empty className="h-full min-h-72 border-0">
               <EmptyHeader>
                 <EmptyTitle>Select a note</EmptyTitle>
-                <EmptyDescription>Choose a note or create a new one.</EmptyDescription>
+                <EmptyDescription>
+                  Choose a note or create a new one.
+                </EmptyDescription>
               </EmptyHeader>
             </Empty>
           )}

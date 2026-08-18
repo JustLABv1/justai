@@ -45,6 +45,7 @@ func (a *App) getConversationContext(c *gin.Context) {
 		KnowledgeSources:      []models.KnowledgeSource{},
 		MCPServers:            []models.MCPServer{},
 		TranscriptionSessions: []models.TranscriptionSession{},
+		Notes:                 []models.Note{},
 	}
 	if err := a.loadConversationKnowledge(c, conversationID, &contextValue); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -55,6 +56,10 @@ func (a *App) getConversationContext(c *gin.Context) {
 		return
 	}
 	if err := a.loadConversationTranscription(c, conversationID, &contextValue); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := a.loadConversationNotes(c, conversationID, &contextValue); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -136,6 +141,30 @@ func (a *App) loadConversationTranscription(c *gin.Context, conversationID uuid.
 			return err
 		}
 		result.TranscriptionSessions = append(result.TranscriptionSessions, item)
+	}
+	return rows.Err()
+}
+
+func (a *App) loadConversationNotes(c *gin.Context, conversationID uuid.UUID, result *models.ConversationContext) error {
+	rows, err := a.DB.QueryContext(c, `
+		SELECT n.id, n.title, n.content, n.source_conversation_id, n.pinned_at,
+		       n.created_at, n.updated_at
+		FROM conversation_notes cn
+		JOIN notes n ON n.id = cn.note_id
+		WHERE cn.conversation_id = $1
+		ORDER BY cn.created_at`, conversationID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item models.Note
+		var sourceID sql.NullString
+		if err := rows.Scan(&item.ID, &item.Title, &item.Content, &sourceID, &item.PinnedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return err
+		}
+		item.SourceConversationID = parseOptionalUUIDString(sourceID.String)
+		result.Notes = append(result.Notes, item)
 	}
 	return rows.Err()
 }
@@ -224,6 +253,53 @@ func (a *App) detachConversationKnowledge(c *gin.Context) {
 		return
 	}
 	if err := transaction.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (a *App) attachConversationNote(c *gin.Context) {
+	conversationID, err := a.authorizeConversation(c, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	noteID, err := uuid.Parse(c.Param("noteId"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid note id"))
+		return
+	}
+	principal, _ := middleware.GetPrincipal(c)
+	organizationID, _ := middleware.GetOrganizationID(c)
+	var available bool
+	if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM notes WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, noteID, principal.UserID, organizationID).Scan(&available); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !available {
+		writeError(c, http.StatusForbidden, fmt.Errorf("note is not available"))
+		return
+	}
+	if _, err := a.DB.ExecContext(c, `INSERT INTO conversation_notes (conversation_id, note_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, conversationID, noteID, principal.UserID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (a *App) detachConversationNote(c *gin.Context) {
+	conversationID, err := a.authorizeConversation(c, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	noteID, err := uuid.Parse(c.Param("noteId"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid note id"))
+		return
+	}
+	if _, err := a.DB.ExecContext(c, `DELETE FROM conversation_notes WHERE conversation_id = $1 AND note_id = $2`, conversationID, noteID); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}

@@ -83,6 +83,7 @@ export function Workspace() {
   const [endpoints, setEndpoints] = useState<Endpoint[]>([])
   const [sources, setSources] = useState<KnowledgeSource[]>([])
   const [servers, setServers] = useState<MCPServer[]>([])
+  const [notes, setNotes] = useState<Note[]>([])
   const [actionError, setActionError] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [createTranscriptionRequested, setCreateTranscriptionRequested] =
@@ -248,6 +249,7 @@ export function Workspace() {
         setEndpoints([])
         setSources([])
         setServers([])
+        setNotes([])
 
         // The platform-admin shell is intentionally independent from the
         // active workspace. Avoid loading workspace resources (and emitting
@@ -276,6 +278,7 @@ export function Workspace() {
                   "/api/v1/knowledge/sources"
                 ),
                 api.get<{ servers: MCPServer[] }>("/api/v1/mcp/servers"),
+                api.get<{ notes: Note[] }>("/api/v1/notes"),
               ])
         if (cancelled) return
 
@@ -337,6 +340,7 @@ export function Workspace() {
           "knowledge"
         )
         const serverResult = valueAt<{ servers: MCPServer[] }>(6, "mcp")
+        const notesResult = valueAt<{ notes: Note[] }>(7, "notes")
         if (conversationResult)
           setConversations(conversationResult.conversations)
         if (archivedConversationResult)
@@ -348,6 +352,7 @@ export function Workspace() {
         if (endpointResult) setEndpoints(endpointResult.endpoints)
         if (sourceResult) setSources(sourceResult.sources)
         if (serverResult) setServers(serverResult.servers)
+        if (notesResult) setNotes(notesResult.notes)
         setFeatureErrors(errors)
         setDisabledFeatures(disabled)
         setStatus("ready")
@@ -794,12 +799,18 @@ export function Workspace() {
   const handleUseNoteInChat = useCallback(
     async (note: Note) => {
       const conversationId = await ensureConversationForContext()
-      await api.post(
-        `/api/v1/conversations/${conversationId}/attachments/text`,
+      const saved = await api.patch<{ note: Note }>(
+        `/api/v1/notes/${note.id}`,
         {
           title: note.title,
           content: note.content,
         }
+      )
+      setNotes((current) =>
+        current.map((item) => (item.id === saved.note.id ? saved.note : item))
+      )
+      await api.post(
+        `/api/v1/conversations/${conversationId}/context/notes/${note.id}`
       )
       navigate("chat", conversationId)
     },
@@ -975,6 +986,7 @@ export function Workspace() {
                 conversationId={activeConversationId}
                 endpoints={endpoints}
                 mcpServers={servers}
+                notes={notes}
                 onEnsureConversation={ensureConversationForContext}
                 onConversationCreated={(conversation) => {
                   setConversations((current) => {
@@ -1060,7 +1072,10 @@ export function Workspace() {
             )}
             {activeView === "profile" && <ProfileView user={user} />}
             {activeView === "notes" && (
-              <NotesView onUseInChat={handleUseNoteInChat} />
+              <NotesView
+                onNotesChange={setNotes}
+                onUseInChat={handleUseNoteInChat}
+              />
             )}
             {activeView === "memory" && <MemoryView />}
             {activeView === "admin" && (
@@ -1082,6 +1097,7 @@ export function Workspace() {
             onNavigate={(view) => navigate(view, null)}
             servers={servers}
             sources={sources}
+            notes={notes}
             transcriptionSessions={transcriptionSessions}
           />
         )}

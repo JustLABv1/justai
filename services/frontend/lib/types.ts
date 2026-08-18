@@ -160,7 +160,7 @@ export type MCPServer = {
 }
 
 export type Citation = {
-  kind?: "knowledge" | "transcription"
+  kind?: "knowledge" | "note" | "transcription"
   resourceId?: string
   sourceId?: string
   title: string

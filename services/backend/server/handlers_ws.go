@@ -187,15 +187,138 @@ func (a *App) conversationHasKnowledge(ctx context.Context, conversationID uuid.
 			  AND CASE WHEN $2 = '' THEN cks.context_scope = 'persistent'
 			           ELSE cks.source_id = ANY(string_to_array($2, ',')::uuid[])
 			      END
+		) OR EXISTS (
+			SELECT 1
+			FROM conversation_notes cn
+			WHERE cn.conversation_id = $1
 		)`, conversationID, assistantUISourceIDsCSV(selectedSourceIDs)).Scan(&attached)
 	return attached, err
 }
 
 func (a *App) searchKnowledge(ctx context.Context, organizationID, userID, conversationID uuid.UUID, query string, limit int, selectedSourceIDs []uuid.UUID) ([]models.Citation, error) {
+	var citations []models.Citation
+	var err error
 	if len(selectedSourceIDs) > 0 {
-		return a.RAG.SearchConversationSources(ctx, conversationID, query, limit, selectedSourceIDs)
+		citations, err = a.RAG.SearchConversationSources(ctx, conversationID, query, limit, selectedSourceIDs)
+	} else {
+		citations, err = a.RAG.SearchConversation(ctx, conversationID, query, limit)
 	}
-	return a.RAG.SearchConversation(ctx, conversationID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	noteCitations, err := a.searchConversationNotes(ctx, conversationID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	// Notes are explicit conversation context, so keep their citations at the
+	// front of the bounded result set. The model also receives the note content
+	// through attachedNotesPrompt below, which handles broad requests such as
+	// “summarize this note” that have no lexical hit.
+	combined := append(noteCitations, citations...)
+	if limit > 0 && len(combined) > limit {
+		combined = combined[:limit]
+	}
+	return combined, nil
+}
+
+func (a *App) searchConversationNotes(ctx context.Context, conversationID uuid.UUID, query string, limit int) ([]models.Citation, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 12 {
+		limit = 6
+	}
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT n.id, n.title, n.content
+		FROM conversation_notes cn
+		JOIN notes n ON n.id = cn.note_id
+		WHERE cn.conversation_id = $1 AND btrim(n.content) <> ''
+		ORDER BY
+			CASE WHEN to_tsvector('simple', coalesce(n.title, '') || ' ' || n.content) @@ plainto_tsquery('simple', $2) THEN 0 ELSE 1 END,
+			ts_rank(to_tsvector('simple', coalesce(n.title, '') || ' ' || n.content), plainto_tsquery('simple', $2)) DESC,
+			cn.created_at
+		LIMIT $3`, conversationID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]models.Citation, 0, limit)
+	for rows.Next() {
+		var citation models.Citation
+		var content string
+		if err := rows.Scan(&citation.ResourceID, &citation.Title, &content); err != nil {
+			return nil, err
+		}
+		citation.Kind = "note"
+		citation.Snippet = noteSnippet(content)
+		result = append(result, citation)
+	}
+	return result, rows.Err()
+}
+
+func noteSnippet(content string) string {
+	content = strings.Join(strings.Fields(content), " ")
+	const maxRunes = 1200
+	runes := []rune(content)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return content
+}
+
+func (a *App) attachedNotesPrompt(ctx context.Context, conversationID uuid.UUID) (string, error) {
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT n.title, n.content
+		FROM conversation_notes cn
+		JOIN notes n ON n.id = cn.note_id
+		WHERE cn.conversation_id = $1 AND btrim(n.content) <> ''
+		ORDER BY cn.created_at`, conversationID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	const maxNoteRunes = 12000
+	const maxTotalRunes = 30000
+	var prompt strings.Builder
+	usedRunes := 0
+	for rows.Next() {
+		var title, content string
+		if err := rows.Scan(&title, &content); err != nil {
+			return "", err
+		}
+		contentRunes := []rune(content)
+		if len(contentRunes) > maxNoteRunes {
+			contentRunes = contentRunes[:maxNoteRunes]
+		}
+		if usedRunes+len(contentRunes) > maxTotalRunes {
+			remaining := maxTotalRunes - usedRunes
+			if remaining <= 0 {
+				break
+			}
+			contentRunes = contentRunes[:remaining]
+		}
+		if len(contentRunes) == 0 {
+			continue
+		}
+		if prompt.Len() == 0 {
+			prompt.WriteString("Attached workspace notes are authoritative user-provided context. Use them when relevant, and do not claim they are external sources.\n\n")
+		}
+		prompt.WriteString("Note: ")
+		prompt.WriteString(strings.TrimSpace(title))
+		prompt.WriteString("\n")
+		prompt.WriteString(string(contentRunes))
+		prompt.WriteString("\n\n")
+		usedRunes += len(contentRunes)
+		if usedRunes >= maxTotalRunes {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(prompt.String()), nil
 }
 
 func chatToolInstructions() string {

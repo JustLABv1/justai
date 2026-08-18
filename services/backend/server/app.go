@@ -215,6 +215,8 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.attachConversationKnowledge)
 	org.PATCH("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.updateConversationKnowledge)
 	org.DELETE("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.detachConversationKnowledge)
+	org.POST("/conversations/:id/context/notes/:noteId", a.attachConversationNote)
+	org.DELETE("/conversations/:id/context/notes/:noteId", a.detachConversationNote)
 	org.POST("/conversations/:id/context/mcp/:serverId", a.platformFeature("mcp"), a.attachConversationMCP)
 	org.DELETE("/conversations/:id/context/mcp/:serverId", a.platformFeature("mcp"), a.detachConversationMCP)
 	org.POST("/conversations/:id/context/transcription/:sessionId", a.platformFeature("transcription"), a.attachConversationTranscription)
