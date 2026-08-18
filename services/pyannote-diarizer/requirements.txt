@@ -1,5 +1,5 @@
 fastapi>=0.141.1,<1
-huggingface_hub>=0.36.2,<1
+huggingface_hub>=1.27.0,<2
 httpx>=0.28.1,<1
 pyannote.audio>=4.0.7,<5
 uvicorn[standard]>=0.52.3,<1
