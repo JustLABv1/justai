@@ -103,6 +103,7 @@ type Endpoint struct {
 	ID                   uuid.UUID       `json:"id"`
 	ScopeType            string          `json:"scopeType"`
 	ScopeID              *uuid.UUID      `json:"scopeId,omitempty"`
+	EndpointKind         string          `json:"endpointKind"`
 	ProviderType         string          `json:"providerType"`
 	Name                 string          `json:"name"`
 	BaseURL              string          `json:"baseUrl"`

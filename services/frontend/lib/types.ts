@@ -195,6 +195,7 @@ export type Endpoint = {
   id: string
   scopeType: "global" | "organization" | "user"
   scopeId?: string
+  endpointKind: EndpointKind
   providerType: string
   name: string
   baseUrl: string
@@ -217,6 +218,8 @@ export type Endpoint = {
   createdAt: string
   updatedAt: string
 }
+
+export type EndpointKind = "llm" | "diarization"
 
 export type KnowledgeSource = {
   id: string

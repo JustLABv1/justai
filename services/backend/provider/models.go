@@ -42,6 +42,33 @@ func DiscoverChatModels(ctx context.Context, endpoint Endpoint) ([]ChatModel, er
 	}
 }
 
+// Probe performs a safe provider reachability check for endpoint setup. Model
+// catalogs are the least invasive probe for API-backed providers. Pyannote has
+// a dedicated health endpoint because a real diarization request requires
+// media and would be inappropriate during configuration.
+func Probe(ctx context.Context, endpoint Endpoint) ([]ChatModel, error) {
+	if endpoint.ProviderType != "pyannote" {
+		return DiscoverChatModels(ctx, endpoint)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, joinURL(endpoint, "/healthz"), nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/json")
+	if endpoint.Credential != "" {
+		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
+	}
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return nil, responseError(response)
+	}
+	return nil, nil
+}
+
 func discoverOpenAIModels(ctx context.Context, endpoint Endpoint) ([]ChatModel, error) {
 	// LiteLLM's OpenAI-compatible /models route can intentionally include the
 	// provider's built-in model catalog (for example when infer_model_from_keys
