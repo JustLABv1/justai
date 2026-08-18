@@ -823,6 +823,17 @@ function SessionRow({
   onSelect: (id: string) => void
   session: TranscriptionSession
 }) {
+  const hasProcessingWarning =
+    session.kind === "video" &&
+    session.status === "completed" &&
+    session.polishStatus === "failed"
+  const statusLabel = hasProcessingWarning
+    ? "completed · grammar failed"
+    : session.status
+  const statusDescription = hasProcessingWarning
+    ? "Grammar polish failed"
+    : session.status
+
   return (
     <div className="group relative">
       <Button
@@ -832,21 +843,38 @@ function SessionRow({
           active && "bg-accent text-accent-foreground"
         )}
         onClick={() => onSelect(session.id)}
-        title={`${session.title} · ${session.status}`}
+        title={`${session.title} · ${statusLabel}`}
         variant="ghost"
       >
         <span
           className={cn(
             "size-1.5 shrink-0 rounded-full",
-            session.status === "live" || active ? "bg-primary" : "bg-border"
+            hasProcessingWarning
+              ? active
+                ? "bg-amber-300"
+                : "bg-amber-500"
+              : session.status === "live" || active
+                ? "bg-primary"
+                : "bg-border"
           )}
         />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium">
             {session.title}
           </span>
-          <span className="block truncate text-[11px] font-normal text-muted-foreground">
-            {session.status} · {formatItemTime(session.updatedAt)}
+          <span
+            className={cn(
+              "flex min-w-0 items-center gap-1.5 text-[11px] font-normal",
+              active ? "text-accent-foreground/75" : "text-muted-foreground"
+            )}
+          >
+            <span className="min-w-0 truncate">{statusDescription}</span>
+            <span aria-hidden="true" className="shrink-0">
+              ·
+            </span>
+            <span className="shrink-0">
+              {formatItemTime(session.updatedAt)}
+            </span>
           </span>
         </span>
         {session.status === "live" && (

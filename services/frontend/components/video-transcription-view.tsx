@@ -882,6 +882,19 @@ export function VideoTranscriptionView({
             </Alert>
           ) : null}
 
+          {snapshot.videoUpload?.status === "completed" &&
+          snapshot.session.polishStatus === "failed" ? (
+            <Alert className="shrink-0 border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+              <CircleAlert aria-hidden="true" />
+              <AlertTitle>Transcript completed with warnings</AlertTitle>
+              <AlertDescription>
+                The verbatim transcript is complete, but Grammar polish failed.
+                The Polished view is unavailable; open the Grammar polish step
+                below to see the error.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           {snapshot.videoUpload ? (
             <VideoPipeline
               hasDiarizedSpeakers={snapshot.speakers.some((speaker) =>
@@ -1663,6 +1676,7 @@ function VideoPipeline({
   const activeStep = steps.find(
     (step) => step.status === "active" || step.status === "retrying"
   )
+  const hasFailedStep = steps.some((step) => step.status === "failed")
   const completedCount = steps.filter((step) =>
     ["completed", "skipped"].includes(step.status)
   ).length
@@ -1676,7 +1690,9 @@ function VideoPipeline({
   const runTimeMs = getVideoPipelineRunTime(session, upload, now)
   const overallLabel =
     upload.status === "completed"
-      ? "Processing complete"
+      ? hasFailedStep
+        ? "Processing completed with warnings"
+        : "Processing complete"
       : upload.status === "failed"
         ? "Processing stopped"
         : upload.status === "cancelled"
@@ -1715,7 +1731,9 @@ function VideoPipeline({
               <Badge
                 className="h-5 px-2 text-[10px]"
                 variant={
-                  upload.status === "failed" ? "destructive" : "secondary"
+                  upload.status === "failed" || hasFailedStep
+                    ? "destructive"
+                    : "secondary"
                 }
               >
                 {completedCount}/{steps.length} steps
