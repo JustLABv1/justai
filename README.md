@@ -10,6 +10,31 @@ JustAI is the JustLAB workspace for routing chat, transcription, retrieval, and 
    docker compose -f docker-compose.dev.yml up -d justai-postgres
    ```
 
+   To enable speaker separation for video transcription, start the optional
+   local pyannote service as well. Accept the Hugging Face conditions for
+   `pyannote/segmentation-3.0` and `pyannote/speaker-diarization-3.1` first:
+
+   ```bash
+   export HF_TOKEN=hf_...
+   docker compose -f docker-compose.dev.yml --profile pyannote up -d --build justai-pyannote
+   curl http://localhost:8001/healthz
+   ```
+
+   On macOS with Podman, allocate at least 8 GB to the Podman machine before
+   processing long videos. A 2 GB machine can terminate the service with exit
+   code `137` while pyannote is diarizing.
+
+   Because the development backend runs directly on the host, configure the
+   JustAI Pyannote endpoint with base URL `http://localhost:8001`. The
+   container's internal name (`http://justai-pyannote:8000`) is only for a
+   backend running inside the same Compose network.
+
+   If S3/MinIO runs on the host at `http://localhost:9000`, keep that as the
+   browser-facing `s3_endpoint` and set
+   `s3_processing_endpoint: "http://host.containers.internal:9000"` for
+   Podman. This gives pyannote a host-reachable signed URL without breaking
+   browser uploads.
+
 2. Start the backend:
 
    ```bash

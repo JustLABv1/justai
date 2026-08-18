@@ -30,6 +30,7 @@ import (
 
 type transcriptionSessionRequest struct {
 	Title                 string `json:"title"`
+	Kind                  string `json:"kind"`
 	TranscriptionEndpoint string `json:"transcriptionEndpointId"`
 	DiarizationEndpoint   string `json:"diarizationEndpointId"`
 	GrammarEndpoint       string `json:"grammarEndpointId"`
@@ -128,6 +129,17 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 		if err != nil {
 			writeError(c, http.StatusBadRequest, err)
 			return
+		}
+		if !strings.EqualFold(strings.TrimSpace(request.Kind), "video") {
+			endpoint, endpointErr := a.getEndpoint(c, diarizationEndpoint)
+			if endpointErr != nil {
+				writeError(c, http.StatusBadRequest, fmt.Errorf("diarization endpoint not found"))
+				return
+			}
+			if endpoint.ProviderType == "pyannote" {
+				writeError(c, http.StatusBadRequest, fmt.Errorf("pyannote diarization is available for completed video transcription, not live sessions"))
+				return
+			}
 		}
 	}
 	grammarEndpoint := uuid.Nil
@@ -1620,7 +1632,7 @@ func endpointSupportsModel(endpoint models.Endpoint, capability string) bool {
 		}
 		return endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
 	}
-	return (capability == "chat" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "openai-compatible" || endpoint.ProviderType == "ollama" || endpoint.ProviderType == "gemini" || endpoint.ProviderType == "anthropic")) || (capability == "realtime-transcription" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini")) || (capability == "diarization" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini")) || (capability == "tts" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "openai-compatible"))
+	return (capability == "chat" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "openai-compatible" || endpoint.ProviderType == "ollama" || endpoint.ProviderType == "gemini" || endpoint.ProviderType == "anthropic")) || (capability == "realtime-transcription" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini")) || (capability == "diarization" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini" || endpoint.ProviderType == "pyannote")) || (capability == "tts" && (endpoint.ProviderType == "openai" || endpoint.ProviderType == "openai-compatible"))
 }
 
 func endpointSupports(endpoint provider.Endpoint, capability string) bool {
@@ -1636,7 +1648,7 @@ func endpointSupports(endpoint provider.Endpoint, capability string) bool {
 	case "realtime-transcription":
 		return endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
 	case "diarization":
-		return endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini"
+		return endpoint.ProviderType == "openai" || endpoint.ProviderType == "gemini" || endpoint.ProviderType == "pyannote"
 	case "tts":
 		return endpoint.ProviderType == "openai" || endpoint.ProviderType == "openai-compatible"
 	case "chat":

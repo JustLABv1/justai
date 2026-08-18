@@ -39,6 +39,10 @@ func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, 
 		return fmt.Errorf("endpoint does not support diarization")
 	}
 
+	if endpoint.ProviderType == "pyannote" {
+		videoURL := storage.presignProcessingURL(http.MethodGet, storageKey, nil, videoProcessingURLLifetime)
+		return m.diarizeVideoWithPyannote(ctx, uploadID, sessionID, endpoint, language, videoURL)
+	}
 	videoURL := storage.presignURL(http.MethodGet, storageKey, nil, videoProcessingURLLifetime)
 	command := exec.CommandContext(ctx, "ffmpeg", ffmpegVideoAudioArgs(videoURL)...)
 	var stderr bytes.Buffer
@@ -108,6 +112,109 @@ func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, 
 			message = err.Error()
 		}
 		return fmt.Errorf("ffmpeg could not extract audio for diarization: %s", message)
+	}
+	return nil
+}
+
+// diarizeVideoWithPyannote sends the complete recording to the dedicated
+// pyannote service. Unlike rolling-window providers, pyannote must see the
+// complete file in one pipeline invocation so SPEAKER_00 remains the same
+// person from the beginning to the end of the recording.
+func (m *TranscriptionManager) diarizeVideoWithPyannote(ctx context.Context, uploadID, sessionID uuid.UUID, endpoint provider.Endpoint, language, videoURL string) error {
+	_ = m.updateVideoProgress(ctx, uploadID, 88, "diarizing", "")
+	turns, err := provider.DiarizeMediaURL(ctx, endpoint, videoURL, language)
+	if err != nil {
+		return err
+	}
+	segments, err := loadTranscriptionSegments(ctx, m.DB, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := m.applyVideoDiarizationTurns(ctx, sessionID, segments, turns); err != nil {
+		return err
+	}
+	_ = m.updateVideoProgress(ctx, uploadID, 94, "diarizing", "")
+	return nil
+}
+
+type videoDiarizationInterval struct {
+	speaker string
+	start   int64
+	end     int64
+}
+
+func chooseVideoDiarizationSpeaker(segmentStart, segmentEnd int64, intervals []videoDiarizationInterval) string {
+	overlaps := make(map[string]int64)
+	for _, interval := range intervals {
+		start := maxInt64(segmentStart, interval.start)
+		end := minInt64(segmentEnd, interval.end)
+		if end > start {
+			overlaps[interval.speaker] += end - start
+		}
+	}
+	bestSpeaker := ""
+	var bestOverlap int64
+	for speaker, overlap := range overlaps {
+		if overlap > bestOverlap || (overlap == bestOverlap && overlap > 0 && (bestSpeaker == "" || speaker < bestSpeaker)) {
+			bestSpeaker = speaker
+			bestOverlap = overlap
+		}
+	}
+	return bestSpeaker
+}
+
+// applyVideoDiarizationTurns assigns the speaker with the greatest temporal
+// overlap to each transcript segment. This is more stable than updating the
+// nearest segment once per turn, especially when one ASR segment spans a
+// speaker change or when pyannote reports overlapping speech.
+func (m *TranscriptionManager) applyVideoDiarizationTurns(ctx context.Context, sessionID uuid.UUID, segments []models.TranscriptionSegment, turns []provider.DiarizationSegment) error {
+	intervals := make([]videoDiarizationInterval, 0, len(turns))
+	for _, turn := range turns {
+		if strings.TrimSpace(turn.Speaker) == "" || turn.End <= turn.Start {
+			continue
+		}
+		start := maxInt64(0, int64(turn.Start*1000))
+		end := maxInt64(start+1, int64(turn.End*1000))
+		intervals = append(intervals, videoDiarizationInterval{
+			speaker: strings.TrimSpace(turn.Speaker),
+			start:   start,
+			end:     end,
+		})
+	}
+	if len(intervals) == 0 {
+		return nil
+	}
+
+	speakerIDs := make(map[string]uuid.UUID)
+	for _, segment := range segments {
+		if segment.SourceID != nil {
+			continue
+		}
+		segmentStart := segment.StartOffsetMs
+		segmentEnd := segment.EndOffsetMs
+		if segmentEnd <= segmentStart {
+			segmentEnd = segmentStart + 1
+		}
+		bestSpeaker := chooseVideoDiarizationSpeaker(segmentStart, segmentEnd, intervals)
+		if bestSpeaker == "" {
+			continue
+		}
+		speakerID, ok := speakerIDs[bestSpeaker]
+		if !ok {
+			var err error
+			speakerID, err = m.app.ensureTranscriptionSpeaker(ctx, sessionID, bestSpeaker)
+			if err != nil {
+				return err
+			}
+			speakerIDs[bestSpeaker] = speakerID
+		}
+		if segment.SpeakerID != nil && *segment.SpeakerID == speakerID {
+			continue
+		}
+		if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_segments SET speaker_id = $2, updated_at = now() WHERE id = $1 AND session_id = $3`, segment.ID, speakerID, sessionID); err != nil {
+			return err
+		}
+		m.broadcast(sessionID, "transcription.segment.updated", ginData{"segmentId": segment.ID, "speakerId": speakerID})
 	}
 	return nil
 }

@@ -101,7 +101,7 @@ function videoUploadStateLabel(upload: TranscriptionVideoUpload) {
     case "uploaded":
       return "Upload complete"
     case "queued":
-      return "Queued"
+      return upload.stage === "retrying" ? "Retrying" : "Queued"
     case "processing":
       return "Processing"
     case "completed":
@@ -389,6 +389,7 @@ export function VideoTranscriptionView({
         joinCode: string
         expiresAt: string
       }>("/api/v1/transcription/sessions", {
+        kind: "video",
         title: title.trim() || "Video transcript",
         language,
         recordAudio: false,
@@ -721,6 +722,22 @@ export function VideoTranscriptionView({
               <span className="hidden sm:inline">New video</span>
             </Button>
           </header>
+
+          {snapshot.videoUpload?.error ? (
+            <Alert className="shrink-0" variant="destructive">
+              <AlertTitle>
+                {snapshot.videoUpload.status === "failed"
+                  ? "Video transcription failed"
+                  : "Video transcription is retrying"}
+              </AlertTitle>
+              <AlertDescription>
+                {snapshot.videoUpload.error}
+                {snapshot.videoUpload.status !== "failed"
+                  ? " JustAI will retry this processing step automatically."
+                  : " Retry the video after resolving the reported issue."}
+              </AlertDescription>
+            </Alert>
+          ) : null}
 
           <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto lg:overflow-hidden lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)]">
             <Card className="min-h-[28rem] overflow-hidden shadow-none lg:min-h-0">
@@ -1344,8 +1361,14 @@ function BadgeForStatus({
   status: TranscriptionSession["status"]
   loading: boolean
 }) {
+  const variant =
+    status === "failed"
+      ? "destructive"
+      : status === "processing" || status === "live"
+        ? "default"
+        : "secondary"
   return (
-    <Badge className="h-5 px-2 text-[10px]" variant="secondary">
+    <Badge className="h-5 px-2 text-[10px]" variant={variant}>
       {loading ? "Syncing" : status}
     </Badge>
   )

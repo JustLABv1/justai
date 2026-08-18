@@ -69,6 +69,7 @@ func TestEnvironmentOverridesYAML(t *testing.T) {
 	t.Setenv("JUSTAI_PORT", "9191")
 	t.Setenv("JUSTAI_DATABASE_URL", "postgres://from-env")
 	t.Setenv("JUSTAI_DEV_SEED", "false")
+	t.Setenv("JUSTAI_TRANSCRIPTION_S3_PROCESSING_ENDPOINT", "http://host.containers.internal:9000")
 
 	loaded, err := Load(configPath)
 	if err != nil {
@@ -76,6 +77,9 @@ func TestEnvironmentOverridesYAML(t *testing.T) {
 	}
 	if loaded.Port != "9191" || loaded.DatabaseURL != "postgres://from-env" || loaded.DevSeed {
 		t.Fatalf("environment values did not override YAML: %+v", loaded)
+	}
+	if loaded.Transcription.S3ProcessingEndpoint != "http://host.containers.internal:9000" {
+		t.Fatalf("S3 processing endpoint did not load from the environment: %q", loaded.Transcription.S3ProcessingEndpoint)
 	}
 }
 
@@ -119,6 +123,7 @@ func clearConfigEnv(t *testing.T) {
 		"JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_MAX_BYTES",
 		"JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_PART_BYTES",
 		"JUSTAI_TRANSCRIPTION_VIDEO_MAX_DURATION_HOURS",
+		"JUSTAI_TRANSCRIPTION_S3_PROCESSING_ENDPOINT",
 	} {
 		t.Setenv(key, "")
 	}

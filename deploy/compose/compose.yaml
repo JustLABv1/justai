@@ -41,6 +41,7 @@ services:
       JUSTAI_TRANSCRIPTION_STORAGE_DRIVER: ${JUSTAI_TRANSCRIPTION_STORAGE_DRIVER:-local}
       JUSTAI_TRANSCRIPTION_LOCAL_STORAGE_PATH: /app/data/transcription
       JUSTAI_TRANSCRIPTION_S3_ENDPOINT: ${JUSTAI_TRANSCRIPTION_S3_ENDPOINT:-}
+      JUSTAI_TRANSCRIPTION_S3_PROCESSING_ENDPOINT: ${JUSTAI_TRANSCRIPTION_S3_PROCESSING_ENDPOINT:-}
       JUSTAI_TRANSCRIPTION_S3_REGION: ${JUSTAI_TRANSCRIPTION_S3_REGION:-us-east-1}
       JUSTAI_TRANSCRIPTION_S3_BUCKET: ${JUSTAI_TRANSCRIPTION_S3_BUCKET:-}
       JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY: ${JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY:-}
@@ -51,6 +52,21 @@ services:
     volumes:
       - ./backend.config.yaml:/etc/justai/config.yaml:ro
       - uploads-data:/app/data
+
+  pyannote-diarizer:
+    profiles: ["pyannote"]
+    build:
+      context: ../../services/pyannote-diarizer
+    restart: unless-stopped
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      PYANNOTE_MODEL_ID: ${PYANNOTE_MODEL_ID:-pyannote/speaker-diarization-3.1}
+      PYANNOTE_SERVICE_TOKEN: ${PYANNOTE_SERVICE_TOKEN:-}
+      PYANNOTE_DEVICE: ${PYANNOTE_DEVICE:-auto}
+      PYANNOTE_MIN_AUDIO_SECONDS: ${PYANNOTE_MIN_AUDIO_SECONDS:-1}
+      PYANNOTE_TORCH_THREADS: ${PYANNOTE_TORCH_THREADS:-2}
+    volumes:
+      - pyannote-hf-cache:/root/.cache/huggingface
 
   frontend:
     image: ${JUSTAI_IMAGE_REPOSITORY:-ghcr.io/justlabv1/justai}:frontend-${JUSTAI_VERSION:-latest}
@@ -81,3 +97,4 @@ services:
 volumes:
   postgres-data:
   uploads-data:
+  pyannote-hf-cache:

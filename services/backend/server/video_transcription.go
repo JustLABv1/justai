@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -48,7 +49,9 @@ func (m *TranscriptionManager) startVideoWorker(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = m.processVideoJob(ctx)
+				if err := m.processVideoJob(ctx); err != nil && !errors.Is(err, errVideoTranscriptionCancelled) && ctx.Err() == nil {
+					slog.Warn("video transcription job failed", "error", err)
+				}
 			}
 		}
 	}()
@@ -515,7 +518,12 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 			if errors.Is(err, errVideoTranscriptionCancelled) || jobCtx.Err() != nil {
 				return err
 			}
-			m.broadcast(record.model.SessionID, "transcription.diarization-error", ginData{"message": err.Error()})
+			message := fmt.Errorf("speaker diarization failed: %w", err)
+			m.broadcast(record.model.SessionID, "transcription.diarization-error", ginData{
+				"message": message.Error(),
+				"fatal":   true,
+			})
+			return message
 		}
 	}
 	if grammarEndpoint.Valid {

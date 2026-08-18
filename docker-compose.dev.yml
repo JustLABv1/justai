@@ -46,6 +46,23 @@ services:
       timeout: 5s
       retries: 12
 
+  justai-pyannote:
+    profiles: ["pyannote"]
+    build:
+      context: ./services/pyannote-diarizer
+      dockerfile: Dockerfile
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      PYANNOTE_MODEL_ID: ${PYANNOTE_MODEL_ID:-pyannote/speaker-diarization-3.1}
+      PYANNOTE_SERVICE_TOKEN: ${PYANNOTE_SERVICE_TOKEN:-}
+      PYANNOTE_DEVICE: ${PYANNOTE_DEVICE:-auto}
+      PYANNOTE_MIN_AUDIO_SECONDS: ${PYANNOTE_MIN_AUDIO_SECONDS:-1}
+      PYANNOTE_TORCH_THREADS: ${PYANNOTE_TORCH_THREADS:-2}
+    ports:
+      - "8001:8000"
+    volumes:
+      - justai-pyannote-cache:/root/.cache/huggingface
+
   justai-frontend:
     build:
       context: ./services/frontend
@@ -64,3 +81,4 @@ services:
 volumes:
   justai-postgres-data:
   justai-backend-data:
+  justai-pyannote-cache:

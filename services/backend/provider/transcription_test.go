@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,6 +49,73 @@ func TestParseRealtimeEventGemini(t *testing.T) {
 	event := parseRealtimeEvent("gemini", payload)
 	if event.Kind != "final" || event.Text != "guten morgen" {
 		t.Fatalf("unexpected Gemini event: %+v", event)
+	}
+}
+
+func TestDiarizeMediaURLPyannote(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/diarize" {
+			t.Errorf("unexpected diarization path: %s", request.URL.Path)
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if got := request.Header.Get("Authorization"); got != "Bearer service-token" {
+			t.Errorf("unexpected authorization header: %q", got)
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var payload map[string]string
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Errorf("decode request body: %v", err)
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if payload["media_url"] != "https://media.example.test/video.mp4" {
+			t.Errorf("unexpected media URL: %q", payload["media_url"])
+		}
+		if payload["model"] != "pyannote/speaker-diarization-3.1" {
+			t.Errorf("unexpected model: %q", payload["model"])
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"segments":[{"speaker":"SPEAKER_00","start":0.25,"end":1.5}]}`))
+	}))
+	defer server.Close()
+
+	segments, err := DiarizeMediaURL(context.Background(), Endpoint{
+		ProviderType:     "pyannote",
+		BaseURL:          server.URL,
+		Credential:       "service-token",
+		DiarizationModel: "pyannote/speaker-diarization-3.1",
+	}, "https://media.example.test/video.mp4", "de")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) != 1 || segments[0].Speaker != "SPEAKER_00" || segments[0].Start != 0.25 || segments[0].End != 1.5 {
+		t.Fatalf("unexpected diarization segments: %+v", segments)
+	}
+}
+
+func TestDiarizeMediaURLReturnsProviderFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusBadGateway)
+		_, _ = writer.Write([]byte(`{"detail":"could not download source media (403)"}`))
+	}))
+	defer server.Close()
+
+	_, err := DiarizeMediaURL(context.Background(), Endpoint{
+		ProviderType: "pyannote",
+		BaseURL:      server.URL,
+	}, "https://media.example.test/video.mp4", "de")
+	if err == nil {
+		t.Fatal("expected diarization provider failure")
+	}
+	if !strings.Contains(err.Error(), "502") || !strings.Contains(err.Error(), "could not download source media") {
+		t.Fatalf("provider failure did not preserve status and detail: %v", err)
 	}
 }
 

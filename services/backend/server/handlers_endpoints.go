@@ -48,6 +48,7 @@ func (a *App) supportedProviders(c *gin.Context) {
 		{"id": "anthropic", "name": "Anthropic", "kind": "native", "capabilities": []string{"chat", "vision"}},
 		{"id": "ollama", "name": "Ollama", "kind": "local", "capabilities": []string{"chat", "vision", "embeddings"}},
 		{"id": "openai-compatible", "name": "OpenAI-compatible", "kind": "gateway", "examples": []string{"LiteLLM", "vLLM", "LM Studio", "OpenRouter"}, "capabilities": []string{"chat", "vision", "image-generation", "embeddings", "realtime-transcription", "chunked-transcription", "diarization", "tool-calling", "tts"}},
+		{"id": "pyannote", "name": "Pyannote", "kind": "self-hosted", "capabilities": []string{"diarization"}},
 		{"id": "mock", "name": "JustAI demo", "kind": "local", "capabilities": []string{"chat"}},
 	}})
 }
@@ -122,7 +123,11 @@ func (a *App) createEndpoint(c *gin.Context) {
 	}
 	capabilities := request.Capabilities
 	if capabilities == nil {
-		capabilities = map[string]bool{"chat": true}
+		if request.ProviderType == "pyannote" {
+			capabilities = map[string]bool{"diarization": true}
+		} else {
+			capabilities = map[string]bool{"chat": true}
+		}
 	}
 	if err := validateProviderCapabilities(request.ProviderType, capabilities); err != nil {
 		writeError(c, http.StatusBadRequest, err)
@@ -155,7 +160,7 @@ func (a *App) createEndpoint(c *gin.Context) {
 		}
 	}
 	var id uuid.UUID
-	err = transaction.QueryRowContext(c, `INSERT INTO endpoint_settings (scope_type, scope_id, provider_type, name, base_url, api_path, api_version, chat_model, vision_model, image_model, embedding_model, transcription_model, diarization_model, speech_model, capabilities, credential_ciphertext, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_by) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''), $15, $16, $17, $18, $19, $20, $21, $22) RETURNING id`, scopeType, scopeID, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.ImageModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, jsonRaw(capabilities), nullableBytes(credential), enabled, isDefault, intValue(request.TimeoutSeconds, 120), intValue(request.MaxOutputTokens, 2048), floatValue(request.Temperature, 0.2), principal.UserID).Scan(&id)
+	err = transaction.QueryRowContext(c, `INSERT INTO endpoint_settings (scope_type, scope_id, provider_type, name, base_url, api_path, api_version, chat_model, vision_model, image_model, embedding_model, transcription_model, diarization_model, speech_model, capabilities, credential_ciphertext, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_by) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''), $15, $16, $17, $18, $19, $20, $21, $22) RETURNING id`, scopeType, scopeID, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.ImageModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, jsonRaw(capabilities), nullableBytes(credential), enabled, isDefault, intValue(request.TimeoutSeconds, endpointTimeoutDefault(request.ProviderType)), intValue(request.MaxOutputTokens, 2048), floatValue(request.Temperature, 0.2), principal.UserID).Scan(&id)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -606,7 +611,7 @@ func (a *App) canUseEndpoint(item models.Endpoint, principal middleware.Principa
 }
 
 func validateEndpointRequest(request *endpointRequest) error {
-	supported := map[string]bool{"mock": true, "openai": true, "openai-compatible": true, "gemini": true, "anthropic": true, "ollama": true}
+	supported := map[string]bool{"mock": true, "openai": true, "openai-compatible": true, "gemini": true, "anthropic": true, "ollama": true, "pyannote": true}
 	if !supported[request.ProviderType] {
 		return fmt.Errorf("unsupported provider type")
 	}
@@ -625,6 +630,8 @@ func validateEndpointRequest(request *endpointRequest) error {
 			request.BaseURL = "http://localhost:11434"
 		case "mock":
 			request.BaseURL = "http://mock.local"
+		case "pyannote":
+			request.BaseURL = "http://localhost:8000"
 		default:
 			return fmt.Errorf("base URL is required for this provider")
 		}
@@ -640,6 +647,7 @@ func validateProviderCapabilities(providerType string, capabilities map[string]b
 		"gemini":            {"chat": true, "vision": true, "embeddings": true, "transcription": true, "realtime-transcription": true, "diarization": true},
 		"anthropic":         {"chat": true, "vision": true},
 		"ollama":            {"chat": true, "vision": true, "embeddings": true},
+		"pyannote":          {"diarization": true},
 	}
 	for capability, enabled := range capabilities {
 		if enabled && !allowed[providerType][capability] {
@@ -668,6 +676,15 @@ func intValue(value, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func endpointTimeoutDefault(providerType string) int {
+	if providerType == "pyannote" {
+		// Full-file diarization can take substantially longer than a chat
+		// request, especially on a CPU-only service.
+		return 1800
+	}
+	return 120
 }
 
 func floatValue(value, fallback float64) float64 {

@@ -414,6 +414,59 @@ type DiarizationSegment struct {
 	End     float64 `json:"end"`
 }
 
+// DiarizeMediaURL runs a whole-file diarization request against providers
+// whose native API accepts media URLs. pyannote is intentionally separate from
+// Diarize: it is a PyTorch pipeline, not an OpenAI-compatible transcription
+// endpoint, and its speaker labels must be generated consistently for the
+// complete recording rather than independently for rolling windows.
+func DiarizeMediaURL(ctx context.Context, endpoint Endpoint, mediaURL, language string) ([]DiarizationSegment, error) {
+	if endpoint.ProviderType != "pyannote" {
+		return nil, fmt.Errorf("provider %s does not expose whole-file diarization", endpoint.ProviderType)
+	}
+	if strings.TrimSpace(mediaURL) == "" {
+		return nil, fmt.Errorf("diarization media URL is empty")
+	}
+	payload := map[string]any{
+		"media_url": mediaURL,
+	}
+	if model := strings.TrimSpace(endpoint.DiarizationModel); model != "" {
+		payload["model"] = model
+	}
+	if language != "" && language != "auto" {
+		// The current pyannote pipeline is language agnostic. Keep this field in
+		// the request contract so a future service can use it without requiring
+		// another backend adapter.
+		payload["language"] = language
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/v1/diarize"), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if endpoint.Credential != "" {
+		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
+	}
+	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 {
+		return nil, responseError(response)
+	}
+	var result struct {
+		Segments []DiarizationSegment `json:"segments"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("pyannote returned invalid diarization JSON: %w", err)
+	}
+	return result.Segments, nil
+}
+
 func Diarize(ctx context.Context, endpoint Endpoint, pcm []byte, language string) ([]DiarizationSegment, error) {
 	if len(pcm) == 0 {
 		return nil, nil

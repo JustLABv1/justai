@@ -32,6 +32,7 @@ type TranscriptionConfig struct {
 	StorageDriver         string
 	LocalStoragePath      string
 	S3Endpoint            string
+	S3ProcessingEndpoint  string
 	S3Region              string
 	S3Bucket              string
 	S3AccessKey           string
@@ -75,6 +76,7 @@ type fileTranscriptionConfig struct {
 	StorageDriver         string `yaml:"storage_driver"`
 	LocalStoragePath      string `yaml:"local_storage_path"`
 	S3Endpoint            string `yaml:"s3_endpoint"`
+	S3ProcessingEndpoint  string `yaml:"s3_processing_endpoint"`
 	S3Region              string `yaml:"s3_region"`
 	S3Bucket              string `yaml:"s3_bucket"`
 	S3AccessKey           string `yaml:"s3_access_key"`
@@ -168,6 +170,7 @@ func transcriptionConfig(values fileTranscriptionConfig) TranscriptionConfig {
 		StorageDriver:         getenvOrFile("JUSTAI_TRANSCRIPTION_STORAGE_DRIVER", values.StorageDriver, "local"),
 		LocalStoragePath:      getenvOrFile("JUSTAI_TRANSCRIPTION_LOCAL_STORAGE_PATH", values.LocalStoragePath, "./data/transcription"),
 		S3Endpoint:            getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ENDPOINT", values.S3Endpoint, ""),
+		S3ProcessingEndpoint:  getenvOrFile("JUSTAI_TRANSCRIPTION_S3_PROCESSING_ENDPOINT", values.S3ProcessingEndpoint, ""),
 		S3Region:              getenvOrFile("JUSTAI_TRANSCRIPTION_S3_REGION", values.S3Region, "us-east-1"),
 		S3Bucket:              getenvOrFile("JUSTAI_TRANSCRIPTION_S3_BUCKET", values.S3Bucket, ""),
 		S3AccessKey:           getenvOrFile("JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY", values.S3AccessKey, ""),

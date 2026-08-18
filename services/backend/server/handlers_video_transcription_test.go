@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/xml"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -122,6 +123,37 @@ func TestVideoPlaybackPresignUsesAuthorizedObjectKey(t *testing.T) {
 	}
 }
 
+func TestVideoDiarizationPresignUsesProcessingEndpoint(t *testing.T) {
+	storage, err := newS3Storage(config.Config{Transcription: config.TranscriptionConfig{
+		S3Endpoint:           "http://localhost:9000",
+		S3ProcessingEndpoint: "http://host.containers.internal:9000",
+		S3Region:             "us-east-1",
+		S3Bucket:             "videos",
+		S3AccessKey:          "access",
+		S3SecretKey:          "secret",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	browserURL, err := url.Parse(storage.presignURL(http.MethodGet, "video.mp4", nil, time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	processingURL, err := url.Parse(storage.presignProcessingURL(http.MethodGet, "video.mp4", nil, time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if browserURL.Host != "localhost:9000" {
+		t.Fatalf("browser presign changed endpoint: %s", browserURL)
+	}
+	if processingURL.Host != "host.containers.internal:9000" {
+		t.Fatalf("processing presign did not use the container endpoint: %s", processingURL)
+	}
+	if processingURL.Query().Get("X-Amz-Signature") == "" {
+		t.Fatalf("processing presign is missing its signature: %s", processingURL)
+	}
+}
+
 func TestMultipartCompletionUsesS3RootElement(t *testing.T) {
 	payload, err := xml.Marshal(s3MultipartCompletion{Parts: []s3MultipartPart{{PartNumber: 1, ETag: `"etag"`}}})
 	if err != nil {
@@ -148,5 +180,23 @@ func TestFFmpegVideoAudioArgsUseSeekableAudioInput(t *testing.T) {
 	}
 	if strings.Contains(joined, "pipe:0") {
 		t.Fatalf("ffmpeg should not receive video through stdin: %s", joined)
+	}
+}
+
+func TestChooseVideoDiarizationSpeakerUsesGreatestOverlap(t *testing.T) {
+	intervals := []videoDiarizationInterval{
+		{speaker: "SPEAKER_01", start: 0, end: 900},
+		{speaker: "SPEAKER_00", start: 800, end: 2000},
+	}
+	if got := chooseVideoDiarizationSpeaker(700, 1500, intervals); got != "SPEAKER_00" {
+		t.Fatalf("expected greatest-overlap speaker, got %q", got)
+	}
+
+	tie := []videoDiarizationInterval{
+		{speaker: "SPEAKER_02", start: 0, end: 500},
+		{speaker: "SPEAKER_01", start: 500, end: 1000},
+	}
+	if got := chooseVideoDiarizationSpeaker(0, 1000, tie); got != "SPEAKER_01" {
+		t.Fatalf("expected deterministic tie-breaker, got %q", got)
 	}
 }

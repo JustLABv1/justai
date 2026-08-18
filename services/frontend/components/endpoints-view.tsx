@@ -178,6 +178,11 @@ const providerDetails: Record<
     description: "LiteLLM, vLLM, LM Studio, OpenRouter, or another gateway.",
     baseUrl: "http://localhost:4000/v1",
   },
+  pyannote: {
+    label: "Pyannote (self-hosted)",
+    description: "A dedicated pyannote.audio speaker-diarization service.",
+    baseUrl: "http://localhost:8000",
+  },
   mock: {
     label: "JustAI demo",
     description: "A local response stream for exploring the UI.",
@@ -271,13 +276,18 @@ export function EndpointsView({
   function selectProvider(value: string | null) {
     const provider = value ?? "openai-compatible"
     const nativeTranscription = provider === "openai" || provider === "gemini"
+    const pyannote = provider === "pyannote"
     setForm((current) => ({
       ...current,
       providerType: provider,
       baseUrl: providerDetails[provider]?.baseUrl ?? current.baseUrl,
       realtimeTranscription: nativeTranscription,
       chunkedTranscription: false,
-      diarization: nativeTranscription,
+      diarization: nativeTranscription || pyannote,
+      diarizationModel: pyannote
+        ? current.diarizationModel || "pyannote/speaker-diarization-3.1"
+        : current.diarizationModel,
+      timeoutSeconds: pyannote ? 1800 : current.timeoutSeconds,
       toolCalling: provider === "openai",
     }))
     setDiscoveredModels([])
@@ -357,7 +367,8 @@ export function EndpointsView({
     })
     setNotice("")
     setOpen(true)
-    if (endpoint.enabled) void discoverModels(endpoint.id)
+    if (endpoint.enabled && endpoint.capabilities.chat)
+      void discoverModels(endpoint.id)
   }
 
   async function discoverModels(endpointId: string) {
@@ -408,7 +419,7 @@ export function EndpointsView({
     setNotice("")
     try {
       const capabilities = {
-        chat: true,
+        chat: form.providerType !== "pyannote",
         embeddings: Boolean(form.embeddingModel),
         "image-generation":
           supports(form.providerType, "image-generation") &&
@@ -440,7 +451,10 @@ export function EndpointsView({
           )
         : await api.post<Endpoint>(endpointPath, {
             ...payload,
-            isDefault: form.isDefault || endpoints.length === 0,
+            isDefault:
+              form.providerType === "pyannote"
+                ? false
+                : form.isDefault || endpoints.length === 0,
           })
       onChange(
         editingEndpoint
@@ -549,6 +563,7 @@ export function EndpointsView({
       })
   }
 
+  const chatCapable = form.providerType !== "pyannote"
   const hasAdditionalModels =
     supports(form.providerType, "vision") ||
     supports(form.providerType, "embeddings") ||
@@ -588,6 +603,10 @@ export function EndpointsView({
           const details =
             providerDetails[endpoint.providerType] ??
             providerDetails["openai-compatible"]
+          const modelLabel =
+            endpoint.chatModel ||
+            endpoint.diarizationModel ||
+            "model selected at request time"
           const manageable = canManageEndpoint(endpoint)
           return (
             <Card key={endpoint.id} size="sm" className="gap-0">
@@ -604,8 +623,7 @@ export function EndpointsView({
                   </div>
                   <CardDescription className="mt-1 flex flex-col gap-0.5">
                     <span>
-                      {details.label} ·{" "}
-                      {endpoint.chatModel || "model selected at request time"}
+                      {details.label} · {modelLabel}
                     </span>
                     {endpoint.capabilities?.vision && (
                       <span className="text-xs">
@@ -932,67 +950,73 @@ export function EndpointsView({
 
                 <section className="rounded-xl border p-4">
                   <div className="mb-4 flex flex-col gap-1">
-                    <p className="text-sm font-medium">Models</p>
+                    <p className="text-sm font-medium">
+                      {chatCapable ? "Models" : "Diarization"}
+                    </p>
                     <p className="text-sm text-muted-foreground">
-                      Choose the model JustAI should use for chat by default.
+                      {chatCapable
+                        ? "Choose the model JustAI should use for chat by default."
+                        : "Configure the speaker-diarization service used by video transcription."}
                     </p>
                   </div>
                   <FieldGroup>
-                    <Field>
-                      <div className="flex items-center justify-between gap-3">
-                        <FieldLabel htmlFor="endpoint-chat-model">
-                          Chat model
-                        </FieldLabel>
-                        {editingEndpoint && (
-                          <Button
-                            className="h-7 gap-1.5 px-2.5 text-xs"
-                            disabled={discoveringModels}
-                            onClick={() =>
-                              void discoverModels(editingEndpoint.id)
-                            }
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            <RefreshCw
-                              className={
-                                discoveringModels ? "animate-spin" : ""
+                    {chatCapable && (
+                      <Field>
+                        <div className="flex items-center justify-between gap-3">
+                          <FieldLabel htmlFor="endpoint-chat-model">
+                            Chat model
+                          </FieldLabel>
+                          {editingEndpoint && (
+                            <Button
+                              className="h-7 gap-1.5 px-2.5 text-xs"
+                              disabled={discoveringModels}
+                              onClick={() =>
+                                void discoverModels(editingEndpoint.id)
                               }
-                              data-icon="inline-start"
-                              aria-hidden="true"
-                            />
-                            {discoveringModels
-                              ? "Discovering…"
-                              : "Discover models"}
-                          </Button>
-                        )}
-                      </div>
-                      <div className="relative">
-                        <Input
-                          id="endpoint-chat-model"
-                          list="endpoint-chat-model-options"
-                          value={form.chatModel}
-                          onChange={(event) =>
-                            update("chatModel", event.target.value)
-                          }
-                          placeholder="e.g. gemma-3-27b-it or gpt-4o-mini"
-                        />
-                        {discoveredModels.length > 0 && (
-                          <datalist id="endpoint-chat-model-options">
-                            {discoveredModels.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.name ?? model.id}
-                              </option>
-                            ))}
-                          </datalist>
-                        )}
-                      </div>
-                      <FieldDescription>
-                        This is the default chat model. Discovery works when the
-                        provider exposes a model catalog; manual IDs work with
-                        compatible gateways too.
-                      </FieldDescription>
-                    </Field>
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              <RefreshCw
+                                className={
+                                  discoveringModels ? "animate-spin" : ""
+                                }
+                                data-icon="inline-start"
+                                aria-hidden="true"
+                              />
+                              {discoveringModels
+                                ? "Discovering…"
+                                : "Discover models"}
+                            </Button>
+                          )}
+                        </div>
+                        <div className="relative">
+                          <Input
+                            id="endpoint-chat-model"
+                            list="endpoint-chat-model-options"
+                            value={form.chatModel}
+                            onChange={(event) =>
+                              update("chatModel", event.target.value)
+                            }
+                            placeholder="e.g. gemma-3-27b-it or gpt-4o-mini"
+                          />
+                          {discoveredModels.length > 0 && (
+                            <datalist id="endpoint-chat-model-options">
+                              {discoveredModels.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.name ?? model.id}
+                                </option>
+                              ))}
+                            </datalist>
+                          )}
+                        </div>
+                        <FieldDescription>
+                          This is the default chat model. Discovery works when
+                          the provider exposes a model catalog; manual IDs work
+                          with compatible gateways too.
+                        </FieldDescription>
+                      </Field>
+                    )}
 
                     {hasAdditionalModels && (
                       <Collapsible
@@ -1062,7 +1086,10 @@ export function EndpointsView({
                                 />
                               </Field>
                             )}
-                            {supports(form.providerType, "image-generation") && (
+                            {supports(
+                              form.providerType,
+                              "image-generation"
+                            ) && (
                               <Field>
                                 <FieldLabel htmlFor="endpoint-image-model">
                                   Image generation model

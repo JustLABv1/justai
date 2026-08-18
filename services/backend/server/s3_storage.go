@@ -20,12 +20,13 @@ import (
 )
 
 type s3Storage struct {
-	endpoint *url.URL
-	region   string
-	bucket   string
-	access   string
-	secret   string
-	client   *http.Client
+	endpoint           *url.URL
+	processingEndpoint *url.URL
+	region             string
+	bucket             string
+	access             string
+	secret             string
+	client             *http.Client
 }
 
 type s3ResponseError struct {
@@ -45,9 +46,16 @@ func newS3Storage(cfg config.Config) (*s3Storage, error) {
 	if endpointValue == "" {
 		endpointValue = "https://s3." + cfg.Transcription.S3Region + ".amazonaws.com"
 	}
-	endpoint, err := url.Parse(endpointValue)
-	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+	endpoint, err := parseS3Endpoint(endpointValue)
+	if err != nil {
 		return nil, fmt.Errorf("invalid s3 endpoint")
+	}
+	processingEndpoint := endpoint
+	if value := strings.TrimSpace(cfg.Transcription.S3ProcessingEndpoint); value != "" {
+		processingEndpoint, err = parseS3Endpoint(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid s3 processing endpoint")
+		}
 	}
 	region := cfg.Transcription.S3Region
 	if region == "" {
@@ -61,20 +69,33 @@ func newS3Storage(cfg config.Config) (*s3Storage, error) {
 		}
 	}
 	return &s3Storage{
-		endpoint: endpoint,
-		region:   region,
-		bucket:   cfg.Transcription.S3Bucket,
-		access:   cfg.Transcription.S3AccessKey,
-		secret:   cfg.Transcription.S3SecretKey,
-		client:   &http.Client{Timeout: clientTimeout},
+		endpoint:           endpoint,
+		processingEndpoint: processingEndpoint,
+		region:             region,
+		bucket:             cfg.Transcription.S3Bucket,
+		access:             cfg.Transcription.S3AccessKey,
+		secret:             cfg.Transcription.S3SecretKey,
+		client:             &http.Client{Timeout: clientTimeout},
 	}, nil
 }
 
+func parseS3Endpoint(value string) (*url.URL, error) {
+	endpoint, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+		return nil, fmt.Errorf("invalid endpoint")
+	}
+	return endpoint, nil
+}
+
 func (s *s3Storage) objectURL(key string) *url.URL {
-	result := *s.endpoint
+	return s.objectURLAt(s.endpoint, key)
+}
+
+func (s *s3Storage) objectURLAt(endpoint *url.URL, key string) *url.URL {
+	result := *endpoint
 	result.RawQuery = ""
 	result.RawPath = ""
-	result.Path = strings.TrimRight(s.endpoint.Path, "/") + "/" + s.bucket + "/" + strings.TrimLeft(key, "/")
+	result.Path = strings.TrimRight(endpoint.Path, "/") + "/" + s.bucket + "/" + strings.TrimLeft(key, "/")
 	return &result
 }
 
@@ -106,7 +127,15 @@ func (s *s3Storage) request(ctx context.Context, method, key string, query url.V
 }
 
 func (s *s3Storage) presignURL(method, key string, query url.Values, lifetime time.Duration) string {
-	object := s.objectURL(key)
+	return s.presignURLAt(s.endpoint, method, key, query, lifetime)
+}
+
+func (s *s3Storage) presignProcessingURL(method, key string, query url.Values, lifetime time.Duration) string {
+	return s.presignURLAt(s.processingEndpoint, method, key, query, lifetime)
+}
+
+func (s *s3Storage) presignURLAt(endpoint *url.URL, method, key string, query url.Values, lifetime time.Duration) string {
+	object := s.objectURLAt(endpoint, key)
 	if lifetime <= 0 {
 		lifetime = 15 * time.Minute
 	}

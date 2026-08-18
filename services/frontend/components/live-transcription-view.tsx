@@ -142,6 +142,7 @@ export function LiveTranscriptionView({
   const diarizationEndpoints = useMemo(
     () =>
       endpoints.filter((endpoint) =>
+        endpoint.providerType !== "pyannote" &&
         endpointSupportsCapability(endpoint, "diarization")
       ),
     [endpoints]
@@ -885,6 +886,7 @@ export function LiveTranscriptionView({
         joinCode: string
         expiresAt: string
       }>("/api/v1/transcription/sessions", {
+        kind: "live",
         title,
         language,
         recordAudio,

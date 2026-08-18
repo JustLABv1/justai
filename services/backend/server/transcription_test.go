@@ -103,3 +103,23 @@ func TestTranscriptionModeKeepsRealtimeAndChunkedTransportsDistinct(t *testing.T
 		t.Fatal("chunked endpoint should satisfy generic transcription capability")
 	}
 }
+
+func TestPyannoteSupportsWholeFileDiarizationOnly(t *testing.T) {
+	modelEndpoint := models.Endpoint{
+		ProviderType: "pyannote",
+		Capabilities: json.RawMessage(`{"diarization":true}`),
+	}
+	if !endpointSupportsModel(modelEndpoint, "diarization") {
+		t.Fatal("pyannote should satisfy diarization endpoint selection")
+	}
+	providerEndpoint := provider.Endpoint{
+		ProviderType: "pyannote",
+		Capabilities: map[string]bool{"diarization": true},
+	}
+	if !endpointSupports(providerEndpoint, "diarization") {
+		t.Fatal("pyannote should support backend diarization")
+	}
+	if endpointSupports(providerEndpoint, "chat") {
+		t.Fatal("pyannote must not be treated as a chat endpoint")
+	}
+}
