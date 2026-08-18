@@ -9,6 +9,7 @@ import {
   FileText,
   FileVideo,
   LoaderCircle,
+  Pause,
   Pencil,
   Play,
   RefreshCw,
@@ -110,6 +111,15 @@ type VideoSessionResponse = VideoSnapshot & {
   recordings?: unknown[]
 }
 
+type VideoSpeakerSummary = {
+  speaker: TranscriptionSpeaker
+  segmentCount: number
+  speakingMs: number
+  sampleStartMs: number | null
+  sampleEndMs: number | null
+  sampleText: string
+}
+
 export function VideoTranscriptionView({
   sessionId,
   endpoints,
@@ -150,6 +160,10 @@ export function VideoTranscriptionView({
     useState<TranscriptionSpeaker | null>(null)
   const [speakerName, setSpeakerName] = useState("")
   const [speakerRenameSaving, setSpeakerRenameSaving] = useState(false)
+  const [speakerSample, setSpeakerSample] = useState<{
+    speakerId: string
+    endOffsetMs: number
+  } | null>(null)
   const requestRef = useRef(0)
   const videoUploadAbortRef = useRef<AbortController | null>(null)
   const videoUploadInFlightRef = useRef(false)
@@ -295,6 +309,7 @@ export function VideoTranscriptionView({
       setVideoPlaybackError("")
       setSpeakerToRename(null)
       setSpeakerName("")
+      setSpeakerSample(null)
     })
   }, [sessionId])
 
@@ -645,9 +660,83 @@ export function VideoTranscriptionView({
   )
   const displayDurationMs =
     videoDurationMs || snapshot?.videoUpload?.durationMs || 0
+  const speakerSummaries = useMemo<VideoSpeakerSummary[]>(() => {
+    const segmentsBySpeaker = new Map<string, TranscriptionSegment[]>()
+    for (const segment of displaySegments) {
+      if (!segment.speakerId) continue
+      const segments = segmentsBySpeaker.get(segment.speakerId) ?? []
+      segments.push(segment)
+      segmentsBySpeaker.set(segment.speakerId, segments)
+    }
+
+    return (snapshot?.speakers ?? []).map((speaker) => {
+      const segments = segmentsBySpeaker.get(speaker.id) ?? []
+      const firstSegment = segments[0]
+      const sampleStartMs = firstSegment
+        ? Math.max(0, firstSegment.startOffsetMs)
+        : null
+      const observedEndMs = firstSegment
+        ? Math.max(
+            sampleStartMs ?? 0,
+            firstSegment.endOffsetMs || (sampleStartMs ?? 0) + 2500
+          )
+        : null
+      const sampleEndMs =
+        sampleStartMs === null || observedEndMs === null
+          ? null
+          : Math.min(
+              displayDurationMs > sampleStartMs
+                ? displayDurationMs
+                : sampleStartMs + 8000,
+              Math.max(
+                sampleStartMs + 1500,
+                Math.min(sampleStartMs + 8000, observedEndMs + 4000)
+              )
+            )
+
+      return {
+        speaker,
+        segmentCount: segments.length,
+        speakingMs: segments.reduce((total, segment) => {
+          const duration = segment.endOffsetMs - segment.startOffsetMs
+          return total + (duration > 0 ? duration : 0)
+        }, 0),
+        sampleStartMs,
+        sampleEndMs,
+        sampleText: firstSegment?.text.trim() ?? "",
+      }
+    })
+  }, [displayDurationMs, displaySegments, snapshot?.speakers])
+
+  const playSpeakerSample = useCallback(
+    (summary: VideoSpeakerSummary) => {
+      const video = videoRef.current
+      if (!video || !snapshot?.videoUpload?.playbackUrl) return
+      if (speakerSample?.speakerId === summary.speaker.id) {
+        video.pause()
+        setSpeakerSample(null)
+        return
+      }
+      if (summary.sampleStartMs === null || summary.sampleEndMs === null) {
+        return
+      }
+      const startOffsetMs = summary.sampleStartMs
+      const endOffsetMs = summary.sampleEndMs
+      video.currentTime = startOffsetMs / 1000
+      setCurrentTimeMs(startOffsetMs)
+      setSpeakerSample({
+        speakerId: summary.speaker.id,
+        endOffsetMs,
+      })
+      void video.play().catch(() => setSpeakerSample(null))
+    },
+    [snapshot?.videoUpload?.playbackUrl, speakerSample?.speakerId]
+  )
+
   const seekToMessage = useCallback((startOffsetMs: number) => {
     const video = videoRef.current
     if (!video) return
+    setSpeakerSample(null)
     video.currentTime = Math.max(0, startOffsetMs / 1000)
     setCurrentTimeMs(Math.max(0, startOffsetMs))
     void video.play().catch(() => undefined)
@@ -962,8 +1051,123 @@ export function VideoTranscriptionView({
               </CardContent>
             </Card>
 
-            <aside className="flex min-h-0 flex-col gap-4 overflow-visible lg:overflow-y-auto">
-              <Card className="shadow-none">
+            <aside className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto overscroll-contain">
+              {speakerSummaries.length > 0 ? (
+                <Card
+                  aria-label="Speaker summary"
+                  className="shrink-0 shadow-none"
+                >
+                  <CardHeader className="gap-1 px-4 py-4">
+                    <CardTitle className="flex items-center gap-2 text-sm">
+                      <Users
+                        aria-hidden="true"
+                        className="size-4 shrink-0 text-primary"
+                      />
+                      Speaker summary
+                    </CardTitle>
+                    <CardDescription>
+                      Name each speaker and play a short sample from their first
+                      detected line.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-2 px-4 pb-4">
+                    <div className="max-h-72 min-h-0 space-y-2 overflow-y-auto pr-1">
+                      {speakerSummaries.map((summary) => {
+                        const speakerName =
+                          summary.speaker.displayName || summary.speaker.label
+                        const isPlaying =
+                          speakerSample?.speakerId === summary.speaker.id
+                        const canPlaySample =
+                          Boolean(snapshot.videoUpload?.playbackUrl) &&
+                          summary.sampleStartMs !== null &&
+                          summary.sampleEndMs !== null
+                        return (
+                          <div
+                            className="rounded-xl border border-border/80 bg-muted/20 p-3"
+                            key={summary.speaker.id}
+                          >
+                            <div className="flex min-w-0 items-start gap-2.5">
+                              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
+                                {speakerInitials(speakerName)}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                                    {speakerName}
+                                  </span>
+                                  <Badge
+                                    className="shrink-0 text-[9px]"
+                                    variant="outline"
+                                  >
+                                    {summary.speaker.label}
+                                  </Badge>
+                                </div>
+                                <p className="mt-1 text-[11px] text-muted-foreground">
+                                  {summary.segmentCount}{" "}
+                                  {summary.segmentCount === 1
+                                    ? "segment"
+                                    : "segments"}{" "}
+                                  ·{" "}
+                                  {formatSpeakerSummaryDuration(
+                                    summary.speakingMs
+                                  )}
+                                </p>
+                                {summary.sampleText ? (
+                                  <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
+                                    “{summary.sampleText}”
+                                  </p>
+                                ) : null}
+                              </div>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <Button
+                                  aria-label={
+                                    isPlaying
+                                      ? `Stop sample for ${speakerName}`
+                                      : `Play sample for ${speakerName}`
+                                  }
+                                  className="shrink-0"
+                                  disabled={!canPlaySample}
+                                  onClick={() => playSpeakerSample(summary)}
+                                  size="icon-sm"
+                                  title={
+                                    isPlaying
+                                      ? "Stop sample"
+                                      : "Play speaker sample"
+                                  }
+                                  variant={isPlaying ? "default" : "outline"}
+                                >
+                                  {isPlaying ? <Pause /> : <Play />}
+                                </Button>
+                                <Button
+                                  aria-label={`Rename ${speakerName}`}
+                                  className="shrink-0"
+                                  onClick={() =>
+                                    openSpeakerRename(summary.speaker)
+                                  }
+                                  size="icon-sm"
+                                  title={`Rename ${speakerName}`}
+                                  variant="ghost"
+                                >
+                                  <Pencil />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <p
+                      aria-live="polite"
+                      className="text-[11px] text-muted-foreground"
+                    >
+                      {snapshot.videoUpload?.playbackUrl
+                        ? "Samples play for up to 8 seconds in the source video."
+                        : "Samples become available when source video playback is ready."}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null}
+              <Card className="shrink-0 shadow-none">
                 <CardHeader className="gap-2 px-4 py-4">
                   <div className="flex items-center justify-between gap-3">
                     <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
@@ -985,11 +1189,12 @@ export function VideoTranscriptionView({
                         className="block aspect-video w-full bg-muted object-contain"
                         controls
                         key={snapshot.videoUpload.playbackUrl}
-                        onError={() =>
+                        onError={() => {
+                          setSpeakerSample(null)
                           setVideoPlaybackError(
                             "The video link expired or the stored video is unavailable."
                           )
-                        }
+                        }}
                         onLoadedMetadata={(event) => {
                           if (Number.isFinite(event.currentTarget.duration)) {
                             setVideoDurationMs(
@@ -997,11 +1202,20 @@ export function VideoTranscriptionView({
                             )
                           }
                         }}
-                        onTimeUpdate={(event) =>
-                          setCurrentTimeMs(
-                            Math.round(event.currentTarget.currentTime * 1000)
+                        onEnded={() => setSpeakerSample(null)}
+                        onTimeUpdate={(event) => {
+                          const currentTime = Math.round(
+                            event.currentTarget.currentTime * 1000
                           )
-                        }
+                          setCurrentTimeMs(currentTime)
+                          if (
+                            speakerSample &&
+                            currentTime >= speakerSample.endOffsetMs
+                          ) {
+                            event.currentTarget.pause()
+                            setSpeakerSample(null)
+                          }
+                        }}
                         playsInline
                         preload="metadata"
                         ref={videoRef}
@@ -1108,7 +1322,7 @@ export function VideoTranscriptionView({
                   ) : null}
                 </div>
               ) : null}
-              <Card className="shadow-none">
+              <Card className="shrink-0 shadow-none">
                 <CardHeader className="gap-1 px-4 py-4">
                   <CardTitle className="text-sm">At a glance</CardTitle>
                   <CardDescription>
@@ -2111,6 +2325,23 @@ function polishStatusLabel(status: TranscriptionSession["polishStatus"]) {
     default:
       return "Verbatim only"
   }
+}
+
+function speakerInitials(value: string) {
+  const initials = value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("")
+  return initials || "?"
+}
+
+function formatSpeakerSummaryDuration(durationMs: number) {
+  if (durationMs <= 0) return "timing unavailable"
+  if (durationMs < 1000) return "<1s speaking"
+  return formatVideoDuration(durationMs) + " speaking"
 }
 
 function formatVideoDuration(durationMs: number) {
