@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -265,10 +266,12 @@ type videoPolishInput struct {
 }
 
 type videoPolishOutput struct {
-	Segments []struct {
-		ID   string `json:"id"`
-		Text string `json:"text"`
-	} `json:"segments"`
+	Segments []videoPolishSegment `json:"segments"`
+}
+
+type videoPolishSegment struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, uploadID, sessionID, endpointID uuid.UUID) error {
@@ -277,25 +280,25 @@ func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, upload
 	}
 	endpoint, err := m.app.providerEndpoint(ctx, endpointID)
 	if err != nil {
-		return m.finishVideoPolish(ctx, sessionID, fmt.Errorf("grammar endpoint could not be loaded: %w", err))
+		return m.finishVideoPolish(ctx, uploadID, sessionID, fmt.Errorf("grammar endpoint could not be loaded: %w", err))
 	}
 	if !endpointSupports(endpoint, "chat") {
-		return m.finishVideoPolish(ctx, sessionID, fmt.Errorf("grammar endpoint does not support chat"))
+		return m.finishVideoPolish(ctx, uploadID, sessionID, fmt.Errorf("grammar endpoint does not support chat"))
 	}
 	segments, err := loadTranscriptionSegments(ctx, m.DB, sessionID)
 	if err != nil {
-		return m.finishVideoPolish(ctx, sessionID, err)
+		return m.finishVideoPolish(ctx, uploadID, sessionID, err)
 	}
 	if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET polish_status = 'processing', updated_at = now() WHERE id = $1`, sessionID); err != nil {
 		return err
 	}
 	m.broadcast(sessionID, "transcription.polish", ginData{"status": "processing"})
 	if len(segments) == 0 {
-		return m.finishVideoPolish(ctx, sessionID, nil)
+		return m.finishVideoPolish(ctx, uploadID, sessionID, nil)
 	}
 
 	if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
-		return m.finishVideoPolish(ctx, sessionID, err)
+		return m.finishVideoPolish(ctx, uploadID, sessionID, err)
 	}
 
 	totalBatches := 0
@@ -324,10 +327,10 @@ func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, upload
 		}
 		totalBatches++
 		if err := m.polishVideoTranscriptBatch(ctx, endpoint, sessionID, batch); err != nil {
-			return m.finishVideoPolish(ctx, sessionID, err)
+			return m.finishVideoPolish(ctx, uploadID, sessionID, err)
 		}
 		if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
-			return m.finishVideoPolish(ctx, sessionID, err)
+			return m.finishVideoPolish(ctx, uploadID, sessionID, err)
 		}
 		progress := 95 + int(float64(totalBatches)*4/float64(maxInt64(1, int64((len(segments)+19)/20))))
 		if progress > 99 {
@@ -335,7 +338,7 @@ func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, upload
 		}
 		_ = m.updateVideoProgress(ctx, uploadID, progress, "polishing", "")
 	}
-	return m.finishVideoPolish(ctx, sessionID, nil)
+	return m.finishVideoPolish(ctx, uploadID, sessionID, nil)
 }
 
 func (m *TranscriptionManager) polishVideoTranscriptBatch(ctx context.Context, endpoint provider.Endpoint, sessionID uuid.UUID, segments []models.TranscriptionSegment) error {
@@ -362,7 +365,7 @@ func (m *TranscriptionManager) polishVideoTranscriptBatch(ctx context.Context, e
 	if err != nil {
 		return err
 	}
-	system := `You are a transcript editor. Correct spelling, punctuation, capitalization, and grammar in the same language as each segment. Return JSON only in the shape {"segments":[{"id":"...","text":"..."}]}. Preserve the meaning, names, numbers, speaker boundaries, and order. Do not summarize, translate, add facts, or remove meaningful words. Keep natural filler words unless they are clearly transcription noise.`
+	system := `You are a transcript editor. Correct spelling, punctuation, capitalization, and grammar in the same language as each segment. Return exactly one JSON object in the shape {"segments":[{"id":"...","text":"..."}]}. Do not emit multiple JSON objects, markdown fences, or commentary. Preserve the meaning, names, numbers, speaker boundaries, and order. Do not summarize, translate, add facts, or remove meaningful words. Keep natural filler words unless they are clearly transcription noise.`
 	var output strings.Builder
 	err = provider.StreamChat(ctx, endpoint, provider.ChatOptions{
 		Model: endpoint.ChatModel,
@@ -392,42 +395,96 @@ func (m *TranscriptionManager) polishVideoTranscriptBatch(ctx context.Context, e
 	return nil
 }
 
-func (m *TranscriptionManager) finishVideoPolish(ctx context.Context, sessionID uuid.UUID, polishErr error) error {
+func (m *TranscriptionManager) finishVideoPolish(ctx context.Context, uploadID, sessionID uuid.UUID, polishErr error) error {
 	status := "completed"
 	if polishErr != nil {
 		status = "failed"
 	}
 	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET polish_status = $2, updated_at = now() WHERE id = $1`, sessionID, status)
+	if err := m.finishVideoPipelineStep(ctx, uploadID, "grammar", status, errorMessage(polishErr)); err != nil {
+		slog.Warn("could not persist grammar pipeline step", "uploadId", uploadID, "error", err)
+	}
 	m.broadcast(sessionID, "transcription.polish", ginData{"status": status, "message": errorMessage(polishErr)})
 	return polishErr
 }
 
 func decodeVideoPolishOutput(value string) (map[uuid.UUID]string, error) {
-	trimmed := strings.TrimSpace(value)
-	trimmed = strings.TrimPrefix(trimmed, "```json")
-	trimmed = strings.TrimPrefix(trimmed, "```")
-	trimmed = strings.TrimSuffix(strings.TrimSpace(trimmed), "```")
-	if start := strings.Index(trimmed, "{"); start >= 0 {
-		if end := strings.LastIndex(trimmed, "}"); end >= start {
-			trimmed = trimmed[start : end+1]
-		}
-	}
-	var decoded videoPolishOutput
-	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
-		return nil, fmt.Errorf("grammar endpoint returned invalid JSON: %w", err)
-	}
-	result := make(map[uuid.UUID]string, len(decoded.Segments))
-	for _, item := range decoded.Segments {
-		id, err := uuid.Parse(item.ID)
+	result := make(map[uuid.UUID]string)
+	var lastErr error
+	for _, candidate := range videoPolishJSONCandidates(value) {
+		segments, err := decodeVideoPolishJSONValue(candidate)
 		if err != nil {
+			lastErr = err
 			continue
 		}
-		result[id] = item.Text
+		for _, item := range segments {
+			id, err := uuid.Parse(item.ID)
+			if err != nil {
+				continue
+			}
+			result[id] = item.Text
+		}
 	}
 	if len(result) == 0 {
+		if lastErr != nil {
+			return nil, fmt.Errorf("grammar endpoint returned invalid JSON: %w", lastErr)
+		}
 		return nil, fmt.Errorf("grammar endpoint returned no transcript segments")
 	}
 	return result, nil
+}
+
+// videoPolishJSONCandidates extracts complete JSON values instead of slicing
+// from the first opening brace to the last closing brace. Some gateways emit
+// a fenced answer, prose around the answer, or more than one JSON object when
+// a streamed response is assembled. json.Decoder safely stops at each value.
+func videoPolishJSONCandidates(value string) []json.RawMessage {
+	trimmed := strings.TrimSpace(value)
+	candidates := make([]json.RawMessage, 0, 2)
+	seen := make(map[string]struct{})
+	for start := 0; start < len(trimmed); start++ {
+		if !strings.ContainsRune("{[\"", rune(trimmed[start])) {
+			continue
+		}
+		var raw json.RawMessage
+		decoder := json.NewDecoder(strings.NewReader(trimmed[start:]))
+		if err := decoder.Decode(&raw); err != nil || len(raw) == 0 {
+			continue
+		}
+		key := string(raw)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, raw)
+	}
+	return candidates
+}
+
+func decodeVideoPolishJSONValue(raw json.RawMessage) ([]videoPolishSegment, error) {
+	var decoded videoPolishOutput
+	if err := json.Unmarshal(raw, &decoded); err == nil && len(decoded.Segments) > 0 {
+		return decoded.Segments, nil
+	}
+	var list []videoPolishSegment
+	if err := json.Unmarshal(raw, &list); err == nil && len(list) > 0 {
+		return list, nil
+	}
+
+	var segment videoPolishSegment
+	if err := json.Unmarshal(raw, &segment); err == nil && segment.ID != "" {
+		return []videoPolishSegment{segment}, nil
+	}
+
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err == nil && strings.TrimSpace(encoded) != "" {
+		return decodeVideoPolishJSONValue(json.RawMessage(encoded))
+	}
+
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("JSON did not contain transcript segments")
 }
 
 func firstNonEmptyString(values ...string) string {

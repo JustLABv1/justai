@@ -1,18 +1,32 @@
 "use client"
 
 import {
+  Check,
+  ChevronDown,
   Clock3,
+  CircleAlert,
+  CircleDashed,
   FileText,
   FileVideo,
   LoaderCircle,
+  Pencil,
   Play,
   RefreshCw,
   Search,
+  Sparkles,
   Upload,
   Users,
   X,
+  type LucideIcon,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
@@ -32,6 +46,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   Empty,
   EmptyDescription,
@@ -53,11 +72,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import {
-  Progress,
-  ProgressLabel,
-  ProgressValue,
-} from "@/components/ui/progress"
+import { Progress } from "@/components/ui/progress"
 import {
   Select,
   SelectContent,
@@ -78,6 +93,7 @@ import type {
   TranscriptionSegment,
   TranscriptionSpeaker,
   TranscriptionSession,
+  TranscriptionVideoPipelineStep,
   TranscriptionVideoUpload,
   User,
 } from "@/lib/types"
@@ -92,35 +108,6 @@ type VideoSnapshot = {
 type VideoSessionResponse = VideoSnapshot & {
   sources?: unknown[]
   recordings?: unknown[]
-}
-
-function videoUploadStateLabel(upload: TranscriptionVideoUpload) {
-  switch (upload.status) {
-    case "uploading":
-      return `Uploading · ${Math.max(0, Math.min(100, upload.progress))}%`
-    case "uploaded":
-      return "Upload complete"
-    case "queued":
-      return upload.stage === "retrying" ? "Retrying" : "Queued"
-    case "processing":
-      return "Processing"
-    case "completed":
-      return "Ready"
-    case "failed":
-      return "Failed"
-    case "cancelled":
-      return "Cancelled"
-  }
-}
-
-function videoUploadStatusVariant(
-  upload: TranscriptionVideoUpload
-): "default" | "secondary" | "destructive" {
-  if (["uploading", "queued", "processing"].includes(upload.status)) {
-    return "default"
-  }
-  if (upload.status === "failed") return "destructive"
-  return "secondary"
 }
 
 export function VideoTranscriptionView({
@@ -141,7 +128,6 @@ export function VideoTranscriptionView({
   onCreateSessionRequestHandled?: () => void
 }) {
   const [snapshot, setSnapshot] = useState<VideoSnapshot | null>(null)
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [title, setTitle] = useState("Video transcript")
@@ -159,6 +145,11 @@ export function VideoTranscriptionView({
   const [videoPlaybackError, setVideoPlaybackError] = useState("")
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoStarting, setVideoStarting] = useState(false)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [speakerToRename, setSpeakerToRename] =
+    useState<TranscriptionSpeaker | null>(null)
+  const [speakerName, setSpeakerName] = useState("")
+  const [speakerRenameSaving, setSpeakerRenameSaving] = useState(false)
   const requestRef = useRef(0)
   const videoUploadAbortRef = useRef<AbortController | null>(null)
   const videoUploadInFlightRef = useRef(false)
@@ -207,7 +198,6 @@ export function VideoTranscriptionView({
 
   const loadSession = useCallback(async (id: string) => {
     const requestId = ++requestRef.current
-    setLoading(true)
     try {
       const result = await api.get<VideoSessionResponse>(
         `/api/v1/transcription/sessions/${id}`
@@ -227,8 +217,6 @@ export function VideoTranscriptionView({
           ? caught.message
           : "The video transcription could not be loaded."
       )
-    } finally {
-      if (requestRef.current === requestId) setLoading(false)
     }
   }, [])
 
@@ -305,6 +293,8 @@ export function VideoTranscriptionView({
       setCurrentTimeMs(0)
       setVideoDurationMs(0)
       setVideoPlaybackError("")
+      setSpeakerToRename(null)
+      setSpeakerName("")
     })
   }, [sessionId])
 
@@ -636,7 +626,9 @@ export function VideoTranscriptionView({
     return transcript.filter((message) => {
       const speaker = speakerById.get(message.speakerKey)
       const speakerLabel = speaker?.displayName || speaker?.label || ""
-      return `${speakerLabel} ${message.text}`.toLocaleLowerCase().includes(query)
+      return `${speakerLabel} ${message.text}`
+        .toLocaleLowerCase()
+        .includes(query)
     })
   }, [speakerById, transcript, transcriptQuery])
   const activeMessageId = useMemo(
@@ -660,6 +652,59 @@ export function VideoTranscriptionView({
     setCurrentTimeMs(Math.max(0, startOffsetMs))
     void video.play().catch(() => undefined)
   }, [])
+
+  const openSpeakerRename = (speaker: TranscriptionSpeaker) => {
+    setSpeakerToRename(speaker)
+    setSpeakerName(speaker.displayName || speaker.label)
+  }
+
+  const saveSpeakerName = async () => {
+    if (!speakerToRename || !snapshot) return
+    const trimmedName = speakerName.trim()
+    if (!trimmedName) {
+      setError("A speaker name is required.")
+      return
+    }
+
+    setSpeakerRenameSaving(true)
+    try {
+      await api.patch(
+        `/api/v1/transcription/sessions/${snapshot.session.id}/speakers/${speakerToRename.id}`,
+        { displayName: trimmedName }
+      )
+      setSnapshot((current) =>
+        current
+          ? {
+              ...current,
+              speakers: current.speakers.map((speaker) =>
+                speaker.id === speakerToRename.id
+                  ? { ...speaker, displayName: trimmedName }
+                  : speaker
+              ),
+            }
+          : current
+      )
+      setSpeakerToRename(null)
+      setError("")
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The speaker name could not be saved."
+      )
+    } finally {
+      setSpeakerRenameSaving(false)
+    }
+  }
+
+  const canCancelVideo = Boolean(
+    snapshot?.videoUpload &&
+    ["uploading", "queued", "processing"].includes(snapshot.videoUpload.status)
+  )
+  const cancelLabel =
+    snapshot?.videoUpload?.status === "uploading"
+      ? "Cancel upload"
+      : "Cancel transcription"
 
   return (
     <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6">
@@ -704,23 +749,32 @@ export function VideoTranscriptionView({
                 <h1 className="truncate text-base font-semibold tracking-tight">
                   {snapshot.session.title}
                 </h1>
-                <BadgeForStatus
-                  status={snapshot.session.status}
-                  loading={loading}
-                />
                 <span className="hidden truncate text-[10px] text-muted-foreground sm:inline">
                   Uploaded by {user.displayName}
                 </span>
               </div>
             </div>
-            <Button
-              onClick={() => setCreateOpen(true)}
-              size="sm"
-              variant="outline"
-            >
-              <Upload data-icon="inline-start" />
-              <span className="hidden sm:inline">New video</span>
-            </Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {canCancelVideo ? (
+                <Button
+                  aria-label={cancelLabel}
+                  onClick={() => setCancelOpen(true)}
+                  size="sm"
+                  variant="destructive"
+                >
+                  <X data-icon="inline-start" />
+                  <span>{cancelLabel}</span>
+                </Button>
+              ) : null}
+              <Button
+                onClick={() => setCreateOpen(true)}
+                size="sm"
+                variant="outline"
+              >
+                <Upload data-icon="inline-start" />
+                <span className="hidden sm:inline">New video</span>
+              </Button>
+            </div>
           </header>
 
           {snapshot.videoUpload?.error ? (
@@ -739,7 +793,17 @@ export function VideoTranscriptionView({
             </Alert>
           ) : null}
 
-          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto lg:overflow-hidden lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)]">
+          {snapshot.videoUpload ? (
+            <VideoPipeline
+              hasDiarizedSpeakers={snapshot.speakers.some((speaker) =>
+                /^speaker[_ -]?\d+$/i.test(speaker.label)
+              )}
+              session={snapshot.session}
+              upload={snapshot.videoUpload}
+            />
+          ) : null}
+
+          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)] lg:overflow-hidden">
             <Card className="min-h-[28rem] overflow-hidden shadow-none lg:min-h-0">
               <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -754,7 +818,9 @@ export function VideoTranscriptionView({
                     <CardDescription>
                       {transcript.length} messages · {snapshot.segments.length}{" "}
                       segments
-                      {transcriptQuery ? ` · ${filteredTranscript.length} matches` : ""}
+                      {transcriptQuery
+                        ? ` · ${filteredTranscript.length} matches`
+                        : ""}
                     </CardDescription>
                   </div>
                   <Tabs
@@ -798,9 +864,7 @@ export function VideoTranscriptionView({
                       const active = message.id === activeMessageId
                       const speaker = speakerById.get(message.speakerKey)
                       return (
-                        <button
-                          aria-current={active ? "true" : undefined}
-                          aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
+                        <div
                           className={cn(
                             "grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2.5 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
                             active
@@ -808,16 +872,26 @@ export function VideoTranscriptionView({
                               : "hover:bg-muted/50"
                           )}
                           key={message.id}
-                          onClick={() => seekToMessage(message.startOffsetMs)}
-                          type="button"
+                          onClick={(event) => {
+                            if (
+                              event.target instanceof Element &&
+                              event.target.closest("button")
+                            ) {
+                              return
+                            }
+                            seekToMessage(message.startOffsetMs)
+                          }}
+                          role="group"
                         >
-                          <span
+                          <button
+                            aria-current={active ? "true" : undefined}
+                            aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
                             className={cn(
-                              "flex items-start gap-1 pt-0.5 font-mono text-[11px] tabular-nums",
-                              active
-                                ? "text-primary"
-                                : "text-muted-foreground"
+                              "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+                              active ? "text-primary" : "text-muted-foreground"
                             )}
+                            onClick={() => seekToMessage(message.startOffsetMs)}
+                            type="button"
                           >
                             {active ? (
                               <Play
@@ -826,21 +900,35 @@ export function VideoTranscriptionView({
                               />
                             ) : null}
                             {formatVideoTimestamp(message.startOffsetMs)}
-                          </span>
+                          </button>
                           <span className="min-w-0">
                             {speaker ? (
-                              <Badge
-                                className="mb-1 max-w-full truncate"
-                                variant="outline"
+                              <Button
+                                aria-label={`Rename ${speaker.displayName || speaker.label}`}
+                                className="group/speaker-name mb-1 h-auto max-w-full justify-start p-0 hover:bg-transparent"
+                                onClick={() => openSpeakerRename(speaker)}
+                                size="sm"
+                                title="Rename speaker"
+                                variant="ghost"
                               >
-                                {speaker.displayName || speaker.label}
-                              </Badge>
+                                <Badge
+                                  className="max-w-full truncate"
+                                  variant="outline"
+                                >
+                                  {speaker.displayName || speaker.label}
+                                </Badge>
+                                <Pencil
+                                  aria-hidden="true"
+                                  className="text-muted-foreground transition-colors group-hover/speaker-name:text-foreground group-focus-visible/speaker-name:text-foreground"
+                                  data-icon="inline-end"
+                                />
+                              </Button>
                             ) : null}
                             <span className="block min-w-0 text-sm leading-6 text-foreground">
                               {message.text}
                             </span>
                           </span>
-                        </button>
+                        </div>
                       )
                     })}
                   </div>
@@ -885,14 +973,6 @@ export function VideoTranscriptionView({
                       />
                       <span className="truncate">Source video</span>
                     </CardTitle>
-                    {snapshot.videoUpload ? (
-                      <Badge
-                        className="shrink-0"
-                        variant={videoUploadStatusVariant(snapshot.videoUpload)}
-                      >
-                        {videoUploadStateLabel(snapshot.videoUpload)}
-                      </Badge>
-                    ) : null}
                   </div>
                   <CardDescription className="truncate">
                     {snapshot.videoUpload?.fileName ?? "Video upload"}
@@ -940,7 +1020,10 @@ export function VideoTranscriptionView({
                   {snapshot.videoUpload?.playbackUrl ? (
                     <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1.5">
-                        <Clock3 aria-hidden="true" className="size-3.5 shrink-0" />
+                        <Clock3
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0"
+                        />
                         {formatVideoTimestamp(currentTimeMs)}
                         {displayDurationMs
                           ? ` / ${formatVideoTimestamp(displayDurationMs)}`
@@ -967,18 +1050,63 @@ export function VideoTranscriptionView({
                   ) : null}
                 </CardContent>
               </Card>
-              {snapshot.videoUpload ? (
-                <VideoUploadStatus
-                  canRetry={Boolean(videoFile)}
-                  onCancel={() => void cancelVideoUpload()}
-                  onFileSelected={(file) => {
-                    setVideoFile(file)
-                    setError("")
-                  }}
-                  onRetry={() => void retryVideoUpload()}
-                  upload={snapshot.videoUpload}
-                  working={videoStarting}
-                />
+              {snapshot.videoUpload &&
+              !["completed", "cancelled"].includes(
+                snapshot.videoUpload.status
+              ) ? (
+                <div className="flex flex-col gap-2 px-1 text-xs">
+                  {snapshot.videoUpload.status === "failed" ||
+                  snapshot.videoUpload.status === "uploaded" ||
+                  (snapshot.videoUpload.status === "uploading" &&
+                    Boolean(videoFile) &&
+                    !videoStarting) ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 text-muted-foreground">
+                        {snapshot.videoUpload.status === "failed"
+                          ? "Processing failed"
+                          : snapshot.videoUpload.status === "uploaded"
+                            ? "Upload complete"
+                            : "Upload paused"}
+                      </span>
+                      <Button
+                        disabled={videoStarting}
+                        onClick={() => void retryVideoUpload()}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <RefreshCw data-icon="inline-start" />
+                        {snapshot.videoUpload.status === "failed"
+                          ? "Retry"
+                          : snapshot.videoUpload.status === "uploaded"
+                            ? "Queue processing"
+                            : "Resume upload"}
+                      </Button>
+                    </div>
+                  ) : null}
+                  {snapshot.videoUpload.status === "uploading" &&
+                  !videoFile &&
+                  !videoStarting ? (
+                    <div className="flex flex-col gap-1.5">
+                      <p className="text-muted-foreground">
+                        This upload is paused. Select the original video file to
+                        resume it.
+                      </p>
+                      <Input
+                        accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv"
+                        aria-label="Select original video file"
+                        className="h-8 text-xs"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0]
+                          if (file) {
+                            setVideoFile(file)
+                            setError("")
+                          }
+                        }}
+                        type="file"
+                      />
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               <Card className="shadow-none">
                 <CardHeader className="gap-1 px-4 py-4">
@@ -1015,20 +1143,20 @@ export function VideoTranscriptionView({
                       {polishStatusLabel(snapshot.session.polishStatus)}
                     </span>
                   </div>
-                  {snapshot.videoUpload?.durationMs ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="flex items-center gap-1.5">
-                        <Clock3
-                          aria-hidden="true"
-                          className="size-3.5 shrink-0"
-                        />
-                        Duration
-                      </span>
-                      <span className="font-medium text-foreground">
-                        {formatVideoDuration(snapshot.videoUpload.durationMs)}
-                      </span>
-                    </div>
-                  ) : null}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-1.5">
+                      <Clock3
+                        aria-hidden="true"
+                        className="size-3.5 shrink-0"
+                      />
+                      Duration
+                    </span>
+                    <span className="font-medium text-foreground tabular-nums">
+                      {displayDurationMs
+                        ? formatVideoDuration(displayDurationMs)
+                        : "—"}
+                    </span>
+                  </div>
                 </CardContent>
               </Card>
             </aside>
@@ -1194,140 +1322,64 @@ export function VideoTranscriptionView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
 
-function VideoUploadStatus({
-  upload,
-  working,
-  canRetry,
-  onRetry,
-  onCancel,
-  onFileSelected,
-}: {
-  upload: TranscriptionVideoUpload
-  working: boolean
-  canRetry: boolean
-  onRetry: () => void
-  onCancel: () => void
-  onFileSelected: (file: File) => void
-}) {
-  const [cancelOpen, setCancelOpen] = useState(false)
-  const terminal = ["completed", "cancelled"].includes(upload.status)
-  const failed = upload.status === "failed"
-  const activeUpload = working && upload.status === "uploading"
-  const resumable =
-    upload.status === "uploaded" ||
-    (upload.status === "uploading" && canRetry && !working)
-  const cancelLabel =
-    upload.status === "uploading" ? "Cancel upload" : "Cancel transcription"
-  const stage =
-    upload.stage === "diarizing"
-      ? "Separating speakers"
-      : upload.stage === "polishing"
-        ? "Polishing grammar"
-        : upload.stage === "transcribing"
-          ? "Transcribing audio"
-          : upload.stage === "extracting"
-            ? "Extracting audio"
-            : upload.stage === "finalizing"
-              ? "Finalizing transcript"
-              : upload.stage === "retrying"
-                ? "Retrying"
-                : upload.status === "completed"
-                  ? "Transcript ready"
-                  : upload.status === "cancelled"
-                    ? "Cancelled"
-                    : upload.status === "uploaded"
-                      ? "Upload complete"
-                      : upload.status === "queued"
-                        ? "Queued for processing"
-                        : upload.status === "processing"
-                          ? "Processing video"
-                          : "Uploading video"
-
-  return (
-    <>
-      <Card className="shadow-none">
-        <CardHeader className="gap-2 px-4 py-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <FileVideo data-icon="inline-start" />
-                <span className="truncate">{upload.fileName}</span>
-              </CardTitle>
-              <CardDescription className="mt-1">
-                {stage}
-                {upload.durationMs
-                  ? ` · ${formatVideoDuration(upload.durationMs)}`
-                  : ""}
-              </CardDescription>
-            </div>
-            {failed || resumable ? (
-              <Button
-                disabled={working}
-                onClick={onRetry}
-                size="sm"
-                variant="outline"
-              >
-                <RefreshCw data-icon="inline-start" />
-                {failed
-                  ? "Retry"
-                  : upload.status === "uploaded"
-                    ? "Queue processing"
-                    : "Resume upload"}
-              </Button>
-            ) : terminal ? null : (
-              <Button
-                aria-label={cancelLabel}
-                onClick={() => setCancelOpen(true)}
-                size="sm"
-                variant="outline"
-              >
-                <X data-icon="inline-start" />
-                {cancelLabel}
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 px-4 pb-4">
-          {activeUpload ? (
-            <Alert className="border-primary/20 bg-primary/5">
-              <AlertTitle>Uploading video</AlertTitle>
-              <AlertDescription>
-                Keep this tab open while the video is uploaded. Transcription
-                starts automatically when the upload finishes.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          <Progress value={upload.progress}>
-            <ProgressLabel>{stage}</ProgressLabel>
-            <ProgressValue />
-          </Progress>
-          {upload.error ? (
-            <p className="text-xs text-destructive">{upload.error}</p>
-          ) : null}
-          {upload.status === "uploading" && !canRetry && !working ? (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs text-muted-foreground">
-                This upload is paused. Select the original video file to resume
-                it.
-              </p>
+      <Dialog
+        open={Boolean(speakerToRename)}
+        onOpenChange={(open) => {
+          if (!open && !speakerRenameSaving) setSpeakerToRename(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Rename speaker</DialogTitle>
+            <DialogDescription>
+              This name is shown for every transcript line attributed to this
+              speaker.
+            </DialogDescription>
+          </DialogHeader>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="video-speaker-name">Speaker name</FieldLabel>
               <Input
-                accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv"
-                aria-label="Select original video file"
-                className="h-8 text-xs"
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  if (file) onFileSelected(file)
+                autoFocus
+                id="video-speaker-name"
+                onChange={(event) => setSpeakerName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    void saveSpeakerName()
+                  }
                 }}
-                type="file"
+                value={speakerName}
               />
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
+            </Field>
+          </FieldGroup>
+          <DialogFooter>
+            <Button
+              disabled={speakerRenameSaving}
+              onClick={() => setSpeakerToRename(null)}
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={speakerRenameSaving || !speakerName.trim()}
+              onClick={() => void saveSpeakerName()}
+            >
+              {speakerRenameSaving ? (
+                <LoaderCircle
+                  className="animate-spin"
+                  data-icon="inline-start"
+                />
+              ) : (
+                <Pencil data-icon="inline-start" />
+              )}
+              Save speaker
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1338,11 +1390,11 @@ function VideoUploadStatus({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep uploading</AlertDialogCancel>
+            <AlertDialogCancel>Keep processing</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 setCancelOpen(false)
-                onCancel()
+                void cancelVideoUpload()
               }}
             >
               {cancelLabel}
@@ -1350,28 +1402,700 @@ function VideoUploadStatus({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </div>
   )
 }
 
-function BadgeForStatus({
-  status,
-  loading,
+function VideoPipeline({
+  hasDiarizedSpeakers,
+  upload,
+  session,
 }: {
-  status: TranscriptionSession["status"]
-  loading: boolean
+  hasDiarizedSpeakers: boolean
+  upload: TranscriptionVideoUpload
+  session: TranscriptionSession
 }) {
-  const variant =
-    status === "failed"
-      ? "destructive"
-      : status === "processing" || status === "live"
-        ? "default"
-        : "secondary"
-  return (
-    <Badge className="h-5 px-2 text-[10px]" variant={variant}>
-      {loading ? "Syncing" : status}
-    </Badge>
+  const [now, setNow] = useState(() => Date.now())
+  const pipelineStorageKey = `justai.video-transcription.pipeline.collapsed:${upload.sessionId}`
+  const [open, setOpen] = useState(true)
+  const isActive = ["uploading", "queued", "processing"].includes(upload.status)
+
+  useEffect(() => {
+    if (!isActive) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [isActive])
+
+  useEffect(() => {
+    let collapsed = false
+    try {
+      collapsed = window.localStorage.getItem(pipelineStorageKey) === "true"
+    } catch {
+      // Local storage can be unavailable in private browsing contexts.
+    }
+    queueMicrotask(() => setOpen(!collapsed))
+  }, [pipelineStorageKey])
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    try {
+      window.localStorage.setItem(pipelineStorageKey, String(!nextOpen))
+    } catch {
+      // The pipeline remains usable when local storage is unavailable.
+    }
+  }
+
+  const steps = getVideoPipelineSteps(upload, session, hasDiarizedSpeakers)
+  const activeStep = steps.find(
+    (step) => step.status === "active" || step.status === "retrying"
   )
+  const completedCount = steps.filter((step) =>
+    ["completed", "skipped"].includes(step.status)
+  ).length
+  const hasStepTiming = steps.some(
+    (step) =>
+      (step.durationMs ?? 0) > 0 ||
+      Boolean(
+        step.startedAt && (step.completedAt || activeStep?.key === step.key)
+      )
+  )
+  const runTimeMs = getVideoPipelineRunTime(session, upload, now)
+  const overallLabel =
+    upload.status === "completed"
+      ? "Processing complete"
+      : upload.status === "failed"
+        ? "Processing stopped"
+        : upload.status === "cancelled"
+          ? "Processing cancelled"
+          : activeStep
+            ? `${videoPipelineStepLabel(activeStep.key)} in progress`
+            : upload.status === "queued"
+              ? "Waiting to start"
+              : "Preparing video"
+
+  return (
+    <Collapsible
+      className="shrink-0"
+      onOpenChange={handleOpenChange}
+      open={open}
+    >
+      <Card
+        aria-label="Video processing pipeline"
+        className="overflow-hidden border-border/80 shadow-none"
+      >
+        <CardHeader className="gap-3 px-4 py-4 sm:px-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Sparkles aria-hidden="true" className="size-4 text-primary" />
+                Processing pipeline
+              </CardTitle>
+              <CardDescription className="mt-1">
+                {overallLabel}.{" "}
+                {hasStepTiming
+                  ? "Each step shows its recorded or inferred duration."
+                  : "Step timings will appear as processing advances."}
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Badge
+                className="h-5 px-2 text-[10px]"
+                variant={
+                  upload.status === "failed" ? "destructive" : "secondary"
+                }
+              >
+                {completedCount}/{steps.length} steps
+              </Badge>
+              <span className="whitespace-nowrap">
+                Run time · {formatPipelineStepDuration(runTimeMs)}
+              </span>
+              <CollapsibleTrigger
+                aria-label={
+                  open
+                    ? "Collapse video processing pipeline"
+                    : "Expand video processing pipeline"
+                }
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                type="button"
+              >
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn(
+                    "size-4 transition-transform duration-200 motion-reduce:transition-none",
+                    !open && "-rotate-90"
+                  )}
+                />
+              </CollapsibleTrigger>
+            </div>
+          </div>
+          <Progress
+            aria-label="Overall video processing progress"
+            className="h-1.5"
+            value={Math.max(0, Math.min(100, upload.progress))}
+          />
+        </CardHeader>
+        <CollapsibleContent>
+          <CardContent className="px-4 pb-4 sm:px-5">
+            <div
+              className="flex flex-col gap-0 md:flex-row md:items-stretch"
+              role="list"
+            >
+              {steps.map((step, index) => {
+                const active =
+                  step.status === "active" || step.status === "retrying"
+                const Icon = videoPipelineStepIcon(step.status)
+                return (
+                  <Fragment key={step.key}>
+                    <div
+                      className={cn(
+                        "min-w-0 flex-1 rounded-xl border p-3 transition-[transform,opacity,background-color,border-color] duration-200 ease-out motion-reduce:transition-none",
+                        videoPipelineStepClass(step.status),
+                        active && "md:-translate-y-0.5"
+                      )}
+                      role="listitem"
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <span
+                          className={cn(
+                            "flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground",
+                            active &&
+                              "video-pipeline-orb border-primary/50 bg-primary/10 text-primary",
+                            step.status === "completed" &&
+                              "border-primary/30 bg-primary/10 text-primary",
+                            step.status === "failed" &&
+                              "border-destructive/40 bg-destructive/10 text-destructive",
+                            step.status === "cancelled" &&
+                              "border-destructive/30 bg-destructive/5 text-destructive"
+                          )}
+                        >
+                          <Icon
+                            aria-hidden="true"
+                            className={cn(
+                              "size-4",
+                              active &&
+                                "motion-safe:animate-spin motion-reduce:animate-none"
+                            )}
+                          />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium">
+                            {videoPipelineStepLabel(step.key)}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            {videoPipelineStepDescription(step.key)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-muted-foreground">
+                          {videoPipelineStatusLabel(step.status)}
+                        </span>
+                        <span className="font-medium text-foreground tabular-nums">
+                          {step.durationEstimated ? "~" : ""}
+                          {formatPipelineStepDuration(
+                            getVideoPipelineStepDuration(step, now)
+                          )}
+                        </span>
+                      </div>
+                      {step.status === "failed" && step.error ? (
+                        <p className="mt-2 line-clamp-2 text-[11px] text-destructive">
+                          {step.error}
+                        </p>
+                      ) : null}
+                    </div>
+                    {index < steps.length - 1 ? (
+                      <div
+                        aria-hidden="true"
+                        className={cn(
+                          "mx-4 h-3 w-px shrink-0 bg-border md:mx-2 md:my-auto md:h-px md:w-5",
+                          ["completed", "skipped"].includes(step.status) &&
+                            "bg-primary/40"
+                        )}
+                      />
+                    ) : null}
+                  </Fragment>
+                )
+              })}
+            </div>
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  )
+}
+
+const videoPipelineKeys = [
+  "upload",
+  "transcription",
+  "diarization",
+  "grammar",
+  "finalization",
+] as const
+
+function getVideoPipelineSteps(
+  upload: TranscriptionVideoUpload,
+  session: TranscriptionSession,
+  hasDiarizedSpeakers = false
+): TranscriptionVideoPipelineStep[] {
+  const pipelineLooksUninitialized = Boolean(
+    upload.pipeline?.length &&
+    [
+      "uploaded",
+      "queued",
+      "processing",
+      "completed",
+      "failed",
+      "cancelled",
+    ].includes(upload.status) &&
+    upload.pipeline.every(
+      (step, index) =>
+        (index === 0 && step.status === "active") ||
+        (index > 0 && step.status === "pending")
+    )
+  )
+  if (
+    upload.pipeline &&
+    upload.pipeline.length > 0 &&
+    !pipelineLooksUninitialized
+  ) {
+    const byKey = new Map(upload.pipeline.map((step) => [step.key, step]))
+    const steps = videoPipelineKeys.map((key) => ({
+      ...(byKey.get(key) ?? {
+        key,
+        status: "pending" as const,
+      }),
+    }))
+    const diarizationStep = steps.find((step) => step.key === "diarization")
+    if (hasDiarizedSpeakers && diarizationStep?.status === "skipped") {
+      diarizationStep.status = "completed"
+      diarizationStep.error = undefined
+    }
+    return hydrateVideoPipelineTiming(steps, upload, session)
+  }
+
+  return hydrateVideoPipelineTiming(
+    fallbackVideoPipeline(upload, session, hasDiarizedSpeakers),
+    upload,
+    session
+  )
+}
+
+function hydrateVideoPipelineTiming(
+  steps: TranscriptionVideoPipelineStep[],
+  upload: TranscriptionVideoUpload,
+  session: TranscriptionSession
+) {
+  const firstTimestamp =
+    parseVideoTimestamp(upload.createdAt) ??
+    parseVideoTimestamp(session.createdAt)
+  const sessionProcessingStart = parseVideoTimestamp(session.startedAt)
+  const terminalEnd =
+    parseVideoTimestamp(session.endedAt) ??
+    parseVideoTimestamp(upload.completedAt) ??
+    parseVideoTimestamp(upload.updatedAt) ??
+    sessionProcessingStart ??
+    firstTimestamp
+  const result = steps.map((step) => ({ ...step }))
+  let cursor = firstTimestamp
+
+  const nextKnownStart = (index: number) => {
+    for (let nextIndex = index + 1; nextIndex < result.length; nextIndex += 1) {
+      const startedAt = parseVideoTimestamp(result[nextIndex].startedAt)
+      if (startedAt !== null) return startedAt
+    }
+    return null
+  }
+
+  // The upload record's completedAt is the end of the whole transcription
+  // job. For legacy pipeline records, the first downstream step (or the
+  // session start) is the only reliable upload-phase boundary.
+  const processingStart =
+    sessionProcessingStart ?? nextKnownStart(0) ?? firstTimestamp
+  const uploadProcessingBoundary = sessionProcessingStart ?? nextKnownStart(0)
+
+  const hydrated = result.map((step, index) => {
+    if (step.status === "pending" || step.status === "skipped") return step
+
+    let startedAt = parseVideoTimestamp(step.startedAt)
+    if (startedAt === null) {
+      startedAt =
+        step.key === "upload"
+          ? firstTimestamp
+          : step.key === "transcription"
+            ? processingStart
+            : cursor
+      if (startedAt !== null) step.startedAt = new Date(startedAt).toISOString()
+    }
+
+    if (
+      step.status === "completed" ||
+      step.status === "failed" ||
+      step.status === "cancelled"
+    ) {
+      let completedAt = parseVideoTimestamp(step.completedAt)
+      if (
+        step.key === "upload" &&
+        uploadProcessingBoundary !== null &&
+        (completedAt === null || completedAt > uploadProcessingBoundary)
+      ) {
+        completedAt = Math.max(
+          startedAt ?? uploadProcessingBoundary,
+          uploadProcessingBoundary
+        )
+        step.completedAt = new Date(completedAt).toISOString()
+        step.durationMs =
+          startedAt === null ? 0 : Math.max(0, completedAt - startedAt)
+        step.durationEstimated = true
+      } else if (completedAt === null) {
+        completedAt =
+          step.key === "upload"
+            ? uploadProcessingBoundary
+            : (nextKnownStart(index) ?? terminalEnd)
+        if (completedAt !== null && startedAt !== null) {
+          completedAt = Math.max(startedAt, completedAt)
+        }
+        if (completedAt !== null) {
+          step.completedAt = new Date(completedAt).toISOString()
+        }
+      }
+      if (
+        (step.durationMs ?? 0) <= 0 &&
+        startedAt !== null &&
+        completedAt !== null
+      ) {
+        step.durationMs = Math.max(0, completedAt - startedAt)
+      }
+      if (completedAt !== null) cursor = completedAt
+    } else if (startedAt !== null) {
+      cursor = startedAt
+    }
+
+    return step
+  })
+
+  const estimatedSteps = hydrated.filter(
+    (step) =>
+      step.key !== "upload" &&
+      ["completed", "failed", "cancelled"].includes(step.status) &&
+      !hasPositiveVideoStepDuration(step)
+  )
+  const processingWindowMs =
+    processingStart !== null && terminalEnd !== null
+      ? Math.max(0, terminalEnd - processingStart)
+      : 0
+  const recordedProcessingMs = hydrated.reduce((total, step) => {
+    if (
+      step.key === "upload" ||
+      step.status === "skipped" ||
+      estimatedSteps.includes(step)
+    ) {
+      return total
+    }
+    return total + Math.max(0, step.durationMs ?? 0)
+  }, 0)
+  let remainingProcessingMs = Math.max(
+    0,
+    processingWindowMs - recordedProcessingMs
+  )
+  if (estimatedSteps.length > 0 && processingWindowMs > 0) {
+    let estimatedStart = processingStart ?? terminalEnd ?? 0
+    estimatedSteps.forEach((step, index) => {
+      const remainingSteps = estimatedSteps.length - index
+      const durationMs =
+        index === estimatedSteps.length - 1
+          ? Math.max(1, remainingProcessingMs)
+          : Math.max(1, Math.floor(remainingProcessingMs / remainingSteps))
+      const completedAt = estimatedStart + durationMs
+      step.startedAt = new Date(estimatedStart).toISOString()
+      step.completedAt = new Date(completedAt).toISOString()
+      step.durationMs = durationMs
+      step.durationEstimated = true
+      estimatedStart = completedAt
+      remainingProcessingMs = Math.max(0, remainingProcessingMs - durationMs)
+    })
+  }
+
+  return hydrated
+}
+
+function hasPositiveVideoStepDuration(step: TranscriptionVideoPipelineStep) {
+  if ((step.durationMs ?? 0) > 0) return true
+  if (!step.startedAt || !step.completedAt) return false
+  const startedAt = parseVideoTimestamp(step.startedAt)
+  const completedAt = parseVideoTimestamp(step.completedAt)
+  return startedAt !== null && completedAt !== null && completedAt > startedAt
+}
+
+function parseVideoTimestamp(value?: string | null) {
+  if (!value) return null
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function fallbackVideoPipeline(
+  upload: TranscriptionVideoUpload,
+  session: TranscriptionSession,
+  hasDiarizedSpeakers = false
+): TranscriptionVideoPipelineStep[] {
+  const timestamp = upload.updatedAt || upload.createdAt
+  const steps = videoPipelineKeys.map<TranscriptionVideoPipelineStep>(
+    (key) => ({
+      key,
+      status: "pending",
+    })
+  )
+  const stepByKey = new Map(steps.map((step) => [step.key, step]))
+  const startAt = session.startedAt || upload.createdAt
+
+  const setStatus = (
+    key: string,
+    status: TranscriptionVideoPipelineStep["status"],
+    completedAt?: string | null
+  ) => {
+    const step = stepByKey.get(key)
+    if (!step) return
+    step.status = status
+    if (status === "active" || status === "retrying") {
+      step.startedAt = step.startedAt || startAt
+      return
+    }
+    if (
+      status === "completed" ||
+      status === "failed" ||
+      status === "cancelled"
+    ) {
+      if (completedAt) {
+        step.completedAt = completedAt
+        if (step.startedAt) {
+          const start = Date.parse(step.startedAt)
+          const end = Date.parse(completedAt)
+          step.durationMs =
+            Number.isFinite(start) && Number.isFinite(end)
+              ? Math.max(0, end - start)
+              : 0
+        }
+      }
+    }
+  }
+
+  const optionalStatus = (
+    key: "diarization" | "grammar",
+    completedAt = timestamp,
+    assumeCompleted = false
+  ) => {
+    if (key === "diarization") {
+      setStatus(
+        key,
+        session.diarizationEndpointId || hasDiarizedSpeakers
+          ? "completed"
+          : "skipped",
+        completedAt
+      )
+      return
+    }
+    if (
+      !session.grammarEndpointId ||
+      session.polishStatus === "not_requested"
+    ) {
+      setStatus(key, "skipped", completedAt)
+    } else if (assumeCompleted && session.polishStatus !== "failed") {
+      setStatus(key, "completed", completedAt)
+    } else if (session.polishStatus === "failed") {
+      setStatus(key, "failed", completedAt)
+    } else if (session.polishStatus === "completed") {
+      setStatus(key, "completed", completedAt)
+    } else {
+      setStatus(key, "active", completedAt)
+    }
+  }
+
+  const stage = upload.stage || ""
+  if (upload.status === "uploading" || stage === "uploading") {
+    setStatus("upload", "active")
+    return steps
+  }
+  const uploadCompletedAt =
+    session.startedAt ||
+    (upload.status === "uploaded" ? upload.updatedAt : undefined)
+  setStatus("upload", "completed", uploadCompletedAt)
+
+  if (upload.status === "queued" && stage === "retrying") {
+    setStatus("transcription", "retrying")
+    return steps
+  }
+  if (["starting", "extracting", "transcribing"].includes(stage)) {
+    setStatus("transcription", "active")
+    return steps
+  }
+  if (stage === "diarizing") {
+    setStatus("transcription", "completed")
+    setStatus("diarization", "active")
+    return steps
+  }
+  if (stage === "polishing") {
+    setStatus("transcription", "completed")
+    optionalStatus("diarization")
+    setStatus("grammar", "active")
+    return steps
+  }
+  if (stage === "finalizing") {
+    setStatus("transcription", "completed")
+    optionalStatus("diarization")
+    optionalStatus("grammar")
+    setStatus("finalization", "active")
+    return steps
+  }
+  if (upload.status === "completed") {
+    setStatus("transcription", "completed")
+    optionalStatus("diarization", upload.completedAt || timestamp, true)
+    optionalStatus("grammar", upload.completedAt || timestamp, true)
+    setStatus("finalization", "completed", upload.completedAt || timestamp)
+    return steps
+  }
+  if (upload.status === "cancelled") {
+    setStatus("transcription", "cancelled")
+    return steps
+  }
+  if (upload.status === "failed") {
+    setStatus("transcription", "failed")
+  }
+  return steps
+}
+
+function videoPipelineStepLabel(key: string) {
+  switch (key) {
+    case "upload":
+      return "Upload"
+    case "transcription":
+      return "Transcription"
+    case "diarization":
+      return "Speaker separation"
+    case "grammar":
+      return "Grammar polish"
+    case "finalization":
+      return "Finalization"
+    default:
+      return key
+  }
+}
+
+function videoPipelineStepDescription(key: string) {
+  switch (key) {
+    case "upload":
+      return "Store the source video"
+    case "transcription":
+      return "Create timestamped text"
+    case "diarization":
+      return "Match words to speakers"
+    case "grammar":
+      return "Correct grammar and punctuation"
+    case "finalization":
+      return "Publish the transcript"
+    default:
+      return ""
+  }
+}
+
+function videoPipelineStatusLabel(
+  status: TranscriptionVideoPipelineStep["status"]
+) {
+  switch (status) {
+    case "active":
+      return "In progress"
+    case "retrying":
+      return "Retrying"
+    case "completed":
+      return "Complete"
+    case "skipped":
+      return "Not configured"
+    case "failed":
+      return "Failed"
+    case "cancelled":
+      return "Cancelled"
+    default:
+      return "Pending"
+  }
+}
+
+function videoPipelineStepIcon(
+  status: TranscriptionVideoPipelineStep["status"]
+): LucideIcon {
+  switch (status) {
+    case "active":
+      return LoaderCircle
+    case "retrying":
+      return RefreshCw
+    case "completed":
+      return Check
+    case "failed":
+      return CircleAlert
+    case "cancelled":
+      return X
+    default:
+      return CircleDashed
+  }
+}
+
+function videoPipelineStepClass(
+  status: TranscriptionVideoPipelineStep["status"]
+) {
+  switch (status) {
+    case "active":
+    case "retrying":
+      return "border-primary/40 bg-primary/5"
+    case "completed":
+      return "border-primary/20 bg-primary/[0.03]"
+    case "failed":
+      return "border-destructive/30 bg-destructive/5"
+    case "cancelled":
+      return "border-destructive/20 bg-destructive/[0.03]"
+    case "skipped":
+      return "border-dashed bg-muted/30 opacity-75"
+    default:
+      return "bg-muted/20"
+  }
+}
+
+function getVideoPipelineStepDuration(
+  step: TranscriptionVideoPipelineStep,
+  now: number
+) {
+  const storedDuration = step.durationMs ?? 0
+  if (step.status === "active" || step.status === "retrying") {
+    const startedAt = step.startedAt ? Date.parse(step.startedAt) : NaN
+    if (Number.isFinite(startedAt)) return Math.max(0, now - startedAt)
+  }
+  if (storedDuration > 0) return storedDuration
+  if (step.startedAt && step.completedAt) {
+    const start = Date.parse(step.startedAt)
+    const end = Date.parse(step.completedAt)
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      return Math.max(0, end - start)
+    }
+  }
+  return 0
+}
+
+function getVideoPipelineRunTime(
+  session: TranscriptionSession,
+  upload: TranscriptionVideoUpload,
+  now: number
+) {
+  const startedAt = Date.parse(session.startedAt || upload.createdAt)
+  if (!Number.isFinite(startedAt)) return 0
+  const terminal = ["completed", "failed", "cancelled"].includes(upload.status)
+  const endedAt = terminal
+    ? Date.parse(session.endedAt || upload.completedAt || upload.updatedAt)
+    : now
+  if (!Number.isFinite(endedAt)) return 0
+  return Math.max(0, endedAt - startedAt)
+}
+
+function formatPipelineStepDuration(durationMs: number) {
+  if (durationMs <= 0) return "—"
+  if (durationMs < 1000) return "<1s"
+  if (durationMs < 60_000) return `${Math.floor(durationMs / 1000)}s`
+  return formatVideoDuration(durationMs)
 }
 
 function polishStatusLabel(status: TranscriptionSession["polishStatus"]) {

@@ -104,6 +104,9 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 		if err := transaction.Commit(); err != nil {
 			return err
 		}
+		if err := m.failVideoPipeline(ctx, uploadID, "maximum retry attempts exceeded"); err != nil {
+			slog.Warn("could not persist video pipeline failure", "uploadId", uploadID, "error", err)
+		}
 		m.broadcast(sessionID, "transcription.session", ginData{"status": "failed"})
 		m.broadcastVideoProgress(uploadID, "failed", 0, "failed", "maximum retry attempts exceeded")
 		return nil
@@ -129,6 +132,9 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 	if err := transaction.Commit(); err != nil {
 		return err
 	}
+	if err := m.advanceVideoPipeline(ctx, uploadID, "starting", ""); err != nil {
+		slog.Warn("could not persist video pipeline start", "uploadId", uploadID, "error", err)
+	}
 
 	var parsed videoJobPayload
 	if err := json.Unmarshal(payload, &parsed); err != nil || parsed.UploadID == "" {
@@ -145,6 +151,9 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 	var uploadStatus string
 	var sessionID uuid.UUID
 	if err := m.DB.QueryRowContext(ctx, `SELECT status, session_id FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&uploadStatus, &sessionID); err == nil && uploadStatus == "cancelled" {
+		if err := m.cancelVideoPipeline(ctx, uploadID); err != nil {
+			slog.Warn("could not persist cancelled video pipeline", "uploadId", uploadID, "error", err)
+		}
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 		return errVideoTranscriptionCancelled
 	}
@@ -163,6 +172,9 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 			return errVideoTranscriptionCancelled
 		}
+		if err := m.completeVideoPipeline(ctx, uploadID); err != nil {
+			slog.Warn("could not persist completed video pipeline", "uploadId", uploadID, "error", err)
+		}
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'completed', ended_at = COALESCE(ended_at, now()), join_code_hash = NULL, join_code_expires_at = NULL, updated_at = now() WHERE id = $1`, sessionID)
 		m.broadcast(sessionID, "transcription.session", ginData{"status": "completed"})
 		m.broadcastVideoProgress(uploadID, "completed", 100, "completed", "")
@@ -171,6 +183,9 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 	if errors.Is(processingErr, errVideoTranscriptionCancelled) {
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'cancelled', stage = 'cancelled', error_message = NULL, updated_at = now() WHERE id = $1`, uploadID)
+		if err := m.cancelVideoPipeline(ctx, uploadID); err != nil {
+			slog.Warn("could not persist cancelled video pipeline", "uploadId", uploadID, "error", err)
+		}
 		m.broadcast(sessionID, "transcription.session", ginData{"status": "failed"})
 		m.broadcastVideoProgress(uploadID, "cancelled", 0, "cancelled", "")
 		return processingErr
@@ -194,12 +209,18 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 		_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'queued', lease_until = NULL, run_after = now() + $2 * interval '1 second', error_message = $3, updated_at = now() WHERE id = $1`, jobID, int64(delay/time.Second), processingErr.Error())
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', stage = 'retrying', error_message = $2, updated_at = now() WHERE id = $1`, uploadID, processingErr.Error())
+		if err := m.retryVideoPipeline(ctx, uploadID, processingErr.Error()); err != nil {
+			slog.Warn("could not persist retrying video pipeline", "uploadId", uploadID, "error", err)
+		}
 		m.broadcast(sessionID, "transcription.session", ginData{"status": "processing"})
 		m.broadcastVideoProgress(uploadID, "queued", 0, "retrying", processingErr.Error())
 		return processingErr
 	}
 	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', lease_until = NULL, error_message = $2, updated_at = now() WHERE id = $1`, jobID, processingErr.Error())
 	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'failed', stage = 'failed', error_message = $2, updated_at = now() WHERE id = $1`, uploadID, processingErr.Error())
+	if err := m.failVideoPipeline(ctx, uploadID, processingErr.Error()); err != nil {
+		slog.Warn("could not persist failed video pipeline", "uploadId", uploadID, "error", err)
+	}
 	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = $1`, sessionID)
 	m.broadcast(sessionID, "transcription.session", ginData{"status": "failed"})
 	m.broadcastVideoProgress(uploadID, "failed", 0, "failed", processingErr.Error())
@@ -243,6 +264,9 @@ func (m *TranscriptionManager) queueVideoTranscription(ctx context.Context, uplo
 	if err := transaction.Commit(); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
+	if err := m.advanceVideoPipeline(ctx, uploadID, "queued", ""); err != nil {
+		slog.Warn("could not persist queued video pipeline", "uploadId", uploadID, "error", err)
+	}
 	m.broadcast(sessionID, "transcription.session", ginData{"status": "processing"})
 	upload, err := loadVideoUpload(ctx, m.DB, uploadID)
 	return jobID, upload, err
@@ -278,6 +302,9 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 	if err := transaction.Commit(); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
+	if err := m.retryVideoPipeline(ctx, uploadID, ""); err != nil {
+		slog.Warn("could not persist manually retried video pipeline", "uploadId", uploadID, "error", err)
+	}
 	m.broadcast(sessionID, "transcription.session", ginData{"status": "processing"})
 	upload, err := loadVideoUpload(ctx, m.DB, uploadID)
 	return jobID, upload, err
@@ -308,6 +335,9 @@ func (m *TranscriptionManager) cancelVideoJob(ctx context.Context, uploadID uuid
 	}
 	if err := transaction.Commit(); err != nil {
 		return err
+	}
+	if err := m.cancelVideoPipeline(ctx, uploadID); err != nil {
+		slog.Warn("could not persist cancelled video pipeline", "uploadId", uploadID, "error", err)
 	}
 	m.broadcast(sessionID, "transcription.session", ginData{"status": "failed"})
 	m.broadcastVideoProgress(uploadID, "cancelled", 0, "cancelled", "")
@@ -358,10 +388,12 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 		return fmt.Errorf("%w: video duration exceeds the %d-hour limit", errVideoTranscriptionPermanent, m.Config.Transcription.VideoMaxDurationHours)
 	}
 	durationMs := int64(duration * 1000)
-	if _, err := m.DB.ExecContext(jobCtx, `UPDATE transcription_video_uploads SET duration_ms = $2, stage = 'extracting', progress = 1, updated_at = now() WHERE id = $1`, uploadID, durationMs); err != nil {
+	if _, err := m.DB.ExecContext(jobCtx, `UPDATE transcription_video_uploads SET duration_ms = $2, updated_at = now() WHERE id = $1`, uploadID, durationMs); err != nil {
 		return err
 	}
-	m.broadcastVideoProgress(uploadID, "processing", 1, "extracting", "")
+	if err := m.updateVideoProgress(jobCtx, uploadID, 1, "extracting", ""); err != nil {
+		return err
+	}
 
 	processCtx, cancel := context.WithCancel(jobCtx)
 	defer cancel()
@@ -621,6 +653,9 @@ func ffmpegVideoAudioArgs(videoURL string) []string {
 
 func (m *TranscriptionManager) updateVideoProgress(ctx context.Context, uploadID uuid.UUID, progress int, stage, errorMessage string) error {
 	progress = int(minInt64(99, maxInt64(0, int64(progress))))
+	if err := m.advanceVideoPipeline(ctx, uploadID, stage, errorMessage); err != nil {
+		slog.Warn("could not persist video pipeline progress", "uploadId", uploadID, "stage", stage, "error", err)
+	}
 	_, err := m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET progress = $2, stage = $3, error_message = NULLIF($4, ''), updated_at = now() WHERE id = $1 AND status NOT IN ('cancelled', 'completed')`, uploadID, progress, stage, errorMessage)
 	if err == nil {
 		m.broadcastVideoProgress(uploadID, "processing", progress, stage, errorMessage)
@@ -648,18 +683,20 @@ func (m *TranscriptionManager) broadcastVideoProgress(uploadID uuid.UUID, status
 func loadVideoUploadRecord(ctx context.Context, db *sql.DB, id uuid.UUID) (videoUploadRecord, error) {
 	var record videoUploadRecord
 	var errorMessage string
+	var pipelineRaw []byte
 	err := db.QueryRowContext(ctx, `
 		SELECT id, session_id, file_name, mime_type, expected_bytes, bytes, part_size, part_count,
 		       status, progress, stage, duration_ms, COALESCE(error_message, ''), created_at,
-		       updated_at, completed_at, expires_at, storage_driver, storage_key, multipart_upload_id
+		       updated_at, completed_at, expires_at, pipeline_steps, storage_driver, storage_key, multipart_upload_id
 		FROM transcription_video_uploads WHERE id = $1`, id).Scan(
 		&record.model.ID, &record.model.SessionID, &record.model.FileName, &record.model.MimeType,
 		&record.model.ExpectedBytes, &record.model.Bytes, &record.model.PartSize, &record.model.PartCount,
 		&record.model.Status, &record.model.Progress, &record.model.Stage, &record.model.DurationMs,
 		&errorMessage, &record.model.CreatedAt, &record.model.UpdatedAt, &record.model.CompletedAt,
-		&record.model.ExpiresAt, &record.storageDriver, &record.storageKey, &record.multipartID,
+		&record.model.ExpiresAt, &pipelineRaw, &record.storageDriver, &record.storageKey, &record.multipartID,
 	)
 	record.model.Error = errorMessage
+	record.model.Pipeline = decodeVideoPipeline(pipelineRaw)
 	return record, err
 }
 

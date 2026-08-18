@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -108,19 +109,23 @@ func (a *App) initVideoTranscriptionUpload(c *gin.Context) {
 		return
 	}
 	expiresAt := time.Now().Add(time.Duration(a.Config.Transcription.AudioRetentionDays) * 24 * time.Hour)
+	pipelineStartedAt := time.Now().UTC()
+	pipelineJSON, _ := json.Marshal(initialVideoPipeline(pipelineStartedAt))
 	var upload models.TranscriptionVideoUpload
+	var pipelineRaw []byte
 	err = a.DB.QueryRowContext(c, `
 		INSERT INTO transcription_video_uploads
-			(id, session_id, storage_driver, storage_key, multipart_upload_id, file_name, mime_type, expected_bytes, part_size, part_count, expires_at)
-		VALUES ($1, $2, 's3', $3, $4, $5, $6, $7, $8, $9, $10)
-		RETURNING id, session_id, file_name, mime_type, expected_bytes, bytes, part_size, part_count, status, progress, stage, duration_ms, COALESCE(error_message, ''), created_at, updated_at, completed_at, expires_at`,
-		uploadID, sessionID, storageKey, multipartID, fileName, mimeType, request.FileBytes, partSize, partCount, expiresAt,
-	).Scan(&upload.ID, &upload.SessionID, &upload.FileName, &upload.MimeType, &upload.ExpectedBytes, &upload.Bytes, &upload.PartSize, &upload.PartCount, &upload.Status, &upload.Progress, &upload.Stage, &upload.DurationMs, &upload.Error, &upload.CreatedAt, &upload.UpdatedAt, &upload.CompletedAt, &upload.ExpiresAt)
+			(id, session_id, storage_driver, storage_key, multipart_upload_id, file_name, mime_type, expected_bytes, part_size, part_count, expires_at, pipeline_steps)
+		VALUES ($1, $2, 's3', $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		RETURNING id, session_id, file_name, mime_type, expected_bytes, bytes, part_size, part_count, status, progress, stage, duration_ms, COALESCE(error_message, ''), created_at, updated_at, completed_at, expires_at, pipeline_steps`,
+		uploadID, sessionID, storageKey, multipartID, fileName, mimeType, request.FileBytes, partSize, partCount, expiresAt, pipelineJSON,
+	).Scan(&upload.ID, &upload.SessionID, &upload.FileName, &upload.MimeType, &upload.ExpectedBytes, &upload.Bytes, &upload.PartSize, &upload.PartCount, &upload.Status, &upload.Progress, &upload.Stage, &upload.DurationMs, &upload.Error, &upload.CreatedAt, &upload.UpdatedAt, &upload.CompletedAt, &upload.ExpiresAt, &pipelineRaw)
 	if err != nil {
 		_ = storage.abortMultipart(c, storageKey, multipartID)
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	upload.Pipeline = decodeVideoPipeline(pipelineRaw)
 	c.JSON(http.StatusCreated, videoUploadResponse{Upload: upload, PartURLs: a.videoUploadPartURLs(storage, storageKey, multipartID, partCount)})
 }
 
@@ -220,6 +225,7 @@ func (a *App) completeVideoTranscriptionUpload(c *gin.Context) {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
+		_ = a.Live.advanceVideoPipeline(c, uploadID, "uploaded", "")
 	}
 	jobID, updated, err := a.Live.queueVideoTranscription(c, uploadID)
 	if err != nil {
@@ -376,31 +382,36 @@ func formatBytes(value int64) string {
 
 func loadVideoUpload(ctx context.Context, db *sql.DB, id uuid.UUID) (models.TranscriptionVideoUpload, error) {
 	var item models.TranscriptionVideoUpload
+	var pipelineRaw []byte
 	err := db.QueryRowContext(ctx, `
 		SELECT id, session_id, file_name, mime_type, expected_bytes, bytes, part_size, part_count,
 		       status, progress, stage, duration_ms, COALESCE(error_message, ''), created_at,
-		       updated_at, completed_at, expires_at
+		       updated_at, completed_at, expires_at, pipeline_steps
 		FROM transcription_video_uploads WHERE id = $1`, id).Scan(
 		&item.ID, &item.SessionID, &item.FileName, &item.MimeType, &item.ExpectedBytes,
 		&item.Bytes, &item.PartSize, &item.PartCount, &item.Status, &item.Progress,
 		&item.Stage, &item.DurationMs, &item.Error, &item.CreatedAt, &item.UpdatedAt,
-		&item.CompletedAt, &item.ExpiresAt,
+		&item.CompletedAt, &item.ExpiresAt, &pipelineRaw,
 	)
+	if err == nil {
+		item.Pipeline = decodeVideoPipeline(pipelineRaw)
+	}
 	return item, err
 }
 
 func loadLatestVideoUpload(ctx context.Context, db *sql.DB, sessionID uuid.UUID) (*models.TranscriptionVideoUpload, error) {
 	var item models.TranscriptionVideoUpload
 	var errorMessage string
+	var pipelineRaw []byte
 	err := db.QueryRowContext(ctx, `
 		SELECT id, session_id, file_name, mime_type, expected_bytes, bytes, part_size, part_count,
 		       status, progress, stage, duration_ms, COALESCE(error_message, ''), created_at,
-		       updated_at, completed_at, expires_at
+		       updated_at, completed_at, expires_at, pipeline_steps
 		FROM transcription_video_uploads WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1`, sessionID).Scan(
 		&item.ID, &item.SessionID, &item.FileName, &item.MimeType, &item.ExpectedBytes,
 		&item.Bytes, &item.PartSize, &item.PartCount, &item.Status, &item.Progress,
 		&item.Stage, &item.DurationMs, &errorMessage, &item.CreatedAt, &item.UpdatedAt,
-		&item.CompletedAt, &item.ExpiresAt,
+		&item.CompletedAt, &item.ExpiresAt, &pipelineRaw,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -409,5 +420,6 @@ func loadLatestVideoUpload(ctx context.Context, db *sql.DB, sessionID uuid.UUID)
 		return nil, err
 	}
 	item.Error = errorMessage
+	item.Pipeline = decodeVideoPipeline(pipelineRaw)
 	return &item, nil
 }

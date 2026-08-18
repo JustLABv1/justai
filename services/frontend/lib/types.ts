@@ -312,6 +312,23 @@ export type TranscriptionRecording = {
   completedAt?: string | null
 }
 
+export type TranscriptionVideoPipelineStep = {
+  key: string
+  status:
+    | "pending"
+    | "active"
+    | "completed"
+    | "skipped"
+    | "failed"
+    | "retrying"
+    | "cancelled"
+  startedAt?: string | null
+  completedAt?: string | null
+  durationMs?: number
+  durationEstimated?: boolean
+  error?: string
+}
+
 export type TranscriptionVideoUpload = {
   id: string
   sessionId: string
@@ -333,6 +350,7 @@ export type TranscriptionVideoUpload = {
   stage?: string
   durationMs?: number
   error?: string
+  pipeline?: TranscriptionVideoPipelineStep[]
   createdAt: string
   updatedAt: string
   completedAt?: string | null

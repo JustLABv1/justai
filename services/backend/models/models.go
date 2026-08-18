@@ -198,25 +198,35 @@ type TranscriptionRecording struct {
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 }
 
+type TranscriptionVideoPipelineStep struct {
+	Key         string     `json:"key"`
+	Status      string     `json:"status"`
+	StartedAt   *time.Time `json:"startedAt,omitempty"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	DurationMs  int64      `json:"durationMs,omitempty"`
+	Error       string     `json:"error,omitempty"`
+}
+
 type TranscriptionVideoUpload struct {
-	ID            uuid.UUID  `json:"id"`
-	SessionID     uuid.UUID  `json:"sessionId"`
-	FileName      string     `json:"fileName"`
-	MimeType      string     `json:"mimeType"`
-	ExpectedBytes int64      `json:"expectedBytes"`
-	Bytes         int64      `json:"bytes"`
-	PartSize      int64      `json:"partSize"`
-	PartCount     int        `json:"partCount"`
-	Status        string     `json:"status"`
-	Progress      int        `json:"progress"`
-	Stage         string     `json:"stage,omitempty"`
-	DurationMs    int64      `json:"durationMs,omitempty"`
-	Error         string     `json:"error,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
-	CompletedAt   *time.Time `json:"completedAt,omitempty"`
-	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
-	PlaybackURL   string     `json:"playbackUrl,omitempty"`
+	ID            uuid.UUID                        `json:"id"`
+	SessionID     uuid.UUID                        `json:"sessionId"`
+	FileName      string                           `json:"fileName"`
+	MimeType      string                           `json:"mimeType"`
+	ExpectedBytes int64                            `json:"expectedBytes"`
+	Bytes         int64                            `json:"bytes"`
+	PartSize      int64                            `json:"partSize"`
+	PartCount     int                              `json:"partCount"`
+	Status        string                           `json:"status"`
+	Progress      int                              `json:"progress"`
+	Stage         string                           `json:"stage,omitempty"`
+	DurationMs    int64                            `json:"durationMs,omitempty"`
+	Error         string                           `json:"error,omitempty"`
+	Pipeline      []TranscriptionVideoPipelineStep `json:"pipeline,omitempty"`
+	CreatedAt     time.Time                        `json:"createdAt"`
+	UpdatedAt     time.Time                        `json:"updatedAt"`
+	CompletedAt   *time.Time                       `json:"completedAt,omitempty"`
+	ExpiresAt     *time.Time                       `json:"expiresAt,omitempty"`
+	PlaybackURL   string                           `json:"playbackUrl,omitempty"`
 }
 
 type KnowledgeSource struct {
