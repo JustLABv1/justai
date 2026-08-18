@@ -4,7 +4,11 @@ import type { ReactNode } from "react"
 import { useMemo, useState } from "react"
 
 import { HugeiconsIcon } from "@hugeicons/react"
-import { ArrowDown01Icon, ToolsIcon } from "@hugeicons/core-free-icons"
+import {
+  AlertCircleIcon,
+  ArrowDown01Icon,
+  ToolsIcon,
+} from "@hugeicons/core-free-icons"
 import type { ToolApprovalResponse } from "@assistant-ui/react"
 
 import { Button } from "@/components/ui/button"
@@ -119,8 +123,18 @@ export function ToolCallsSection({
   renderIcon,
   renderContent,
 }: ToolCallsSectionProps) {
+  const pendingApprovalIndices = useMemo(
+    () =>
+      toolCalls.reduce<number[]>((indices, call, index) => {
+        if (call.status === "waiting") indices.push(index)
+        return indices
+      }, []),
+    [toolCalls]
+  )
+  const hasPendingApprovals = pendingApprovalIndices.length > 0
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
   const [expandedCalls, setExpandedCalls] = useState<Set<number>>(new Set())
+  const isGroupExpanded = isExpanded || hasPendingApprovals
 
   // Create a lookup map for custom integrations by id
   const integrationLookup = useMemo(() => {
@@ -222,6 +236,7 @@ export function ToolCallsSection({
       {/* Collapsible Header */}
       <button
         type="button"
+        aria-expanded={isGroupExpanded}
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex cursor-pointer items-center gap-2 py-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
       >
@@ -230,14 +245,25 @@ export function ToolCallsSection({
           Used {toolCalls.length} tool
           {toolCalls.length > 1 ? "s" : ""}
         </span>
-        <ChevronIcon isExpanded={isExpanded} />
+        {hasPendingApprovals && (
+          <span
+            aria-live="polite"
+            className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
+          >
+            <HugeiconsIcon icon={AlertCircleIcon} size={13} />
+            {pendingApprovalIndices.length === 1
+              ? "Approval required"
+              : `${pendingApprovalIndices.length} approvals required`}
+          </span>
+        )}
+        <ChevronIcon isExpanded={isGroupExpanded} />
       </button>
 
       {/* Collapsible Content */}
       <div
         className={cn(
           "overflow-hidden transition-all duration-200",
-          isExpanded ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
+          isGroupExpanded ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
         )}
       >
         <div className="space-y-0 pt-1">
@@ -246,11 +272,7 @@ export function ToolCallsSection({
               call.show_category !== false &&
               call.tool_category &&
               call.tool_category !== "unknown"
-            const requiresApproval = Boolean(
-              call.approval &&
-              call.approval.approved === undefined &&
-              !call.approval.resolution
-            )
+            const requiresApproval = call.status === "waiting"
             const hasInput = Boolean(
               call.inputs && Object.keys(call.inputs).length > 0
             )
@@ -260,7 +282,7 @@ export function ToolCallsSection({
               call.error ||
               requiresApproval
             )
-            const isCallExpanded = expandedCalls.has(index)
+            const isCallExpanded = expandedCalls.has(index) || requiresApproval
             const statusLabel =
               call.status === "waiting"
                 ? "Approval needed"
@@ -340,6 +362,49 @@ export function ToolCallsSection({
 
                   {isCallExpanded && hasDetails && (
                     <div className="mt-2 mb-3 w-fit space-y-2 rounded-xl bg-zinc-100 p-3 text-[11px] dark:bg-zinc-800/50">
+                      {requiresApproval && (
+                        <div
+                          aria-live="assertive"
+                          role="alert"
+                          className="rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-2 text-amber-900 dark:bg-amber-500/10 dark:text-amber-100"
+                        >
+                          <div className="flex items-center gap-1.5 font-semibold">
+                            <HugeiconsIcon
+                              aria-hidden="true"
+                              icon={AlertCircleIcon}
+                              size={14}
+                            />
+                            Approval required
+                          </div>
+                          <p className="mt-1 text-[10px] text-amber-800/80 dark:text-amber-200/80">
+                            Review this MCP request before it runs.
+                          </p>
+                          {call.respondToApproval && (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  call.respondToApproval?.({ approved: true })
+                                }
+                              >
+                                Allow
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  call.respondToApproval?.({
+                                    approved: false,
+                                    reason: "Denied by user",
+                                  })
+                                }
+                              >
+                                Deny
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {hasInput && (
                         <div className="flex flex-col">
                           <span className="mb-1 font-medium text-zinc-400 dark:text-zinc-500">
@@ -360,30 +425,6 @@ export function ToolCallsSection({
                         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive">
                           {call.error}
                         </p>
-                      )}
-                      {requiresApproval && call.respondToApproval && (
-                        <div className="flex flex-wrap gap-2 pt-1">
-                          <Button
-                            size="sm"
-                            onClick={() =>
-                              call.respondToApproval?.({ approved: true })
-                            }
-                          >
-                            Allow
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              call.respondToApproval?.({
-                                approved: false,
-                                reason: "Denied by user",
-                              })
-                            }
-                          >
-                            Deny
-                          </Button>
-                        </div>
                       )}
                     </div>
                   )}

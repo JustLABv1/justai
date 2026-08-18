@@ -88,3 +88,16 @@ func TestFindMCPBindingMatchesRawToolNameAndServer(t *testing.T) {
 		t.Fatal("a tool on another server should not resolve")
 	}
 }
+
+func TestFindMCPBindingReturnsProviderSafeName(t *testing.T) {
+	serverID := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
+	providerName, binding, ok := findMCPBindingWithProviderName(map[string]voiceToolBinding{
+		"mcp_12345678_search_plain_docs": {
+			ServerID: serverID,
+			ToolName: "search_plain_docs",
+		},
+	}, serverID, "search_plain_docs")
+	if !ok || providerName != "mcp_12345678_search_plain_docs" || binding.ToolName != "search_plain_docs" {
+		t.Fatalf("unexpected MCP binding lookup: %q %+v (ok=%v)", providerName, binding, ok)
+	}
+}

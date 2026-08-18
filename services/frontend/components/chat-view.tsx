@@ -18,6 +18,7 @@ import {
   Paperclip,
   PanelRightOpen,
   Pencil,
+  Plug,
   RefreshCw,
   RotateCcw,
   Quote,
@@ -53,6 +54,10 @@ import {
   useThreadViewport,
   useAuiState,
   useVoiceState,
+  type Unstable_DirectiveFormatter,
+  type Unstable_TriggerItem,
+  unstable_defaultDirectiveFormatter,
+  unstable_useTriggerPopoverScopeContext,
 } from "@assistant-ui/react"
 import {
   AssistantChatTransport,
@@ -85,6 +90,7 @@ import type {
   ConversationContext,
   Endpoint,
   KnowledgeSource,
+  MCPServer,
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -92,6 +98,7 @@ import { cn } from "@/lib/utils"
 type Props = {
   conversationId: string | null
   endpoints: Endpoint[]
+  mcpServers: MCPServer[]
   onEnsureConversation?: () => Promise<string>
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
@@ -336,7 +343,8 @@ async function readImageAsDataURL(file: Blob): Promise<NormalizedImage> {
     // vLLM/LiteLLM installations commonly support PNG/JPEG reliably, but not
     // every format a browser can preview (for example WebP or SVG). Rasterize
     // every image so the provider receives a real, self-consistent payload.
-    const preferredType = file.type === "image/jpeg" ? "image/jpeg" : "image/png"
+    const preferredType =
+      file.type === "image/jpeg" ? "image/jpeg" : "image/png"
     const toBlob = (type: string) =>
       new Promise<Blob>((resolve, reject) => {
         canvas.toBlob(
@@ -881,41 +889,192 @@ function MessageTiming() {
   )
 }
 
-function ContextDisplay({ context }: { context: ConversationContext }) {
-  const items = [
+function ContextDisplay({
+  context,
+  onRemoveMCP,
+}: {
+  context: ConversationContext
+  onRemoveMCP?: (serverId: string) => Promise<void>
+}) {
+  const [removingMcpId, setRemovingMcpId] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
+  const items: Array<{
+    id: string
+    label: string
+    detail: string
+    kind: "knowledge" | "mcp" | "transcription"
+    resourceId?: string
+  }> = [
     ...context.knowledgeSources
       .filter((source) => source.contextScope !== "message")
       .map((source) => ({
         id: `knowledge:${source.id}`,
         label: source.title,
         detail: source.sourceType || "knowledge",
+        kind: "knowledge" as const,
       })),
     ...context.mcpServers.map((server) => ({
       id: `mcp:${server.id}`,
       label: server.name,
       detail: "MCP",
+      kind: "mcp" as const,
+      resourceId: server.id,
     })),
     ...context.transcriptionSessions.map((session) => ({
       id: `transcription:${session.id}`,
       label: session.title,
       detail: "transcription",
+      kind: "transcription" as const,
     })),
   ]
-  if (!items.length) return null
+
+  const handleRemoveMCP = async (serverId: string) => {
+    if (!onRemoveMCP || removingMcpId) return
+
+    setRemoveError(null)
+    setRemovingMcpId(serverId)
+    try {
+      await onRemoveMCP(serverId)
+    } catch (error) {
+      setRemoveError(
+        error instanceof Error
+          ? error.message
+          : "The MCP server could not be removed from this chat."
+      )
+    } finally {
+      setRemovingMcpId(null)
+    }
+  }
+
+  if (!items.length && !removeError) return null
+
   return (
-    <div className="mx-1 mb-1 flex min-w-0 items-center gap-1.5 overflow-x-auto rounded-xl border bg-muted/20 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-      <span className="shrink-0 font-medium text-foreground">Context</span>
-      {items.map((item) => (
-        <span
-          className="inline-flex max-w-48 shrink-0 items-center gap-1 rounded-full bg-background px-2 py-0.5"
-          key={item.id}
-          title={`${item.label} · ${item.detail}`}
-        >
-          <span className="size-1.5 rounded-full bg-primary/70" />
-          <span className="truncate">{item.label}</span>
-        </span>
-      ))}
+    <div className="min-w-0">
+      <div className="mx-1 mb-1 flex min-w-0 items-center gap-1.5 overflow-x-auto rounded-xl border bg-muted/20 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+        <span className="shrink-0 font-medium text-foreground">Context</span>
+        {items.map((item) => (
+          <div
+            className="inline-flex max-w-48 shrink-0 items-center gap-1 rounded-full bg-background px-2 py-0.5"
+            key={item.id}
+            title={`${item.label} · ${item.detail}`}
+          >
+            <span className="size-1.5 shrink-0 rounded-full bg-primary/70" />
+            <span className="truncate">{item.label}</span>
+            {item.kind === "mcp" && item.resourceId && onRemoveMCP ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-full p-0.5 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                aria-label={`Remove ${item.label} from this chat`}
+                title={`Remove ${item.label} from this chat`}
+                disabled={removingMcpId !== null}
+                onClick={() => {
+                  void handleRemoveMCP(item.resourceId!)
+                }}
+              >
+                {removingMcpId === item.resourceId ? (
+                  <RefreshCw className="size-3 animate-spin" />
+                ) : (
+                  <X className="size-3" />
+                )}
+              </button>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      {removeError ? (
+        <p role="alert" className="mx-2.5 mb-1 text-[11px] text-destructive">
+          {removeError}
+        </p>
+      ) : null}
     </div>
+  )
+}
+
+function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
+  return (
+    <ComposerPrimitive.Unstable_TriggerPopoverItems
+      aria-label={ariaLabel}
+      className="flex max-h-56 flex-col gap-1 overflow-y-auto"
+    >
+      {(items) =>
+        items.map((item, index) => {
+          const isMCP = item.type === "mcp"
+          const isAttached = isMCP && item.metadata?.attached === true
+          return (
+            <ComposerPrimitive.Unstable_TriggerPopoverItem
+              className="group/trigger flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-muted data-[highlighted]:bg-muted"
+              index={index}
+              item={item}
+              key={item.id}
+            >
+              <span
+                className={cn(
+                  "flex size-7 shrink-0 items-center justify-center rounded-lg",
+                  isMCP
+                    ? "bg-primary/10 text-primary"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                {isMCP ? (
+                  <Plug className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <span className="size-1.5 rounded-full bg-current" />
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium">
+                  {item.label}
+                </span>
+                {item.description && (
+                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                    {item.description}
+                  </span>
+                )}
+              </span>
+              {isAttached && (
+                <Check
+                  className="size-3.5 shrink-0 text-primary"
+                  aria-label="Already attached"
+                />
+              )}
+            </ComposerPrimitive.Unstable_TriggerPopoverItem>
+          )
+        })
+      }
+    </ComposerPrimitive.Unstable_TriggerPopoverItems>
+  )
+}
+
+function McpTriggerPopoverHeader() {
+  const { open } = unstable_useTriggerPopoverScopeContext()
+  if (!open) return null
+
+  return (
+    <div className="flex items-center gap-2 px-2.5 py-2">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <Plug className="size-3.5" aria-hidden="true" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs font-medium">Add an MCP server</p>
+        <p className="text-[11px] text-muted-foreground">
+          Choose a server to attach to this chat
+        </p>
+      </div>
+      <span className="ml-auto hidden shrink-0 text-[10px] whitespace-nowrap text-muted-foreground sm:inline">
+        ↑↓ · Enter
+      </span>
+    </div>
+  )
+}
+
+function TriggerPopoverKeyboardHint() {
+  const { open } = unstable_useTriggerPopoverScopeContext()
+  if (!open) return null
+
+  return (
+    <p className="mt-1 border-t px-2.5 pt-2 text-[10px] text-muted-foreground">
+      Use ↑/↓ to navigate · Enter to select · Esc to close
+    </p>
   )
 }
 
@@ -1368,6 +1527,7 @@ function ModelEndpointPicker({
 
 function Composer({
   endpoints,
+  mcpServers,
   endpointId,
   onEndpointChange,
   models,
@@ -1377,9 +1537,12 @@ function Composer({
   compact = false,
   onOpenHistory,
   conversationContext,
+  onAttachMCP,
+  onRemoveMCP,
   toolApproval,
 }: {
   endpoints: Endpoint[]
+  mcpServers: MCPServer[]
   endpointId: string
   onEndpointChange: (id: string) => void
   models: DiscoveredChatModel[]
@@ -1389,6 +1552,8 @@ function Composer({
   compact?: boolean
   onOpenHistory?: () => void
   conversationContext: ConversationContext
+  onAttachMCP: (serverId: string) => Promise<void>
+  onRemoveMCP: (serverId: string) => Promise<void>
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
@@ -1399,6 +1564,40 @@ function Composer({
       attachment.status.type === "running" ||
       attachment.status.type === "incomplete"
   )
+  const mcpItems = useMemo<Unstable_TriggerItem[]>(() => {
+    const attachedServerIds = new Set(
+      conversationContext.mcpServers.map((server) => server.id)
+    )
+    const serversById = new Map<string, MCPServer>()
+    for (const server of mcpServers) serversById.set(server.id, server)
+    for (const server of conversationContext.mcpServers) {
+      if (!serversById.has(server.id)) serversById.set(server.id, server)
+    }
+
+    return Array.from(serversById.values())
+      .filter((server) => server.enabled || attachedServerIds.has(server.id))
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((server) => {
+        const attached = attachedServerIds.has(server.id)
+        return {
+          id: `mcp:${server.id}`,
+          type: "mcp",
+          label: server.name,
+          description: attached
+            ? server.enabled
+              ? "Already attached"
+              : "Attached · disabled"
+            : server.credentialConfigured
+              ? "Add to this chat"
+              : "Needs setup",
+          metadata: {
+            resourceId: server.id,
+            attached,
+          },
+        }
+      })
+  }, [conversationContext.mcpServers, mcpServers])
+
   const contextTriggerAdapter = useMemo(() => {
     const groups = [
       {
@@ -1415,13 +1614,7 @@ function Composer({
       {
         id: "mcp",
         label: "MCP servers",
-        items: conversationContext.mcpServers.map((server) => ({
-          id: `mcp:${server.id}`,
-          type: "mcp",
-          label: server.name,
-          description: server.enabled ? "Connected" : "Disabled",
-          metadata: { resourceId: server.id },
-        })),
+        items: mcpItems,
       },
       {
         id: "transcription",
@@ -1452,7 +1645,65 @@ function Composer({
         )
       },
     }
-  }, [conversationContext])
+  }, [conversationContext, mcpItems])
+
+  const mcpTriggerAdapter = useMemo(
+    () => ({
+      categories: () => [],
+      categoryItems: () => [],
+      search: (query: string) => {
+        const normalized = query.toLocaleLowerCase()
+        return mcpItems.filter(
+          (item) =>
+            item.label.toLocaleLowerCase().includes(normalized) ||
+            item.description?.toLocaleLowerCase().includes(normalized)
+        )
+      },
+    }),
+    [mcpItems]
+  )
+
+  const contextDirectiveFormatter = useMemo<Unstable_DirectiveFormatter>(
+    () => ({
+      serialize: (item) =>
+        item.type === "mcp"
+          ? ""
+          : unstable_defaultDirectiveFormatter.serialize(item),
+      parse: unstable_defaultDirectiveFormatter.parse,
+    }),
+    []
+  )
+
+  const [attachingMcpId, setAttachingMcpId] = useState<string | null>(null)
+  const [mcpAttachError, setMcpAttachError] = useState<string | null>(null)
+  const attachingMcpName =
+    mcpItems.find((item) => item.metadata?.resourceId === attachingMcpId)
+      ?.label ?? "MCP server"
+  const attachMcpFromTrigger = useCallback(
+    (item: Unstable_TriggerItem) => {
+      if (item.type !== "mcp") return
+      const resourceId = item.metadata?.resourceId
+      if (typeof resourceId !== "string" || item.metadata?.attached === true) {
+        return
+      }
+      setMcpAttachError(null)
+      setAttachingMcpId(resourceId)
+      void onAttachMCP(resourceId)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof APIError || error instanceof Error
+              ? error.message
+              : "The MCP server could not be added to this chat."
+          setMcpAttachError(message)
+        })
+        .finally(() => {
+          setAttachingMcpId((current) =>
+            current === resourceId ? null : current
+          )
+        })
+    },
+    [onAttachMCP]
+  )
 
   return (
     <div
@@ -1462,182 +1713,226 @@ function Composer({
       )}
     >
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
-        <ComposerPrimitive.Unstable_TriggerPopover
-          adapter={contextTriggerAdapter}
-          char="@"
-          className="absolute bottom-full left-0 z-40 mb-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-background p-2 shadow-xl"
-        >
-          <ComposerPrimitive.Unstable_TriggerPopover.Directive />
-          <ComposerPrimitive.Unstable_TriggerPopoverCategories className="flex flex-col gap-1">
-            {(categories) =>
-              categories.map((category) => (
-                <ComposerPrimitive.Unstable_TriggerPopoverCategoryItem
-                  categoryId={category.id}
-                  className="rounded-lg px-2.5 py-2 text-left text-xs hover:bg-muted"
-                  key={category.id}
-                >
-                  {category.label}
-                </ComposerPrimitive.Unstable_TriggerPopoverCategoryItem>
-              ))
-            }
-          </ComposerPrimitive.Unstable_TriggerPopoverCategories>
-          <ComposerPrimitive.Unstable_TriggerPopoverItems className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-            {(items) =>
-              items.map((item, index) => (
-                <ComposerPrimitive.Unstable_TriggerPopoverItem
-                  className="rounded-lg px-2.5 py-2 text-left hover:bg-muted"
-                  index={index}
-                  item={item}
-                  key={item.id}
-                >
-                  <span className="block text-xs font-medium">
-                    {item.label}
-                  </span>
-                  {item.description && (
-                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                      {item.description}
-                    </span>
-                  )}
-                </ComposerPrimitive.Unstable_TriggerPopoverItem>
-              ))
-            }
-          </ComposerPrimitive.Unstable_TriggerPopoverItems>
-        </ComposerPrimitive.Unstable_TriggerPopover>
-        <ComposerPrimitive.AttachmentDropzone className="rounded-[2rem] transition-colors data-[dragging=true]:ring-2 data-[dragging=true]:ring-primary/40">
-          <ComposerPrimitive.Root
-            className={cn(
-              "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
-              compact &&
-                "flex flex-wrap items-center gap-2 overflow-hidden rounded-[1.75rem] bg-muted/30 p-2 ring-border/60"
-            )}
-            data-running={isThreadRunning}
+        <div className="relative">
+          <ComposerPrimitive.Unstable_TriggerPopover
+            adapter={contextTriggerAdapter}
+            char="@"
+            className="absolute bottom-full left-0 z-40 mb-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-background p-2 shadow-xl"
           >
-            <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
-              <Quote className="size-3.5 shrink-0" aria-hidden="true" />
-              <ComposerPrimitive.QuoteText className="min-w-0 flex-1 truncate" />
-              <ComposerPrimitive.QuoteDismiss
-                aria-label="Remove quote"
-                className="rounded p-0.5 hover:bg-muted hover:text-foreground"
-              >
-                <X className="size-3.5" />
-              </ComposerPrimitive.QuoteDismiss>
-            </ComposerPrimitive.Quote>
-            <ComposerPrimitive.Queue>
-              {() => (
-                <div className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
-                  <span className="size-1.5 shrink-0 rounded-full bg-primary" />
-                  <QueueItemPrimitive.Text className="min-w-0 flex-1 truncate" />
-                  <QueueItemPrimitive.Steer className="rounded px-1.5 py-0.5 text-[11px] hover:bg-muted hover:text-foreground">
-                    Send now
-                  </QueueItemPrimitive.Steer>
-                  <QueueItemPrimitive.Remove
-                    aria-label="Remove queued message"
-                    className="rounded p-0.5 hover:bg-muted hover:text-foreground"
+            <ComposerPrimitive.Unstable_TriggerPopover.Directive
+              formatter={contextDirectiveFormatter}
+              onInserted={attachMcpFromTrigger}
+            />
+            <ComposerPrimitive.Unstable_TriggerPopoverCategories className="flex flex-col gap-1">
+              {(categories) =>
+                categories.map((category) => (
+                  <ComposerPrimitive.Unstable_TriggerPopoverCategoryItem
+                    categoryId={category.id}
+                    className="rounded-lg px-2.5 py-2 text-left text-xs hover:bg-muted data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
+                    key={category.id}
                   >
-                    <X className="size-3.5" />
-                  </QueueItemPrimitive.Remove>
+                    {category.label}
+                  </ComposerPrimitive.Unstable_TriggerPopoverCategoryItem>
+                ))
+              }
+            </ComposerPrimitive.Unstable_TriggerPopoverCategories>
+            <ContextTriggerItems ariaLabel="Context resources" />
+            <TriggerPopoverKeyboardHint />
+          </ComposerPrimitive.Unstable_TriggerPopover>
+          <ComposerPrimitive.Unstable_TriggerPopover
+            adapter={mcpTriggerAdapter}
+            char="/"
+            className="absolute bottom-full left-0 z-40 mb-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-background p-2 shadow-xl"
+          >
+            <ComposerPrimitive.Unstable_TriggerPopover.Action
+              onExecute={attachMcpFromTrigger}
+              removeOnExecute
+            />
+            <McpTriggerPopoverHeader />
+            <ContextTriggerItems ariaLabel="MCP servers" />
+            <TriggerPopoverKeyboardHint />
+          </ComposerPrimitive.Unstable_TriggerPopover>
+          <ComposerPrimitive.Unstable_TriggerPopover
+            adapter={mcpTriggerAdapter}
+            char="$"
+            className="absolute bottom-full left-0 z-40 mb-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-background p-2 shadow-xl"
+          >
+            <ComposerPrimitive.Unstable_TriggerPopover.Action
+              onExecute={attachMcpFromTrigger}
+              removeOnExecute
+            />
+            <McpTriggerPopoverHeader />
+            <ContextTriggerItems ariaLabel="MCP servers" />
+            <TriggerPopoverKeyboardHint />
+          </ComposerPrimitive.Unstable_TriggerPopover>
+          <ComposerPrimitive.AttachmentDropzone className="rounded-[2rem] transition-colors data-[dragging=true]:ring-2 data-[dragging=true]:ring-primary/40">
+            <ComposerPrimitive.Root
+              className={cn(
+                "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
+                compact &&
+                  "flex flex-wrap items-center gap-2 overflow-hidden rounded-[1.75rem] bg-muted/30 p-2 ring-border/60"
+              )}
+              data-running={isThreadRunning}
+            >
+              <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                <Quote className="size-3.5 shrink-0" aria-hidden="true" />
+                <ComposerPrimitive.QuoteText className="min-w-0 flex-1 truncate" />
+                <ComposerPrimitive.QuoteDismiss
+                  aria-label="Remove quote"
+                  className="rounded p-0.5 hover:bg-muted hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </ComposerPrimitive.QuoteDismiss>
+              </ComposerPrimitive.Quote>
+              <ComposerPrimitive.Queue>
+                {() => (
+                  <div className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                    <QueueItemPrimitive.Text className="min-w-0 flex-1 truncate" />
+                    <QueueItemPrimitive.Steer className="rounded px-1.5 py-0.5 text-[11px] hover:bg-muted hover:text-foreground">
+                      Send now
+                    </QueueItemPrimitive.Steer>
+                    <QueueItemPrimitive.Remove
+                      aria-label="Remove queued message"
+                      className="rounded p-0.5 hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="size-3.5" />
+                    </QueueItemPrimitive.Remove>
+                  </div>
+                )}
+              </ComposerPrimitive.Queue>
+              {hasAttachments && (
+                <div
+                  className={cn(
+                    "flex w-full flex-wrap items-center gap-2 px-2 pt-1 pb-0.5",
+                    compact && "order-first basis-full"
+                  )}
+                >
+                  <ComposerPrimitive.Attachments>
+                    {({ attachment }) => (
+                      <AttachmentPrimitive.Root className="max-w-full">
+                        <ChatAttachmentPreview
+                          attachment={attachment}
+                          showRemove
+                          variant="composer"
+                        />
+                      </AttachmentPrimitive.Root>
+                    )}
+                  </ComposerPrimitive.Attachments>
                 </div>
               )}
-            </ComposerPrimitive.Queue>
-            {hasAttachments && (
-              <div
-                className={cn(
-                  "flex w-full flex-wrap items-center gap-2 px-2 pt-1 pb-0.5",
-                  compact && "order-first basis-full"
-                )}
-              >
-                <ComposerPrimitive.Attachments>
-                  {({ attachment }) => (
-                    <AttachmentPrimitive.Root className="max-w-full">
-                      <ChatAttachmentPreview
-                        attachment={attachment}
-                        showRemove
-                        variant="composer"
-                      />
-                    </AttachmentPrimitive.Root>
-                  )}
-                </ComposerPrimitive.Attachments>
-              </div>
-            )}
-            {!compact && <ContextDisplay context={conversationContext} />}
-            <ComposerPrimitive.Input
-              className={cn(
-                "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
-                compact && "order-2 min-h-10 min-w-0 flex-1 px-2 py-2 leading-6"
-              )}
-              placeholder={
-                compact ? "What do you want to know?" : "Message JustAI…"
-              }
-              submitMode="enter"
-            />
-            <div
-              className={cn(
-                "flex items-center justify-between gap-2 px-1",
-                compact && "contents"
-              )}
-            >
-              <div
-                className={cn(
-                  "flex min-w-0 items-center gap-1",
-                  compact && "order-1"
-                )}
-              >
-                <ComposerPrimitive.AddAttachment
-                  aria-label="Attach a file"
-                  className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  multiple
+              <ContextDisplay
+                context={conversationContext}
+                onRemoveMCP={onRemoveMCP}
+              />
+              {attachingMcpId && (
+                <div
+                  className="mx-1 mb-1 flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[11px] text-muted-foreground"
+                  role="status"
                 >
-                  <Paperclip className="size-4" />
-                </ComposerPrimitive.AddAttachment>
-                {onOpenHistory && (
-                  <Button
-                    aria-label="Open conversation history"
-                    className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
-                    onClick={onOpenHistory}
-                    size="icon-sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <History className="size-4" />
-                  </Button>
+                  <RefreshCw
+                    className="size-3 shrink-0 animate-spin text-primary"
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">
+                    Adding{" "}
+                    <span className="font-medium text-foreground">
+                      {attachingMcpName}
+                    </span>
+                    …
+                  </span>
+                </div>
+              )}
+              {mcpAttachError && (
+                <div
+                  className="mx-1 mb-1 rounded-xl border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-[11px] text-destructive"
+                  role="alert"
+                >
+                  {mcpAttachError}
+                </div>
+              )}
+              <ComposerPrimitive.Input
+                className={cn(
+                  "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
+                  compact &&
+                    "order-2 min-h-10 min-w-0 flex-1 px-2 py-2 leading-6"
                 )}
-              </div>
-              <div className="order-3 flex shrink-0 items-center gap-1">
-                <ModelEndpointPicker
-                  compact={compact}
-                  endpointId={endpointId}
-                  endpoints={endpoints}
-                  modelDiscoveryLoading={modelDiscoveryLoading}
-                  modelId={modelId}
-                  models={models}
-                  onEndpointChange={onEndpointChange}
-                  onModelChange={onModelChange}
-                />
-                <VoiceControl
-                  className="shrink-0"
+                placeholder={
                   compact
-                  toolApproval={toolApproval}
-                />
-                {isThreadRunning ? (
-                  <ComposerPrimitive.Cancel
-                    aria-label="Cancel response"
-                    className="flex size-9 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
-                  >
-                    <RotateCcw className="size-4" />
-                  </ComposerPrimitive.Cancel>
-                ) : (
-                  <ComposerPrimitive.Send
-                    aria-label="Send message"
-                    className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
-                    disabled={hasUnreadyAttachments}
-                  >
-                    <ArrowUp className="size-4" />
-                  </ComposerPrimitive.Send>
+                    ? "What do you want to know? (type /, $ or @ for MCPs)"
+                    : "Message JustAI… (type /, $ or @ to add MCPs)"
+                }
+                submitMode="enter"
+              />
+              <div
+                className={cn(
+                  "flex items-center justify-between gap-2 px-1",
+                  compact && "contents"
                 )}
+              >
+                <div
+                  className={cn(
+                    "flex min-w-0 items-center gap-1",
+                    compact && "order-1"
+                  )}
+                >
+                  <ComposerPrimitive.AddAttachment
+                    aria-label="Attach a file"
+                    className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    multiple
+                  >
+                    <Paperclip className="size-4" />
+                  </ComposerPrimitive.AddAttachment>
+                  {onOpenHistory && (
+                    <Button
+                      aria-label="Open conversation history"
+                      className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
+                      onClick={onOpenHistory}
+                      size="icon-sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <History className="size-4" />
+                    </Button>
+                  )}
+                </div>
+                <div className="order-3 flex shrink-0 items-center gap-1">
+                  <ModelEndpointPicker
+                    compact={compact}
+                    endpointId={endpointId}
+                    endpoints={endpoints}
+                    modelDiscoveryLoading={modelDiscoveryLoading}
+                    modelId={modelId}
+                    models={models}
+                    onEndpointChange={onEndpointChange}
+                    onModelChange={onModelChange}
+                  />
+                  <VoiceControl
+                    className="shrink-0"
+                    compact
+                    toolApproval={toolApproval}
+                  />
+                  {isThreadRunning ? (
+                    <ComposerPrimitive.Cancel
+                      aria-label="Cancel response"
+                      className="flex size-9 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
+                    >
+                      <RotateCcw className="size-4" />
+                    </ComposerPrimitive.Cancel>
+                  ) : (
+                    <ComposerPrimitive.Send
+                      aria-label="Send message"
+                      className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
+                      disabled={hasUnreadyAttachments}
+                    >
+                      <ArrowUp className="size-4" />
+                    </ComposerPrimitive.Send>
+                  )}
+                </div>
               </div>
-            </div>
-          </ComposerPrimitive.Root>
-        </ComposerPrimitive.AttachmentDropzone>
+            </ComposerPrimitive.Root>
+          </ComposerPrimitive.AttachmentDropzone>
+        </div>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       {!compact && (
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
@@ -1733,8 +2028,11 @@ function AssistantChatSurface({
   conversationId,
   initialMessages,
   endpoints,
+  mcpServers,
   activeEndpoint,
   onEnsureConversation,
+  onAttachMCP,
+  onRemoveMCP,
   onUpload,
   onRemoveUpload,
   onConversationCreated,
@@ -1746,8 +2044,11 @@ function AssistantChatSurface({
   conversationId: string | null
   initialMessages: UIMessage[]
   endpoints: Endpoint[]
+  mcpServers: MCPServer[]
   activeEndpoint?: Endpoint
   onEnsureConversation: () => Promise<string>
+  onAttachMCP: (serverId: string) => Promise<void>
+  onRemoveMCP: (serverId: string) => Promise<void>
   onUpload: (file: File) => Promise<UploadedConversationAttachment>
   onRemoveUpload: (sourceId: string) => Promise<void>
   onConversationCreated?: (conversation: Conversation) => void
@@ -2055,6 +2356,7 @@ function AssistantChatSurface({
       <AssistantThreadLayout
         composerProps={{
           conversationContext,
+          mcpServers,
           endpointId: selectedEndpointId,
           endpoints,
           models: availableModels,
@@ -2067,6 +2369,8 @@ function AssistantChatSurface({
               [selectedEndpointId]: model,
             })),
           onOpenHistory,
+          onAttachMCP,
+          onRemoveMCP,
           toolApproval: voiceApproval,
         }}
         onVoiceErrorClear={() => setVoiceError(null)}
@@ -2080,6 +2384,7 @@ function AssistantChatSurface({
 export function ChatView({
   conversationId,
   endpoints,
+  mcpServers,
   onConversationCreated,
   onConversationUpdated,
   onConversationSettled,
@@ -2291,6 +2596,25 @@ export function ChatView({
     onConversationUpdatedRef.current?.()
   }, [])
 
+  const attachMCPServer = useCallback(
+    async (serverId: string) => {
+      const id = await ensureConversation()
+      await api.post(`/api/v1/conversations/${id}/context/mcp/${serverId}`)
+      await refreshConversationContext(id)
+    },
+    [ensureConversation, refreshConversationContext]
+  )
+
+  const removeMCPServer = useCallback(
+    async (serverId: string) => {
+      const id = activeConversationRef.current
+      if (!id) return
+      await api.delete(`/api/v1/conversations/${id}/context/mcp/${serverId}`)
+      await refreshConversationContext(id)
+    },
+    [refreshConversationContext]
+  )
+
   const waitForKnowledgeSource = useCallback(
     async (id: string, sourceId: string): Promise<KnowledgeSource> => {
       for (let attempt = 0; attempt < 90; attempt += 1) {
@@ -2407,11 +2731,14 @@ export function ChatView({
         activeEndpoint={activeEndpoint}
         conversationId={activeConversationId}
         endpoints={activeChatEndpoints}
+        mcpServers={mcpServers}
         initialMessages={initialMessages}
         onConversationCreated={handleSurfaceConversationCreated}
         onConversationUpdated={onConversationUpdated}
         onConversationSettled={onConversationSettled}
         onEnsureConversation={ensureConversation}
+        onAttachMCP={attachMCPServer}
+        onRemoveMCP={removeMCPServer}
         onOpenHistory={onOpenHistory}
         onRemoveUpload={removeUploadedFile}
         onUpload={uploadFile}

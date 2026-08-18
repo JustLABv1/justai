@@ -1037,7 +1037,7 @@ func assistantUIDynamicToolPart(event chatToolEvent) map[string]any {
 	state := "output-available"
 	part := map[string]any{
 		"type":       "dynamic-tool",
-		"toolName":   event.ToolName,
+		"toolName":   assistantUIToolName(event),
 		"toolCallId": event.CallID,
 		"input":      event.Arguments,
 		"state":      state,
@@ -1070,6 +1070,14 @@ func assistantUIDynamicToolPart(event chatToolEvent) map[string]any {
 		}
 	}
 	return part
+}
+
+func assistantUIToolName(event chatToolEvent) string {
+	return firstNonEmptyChatToolString(event.ProviderToolName, event.ToolName)
+}
+
+func assistantUIApprovalToolNameMatchesEvent(approvalToolName string, event chatToolEvent) bool {
+	return approvalToolName != "" && (approvalToolName == event.ToolName || (event.ProviderToolName != "" && approvalToolName == event.ProviderToolName))
 }
 
 func assistantUIMCPAppMetadata(event chatToolEvent) map[string]any {
@@ -1134,7 +1142,7 @@ func assistantUIMessageContainsApproval(raw []byte, approvalID, callID string) b
 		if part.Type != "dynamic-tool" && !strings.HasPrefix(part.Type, "tool-") {
 			continue
 		}
-		if part.ToolCall == callID && part.State == "approval-requested" && part.Approval != nil && part.Approval.ID == approvalID {
+		if (callID == "" || part.ToolCall == callID) && part.State == "approval-requested" && part.Approval != nil && part.Approval.ID == approvalID {
 			return true
 		}
 	}
@@ -1294,10 +1302,31 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 	if !found {
 		return nil, uuid.Nil, fmt.Errorf("approval is no longer pending")
 	}
+	// The standard UI-message approval response only carries approvalId,
+	// approved, and an optional reason. Resolve omitted call/tool/argument
+	// fields from the server-side pending event instead of requiring the
+	// browser to echo metadata that it does not own.
+	if approval.CallID == "" {
+		approval.CallID = event.CallID
+	}
+	if approval.ToolName == "" {
+		approval.ToolName = assistantUIToolName(event)
+	}
+	if approval.Arguments == nil {
+		approval.Arguments = event.Arguments
+	}
 	if approval.CallID == "" || approval.CallID != event.CallID {
 		return nil, uuid.Nil, fmt.Errorf("approval call does not match the pending tool")
 	}
-	if approval.ToolName == "" || approval.ToolName != event.ToolName {
+	var bindings map[string]voiceToolBinding
+	var providerToolName string
+	var pendingBinding voiceToolBinding
+	var pendingBindingFound bool
+	if !assistantUIApprovalToolNameMatchesEvent(approval.ToolName, event) && event.ServerID != uuid.Nil {
+		bindings = a.discoverConversationTools(ctx, userID, organizationID, conversationID).Bindings
+		providerToolName, pendingBinding, pendingBindingFound = findMCPBindingWithProviderName(bindings, event.ServerID, event.ToolName)
+	}
+	if !assistantUIApprovalToolNameMatchesEvent(approval.ToolName, event) && (!pendingBindingFound || approval.ToolName != providerToolName) {
 		return nil, uuid.Nil, fmt.Errorf("approval tool does not match the pending tool")
 	}
 	expected, _ := json.Marshal(event.Arguments)
@@ -1322,13 +1351,18 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 		a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.approval", event.ServerID, map[string]any{"conversationId": conversationID, "serverId": event.ServerID, "tool": event.ToolName, "approved": false, "reason": event.Error})
 		return &event, messageID, nil
 	}
-	bindings := a.discoverConversationTools(ctx, userID, organizationID, conversationID).Bindings
+	if bindings == nil {
+		bindings = a.discoverConversationTools(ctx, userID, organizationID, conversationID).Bindings
+	}
 	// Discovery uses provider-safe names as map keys (for example,
 	// mcp_<server>_<tool>), while chat events intentionally persist the raw
 	// MCP tool name so the history remains readable and stable. Resolve the
 	// pending tool by both its attached server and raw MCP name rather than
 	// treating the raw name as a provider name.
-	binding, ok := findMCPBinding(bindings, event.ServerID, event.ToolName)
+	if !pendingBindingFound {
+		providerToolName, pendingBinding, pendingBindingFound = findMCPBindingWithProviderName(bindings, event.ServerID, event.ToolName)
+	}
+	binding, ok := pendingBinding, pendingBindingFound
 	if !ok {
 		return nil, uuid.Nil, fmt.Errorf("the requested MCP tool is no longer available")
 	}
@@ -1408,7 +1442,7 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			if strings.TrimSpace(call.Arguments) != "" {
 				if err := json.Unmarshal([]byte(call.Arguments), &arguments); err != nil {
 					errorText := "The tool arguments were invalid JSON."
-					event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, CallID: call.ID, Error: errorText}
+					event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, ProviderToolName: call.Name, CallID: call.ID, Error: errorText}
 					messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 					if messageRowID != uuid.Nil {
 						*parentID = messageRowID
@@ -1422,7 +1456,7 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			binding, exists := bindings[call.Name]
 			if !exists {
 				errorText := "The requested tool is not available."
-				event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, CallID: call.ID, Arguments: arguments, Error: errorText}
+				event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, ProviderToolName: call.Name, CallID: call.ID, Arguments: arguments, Error: errorText}
 				messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 				if messageRowID != uuid.Nil {
 					*parentID = messageRowID
@@ -1436,7 +1470,7 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			if binding.Builtin {
 				eventKind = "builtin_tool"
 			}
-			event := chatToolEvent{Kind: eventKind, Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
+			event := chatToolEvent{Kind: eventKind, Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, ProviderToolName: call.Name, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
 			messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 			if messageRowID != uuid.Nil {
 				*parentID = messageRowID
@@ -1892,7 +1926,7 @@ func (a *App) legacyAssistantUIMessage(ctx context.Context, id uuid.UUID, role, 
 		var event chatToolEvent
 		if json.Unmarshal([]byte(content), &event) == nil && isChatToolEventKind(event.Kind) {
 			state := "output-available"
-			part := map[string]any{"type": "dynamic-tool", "toolName": event.ToolName, "toolCallId": event.CallID, "input": event.Arguments, "state": state, "dynamic": true}
+			part := map[string]any{"type": "dynamic-tool", "toolName": assistantUIToolName(event), "toolCallId": event.CallID, "input": event.Arguments, "state": state, "dynamic": true}
 			switch event.Status {
 			case "awaiting_approval":
 				part["state"] = "approval-requested"

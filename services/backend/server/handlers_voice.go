@@ -702,12 +702,17 @@ func mcpToolAllowed(allowed map[string]bool, toolName string) bool {
 // binding. The discovery map is keyed by the provider-safe name sent to the
 // model, whereas chat and voice history store the original MCP name.
 func findMCPBinding(bindings map[string]voiceToolBinding, serverID uuid.UUID, toolName string) (voiceToolBinding, bool) {
-	for _, binding := range bindings {
+	_, binding, ok := findMCPBindingWithProviderName(bindings, serverID, toolName)
+	return binding, ok
+}
+
+func findMCPBindingWithProviderName(bindings map[string]voiceToolBinding, serverID uuid.UUID, toolName string) (string, voiceToolBinding, bool) {
+	for providerName, binding := range bindings {
 		if binding.ServerID == serverID && binding.ToolName == toolName {
-			return binding, true
+			return providerName, binding, true
 		}
 	}
-	return voiceToolBinding{}, false
+	return "", voiceToolBinding{}, false
 }
 
 func voiceToolName(serverID uuid.UUID, toolName string, existing map[string]voiceToolBinding) string {

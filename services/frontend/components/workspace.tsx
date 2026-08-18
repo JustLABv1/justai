@@ -974,6 +974,7 @@ export function Workspace() {
               <ChatView
                 conversationId={activeConversationId}
                 endpoints={endpoints}
+                mcpServers={servers}
                 onEnsureConversation={ensureConversationForContext}
                 onConversationCreated={(conversation) => {
                   setConversations((current) => {

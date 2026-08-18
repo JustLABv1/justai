@@ -40,6 +40,24 @@ func TestFindAssistantUIApprovalReadsV7ResponsePart(t *testing.T) {
 	}
 }
 
+func TestFindAssistantUIApprovalAcceptsProtocolResponseWithoutToolMetadata(t *testing.T) {
+	rawPart := json.RawMessage(`{"type":"tool-approval-response","approvalId":"approval-1","approved":true}`)
+	approval := findAssistantUIApproval([]assistantUIMessage{{
+		ID:    "assistant-1",
+		Role:  "assistant",
+		Parts: []json.RawMessage{rawPart},
+	}})
+	if approval == nil {
+		t.Fatal("expected an approval response")
+	}
+	if approval.ApprovalID != "approval-1" || !approval.Approved {
+		t.Fatalf("unexpected approval: %+v", approval)
+	}
+	if approval.CallID != "" || approval.ToolName != "" || approval.Arguments != nil {
+		t.Fatalf("expected tool metadata to be resolved from the pending event, got %+v", approval)
+	}
+}
+
 func TestFindAssistantUIApprovalDoesNotReplayHistory(t *testing.T) {
 	rawPart, err := json.Marshal(map[string]any{
 		"type":       "tool-approval-response",
@@ -153,6 +171,25 @@ func TestAssistantUIToolMessagePreservesApprovalAndResult(t *testing.T) {
 	}
 }
 
+func TestAssistantUIToolNameUsesProviderSafeName(t *testing.T) {
+	event := chatToolEvent{
+		ToolName:         "search_plain_docs",
+		ProviderToolName: "mcp_12345678_search_plain_docs",
+	}
+	if got := assistantUIToolName(event); got != event.ProviderToolName {
+		t.Fatalf("expected the provider-safe tool name, got %q", got)
+	}
+	if !assistantUIApprovalToolNameMatchesEvent(event.ProviderToolName, event) {
+		t.Fatal("expected a provider-safe approval name to match")
+	}
+	if !assistantUIApprovalToolNameMatchesEvent(event.ToolName, event) {
+		t.Fatal("expected the raw approval name to remain backwards compatible")
+	}
+	if assistantUIApprovalToolNameMatchesEvent("mcp_other_tool", event) {
+		t.Fatal("did not expect an unrelated tool name to match")
+	}
+}
+
 func TestMergeAssistantUIToolMessagePreservesPartsAndPendingStatus(t *testing.T) {
 	target := map[string]any{
 		"id": "call-1",
@@ -241,6 +278,9 @@ func TestAssistantUIMessageContainsApproval(t *testing.T) {
 	raw := []byte(`{"parts":[{"type":"dynamic-tool","toolCallId":"call-1","state":"approval-requested","approval":{"id":"approval-1"}}]}`)
 	if !assistantUIMessageContainsApproval(raw, "approval-1", "call-1") {
 		t.Fatal("expected the canonical message to contain the pending approval")
+	}
+	if !assistantUIMessageContainsApproval(raw, "approval-1", "") {
+		t.Fatal("expected an approval-only response to resolve by approval id")
 	}
 	if assistantUIMessageContainsApproval(raw, "approval-1", "tampered-call") {
 		t.Fatal("did not expect a mismatched call id to validate")

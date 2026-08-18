@@ -27,12 +27,16 @@ type wsTicketRequest struct {
 }
 
 type chatToolEvent struct {
-	Kind              string         `json:"kind"`
-	Status            string         `json:"status"`
-	Round             int            `json:"round,omitempty"`
-	ServerID          uuid.UUID      `json:"serverId"`
-	ServerName        string         `json:"serverName"`
+	Kind       string    `json:"kind"`
+	Status     string    `json:"status"`
+	Round      int       `json:"round,omitempty"`
+	ServerID   uuid.UUID `json:"serverId"`
+	ServerName string    `json:"serverName"`
+	// ToolName is the original MCP name used when executing the tool. The
+	// provider-facing name is kept separately because model tool definitions
+	// must be unique and may be normalized for the provider.
 	ToolName          string         `json:"toolName"`
+	ProviderToolName  string         `json:"providerToolName,omitempty"`
 	MCPAppResourceURI string         `json:"mcpAppResourceUri,omitempty"`
 	MCPAppMIMEType    string         `json:"mcpAppMimeType,omitempty"`
 	CallID            string         `json:"callId"`
