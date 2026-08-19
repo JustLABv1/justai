@@ -134,6 +134,45 @@ type UploadedConversationAttachment = {
   source: KnowledgeSource
 }
 
+type LoadedConversation = {
+  messages: UIMessage[]
+  context: ConversationContext
+}
+
+type CachedConversation = LoadedConversation & {
+  cachedAt: number
+}
+
+const CONVERSATION_CACHE_TTL_MS = 30_000
+const CONVERSATION_CACHE_LIMIT = 20
+const conversationCache = new Map<string, CachedConversation>()
+
+function readCachedConversation(id: string): LoadedConversation | null {
+  const cached = conversationCache.get(id)
+  if (!cached) return null
+  if (Date.now() - cached.cachedAt > CONVERSATION_CACHE_TTL_MS) {
+    conversationCache.delete(id)
+    return null
+  }
+  conversationCache.delete(id)
+  conversationCache.set(id, cached)
+  return { messages: cached.messages, context: cached.context }
+}
+
+function cacheConversation(id: string, loaded: LoadedConversation) {
+  conversationCache.delete(id)
+  conversationCache.set(id, { ...loaded, cachedAt: Date.now() })
+  while (conversationCache.size > CONVERSATION_CACHE_LIMIT) {
+    const oldestId = conversationCache.keys().next().value
+    if (typeof oldestId !== "string") break
+    conversationCache.delete(oldestId)
+  }
+}
+
+function invalidateConversationCache(id: string | null) {
+  if (id) conversationCache.delete(id)
+}
+
 function supportsVoiceTranscription(endpoint: Endpoint) {
   const capabilities = endpoint.capabilities ?? {}
   if (Object.prototype.hasOwnProperty.call(capabilities, "transcription")) {
@@ -2541,7 +2580,10 @@ export function ChatView({
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
   >(conversationId)
-  const [surfaceKey, setSurfaceKey] = useState(conversationId ?? "new")
+  const [surfaceKey, setSurfaceKey] = useState(
+    conversationId ? `loading:${conversationId}` : "new"
+  )
+  const [surfaceReady, setSurfaceReady] = useState(!conversationId)
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([])
   const [historyLoading, setHistoryLoading] = useState(Boolean(conversationId))
   const [conversationContext, setConversationContext] =
@@ -2579,14 +2621,11 @@ export function ChatView({
     activeChatEndpoints[0]
 
   const loadConversation = useCallback(
-    async (id: string | null, signal?: AbortSignal) => {
-      setHistoryLoading(Boolean(id))
-      setConversationContext(EMPTY_CONTEXT)
-      if (!id) {
-        setInitialMessages([])
-        setHistoryLoading(false)
-        return
-      }
+    async (
+      id: string | null,
+      signal?: AbortSignal
+    ): Promise<LoadedConversation | null> => {
+      if (!id) return { messages: [], context: EMPTY_CONTEXT }
       try {
         const [historyResult, contextResult] = await Promise.allSettled([
           api.get<AssistantHistoryResponse>(
@@ -2597,9 +2636,11 @@ export function ChatView({
             signal,
           }),
         ])
-        if (signal?.aborted) return
+        if (signal?.aborted) return null
+        let messages: UIMessage[] = []
+        let context = EMPTY_CONTEXT
         if (historyResult.status === "fulfilled") {
-          setInitialMessages(normalizeHistory(historyResult.value))
+          messages = normalizeHistory(historyResult.value)
         } else if (
           historyResult.reason instanceof APIError
             ? historyResult.reason.status === 404
@@ -2610,28 +2651,28 @@ export function ChatView({
                 404
         ) {
           onConversationMissingRef.current?.()
+          return null
         } else {
           console.error(
             "Assistant UI history could not be loaded",
             historyResult.reason
           )
-          setInitialMessages([])
         }
         if (contextResult.status === "fulfilled") {
-          setConversationContext(contextResult.value)
+          context = contextResult.value
         } else {
           console.error(
             "Assistant UI conversation context could not be loaded",
             contextResult.reason
           )
         }
+        return { messages, context }
       } catch (caught) {
         if (!signal?.aborted) {
           console.error("Assistant UI history could not be loaded", caught)
-          setInitialMessages([])
+          return { messages: [], context: EMPTY_CONTEXT }
         }
-      } finally {
-        if (!signal?.aborted) setHistoryLoading(false)
+        return null
       }
     },
     []
@@ -2661,15 +2702,55 @@ export function ChatView({
       locallyCreatedConversationRef.current = null
       setActiveConversationId(conversationId)
       activeConversationRef.current = conversationId
+      setSurfaceReady(true)
       return
     }
-    setActiveConversationId(conversationId)
-    setSurfaceKey(conversationId ?? "new")
     activeConversationRef.current = conversationId
+
+    if (!conversationId) {
+      const controller = new AbortController()
+      queueMicrotask(() => {
+        if (controller.signal.aborted) return
+        setInitialMessages([])
+        setConversationContext(EMPTY_CONTEXT)
+        setActiveConversationId(null)
+        setSurfaceKey("new")
+        setSurfaceReady(true)
+        setHistoryLoading(false)
+      })
+      return () => controller.abort()
+    }
+
+    const cached = readCachedConversation(conversationId)
+    if (cached) {
+      queueMicrotask(() => {
+        setInitialMessages(cached.messages)
+        setConversationContext(cached.context)
+        setActiveConversationId(conversationId)
+        setSurfaceKey(conversationId)
+        setSurfaceReady(true)
+        setHistoryLoading(false)
+      })
+      return
+    }
+
     const controller = new AbortController()
-    queueMicrotask(
-      () => void loadConversationRef.current(conversationId, controller.signal)
-    )
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return
+      setHistoryLoading(true)
+      void loadConversationRef
+        .current(conversationId, controller.signal)
+        .then((loaded) => {
+          if (controller.signal.aborted || !loaded) return
+          cacheConversation(conversationId, loaded)
+          setInitialMessages(loaded.messages)
+          setConversationContext(loaded.context)
+          setActiveConversationId(conversationId)
+          setSurfaceKey(conversationId)
+          setSurfaceReady(true)
+          setHistoryLoading(false)
+        })
+    })
     return () => controller.abort()
   }, [conversationId])
 
@@ -2736,6 +2817,7 @@ export function ChatView({
     const context = await api.get<ConversationContext>(
       `/api/v1/conversations/${id}/context`
     )
+    invalidateConversationCache(id)
     setConversationContext(context)
     onConversationUpdatedRef.current?.()
   }, [])
@@ -2808,6 +2890,7 @@ export function ChatView({
   const uploadFile = useCallback(
     async (file: File): Promise<UploadedConversationAttachment> => {
       const id = await ensureConversation()
+      invalidateConversationCache(id)
       const body = new FormData()
       body.append("file", file)
       const source = await api.upload<KnowledgeSource>(
@@ -2839,7 +2922,13 @@ export function ChatView({
     const context = await api.get<ConversationContext>(
       `/api/v1/conversations/${id}/context`
     )
+    invalidateConversationCache(id)
     setConversationContext(context)
+    onConversationUpdatedRef.current?.()
+  }, [])
+
+  const handleSurfaceConversationUpdated = useCallback(() => {
+    invalidateConversationCache(activeConversationRef.current)
     onConversationUpdatedRef.current?.()
   }, [])
 
@@ -2857,59 +2946,79 @@ export function ChatView({
     []
   )
 
-  if (historyLoading && conversationId) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-        Loading conversation…
-      </div>
-    )
-  }
+  const conversationLoading =
+    Boolean(conversationId) &&
+    (historyLoading || activeConversationId !== conversationId || !surfaceReady)
+  const surfaceMatchesRoute = activeConversationId === conversationId
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      {onOpenContext && (
-        <Button
-          aria-expanded={contextOpen}
-          aria-label={
-            contextOpen
-              ? "Close conversation context"
-              : "Open conversation context"
-          }
-          className="absolute top-3 right-3 z-30 h-8 gap-1.5 rounded-full border bg-background/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground"
-          onClick={onOpenContext}
-          size="sm"
-          type="button"
-          variant="ghost"
+    <div
+      aria-busy={conversationLoading}
+      className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+    >
+      <div
+        className="chat-surface-content relative flex min-h-0 flex-1 flex-col"
+        data-loading={conversationLoading ? "true" : undefined}
+      >
+        {onOpenContext && (
+          <Button
+            aria-expanded={contextOpen}
+            aria-label={
+              contextOpen
+                ? "Close conversation context"
+                : "Open conversation context"
+            }
+            className="absolute top-3 right-3 z-30 h-8 gap-1.5 rounded-full border bg-background/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground"
+            onClick={onOpenContext}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {contextOpen ? (
+              <PanelRightClose className="size-3.5" />
+            ) : (
+              <PanelRightOpen className="size-3.5" />
+            )}
+            Context
+          </Button>
+        )}
+        {surfaceReady && surfaceMatchesRoute && (
+          <div
+            key={surfaceKey}
+            className="chat-surface-enter flex min-h-0 flex-1 flex-col"
+          >
+            <AssistantChatSurface
+              activeEndpoint={activeEndpoint}
+              conversationId={activeConversationId}
+              endpoints={activeChatEndpoints}
+              mcpServers={mcpServers}
+              notes={notes}
+              initialMessages={initialMessages}
+              onConversationCreated={handleSurfaceConversationCreated}
+              onConversationUpdated={handleSurfaceConversationUpdated}
+              onConversationSettled={onConversationSettled}
+              onEnsureConversation={ensureConversation}
+              onAttachMCP={attachMCPServer}
+              onRemoveMCP={removeMCPServer}
+              onAttachNote={attachNote}
+              onRemoveNote={removeNote}
+              onOpenHistory={onOpenHistory}
+              onRemoveUpload={removeUploadedFile}
+              onUpload={uploadFile}
+              conversationContext={conversationContext}
+            />
+          </div>
+        )}
+      </div>
+      {conversationLoading && (
+        <div
+          aria-live="polite"
+          className="chat-history-loading absolute inset-0 z-20 flex items-center justify-center bg-background text-sm text-muted-foreground"
+          role="status"
         >
-          {contextOpen ? (
-            <PanelRightClose className="size-3.5" />
-          ) : (
-            <PanelRightOpen className="size-3.5" />
-          )}
-          Context
-        </Button>
+          Loading conversation…
+        </div>
       )}
-      <AssistantChatSurface
-        key={surfaceKey}
-        activeEndpoint={activeEndpoint}
-        conversationId={activeConversationId}
-        endpoints={activeChatEndpoints}
-        mcpServers={mcpServers}
-        notes={notes}
-        initialMessages={initialMessages}
-        onConversationCreated={handleSurfaceConversationCreated}
-        onConversationUpdated={onConversationUpdated}
-        onConversationSettled={onConversationSettled}
-        onEnsureConversation={ensureConversation}
-        onAttachMCP={attachMCPServer}
-        onRemoveMCP={removeMCPServer}
-        onAttachNote={attachNote}
-        onRemoveNote={removeNote}
-        onOpenHistory={onOpenHistory}
-        onRemoveUpload={removeUploadedFile}
-        onUpload={uploadFile}
-        conversationContext={conversationContext}
-      />
       <span className="sr-only">
         {
           conversationContext.knowledgeSources.filter(

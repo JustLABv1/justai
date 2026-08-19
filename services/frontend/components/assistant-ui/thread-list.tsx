@@ -288,7 +288,7 @@ function AssistantThreadItem({
         </button>
       )}
       {!sectionCollapsed && (
-        <ThreadListItemPrimitive.Root className="group relative rounded-xl data-[active=true]:bg-accent">
+        <ThreadListItemPrimitive.Root className="group relative rounded-xl transition-colors duration-200 data-[active=true]:bg-accent">
           <ThreadListItemPrimitive.Trigger
             aria-label={`Open ${thread.title || "conversation"}`}
             className="flex min-h-12 w-full items-center gap-2 rounded-xl px-2.5 py-2 pr-9 text-left text-xs hover:bg-accent/70"

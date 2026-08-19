@@ -2,9 +2,9 @@
 
 import { useSyncExternalStore } from "react"
 import { Check, Monitor, Moon, Sun } from "lucide-react"
-import { useTheme } from "next-themes"
 
 import { Button } from "@/components/ui/button"
+import { useThemeTransition } from "@/components/theme-provider"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,7 +25,7 @@ const getClientSnapshot = () => true
 const getServerSnapshot = () => false
 
 function ThemeSwitcher({ expanded = false }: { expanded?: boolean }) {
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme } = useThemeTransition()
   const mounted = useSyncExternalStore(
     emptySubscribe,
     getClientSnapshot,

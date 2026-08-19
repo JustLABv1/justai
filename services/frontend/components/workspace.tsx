@@ -98,6 +98,9 @@ export function Workspace() {
   const [pendingConversationId, setPendingConversationId] = useState<
     string | null
   >(null)
+  const [conversationRouteTarget, setConversationRouteTarget] = useState<{
+    id: string | null
+  } | null>(null)
   const conversationCreationRef = useRef<Promise<string> | null>(null)
   const activeConversationRef = useRef<string | null>(requestedConversationId)
   const pendingConversationIdRef = useRef<string | null>(null)
@@ -401,12 +404,29 @@ export function Workspace() {
     organizations.find(
       (organization) => organization.id === activeOrganizationId
     ) ?? organizations[0]
-  const activeConversationId = requestedConversationId ?? pendingConversationId
+  const activeConversationId =
+    conversationRouteTarget !== null
+      ? conversationRouteTarget.id
+      : (requestedConversationId ?? pendingConversationId)
 
   useEffect(() => {
-    activeConversationRef.current =
-      requestedConversationId ?? pendingConversationId
-  }, [pendingConversationId, requestedConversationId])
+    activeConversationRef.current = activeConversationId
+  }, [activeConversationId])
+
+  useEffect(() => {
+    if (
+      conversationRouteTarget === null ||
+      requestedConversationId !== conversationRouteTarget.id
+    ) {
+      return
+    }
+    const settledTarget = conversationRouteTarget
+    queueMicrotask(() => {
+      setConversationRouteTarget((current) =>
+        current === settledTarget ? null : current
+      )
+    })
+  }, [conversationRouteTarget, requestedConversationId])
 
   useEffect(() => {
     // The native History API updates the pathname without a server
@@ -511,6 +531,13 @@ export function Workspace() {
       .toUpperCase()
   }, [user])
 
+  const workspaceViewKey =
+    activeView === "settings"
+      ? `${activeView}:${route.settingsTab}`
+      : activeView === "admin"
+        ? `${activeView}:${route.adminTab}`
+        : activeView
+
   const navigate = useCallback(
     (
       view: ViewId,
@@ -520,12 +547,16 @@ export function Workspace() {
       settingsTab: import("@/lib/types").SettingsTab = "workspace",
       adminTab: AdminTab = "overview"
     ) => {
-      if (view !== "chat") setContextOpen(false)
+      if (view !== "chat") {
+        setContextOpen(false)
+        setConversationRouteTarget(null)
+      }
       const isInternalChatReplace =
         view === "chat" && replace && conversationId !== null
       if (view === "chat") {
         activeConversationRef.current = conversationId
         if (!isInternalChatReplace) {
+          setConversationRouteTarget({ id: conversationId })
           pendingConversationIdRef.current = null
           setPendingConversationId(null)
         }
@@ -971,8 +1002,9 @@ export function Workspace() {
               </Alert>
             )}
           <div
+            key={workspaceViewKey}
             className={cn(
-              "min-h-0 w-full flex-1",
+              "workspace-view-enter min-h-0 w-full flex-1",
               activeView === "transcription" ||
                 activeView === "video-transcription"
                 ? "flex overflow-hidden"

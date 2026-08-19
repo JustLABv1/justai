@@ -1,7 +1,5 @@
-import { Suspense } from "react"
 import { redirect } from "next/navigation"
 
-import { Workspace } from "@/components/workspace"
 import { workspacePath } from "@/lib/workspace-routes"
 
 type RouteParams = { segments?: string[] }
@@ -21,9 +19,5 @@ export default async function WorkspaceRoutePage({
     redirect(workspacePath(section))
   }
 
-  return (
-    <Suspense fallback={<div className="min-h-full flex-1 bg-background" />}>
-      <Workspace />
-    </Suspense>
-  )
+  return null
 }

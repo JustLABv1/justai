@@ -585,7 +585,7 @@ export function WorkspaceContext({
 
   return (
     <>
-      <aside className="hidden w-[304px] min-w-0 shrink-0 flex-col overflow-hidden border-l border-border bg-muted/20 lg:flex">
+      <aside className="workspace-context-enter hidden w-[304px] min-w-0 shrink-0 flex-col overflow-hidden border-l border-border bg-muted/20 lg:flex">
         {panel}
       </aside>
       {isMobileViewport && (
