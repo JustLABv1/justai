@@ -74,9 +74,13 @@ spec:
                 secretKeyRef:
                   name: {{ $encryptionKeyName | quote }}
                   key: {{ $encryptionKeyKey | quote }}
-            {{- with .Values.monolith.extraEnv }}
+            {{- with .Values.monolith.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- with .Values.monolith.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: backend-config
               mountPath: /etc/justai/config.yaml
@@ -205,9 +209,13 @@ spec:
                 secretKeyRef:
                   name: {{ $encryptionKeyName | quote }}
                   key: {{ $encryptionKeyKey | quote }}
-            {{- with .Values.backend.extraEnv }}
+            {{- with .Values.backend.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- with .Values.backend.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: backend-config
               mountPath: /etc/justai/config.yaml
@@ -320,9 +328,13 @@ spec:
           env:
             - name: NODE_ENV
               value: production
-            {{- with .Values.frontend.extraEnv }}
+            {{- with .Values.frontend.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- with .Values.frontend.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- if .Values.customCA.enabled }}
           volumeMounts:
             - name: custom-ca

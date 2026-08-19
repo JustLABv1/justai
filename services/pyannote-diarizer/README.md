@@ -21,6 +21,11 @@ Create a Hugging Face access token and provide it as `HF_TOKEN`. The token is
 only needed by this service to download the model and should not be entered as
 the JustAI provider credential.
 
+The Hugging Face client honors the standard `HTTP_PROXY`, `HTTPS_PROXY`, and
+`NO_PROXY` environment variables. Set them when the container needs an egress
+proxy to reach Hugging Face; include the S3/media host in `NO_PROXY` when that
+traffic must stay on the internal network.
+
 ## Run locally
 
 ```bash

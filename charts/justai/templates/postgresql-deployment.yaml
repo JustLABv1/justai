@@ -50,6 +50,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "justai.fullname" . }}-postgresql-config
+            {{- with .Values.postgresql.envFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: POSTGRES_PASSWORD
               valueFrom:
@@ -58,6 +61,9 @@ spec:
                   key: {{ $passwordKey | quote }}
             - name: PGDATA
               value: {{ printf "%s/pgdata" .Values.postgresql.mountPath | quote }}
+            {{- with .Values.postgresql.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           livenessProbe:
             exec:
               command:

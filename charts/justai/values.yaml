@@ -1,6 +1,8 @@
 ## JustAI Helm chart defaults.
-## Supply production secrets through an external Secret, Vault integration, or
-## set secrets.create=true with non-empty values in a private values file.
+## Workload `env` and `envFrom` values use the native Kubernetes EnvVar and
+## EnvFromSource shapes. Keep credentials in an external Secret or Vault; the
+## inline values below are intended only for private, non-production values
+## files.
 
 # microservices uses the backend and frontend images separately. monolith uses
 # the combined root Dockerfile image.
@@ -36,14 +38,6 @@ config:
   # Empty derives the first ingress host and scheme. Set explicitly when the
   # frontend is exposed by another hostname.
   frontendOrigins: []
-  database:
-    # Required when postgresql.enabled=false and secrets.create=true.
-    # Prefer supplying this through an external Secret in production.
-    url: ""
-  # These are only used when secrets.create=true. External Secrets should
-  # provide the corresponding Secret keys instead.
-  jwtSecret: ""
-  encryptionKey: ""
   oidc:
     issuer: ""
     clientId: ""
@@ -84,7 +78,8 @@ monolith:
     port: 80
     backendPort: 8080
     frontendPort: 3000
-  extraEnv: []
+  env: []
+  envFrom: []
   resources:
     limits:
       cpu: 1000m
@@ -102,7 +97,8 @@ backend:
   service:
     type: ClusterIP
     port: 8080
-  extraEnv: []
+  env: []
+  envFrom: []
   resources:
     limits:
       cpu: 500m
@@ -123,7 +119,8 @@ frontend:
   service:
     type: ClusterIP
     port: 3000
-  extraEnv: []
+  env: []
+  envFrom: []
   resources:
     limits:
       cpu: 500m
@@ -151,16 +148,16 @@ pyannote:
   torchThreads: 2
   downloadTimeoutSeconds: 1800
   maxSourceBytes: "21474836480"
-  # Prefer an external Secret. The inline values are intended only for a
-  # private values file and are converted into a generated Secret.
-  hfToken: ""
-  serviceToken: ""
-  hfTokenSecret:
-    name: ""
-    key: hf-token
-  serviceTokenSecret:
-    name: ""
-    key: service-token
+  # Hugging Face and Pyannote use the standard HTTP(S)_PROXY environment
+  # variables. Set these when model downloads must go through an egress proxy.
+  # Keep credentials out of the URL when possible; use secrets.refs below for
+  # proxy URLs that contain credentials.
+  proxy:
+    http: ""
+    https: ""
+    noProxy: []
+  env: []
+  envFrom: []
   cache:
     persistence:
       enabled: false
@@ -176,7 +173,6 @@ pyannote:
     seccompProfile:
       type: RuntimeDefault
   securityContext: {}
-  extraEnv: []
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -235,10 +231,11 @@ postgresql:
   auth:
     database: justai
     username: justai
-    password: ""
   service:
     type: ClusterIP
     port: 5432
+  env: []
+  envFrom: []
   # PostgreSQL runs as UID 999 in the pgvector image. fsGroup lets the
   # container initialize a fresh PVC without a privileged init container.
   podSecurityContext:
@@ -264,6 +261,18 @@ postgresql:
 secrets:
   create: false
   existingSecret: ""
+  # These values are used only when create=true (or by a private values file).
+  # Prefer an external Secret or Vault in production.
+  data:
+    databaseURL: ""
+    postgresqlPassword: ""
+    jwtSecret: ""
+    encryptionKey: ""
+    pyannoteHfToken: ""
+    pyannoteServiceToken: ""
+    pyannoteHttpProxy: ""
+    pyannoteHttpsProxy: ""
+    pyannoteNoProxy: ""
   vault:
     enabled: false
     authRef: ""
@@ -274,6 +283,8 @@ secrets:
     refreshAfter: 30s
     destination:
       create: true
+  # Every secret-backed environment variable uses this name/key shape. Leave
+  # name empty to inherit existingSecret (or the generated/Vault Secret).
   refs:
     databaseURL:
       name: ""
@@ -287,6 +298,21 @@ secrets:
     encryptionKey:
       name: ""
       key: encryption-key
+    pyannoteHfToken:
+      name: ""
+      key: hf-token
+    pyannoteServiceToken:
+      name: ""
+      key: service-token
+    pyannoteHttpProxy:
+      name: ""
+      key: http-proxy
+    pyannoteHttpsProxy:
+      name: ""
+      key: https-proxy
+    pyannoteNoProxy:
+      name: ""
+      key: no-proxy
 
 customCA:
   enabled: false

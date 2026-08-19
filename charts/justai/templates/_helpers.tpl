@@ -78,7 +78,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "justai.validateSecretRefs" -}}
 {{- $root := . -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" -}}
 {{- $_ := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- end }}
 {{- end }}
@@ -87,7 +87,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $root := . -}}
 {{- $generatedName := printf "%s-secrets" (include "justai.fullname" $root) -}}
 {{- $seen := dict -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" -}}
 {{- $name := include "justai.secretRefName" (dict "root" $root "ref" $refName) -}}
 {{- $key := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- if eq $name $generatedName }}
@@ -101,9 +101,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{/* Build a database URL for the embedded pgvector service. */}}
 {{- define "justai.databaseURL" -}}
+{{- $password := .Values.secrets.data.postgresqlPassword | default "" -}}
 {{- if .Values.postgresql.enabled -}}
-{{- printf "postgres://%s:%s@%s:%d/%s?sslmode=disable" .Values.postgresql.auth.username .Values.postgresql.auth.password (printf "%s-postgresql" (include "justai.fullname" .)) (.Values.postgresql.service.port | int) .Values.postgresql.auth.database -}}
+{{- printf "postgres://%s:%s@%s:%d/%s?sslmode=disable" .Values.postgresql.auth.username $password (printf "%s-postgresql" (include "justai.fullname" .)) (.Values.postgresql.service.port | int) .Values.postgresql.auth.database -}}
 {{- else -}}
-{{- .Values.config.database.url -}}
+{{- .Values.secrets.data.databaseURL | default "" -}}
 {{- end -}}
 {{- end }}

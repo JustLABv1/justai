@@ -1,8 +1,50 @@
 {{- if .Values.pyannote.enabled }}
-{{- if and (not .Values.pyannote.hfToken) (not .Values.pyannote.hfTokenSecret.name) }}
-{{- fail "pyannote.enabled requires pyannote.hfToken or pyannote.hfTokenSecret.name" }}
+{{- include "justai.validateSecretRefs" . -}}
+{{- $globalSecretStore := or .Values.secrets.create .Values.secrets.existingSecret .Values.secrets.vault.enabled -}}
+{{- $externalSecretStore := or .Values.secrets.existingSecret .Values.secrets.vault.enabled -}}
+{{- $hfToken := .Values.secrets.data.pyannoteHfToken | default "" -}}
+{{- $serviceToken := .Values.secrets.data.pyannoteServiceToken | default "" -}}
+{{- $proxyHTTPValue := .Values.secrets.data.pyannoteHttpProxy | default "" -}}
+{{- $proxyHTTPSValue := .Values.secrets.data.pyannoteHttpsProxy | default "" -}}
+{{- $proxyNoProxyValue := .Values.secrets.data.pyannoteNoProxy | default "" -}}
+{{- $hfTokenRefName := .Values.secrets.refs.pyannoteHfToken.name | default "" -}}
+{{- $serviceTokenRefName := .Values.secrets.refs.pyannoteServiceToken.name | default "" -}}
+{{- $proxyHTTPRefName := .Values.secrets.refs.pyannoteHttpProxy.name | default "" -}}
+{{- $proxyHTTPSRefName := .Values.secrets.refs.pyannoteHttpsProxy.name | default "" -}}
+{{- $proxyNoProxyRefName := .Values.secrets.refs.pyannoteNoProxy.name | default "" -}}
+{{- if and (not $hfTokenRefName) (not $hfToken) (not $externalSecretStore) }}
+{{- fail "pyannote.enabled requires a Hugging Face token through secrets.refs.pyannoteHfToken, secrets.data.pyannoteHfToken with secrets.create=true, or an existing Secret/Vault Secret" }}
 {{- end }}
-{{- $generatedSecret := printf "%s-pyannote-secrets" (include "justai.fullname" .) -}}
+{{- if and $hfToken (not $globalSecretStore) (not $hfTokenRefName) }}
+{{- fail "secrets.data.pyannoteHfToken requires secrets.create=true, secrets.vault.enabled=true, or secrets.refs.pyannoteHfToken.name" }}
+{{- end }}
+{{- if and $serviceToken (not $globalSecretStore) (not $serviceTokenRefName) }}
+{{- fail "secrets.data.pyannoteServiceToken requires secrets.create=true, secrets.vault.enabled=true, or secrets.refs.pyannoteServiceToken.name" }}
+{{- end }}
+{{- if and $proxyHTTPValue (not $globalSecretStore) (not $proxyHTTPRefName) }}
+{{- fail "secrets.data.pyannoteHttpProxy requires secrets.create=true, secrets.vault.enabled=true, or secrets.refs.pyannoteHttpProxy.name" }}
+{{- end }}
+{{- if and $proxyHTTPSValue (not $globalSecretStore) (not $proxyHTTPSRefName) }}
+{{- fail "secrets.data.pyannoteHttpsProxy requires secrets.create=true, secrets.vault.enabled=true, or secrets.refs.pyannoteHttpsProxy.name" }}
+{{- end }}
+{{- if and $proxyNoProxyValue (not $globalSecretStore) (not $proxyNoProxyRefName) }}
+{{- fail "secrets.data.pyannoteNoProxy requires secrets.create=true, secrets.vault.enabled=true, or secrets.refs.pyannoteNoProxy.name" }}
+{{- end }}
+{{- $sharedSecret := include "justai.secretRefName" (dict "root" . "ref" "pyannoteHfToken") -}}
+{{- $sharedHfKey := include "justai.secretRefKey" (dict "root" . "ref" "pyannoteHfToken") -}}
+{{- $sharedServiceSecret := include "justai.secretRefName" (dict "root" . "ref" "pyannoteServiceToken") -}}
+{{- $sharedServiceKey := include "justai.secretRefKey" (dict "root" . "ref" "pyannoteServiceToken") -}}
+{{- $proxyHTTPConfigured := or $proxyHTTPValue $proxyHTTPRefName -}}
+{{- $proxyHTTPSConfigured := or $proxyHTTPSValue $proxyHTTPSRefName -}}
+{{- $proxyNoProxyConfigured := or $proxyNoProxyValue $proxyNoProxyRefName -}}
+{{- $proxyHTTPSecret := include "justai.secretRefName" (dict "root" . "ref" "pyannoteHttpProxy") -}}
+{{- $proxyHTTPKey := include "justai.secretRefKey" (dict "root" . "ref" "pyannoteHttpProxy") -}}
+{{- $proxyHTTPSSecret := include "justai.secretRefName" (dict "root" . "ref" "pyannoteHttpsProxy") -}}
+{{- $proxyHTTPSKey := include "justai.secretRefKey" (dict "root" . "ref" "pyannoteHttpsProxy") -}}
+{{- $proxyNoProxySecret := include "justai.secretRefName" (dict "root" . "ref" "pyannoteNoProxy") -}}
+{{- $proxyNoProxyKey := include "justai.secretRefKey" (dict "root" . "ref" "pyannoteNoProxy") -}}
+{{- $noProxy := .Values.pyannote.proxy.noProxy -}}
+{{- if kindIs "slice" $noProxy }}{{- $noProxy = join "," $noProxy -}}{{- end }}
 {{- $imageTag := .Values.pyannote.image.tag | default (printf "pyannote-%s" .Chart.AppVersion) -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -73,35 +115,59 @@ spec:
               value: {{ .Values.pyannote.maxSourceBytes | quote }}
             - name: HF_HOME
               value: /tmp/huggingface
-            {{- if .Values.pyannote.hfToken }}
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /tmp/huggingface/hub
+            {{- if .Values.pyannote.proxy.http }}
+            - name: HTTP_PROXY
+              value: {{ .Values.pyannote.proxy.http | quote }}
+            {{- else if $proxyHTTPConfigured }}
+            - name: HTTP_PROXY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $proxyHTTPSecret | quote }}
+                  key: {{ $proxyHTTPKey | quote }}
+            {{- end }}
+            {{- if .Values.pyannote.proxy.https }}
+            - name: HTTPS_PROXY
+              value: {{ .Values.pyannote.proxy.https | quote }}
+            {{- else if $proxyHTTPSConfigured }}
+            - name: HTTPS_PROXY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $proxyHTTPSSecret | quote }}
+                  key: {{ $proxyHTTPSKey | quote }}
+            {{- end }}
+            {{- if $noProxy }}
+            - name: NO_PROXY
+              value: {{ $noProxy | quote }}
+            {{- else if $proxyNoProxyConfigured }}
+            - name: NO_PROXY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $proxyNoProxySecret | quote }}
+                  key: {{ $proxyNoProxyKey | quote }}
+            {{- end }}
+            {{- if or $globalSecretStore $hfTokenRefName }}
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ $generatedSecret | quote }}
-                  key: hf-token
-            {{- else if .Values.pyannote.hfTokenSecret.name }}
-            - name: HF_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.pyannote.hfTokenSecret.name | quote }}
-                  key: {{ .Values.pyannote.hfTokenSecret.key | quote }}
+                  name: {{ $sharedSecret | quote }}
+                  key: {{ $sharedHfKey | quote }}
             {{- end }}
-            {{- if .Values.pyannote.serviceToken }}
+            {{- if or $serviceToken $serviceTokenRefName }}
             - name: PYANNOTE_SERVICE_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ $generatedSecret | quote }}
-                  key: service-token
-            {{- else if .Values.pyannote.serviceTokenSecret.name }}
-            - name: PYANNOTE_SERVICE_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.pyannote.serviceTokenSecret.name | quote }}
-                  key: {{ .Values.pyannote.serviceTokenSecret.key | quote }}
+                  name: {{ $sharedServiceSecret | quote }}
+                  key: {{ $sharedServiceKey | quote }}
             {{- end }}
-            {{- with .Values.pyannote.extraEnv }}
+            {{- with .Values.pyannote.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- with .Values.pyannote.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- if .Values.pyannote.cache.persistence.enabled }}
           volumeMounts:
             - name: huggingface-cache
