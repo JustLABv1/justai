@@ -199,6 +199,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/knowledge/sources", a.platformFeature("knowledge"), a.createKnowledgeSource)
 	org.POST("/knowledge/sources/:id/reindex", a.platformFeature("knowledge"), a.reindexKnowledgeSource)
 	org.DELETE("/knowledge/sources/:id", a.platformFeature("knowledge"), a.deleteKnowledgeSource)
+	org.GET("/repositories", a.platformFeature("knowledge"), a.listUserRepositoryContexts)
 	org.GET("/memories", a.listMemories)
 	org.POST("/memories", a.createMemory)
 	org.PATCH("/memories/:id", a.updateMemory)

@@ -434,6 +434,31 @@ func (a *App) loadConversationRepositories(c *gin.Context, conversationID uuid.U
 	return rows.Err()
 }
 
+func (a *App) listUserRepositoryContexts(c *gin.Context) {
+	principal, _ := middleware.GetPrincipal(c)
+	rows, err := a.DB.QueryContext(c, repositoryLibraryContextQuery, principal.UserID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer rows.Close()
+
+	result := make([]models.RepositoryContext, 0)
+	for rows.Next() {
+		item, scanErr := scanRepositoryContext(rows)
+		if scanErr != nil {
+			writeError(c, http.StatusInternalServerError, scanErr)
+			return
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"repositories": result})
+}
+
 func (a *App) getRepositoryContext(ctx context.Context, conversationID, repositoryID uuid.UUID) (models.RepositoryContext, error) {
 	row := a.DB.QueryRowContext(ctx, repositoryContextQuery+` WHERE crc.conversation_id = $1 AND rc.id = $2`, conversationID, repositoryID)
 	return scanRepositoryContext(row)
@@ -473,6 +498,42 @@ const repositoryContextQuery = `
 		) ij ON TRUE
 		WHERE rcf.context_id = rc.id
 	) stats ON TRUE`
+
+const repositoryLibraryContextQuery = `
+	SELECT rc.id, rc.conversation_id, rc.scope_type, rc.scope_id, rc.provider,
+	       rc.repository_url, rc.owner, rc.repository, rc.ref,
+	       COALESCE(rc.resolved_ref, ''), rc.title, 'persistent',
+	       CASE
+	         WHEN rc.status = 'failed' THEN 'failed'
+	         WHEN COALESCE(stats.file_count, 0) = 0 THEN rc.status
+	         WHEN stats.failed_count > 0 THEN 'failed'
+	         WHEN stats.ready_count = stats.file_count THEN 'ready'
+	         ELSE 'processing'
+	       END,
+	       COALESCE(rc.error_message, CASE WHEN COALESCE(stats.failed_count, 0) > 0 THEN 'One or more repository files failed to index' ELSE '' END),
+	       COALESCE(stats.file_count, 0), COALESCE(stats.ready_count, 0),
+	       rc.skipped_file_count, rc.total_bytes,
+	       CASE WHEN COALESCE(stats.file_count, 0) = 0 THEN 0 ELSE COALESCE(stats.progress, 0) END,
+	       rc.created_at, rc.updated_at
+	FROM repository_contexts rc
+	LEFT JOIN LATERAL (
+		SELECT COUNT(*)::int AS file_count,
+		       COUNT(*) FILTER (WHERE ks.status = 'ready')::int AS ready_count,
+		       COUNT(*) FILTER (WHERE ks.status = 'failed')::int AS failed_count,
+		       ROUND(AVG(COALESCE(ij.progress, 0)))::int AS progress
+		FROM repository_context_files rcf
+		JOIN knowledge_sources ks ON ks.id = rcf.source_id
+		LEFT JOIN LATERAL (
+			SELECT progress
+			FROM ingestion_jobs
+			WHERE source_id = ks.id
+			ORDER BY created_at DESC, id DESC
+			LIMIT 1
+		) ij ON TRUE
+		WHERE rcf.context_id = rc.id
+	) stats ON TRUE
+	WHERE rc.scope_type = 'user' AND rc.scope_id = $1
+	ORDER BY rc.updated_at DESC, rc.created_at DESC`
 
 func scanRepositoryContext(scanner interface{ Scan(dest ...any) error }) (models.RepositoryContext, error) {
 	var item models.RepositoryContext

@@ -49,10 +49,13 @@ import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type ContextTab = "sources" | "mcp" | "live"
+type EnsureConversationOptions = { activate?: boolean }
 
 type WorkspaceContextProps = {
   conversationId: string | null
-  onEnsureConversation?: () => Promise<string>
+  onEnsureConversation?: (
+    options?: EnsureConversationOptions
+  ) => Promise<string>
   sources: KnowledgeSource[]
   servers: MCPServer[]
   notes: Note[]
@@ -86,6 +89,9 @@ export function WorkspaceContext({
   const [repositoryURL, setRepositoryURL] = useState("")
   const [repositoryRef, setRepositoryRef] = useState("")
   const [repositoryToken, setRepositoryToken] = useState("")
+  const [repositoryLibrary, setRepositoryLibrary] = useState<
+    RepositoryContext[]
+  >([])
   const [isMobileViewport, setIsMobileViewport] = useState(false)
   const [loadedConversationId, setLoadedConversationId] = useState<
     string | null
@@ -97,6 +103,25 @@ export function WorkspaceContext({
     updateViewport()
     mediaQuery.addEventListener("change", updateViewport)
     return () => mediaQuery.removeEventListener("change", updateViewport)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadRepositoryLibrary = () => {
+      void api
+        .get<{ repositories: RepositoryContext[] }>("/api/v1/repositories")
+        .then((result) => {
+          if (!cancelled) setRepositoryLibrary(result.repositories)
+        })
+        .catch(() => undefined)
+    }
+
+    loadRepositoryLibrary()
+    const timer = window.setInterval(loadRepositoryLibrary, 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
   }, [])
 
   useEffect(() => {
@@ -157,6 +182,13 @@ export function WorkspaceContext({
   const visibleNotice =
     conversationId && loadedConversationId === conversationId ? notice : ""
 
+  async function ensureContextConversation(message: string) {
+    const targetConversationId =
+      conversationId ?? (await onEnsureConversation?.({ activate: false }))
+    if (!targetConversationId) throw new Error(message)
+    return targetConversationId
+  }
+
   const availableSources = Array.from(
     new Map(
       [...sources, ...visibleContext.knowledgeSources].map((source) => [
@@ -164,11 +196,22 @@ export function WorkspaceContext({
         source,
       ])
     ).values()
-  )
+  ).filter((source) => source.sourceType !== "repository")
   const readySources = availableSources.filter(
     (source) => source.status === "ready"
   )
-  const repositories = visibleContext.repositories ?? []
+  const attachedRepositories = visibleContext.repositories ?? []
+  const repositories = Array.from(
+    new Map(
+      [...repositoryLibrary, ...attachedRepositories].map((repository) => [
+        repository.id,
+        repository,
+      ])
+    ).values()
+  )
+  const attachedRepositoryIds = new Set(
+    attachedRepositories.map((repository) => repository.id)
+  )
   const readyRepositories = repositories.filter(
     (repository) => repository.status === "ready"
   )
@@ -217,11 +260,9 @@ export function WorkspaceContext({
             ? "notes"
             : "transcription"
     try {
-      const targetConversationId =
-        conversationId ?? (await onEnsureConversation?.())
-      if (!targetConversationId) {
-        throw new Error("A conversation is required before attaching context.")
-      }
+      const targetConversationId = await ensureContextConversation(
+        "A conversation is required before attaching context."
+      )
       await (attached
         ? api.delete(
             `/api/v1/conversations/${targetConversationId}/context/${path}/${id}`
@@ -249,11 +290,9 @@ export function WorkspaceContext({
     setBusy(sourceId)
     setNotice("")
     try {
-      const targetConversationId =
-        conversationId ?? (await onEnsureConversation?.())
-      if (!targetConversationId) {
-        throw new Error("A conversation is required before pinning context.")
-      }
+      const targetConversationId = await ensureContextConversation(
+        "A conversation is required before pinning context."
+      )
       await api.patch(
         `/api/v1/conversations/${targetConversationId}/context/knowledge/${sourceId}`,
         { contextScope: "persistent" }
@@ -283,13 +322,9 @@ export function WorkspaceContext({
     setBusy("repository-create")
     setNotice("")
     try {
-      const targetConversationId =
-        conversationId ?? (await onEnsureConversation?.())
-      if (!targetConversationId) {
-        throw new Error(
-          "A conversation is required before adding a repository."
-        )
-      }
+      const targetConversationId = await ensureContextConversation(
+        "A conversation is required before adding a repository."
+      )
       const repository = await api.post<RepositoryContext>(
         `/api/v1/conversations/${targetConversationId}/repositories`,
         {
@@ -323,19 +358,53 @@ export function WorkspaceContext({
     }
   }
 
+  async function attachRepository(item: RepositoryContext) {
+    if (attachedRepositoryIds.has(item.id)) return
+    setBusy(item.id)
+    setNotice("")
+    try {
+      const targetConversationId = await ensureContextConversation(
+        "A conversation is required before adding a repository."
+      )
+      const repository = await api.post<RepositoryContext>(
+        `/api/v1/conversations/${targetConversationId}/repositories`,
+        { url: item.repositoryUrl, ref: item.ref, accessToken: "" }
+      )
+      const next = await api.get<ConversationContext>(
+        `/api/v1/conversations/${targetConversationId}/context`
+      )
+      setContext(next)
+      setLoadedConversationId(targetConversationId)
+      setNotice(
+        repository.status === "ready"
+          ? "Repository attached. Its existing index is available in this chat."
+          : "Repository attached. It will become searchable when indexing finishes."
+      )
+    } catch (caught) {
+      setNotice(
+        caught instanceof Error
+          ? caught.message
+          : "The repository could not be attached."
+      )
+    } finally {
+      setBusy("")
+    }
+  }
+
   async function removeRepository(item: RepositoryContext) {
-    if (!conversationId) return
+    const targetConversationId = conversationId
+    if (!targetConversationId) return
     setBusy(item.id)
     setNotice("")
     try {
       await api.delete(
-        `/api/v1/conversations/${conversationId}/context/repositories/${item.id}`
+        `/api/v1/conversations/${targetConversationId}/context/repositories/${item.id}`
       )
       const next = await api.get<ConversationContext>(
-        `/api/v1/conversations/${conversationId}/context`
+        `/api/v1/conversations/${targetConversationId}/context`
       )
       setContext(next)
-      setLoadedConversationId(conversationId)
+      setLoadedConversationId(targetConversationId)
     } catch (caught) {
       setNotice(
         caught instanceof Error
@@ -423,20 +492,37 @@ export function WorkspaceContext({
                 label={item.title}
                 status={formatRepositoryStatus(item.status)}
                 action={
-                  <Button
-                    aria-label={`Remove ${item.title} from this chat; keep it indexed for future chats`}
-                    disabled={busy === item.id}
-                    onClick={() => void removeRepository(item)}
-                    size="icon-xs"
-                    title="Remove from this chat (keep indexed for future chats)"
-                    variant="ghost"
-                  >
-                    {busy === item.id ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : (
-                      <X />
-                    )}
-                  </Button>
+                  attachedRepositoryIds.has(item.id) ? (
+                    <Button
+                      aria-label={`Remove ${item.title} from this chat; keep it indexed for future chats`}
+                      disabled={busy === item.id}
+                      onClick={() => void removeRepository(item)}
+                      size="icon-xs"
+                      title="Remove from this chat (keep indexed for future chats)"
+                      variant="ghost"
+                    >
+                      {busy === item.id ? (
+                        <LoaderCircle className="animate-spin" />
+                      ) : (
+                        <X />
+                      )}
+                    </Button>
+                  ) : (
+                    <Button
+                      aria-label={`Add ${item.title} to this chat`}
+                      disabled={busy === item.id}
+                      onClick={() => void attachRepository(item)}
+                      size="icon-xs"
+                      title="Add to this chat"
+                      variant="ghost"
+                    >
+                      {busy === item.id ? (
+                        <LoaderCircle className="animate-spin" />
+                      ) : (
+                        <Plus />
+                      )}
+                    </Button>
+                  )
                 }
               />
             ))
@@ -458,7 +544,8 @@ export function WorkspaceContext({
           <div className="mb-2 rounded-lg border border-dashed p-3 text-[11px] leading-relaxed text-muted-foreground">
             JustAI imports a bounded set of text files and indexes them as
             read-only chat context. Provider credentials are encrypted and never
-            sent to the model.
+            sent to the model. Repository files are represented by the
+            repository above rather than listed as separate attachments.
           </div>
           <ContextHeading
             icon={BookOpenText}

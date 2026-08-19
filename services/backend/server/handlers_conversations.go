@@ -79,7 +79,17 @@ func (a *App) listConversations(c *gin.Context) {
 	} else if archivedQuery == "all" {
 		archiveFilter = "TRUE"
 	}
-	conditions := []string{"c.user_id = $1", "c.organization_id = $2", archiveFilter}
+	conditions := []string{
+		"c.user_id = $1",
+		"c.organization_id = $2",
+		archiveFilter,
+		`EXISTS (
+			SELECT 1
+			FROM messages conversation_messages
+			WHERE conversation_messages.conversation_id = c.id
+			  AND conversation_messages.role IN ('user', 'assistant')
+		)`,
+	}
 	args := []any{principal.UserID, organizationID}
 	organized := strings.EqualFold(strings.TrimSpace(c.Query("organized")), "true")
 	if folderID := strings.TrimSpace(c.Query("folderId")); folderID != "" {

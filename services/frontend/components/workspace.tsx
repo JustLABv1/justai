@@ -104,6 +104,8 @@ export function Workspace() {
   const conversationCreationRef = useRef<Promise<string> | null>(null)
   const activeConversationRef = useRef<string | null>(requestedConversationId)
   const pendingConversationIdRef = useRef<string | null>(null)
+  const pendingConversationRef = useRef<Conversation | null>(null)
+  const pendingConversationAddedRef = useRef(false)
   const hydratedConversationRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -439,6 +441,8 @@ export function Workspace() {
       return
     }
     pendingConversationIdRef.current = null
+    pendingConversationRef.current = null
+    pendingConversationAddedRef.current = false
     setPendingConversationId(null)
   }, [requestedConversationId])
 
@@ -558,6 +562,8 @@ export function Workspace() {
         if (!isInternalChatReplace) {
           setConversationRouteTarget({ id: conversationId })
           pendingConversationIdRef.current = null
+          pendingConversationRef.current = null
+          pendingConversationAddedRef.current = false
           setPendingConversationId(null)
         }
       }
@@ -594,48 +600,81 @@ export function Workspace() {
     [router]
   )
 
-  const ensureConversationForContext = useCallback(async () => {
-    // A root chat is intentionally pending until its first message or
-    // attachment needs a server conversation. Clear a stale route id before
-    // deciding whether there is already a conversation to reuse.
-    if (!requestedConversationId && pendingConversationIdRef.current) {
-      activeConversationRef.current = pendingConversationIdRef.current
-      return pendingConversationIdRef.current
-    }
-    if (!requestedConversationId && !pendingConversationId) {
-      activeConversationRef.current = null
-    }
-    if (activeConversationRef.current) return activeConversationRef.current
-    if (conversationCreationRef.current) return conversationCreationRef.current
+  const promotePendingConversation = useCallback(
+    (id: string) => {
+      if (!pendingConversationAddedRef.current) {
+        const conversation = pendingConversationRef.current
+        if (conversation) {
+          setConversations((current) => [
+            conversation,
+            ...current.filter((item) => item.id !== conversation.id),
+          ])
+        }
+        pendingConversationAddedRef.current = true
+      }
+      // Keep the pending id alive until the route catches up. This preserves
+      // the mounted chat runtime while the first message is being sent.
+      navigate("chat", id, true)
+    },
+    [navigate]
+  )
 
-    const creation = api
-      .post<{ conversation: Conversation }>("/api/v1/conversations")
-      .then((result) => {
-        activeConversationRef.current = result.conversation.id
-        pendingConversationIdRef.current = result.conversation.id
-        setPendingConversationId(result.conversation.id)
-        setConversations((current) => [
-          result.conversation,
-          ...current.filter((item) => item.id !== result.conversation.id),
-        ])
-        // Put the durable conversation URL in place as soon as the server
-        // conversation exists. This lets the first response stream directly
-        // on its final route instead of waiting for onFinish to navigate.
-        navigate("chat", result.conversation.id, true)
-        return result.conversation.id
-      })
-      .finally(() => {
-        conversationCreationRef.current = null
-      })
-    conversationCreationRef.current = creation
-    return creation
-  }, [navigate, pendingConversationId, requestedConversationId])
+  const ensureConversationForContext = useCallback(
+    async ({ activate = true }: { activate?: boolean } = {}) => {
+      // A root chat can hold a server-side context draft without changing the
+      // URL. The draft is promoted to a normal history item only when the
+      // user sends the first message (or another action explicitly activates
+      // it).
+      if (!requestedConversationId && pendingConversationIdRef.current) {
+        const id = pendingConversationIdRef.current
+        activeConversationRef.current = id
+        if (activate) promotePendingConversation(id)
+        return id
+      }
+      if (!requestedConversationId && !pendingConversationId) {
+        activeConversationRef.current = null
+      }
+      if (activeConversationRef.current) return activeConversationRef.current
+
+      if (conversationCreationRef.current) {
+        const id = await conversationCreationRef.current
+        if (activate) promotePendingConversation(id)
+        return id
+      }
+
+      const creation = api
+        .post<{ conversation: Conversation }>("/api/v1/conversations")
+        .then((result) => {
+          activeConversationRef.current = result.conversation.id
+          pendingConversationIdRef.current = result.conversation.id
+          pendingConversationRef.current = result.conversation
+          pendingConversationAddedRef.current = false
+          setPendingConversationId(result.conversation.id)
+          return result.conversation.id
+        })
+        .finally(() => {
+          conversationCreationRef.current = null
+        })
+      conversationCreationRef.current = creation
+      const id = await creation
+      if (activate) promotePendingConversation(id)
+      return id
+    },
+    [
+      navigate,
+      pendingConversationId,
+      promotePendingConversation,
+      requestedConversationId,
+    ]
+  )
 
   const settlePendingConversation = useCallback(() => {
     const id = pendingConversationIdRef.current
     if (!id) return
     if (requestedConversationId === id) {
       pendingConversationIdRef.current = null
+      pendingConversationRef.current = null
+      pendingConversationAddedRef.current = false
       setPendingConversationId(null)
       return
     }
@@ -655,6 +694,8 @@ export function Workspace() {
       )
     }
     pendingConversationIdRef.current = null
+    pendingConversationRef.current = null
+    pendingConversationAddedRef.current = false
     setPendingConversationId(null)
     navigate("chat", null, true)
   }, [navigate, requestedConversationId])
