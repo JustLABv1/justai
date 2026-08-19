@@ -66,9 +66,9 @@ FROM reg.mini.dev/python:3.14-dev AS builder
 USER root
 
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-# Keep torch and torchaudio on the same release. PyTorch 2.10.0 publishes
-# Linux CPU wheels for CPython 3.14 and fixes CVE-2026-24747.
-ARG TORCH_VERSION=2.10.0
+# Keep torch and torchaudio on the same release. PyTorch 2.11.0 publishes
+# Linux CPU wheels for CPython 3.14 and is above the CVE-2026-24747 fix level.
+ARG TORCH_VERSION=2.11.0
 ARG APP_VERSION=dev
 
 ENV VIRTUAL_ENV=/opt/venv \

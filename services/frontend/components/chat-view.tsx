@@ -3013,10 +3013,21 @@ export function ChatView({
       {conversationLoading && (
         <div
           aria-live="polite"
-          className="chat-history-loading absolute inset-0 z-20 flex items-center justify-center bg-background text-sm text-muted-foreground"
+          className="chat-history-loading absolute inset-0 z-20 flex items-center justify-center bg-background/95 text-sm text-muted-foreground backdrop-blur-sm"
           role="status"
         >
-          Loading conversation…
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div
+              aria-hidden="true"
+              className="chat-history-loading-logo relative size-14"
+            >
+              <BrandMark className="absolute inset-0 size-full text-primary/25" />
+              <span className="chat-history-loading-logo-sheen absolute inset-0">
+                <BrandMark className="size-full text-primary" />
+              </span>
+            </div>
+            <p className="font-medium text-foreground">Loading conversation…</p>
+          </div>
         </div>
       )}
       <span className="sr-only">

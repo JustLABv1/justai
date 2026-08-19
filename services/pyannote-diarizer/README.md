@@ -6,7 +6,7 @@ not an OpenAI-compatible language model.
 
 The image uses the versioned Minimus Python build/runtime pair
 (`reg.mini.dev/python:3.14-dev` and `reg.mini.dev/python:3.14`). It installs the
-matching CPU `torch`/`torchaudio` 2.10.0 wheels. A source-verified, fully
+matching CPU `torch`/`torchaudio` 2.11.0 wheels. A source-verified, fully
 static FFmpeg 9.0.1 binary (with static OpenSSL) is built in a separate stage,
 then copied into the shell-less production image. This keeps FFmpeg’s HTTPS
 support while avoiding Alpine’s vulnerable FFmpeg package tree.

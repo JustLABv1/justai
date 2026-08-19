@@ -298,6 +298,35 @@
     var(--motion-ease-out) both;
 }
 
+.chat-history-loading-logo {
+  filter: drop-shadow(
+    0 10px 20px color-mix(in oklch, var(--primary) 18%, transparent)
+  );
+}
+
+.chat-history-loading-logo-sheen {
+  clip-path: polygon(-120% 0, -80% 0, -30% 100%, -70% 100%);
+  opacity: 0;
+  animation: chat-history-logo-shimmer 1.8s linear infinite;
+}
+
+@keyframes chat-history-logo-shimmer {
+  0%,
+  20% {
+    clip-path: polygon(-120% 0, -80% 0, -30% 100%, -70% 100%);
+    opacity: 0;
+  }
+  44% {
+    clip-path: polygon(15% 0, 55% 0, 105% 100%, 65% 100%);
+    opacity: 1;
+  }
+  76%,
+  100% {
+    clip-path: polygon(130% 0, 170% 0, 220% 100%, 180% 100%);
+    opacity: 0;
+  }
+}
+
 @keyframes video-pipeline-pulse {
   0% {
     opacity: 0.45;
@@ -328,7 +357,8 @@
   .workspace-view-enter,
   .workspace-context-enter,
   .chat-surface-enter,
-  .chat-history-loading {
+  .chat-history-loading,
+  .chat-history-loading-logo-sheen {
     animation: none;
   }
 
