@@ -226,6 +226,37 @@ def validate_audio(audio_path: Path) -> float:
     return duration
 
 
+def load_extracted_audio(audio_path: Path) -> dict[str, Any]:
+    """Load the normalized PCM WAV without relying on TorchCodec.
+
+    pyannote.audio 4 delegates path-based decoding to TorchCodec. The service
+    already normalizes every input into mono 16 kHz 16-bit PCM with FFmpeg, so
+    loading those bytes directly is both deterministic and avoids TorchCodec's
+    optional system FFmpeg-library dependency.
+    """
+
+    try:
+        with wave.open(str(audio_path), "rb") as audio:
+            channels = audio.getnchannels()
+            sample_width = audio.getsampwidth()
+            sample_rate = audio.getframerate()
+            frames = audio.readframes(audio.getnframes())
+    except (OSError, wave.Error) as error:
+        raise HTTPException(
+            status_code=422, detail=f"extracted audio is invalid: {error}"
+        ) from error
+
+    if channels != 1 or sample_width != 2 or sample_rate <= 0 or not frames:
+        raise HTTPException(
+            status_code=422,
+            detail="extracted audio is not mono 16-bit PCM",
+        )
+
+    waveform = torch.frombuffer(bytearray(frames), dtype=torch.int16)
+    waveform = waveform.to(dtype=torch.float32).div_(32768.0).unsqueeze(0)
+    return {"waveform": waveform, "sample_rate": sample_rate}
+
+
 def run_diarization(audio_path: Path, request: DiarizeRequest) -> list[DiarizationTurn]:
     if request.model and request.model != MODEL_ID:
         raise HTTPException(
@@ -245,7 +276,7 @@ def run_diarization(audio_path: Path, request: DiarizeRequest) -> list[Diarizati
     # enabled is important for long recordings because it avoids retaining
     # autograd state while the pipeline processes the complete WAV.
     with PIPELINE_LOCK, torch.inference_mode():
-        annotation = PIPELINE(str(audio_path), **parameters)
+        annotation = PIPELINE(load_extracted_audio(audio_path), **parameters)
     turns: list[DiarizationTurn] = []
     for turn, _, speaker in annotation.itertracks(yield_label=True):
         start = float(turn.start)
