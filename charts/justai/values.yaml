@@ -52,7 +52,11 @@ config:
   transcription:
     storageDriver: local
     localStoragePath: /app/data/transcription
+    # The browser-facing endpoint must be reachable by clients for presigned
+    # multipart uploads. Use s3ProcessingEndpoint for a worker-only address
+    # when the backend/worker network differs from the browser network.
     s3Endpoint: ""
+    s3ProcessingEndpoint: ""
     s3Region: us-east-1
     s3Bucket: ""
     streamingChunkMs: 2500
@@ -273,6 +277,8 @@ secrets:
     pyannoteHttpProxy: ""
     pyannoteHttpsProxy: ""
     pyannoteNoProxy: ""
+    s3AccessKey: ""
+    s3SecretKey: ""
   vault:
     enabled: false
     authRef: ""
@@ -313,6 +319,12 @@ secrets:
     pyannoteNoProxy:
       name: ""
       key: no-proxy
+    s3AccessKey:
+      name: ""
+      key: s3-access-key
+    s3SecretKey:
+      name: ""
+      key: s3-secret-key
 
 customCA:
   enabled: false

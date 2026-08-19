@@ -6,6 +6,30 @@
 {{- $jwtSecretKey := include "justai.secretRefKey" (dict "root" . "ref" "jwtSecret") -}}
 {{- $encryptionKeyName := include "justai.secretRefName" (dict "root" . "ref" "encryptionKey") -}}
 {{- $encryptionKeyKey := include "justai.secretRefKey" (dict "root" . "ref" "encryptionKey") -}}
+{{- $s3Enabled := eq (lower .Values.config.transcription.storageDriver) "s3" -}}
+{{- $s3AccessKeyValue := .Values.secrets.data.s3AccessKey | default "" -}}
+{{- $s3SecretKeyValue := .Values.secrets.data.s3SecretKey | default "" -}}
+{{- $s3AccessKeyRefName := .Values.secrets.refs.s3AccessKey.name | default "" -}}
+{{- $s3SecretKeyRefName := .Values.secrets.refs.s3SecretKey.name | default "" -}}
+{{- $externalSecretStore := or .Values.secrets.existingSecret .Values.secrets.vault.enabled -}}
+{{- if $s3Enabled }}
+{{- if and (not $s3AccessKeyValue) (not $s3AccessKeyRefName) (not $externalSecretStore) }}
+{{- fail "S3 storage requires secrets.refs.s3AccessKey, secrets.data.s3AccessKey with secrets.create=true, or an existing Secret/Vault Secret" }}
+{{- end }}
+{{- if and (not $s3SecretKeyValue) (not $s3SecretKeyRefName) (not $externalSecretStore) }}
+{{- fail "S3 storage requires secrets.refs.s3SecretKey, secrets.data.s3SecretKey with secrets.create=true, or an existing Secret/Vault Secret" }}
+{{- end }}
+{{- if and $s3AccessKeyValue (not .Values.secrets.create) (not .Values.secrets.vault.enabled) (not $s3AccessKeyRefName) }}
+{{- fail "secrets.data.s3AccessKey requires secrets.create=true, secrets.vault.enabled=true, or secrets.refs.s3AccessKey.name" }}
+{{- end }}
+{{- if and $s3SecretKeyValue (not .Values.secrets.create) (not .Values.secrets.vault.enabled) (not $s3SecretKeyRefName) }}
+{{- fail "secrets.data.s3SecretKey requires secrets.create=true, secrets.vault.enabled=true, or secrets.refs.s3SecretKey.name" }}
+{{- end }}
+{{- end }}
+{{- $s3AccessKeyName := include "justai.secretRefName" (dict "root" . "ref" "s3AccessKey") -}}
+{{- $s3AccessKeyKey := include "justai.secretRefKey" (dict "root" . "ref" "s3AccessKey") -}}
+{{- $s3SecretKeyName := include "justai.secretRefName" (dict "root" . "ref" "s3SecretKey") -}}
+{{- $s3SecretKeyKey := include "justai.secretRefKey" (dict "root" . "ref" "s3SecretKey") -}}
 {{- $configName := printf "%s-backend-config" (include "justai.fullname" .) -}}
 {{- $uploadsName := printf "%s-uploads" (include "justai.fullname" .) -}}
 {{- if eq .Values.deploymentMode "monolith" }}
@@ -74,6 +98,18 @@ spec:
                 secretKeyRef:
                   name: {{ $encryptionKeyName | quote }}
                   key: {{ $encryptionKeyKey | quote }}
+            {{- if $s3Enabled }}
+            - name: JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3AccessKeyName | quote }}
+                  key: {{ $s3AccessKeyKey | quote }}
+            - name: JUSTAI_TRANSCRIPTION_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3SecretKeyName | quote }}
+                  key: {{ $s3SecretKeyKey | quote }}
+            {{- end }}
             {{- with .Values.monolith.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -209,6 +245,18 @@ spec:
                 secretKeyRef:
                   name: {{ $encryptionKeyName | quote }}
                   key: {{ $encryptionKeyKey | quote }}
+            {{- if $s3Enabled }}
+            - name: JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3AccessKeyName | quote }}
+                  key: {{ $s3AccessKeyKey | quote }}
+            - name: JUSTAI_TRANSCRIPTION_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3SecretKeyName | quote }}
+                  key: {{ $s3SecretKeyKey | quote }}
+            {{- end }}
             {{- with .Values.backend.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

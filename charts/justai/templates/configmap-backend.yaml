@@ -33,6 +33,7 @@ data:
       storage_driver: {{ .Values.config.transcription.storageDriver | quote }}
       local_storage_path: {{ .Values.config.transcription.localStoragePath | quote }}
       s3_endpoint: {{ .Values.config.transcription.s3Endpoint | quote }}
+      s3_processing_endpoint: {{ .Values.config.transcription.s3ProcessingEndpoint | quote }}
       s3_region: {{ .Values.config.transcription.s3Region | quote }}
       s3_bucket: {{ .Values.config.transcription.s3Bucket | quote }}
       audio_retention_days: {{ .Values.config.transcription.audioRetentionDays }}

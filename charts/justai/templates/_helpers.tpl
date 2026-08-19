@@ -78,7 +78,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "justai.validateSecretRefs" -}}
 {{- $root := . -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $_ := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- end }}
 {{- end }}
@@ -87,7 +87,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $root := . -}}
 {{- $generatedName := printf "%s-secrets" (include "justai.fullname" $root) -}}
 {{- $seen := dict -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $name := include "justai.secretRefName" (dict "root" $root "ref" $refName) -}}
 {{- $key := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- if eq $name $generatedName }}

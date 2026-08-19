@@ -20,6 +20,12 @@ Required Secret keys:
 {{- if .Values.postgresql.enabled }}
   {{ include "justai.secretRefKey" (dict "root" . "ref" "postgresqlPassword") }}
 {{- end }}
+{{- if eq (lower .Values.config.transcription.storageDriver) "s3" }}
+
+S3 Secret keys:
+  {{ include "justai.secretRefKey" (dict "root" . "ref" "s3AccessKey") }}
+  {{ include "justai.secretRefKey" (dict "root" . "ref" "s3SecretKey") }}
+{{- end }}
 
 Check rollout status with:
   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}

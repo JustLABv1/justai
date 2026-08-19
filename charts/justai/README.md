@@ -131,8 +131,40 @@ private image registry. The release workflow publishes the default image as a
 `pyannote-*` tag alongside the backend and frontend images.
 
 Prerecorded video transcription uses direct S3-compatible multipart uploads.
-Set `config.transcription.storageDriver: s3`, provide the S3 credentials through
-the backend environment or Secret, and configure bucket CORS for the public
-frontend origin with `PUT`, `Content-Type`, and exposed `ETag`. The configured
-S3 endpoint must be reachable by browsers; internal cluster DNS names will not
-work for the upload URLs.
+Set `config.transcription.storageDriver: s3`, configure the browser-facing
+`s3Endpoint`, `s3Region`, and `s3Bucket`, and put the S3 access and secret keys
+in the shared Secret reference fields:
+
+```yaml
+config:
+  transcription:
+    storageDriver: s3
+    s3Endpoint: https://s3.example.com
+    s3ProcessingEndpoint: http://minio.storage.svc.cluster.local:9000
+    s3Region: us-east-1
+    s3Bucket: justai-transcription
+
+secrets:
+  existingSecret: justai-secrets
+  refs:
+    s3AccessKey:
+      name: justai-s3-credentials
+      key: s3-access-key
+    s3SecretKey:
+      name: justai-s3-credentials
+      key: s3-secret-key
+```
+
+`s3ProcessingEndpoint` is optional and is used for worker-side playback and
+processing URLs when the browser-facing endpoint is not reachable from the
+cluster. The access and secret key values can instead be supplied in a private
+values file under `secrets.data.s3AccessKey` and `secrets.data.s3SecretKey`
+with `secrets.create=true`. The chart injects them as
+`JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY` and
+`JUSTAI_TRANSCRIPTION_S3_SECRET_KEY` into the backend (and monolith) only when
+S3 storage is enabled.
+
+Configure bucket CORS for the public frontend origin with `PUT`,
+`Content-Type`, and exposed `ETag`. The configured `s3Endpoint` must be
+reachable by browsers; internal cluster DNS names will not work for upload
+URLs.
