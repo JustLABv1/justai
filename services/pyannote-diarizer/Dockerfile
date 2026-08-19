@@ -86,6 +86,8 @@ COPY requirements.txt ./
 
 # Pip is not needed by the runtime. Removing it also removes its vendored
 # historical SBOM, which otherwise reports packages that are not installed.
+# Torch requires setuptools<82; keep the compatible release above both
+# setuptools CVE fix levels and verify it before copying the venv.
 RUN python -m venv "$VIRTUAL_ENV" \
     && python -m pip install --upgrade pip \
     && pip install --index-url "${TORCH_INDEX_URL}" \
@@ -96,7 +98,8 @@ RUN python -m venv "$VIRTUAL_ENV" \
       "setuptools==80.10.2" \
       "wheel==0.46.2" \
       "msgpack==1.2.1" \
-    && pip check
+    && pip check \
+    && python -c 'import importlib.metadata as metadata; assert metadata.version("setuptools") == "80.10.2"'
 
 RUN rm -rf "$VIRTUAL_ENV/lib/python3.14/site-packages/pip" \
     && rm -rf "$VIRTUAL_ENV/lib/python3.14/site-packages/pip-"*.dist-info
