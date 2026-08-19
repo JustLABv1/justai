@@ -424,7 +424,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	}
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
-	citations, err := a.searchKnowledge(ctx, organizationID, userID, conversationID, content, 6, nil)
+	citations, err := a.searchKnowledge(ctx, organizationID, userID, conversationID, content, 6, nil, false)
 	if err != nil {
 		citations = nil
 	}

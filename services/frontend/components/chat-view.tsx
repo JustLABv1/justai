@@ -10,6 +10,7 @@ import {
 } from "react"
 import {
   ArrowUp,
+  BrainCircuit,
   Check,
   ChevronDown,
   Copy,
@@ -65,6 +66,7 @@ import {
   createResumableSessionStorage,
   useChatRuntime,
 } from "@assistant-ui/react-ai-sdk"
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { lastAssistantMessageIsCompleteWithApprovalResponses } from "ai"
 import type { UIMessage } from "ai"
 
@@ -98,12 +100,16 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
+type EnsureConversationOptions = { activate?: boolean }
+
 type Props = {
   conversationId: string | null
   endpoints: Endpoint[]
   mcpServers: MCPServer[]
   notes: Note[]
-  onEnsureConversation?: () => Promise<string>
+  onEnsureConversation?: (
+    options?: EnsureConversationOptions
+  ) => Promise<string>
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
   onConversationSettled?: () => void
@@ -289,6 +295,7 @@ function createHistoryAdapter(
 
 const EMPTY_CONTEXT: ConversationContext = {
   knowledgeSources: [],
+  repositories: [],
   mcpServers: [],
   transcriptionSessions: [],
   notes: [],
@@ -937,10 +944,12 @@ function ContextDisplay({
   context,
   onRemoveMCP,
   onRemoveNote,
+  onRemoveRepository,
 }: {
   context: ConversationContext
   onRemoveMCP?: (serverId: string) => Promise<void>
   onRemoveNote?: (noteId: string) => Promise<void>
+  onRemoveRepository?: (repositoryId: string) => Promise<void>
 }) {
   const [removingContextId, setRemovingContextId] = useState<string | null>(
     null
@@ -950,7 +959,7 @@ function ContextDisplay({
     id: string
     label: string
     detail: string
-    kind: "knowledge" | "mcp" | "note" | "transcription"
+    kind: "knowledge" | "repository" | "mcp" | "note" | "transcription"
     resourceId?: string
   }> = [
     ...context.knowledgeSources
@@ -961,6 +970,13 @@ function ContextDisplay({
         detail: source.sourceType || "knowledge",
         kind: "knowledge" as const,
       })),
+    ...(context.repositories ?? []).map((repository) => ({
+      id: `repository:${repository.id}`,
+      label: repository.title,
+      detail: `repository · ${repository.status}`,
+      kind: "repository" as const,
+      resourceId: repository.id,
+    })),
     ...context.mcpServers.map((server) => ({
       id: `mcp:${server.id}`,
       label: server.name,
@@ -984,11 +1000,16 @@ function ContextDisplay({
   ]
 
   const handleRemoveContext = async (
-    kind: "mcp" | "note",
+    kind: "mcp" | "note" | "repository",
     resourceId: string
   ) => {
     if (removingContextId) return
-    const onRemove = kind === "mcp" ? onRemoveMCP : onRemoveNote
+    const onRemove =
+      kind === "mcp"
+        ? onRemoveMCP
+        : kind === "note"
+          ? onRemoveNote
+          : onRemoveRepository
     if (!onRemove) return
 
     setRemoveError(null)
@@ -1009,8 +1030,8 @@ function ContextDisplay({
   if (!items.length && !removeError) return null
 
   return (
-    <div className="min-w-0">
-      <div className="mx-1 mb-1 flex min-w-0 items-center gap-1.5 overflow-x-auto rounded-xl border bg-muted/20 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+    <div className="order-first w-full min-w-0 basis-full">
+      <div className="mx-1 mb-1 flex w-fit max-w-full min-w-0 items-center gap-1.5 overflow-x-auto rounded-xl border bg-muted/20 px-2.5 py-1.5 text-[11px] text-muted-foreground">
         <span className="shrink-0 font-medium text-foreground">Context</span>
         {items.map((item) => (
           <div
@@ -1022,7 +1043,8 @@ function ContextDisplay({
             <span className="truncate">{item.label}</span>
             {item.resourceId &&
             ((item.kind === "mcp" && onRemoveMCP) ||
-              (item.kind === "note" && onRemoveNote)) ? (
+              (item.kind === "note" && onRemoveNote) ||
+              (item.kind === "repository" && onRemoveRepository)) ? (
               <button
                 type="button"
                 className="shrink-0 rounded-full p-0.5 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
@@ -1031,6 +1053,8 @@ function ContextDisplay({
                 disabled={removingContextId !== null}
                 onClick={() => {
                   if (item.kind === "mcp" || item.kind === "note") {
+                    void handleRemoveContext(item.kind, item.resourceId!)
+                  } else if (item.kind === "repository") {
                     void handleRemoveContext(item.kind, item.resourceId!)
                   }
                 }}
@@ -1594,6 +1618,98 @@ function ModelEndpointPicker({
   )
 }
 
+function DeepContextToggle({
+  available,
+  compact,
+  enabled,
+  onToggle,
+  title,
+}: {
+  available: boolean
+  compact: boolean
+  enabled: boolean
+  onToggle: () => void
+  title: string
+}) {
+  return (
+    <PopoverPrimitive.Root>
+      <PopoverPrimitive.Trigger
+        aria-label={available ? "Toggle deep context mode" : title}
+        aria-pressed={enabled}
+        disabled={!available}
+        openOnHover
+        delay={250}
+        closeDelay={120}
+        onClick={onToggle}
+        render={
+          <Button
+            className={cn(
+              "rounded-full text-muted-foreground hover:text-foreground",
+              compact ? "size-9 p-0" : "gap-1.5 px-2.5",
+              enabled &&
+                "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+            )}
+            size={compact ? "icon" : "sm"}
+            type="button"
+            variant="ghost"
+          />
+        }
+        title={title}
+      >
+        <BrainCircuit className="size-4" aria-hidden="true" />
+        {!compact && <span>Deep context</span>}
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Positioner
+          align="end"
+          className="z-50 outline-none"
+          side="top"
+          sideOffset={8}
+        >
+          <PopoverPrimitive.Popup
+            className="w-[min(22rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            initialFocus={false}
+          >
+            <PopoverPrimitive.Arrow className="-mb-1 size-2.5 rotate-45 border-r border-b bg-popover" />
+            <div className="flex items-start gap-2.5">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <BrainCircuit className="size-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <PopoverPrimitive.Title className="text-xs font-semibold">
+                  Deep context
+                </PopoverPrimitive.Title>
+                <PopoverPrimitive.Description className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  Searches a broader, more diverse set of passages across your
+                  attached repository so JustAI can connect evidence across
+                  files.
+                </PopoverPrimitive.Description>
+              </div>
+              <PopoverPrimitive.Close
+                aria-label="Close deep context explanation"
+                className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </PopoverPrimitive.Close>
+            </div>
+            <div className="mt-3 rounded-lg border bg-muted/30 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {enabled ? "On" : "Off"}
+              </span>
+              {enabled
+                ? " · broader retrieval is active for the next question."
+                : " · quick retrieval uses a smaller context window."}
+            </div>
+            <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+              This still uses a relevant sample, not the entire repository.
+            </p>
+          </PopoverPrimitive.Popup>
+        </PopoverPrimitive.Positioner>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  )
+}
+
 function Composer({
   endpoints,
   mcpServers,
@@ -1604,6 +1720,8 @@ function Composer({
   modelId,
   modelDiscoveryLoading,
   onModelChange,
+  deepContext,
+  onDeepContextChange,
   compact = false,
   onOpenHistory,
   conversationContext,
@@ -1611,6 +1729,7 @@ function Composer({
   onRemoveMCP,
   onAttachNote,
   onRemoveNote,
+  onRemoveRepository,
   toolApproval,
 }: {
   endpoints: Endpoint[]
@@ -1622,6 +1741,8 @@ function Composer({
   modelId: string
   modelDiscoveryLoading?: boolean
   onModelChange: (id: string) => void
+  deepContext: boolean
+  onDeepContextChange: (enabled: boolean) => void
   compact?: boolean
   onOpenHistory?: () => void
   conversationContext: ConversationContext
@@ -1629,6 +1750,7 @@ function Composer({
   onRemoveMCP: (serverId: string) => Promise<void>
   onAttachNote: (noteId: string) => Promise<void>
   onRemoveNote: (noteId: string) => Promise<void>
+  onRemoveRepository: (repositoryId: string) => Promise<void>
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
@@ -1639,6 +1761,24 @@ function Composer({
       attachment.status.type === "running" ||
       attachment.status.type === "incomplete"
   )
+  const readyRepositories = (conversationContext.repositories ?? []).filter(
+    (repository) => repository.status === "ready"
+  )
+  const deepContextAvailable = readyRepositories.length > 0
+  const deepContextTitle = deepContextAvailable
+    ? deepContext
+      ? "Deep context is on · use broader context across files"
+      : "Use broader context for this question"
+    : (conversationContext.repositories ?? []).length > 0
+      ? "Repository is still indexing"
+      : "Connect a repository in Context first"
+
+  useEffect(() => {
+    if (!deepContextAvailable && deepContext) {
+      onDeepContextChange(false)
+    }
+  }, [onDeepContextChange, deepContext, deepContextAvailable])
+
   const mcpItems = useMemo<Unstable_TriggerItem[]>(() => {
     const attachedServerIds = new Set(
       conversationContext.mcpServers.map((server) => server.id)
@@ -1972,6 +2112,7 @@ function Composer({
                 context={conversationContext}
                 onRemoveMCP={onRemoveMCP}
                 onRemoveNote={onRemoveNote}
+                onRemoveRepository={onRemoveRepository}
               />
               {attachingMcpId && (
                 <div
@@ -2071,6 +2212,13 @@ function Composer({
                   )}
                 </div>
                 <div className="order-3 flex shrink-0 items-center gap-1">
+                  <DeepContextToggle
+                    available={deepContextAvailable}
+                    compact={compact}
+                    enabled={deepContext}
+                    onToggle={() => onDeepContextChange(!deepContext)}
+                    title={deepContextTitle}
+                  />
                   <ModelEndpointPicker
                     compact={compact}
                     endpointId={endpointId}
@@ -2210,6 +2358,7 @@ function AssistantChatSurface({
   onRemoveMCP,
   onAttachNote,
   onRemoveNote,
+  onRemoveRepository,
   onUpload,
   onRemoveUpload,
   onConversationCreated,
@@ -2229,6 +2378,7 @@ function AssistantChatSurface({
   onRemoveMCP: (serverId: string) => Promise<void>
   onAttachNote: (noteId: string) => Promise<void>
   onRemoveNote: (noteId: string) => Promise<void>
+  onRemoveRepository: (repositoryId: string) => Promise<void>
   onUpload: (file: File) => Promise<UploadedConversationAttachment>
   onRemoveUpload: (sourceId: string) => Promise<void>
   onConversationCreated?: (conversation: Conversation) => void
@@ -2248,6 +2398,7 @@ function AssistantChatSurface({
     import("@assistant-ui/react").ToolCallMessagePartProps | null
   >(null)
   const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [deepContext, setDeepContext] = useState(false)
   const selectedEndpointId =
     endpointId && endpoints.some((item) => item.id === endpointId)
       ? endpointId
@@ -2349,6 +2500,7 @@ function AssistantChatSurface({
           endpointId: selectedEndpointId,
           model: selectedModel,
           useMemory: true,
+          deepContext,
         }),
         resumable: {
           storage: resumableStorage,
@@ -2385,12 +2537,19 @@ function AssistantChatSurface({
               endpointId: selectedEndpointId,
               model: selectedModel,
               useMemory: true,
+              deepContext,
               requestId,
             },
           }
         },
       }),
-    [onEnsureConversation, resumableStorage, selectedEndpointId, selectedModel]
+    [
+      onEnsureConversation,
+      deepContext,
+      resumableStorage,
+      selectedEndpointId,
+      selectedModel,
+    ]
   )
 
   const attachments = useMemo(
@@ -2533,6 +2692,8 @@ function AssistantChatSurface({
           models: availableModels,
           modelDiscoveryLoading,
           modelId: selectedModel,
+          deepContext,
+          onDeepContextChange: setDeepContext,
           onEndpointChange: setEndpointId,
           onModelChange: (model) =>
             setModelByEndpoint((current) => ({
@@ -2544,6 +2705,7 @@ function AssistantChatSurface({
           onRemoveMCP,
           onAttachNote,
           onRemoveNote,
+          onRemoveRepository,
           toolApproval: voiceApproval,
         }}
         onVoiceErrorClear={() => setVoiceError(null)}
@@ -2579,6 +2741,7 @@ export function ChatView({
   const [historyLoading, setHistoryLoading] = useState(Boolean(conversationId))
   const [conversationContext, setConversationContext] =
     useState<ConversationContext>(EMPTY_CONTEXT)
+  const [contextHintDismissed, setContextHintDismissed] = useState(contextOpen)
   const locallyCreatedConversationRef = useRef<string | null>(null)
   const pendingConversationRef = useRef(false)
   const conversationCreationRef = useRef<Promise<string> | null>(null)
@@ -2785,24 +2948,27 @@ export function ChatView({
     return creation
   }, [])
 
-  const ensureConversation = useCallback(async () => {
-    const creatingFromRoot = routeConversationIdRef.current === null
-    if (creatingFromRoot) pendingConversationRef.current = true
-    try {
-      const id = await (onEnsureConversationRef.current?.() ??
-        ensureLocalConversation())
-      if (creatingFromRoot) {
-        pendingConversationRef.current = false
-        locallyCreatedConversationRef.current = id
-        activeConversationRef.current = id
-        setActiveConversationId(id)
+  const ensureConversation = useCallback(
+    async ({ activate = true }: EnsureConversationOptions = {}) => {
+      const creatingFromRoot = routeConversationIdRef.current === null
+      if (creatingFromRoot) pendingConversationRef.current = true
+      try {
+        const id = await (onEnsureConversationRef.current?.({ activate }) ??
+          ensureLocalConversation())
+        if (creatingFromRoot) {
+          pendingConversationRef.current = false
+          locallyCreatedConversationRef.current = id
+          activeConversationRef.current = id
+          setActiveConversationId(id)
+        }
+        return id
+      } catch (error) {
+        if (creatingFromRoot) pendingConversationRef.current = false
+        throw error
       }
-      return id
-    } catch (error) {
-      if (creatingFromRoot) pendingConversationRef.current = false
-      throw error
-    }
-  }, [ensureLocalConversation])
+    },
+    [ensureLocalConversation]
+  )
 
   const refreshConversationContext = useCallback(async (id: string) => {
     const context = await api.get<ConversationContext>(
@@ -2813,9 +2979,21 @@ export function ChatView({
     onConversationUpdatedRef.current?.()
   }, [])
 
+  const removeRepository = useCallback(
+    async (repositoryId: string) => {
+      const id = activeConversationRef.current
+      if (!id) return
+      await api.delete(
+        `/api/v1/conversations/${id}/context/repositories/${repositoryId}`
+      )
+      await refreshConversationContext(id)
+    },
+    [refreshConversationContext]
+  )
+
   const attachMCPServer = useCallback(
     async (serverId: string) => {
-      const id = await ensureConversation()
+      const id = await ensureConversation({ activate: false })
       await api.post(`/api/v1/conversations/${id}/context/mcp/${serverId}`)
       await refreshConversationContext(id)
     },
@@ -2834,7 +3012,7 @@ export function ChatView({
 
   const attachNote = useCallback(
     async (noteId: string) => {
-      const id = await ensureConversation()
+      const id = await ensureConversation({ activate: false })
       await api.post(`/api/v1/conversations/${id}/context/notes/${noteId}`)
       await refreshConversationContext(id)
     },
@@ -2880,7 +3058,7 @@ export function ChatView({
 
   const uploadFile = useCallback(
     async (file: File): Promise<UploadedConversationAttachment> => {
-      const id = await ensureConversation()
+      const id = await ensureConversation({ activate: false })
       invalidateConversationCache(id)
       const body = new FormData()
       body.append("file", file)
@@ -2941,6 +3119,18 @@ export function ChatView({
     Boolean(conversationId) &&
     (historyLoading || activeConversationId !== conversationId || !surfaceReady)
   const surfaceMatchesRoute = activeConversationId === conversationId
+  const showContextHint =
+    Boolean(onOpenContext) &&
+    !contextOpen &&
+    !contextHintDismissed &&
+    surfaceReady &&
+    !conversationLoading &&
+    (conversationContext.repositories ?? []).length === 0
+  const hasKnowledgeSources = conversationContext.knowledgeSources.length > 0
+  const handleOpenContext = () => {
+    setContextHintDismissed(true)
+    onOpenContext?.()
+  }
 
   return (
     <div
@@ -2951,18 +3141,58 @@ export function ChatView({
         className="chat-surface-content relative flex min-h-0 flex-1 flex-col"
         data-loading={conversationLoading ? "true" : undefined}
       >
+        {showContextHint && (
+          <div
+            aria-live="polite"
+            className="absolute top-12 right-3 z-30 flex max-w-[280px] items-start gap-2 rounded-xl border bg-background/95 p-3 text-xs shadow-lg backdrop-blur"
+            role="status"
+          >
+            <div className="min-w-0">
+              <p className="font-medium text-foreground">
+                {hasKnowledgeSources
+                  ? "Add a repository"
+                  : "Add files or a repository"}
+              </p>
+              <p className="mt-1 leading-relaxed text-muted-foreground">
+                {hasKnowledgeSources
+                  ? "Open Context in the top right to connect a read-only GitHub/GitLab repository."
+                  : "Open Context in the top right to attach files or connect a read-only GitHub/GitLab repository."}
+              </p>
+              <button
+                className="mt-2 font-medium text-foreground underline underline-offset-2 hover:no-underline"
+                onClick={handleOpenContext}
+                type="button"
+              >
+                Open Context
+              </button>
+            </div>
+            <button
+              aria-label="Dismiss context tip"
+              className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setContextHintDismissed(true)}
+              type="button"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
         {onOpenContext && (
           <Button
             aria-expanded={contextOpen}
             aria-label={
               contextOpen
                 ? "Close conversation context"
-                : "Open conversation context"
+                : "Open conversation context to add files or repositories"
             }
             className="absolute top-3 right-3 z-30 h-8 gap-1.5 rounded-full border bg-background/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground"
-            onClick={onOpenContext}
+            onClick={handleOpenContext}
             size="sm"
             type="button"
+            title={
+              contextOpen
+                ? "Close conversation context"
+                : "Open Context to add files or repositories"
+            }
             variant="ghost"
           >
             {contextOpen ? (
@@ -2993,6 +3223,7 @@ export function ChatView({
               onRemoveMCP={removeMCPServer}
               onAttachNote={attachNote}
               onRemoveNote={removeNote}
+              onRemoveRepository={removeRepository}
               onOpenHistory={onOpenHistory}
               onRemoveUpload={removeUploadedFile}
               onUpload={uploadFile}
@@ -3027,7 +3258,8 @@ export function ChatView({
             (source) => source.contextScope !== "message"
           ).length
         }{" "}
-        knowledge sources, {conversationContext.mcpServers.length} MCP servers,{" "}
+        knowledge sources, {(conversationContext.repositories ?? []).length}{" "}
+        repositories, {conversationContext.mcpServers.length} MCP servers,{" "}
         {conversationContext.notes?.length ?? 0} notes,{" "}
         {conversationContext.transcriptionSessions.length} transcription
         sessions attached.

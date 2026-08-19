@@ -25,6 +25,7 @@ type Config struct {
 	SecureCookies       bool
 	CookieSameSite      string
 	CookieDomain        string
+	RepositoryMaxFiles  int
 	Transcription       TranscriptionConfig
 }
 
@@ -69,6 +70,7 @@ type fileConfig struct {
 	SecureCookies       *bool                   `yaml:"secure_cookies"`
 	CookieSameSite      string                  `yaml:"cookie_same_site"`
 	CookieDomain        string                  `yaml:"cookie_domain"`
+	RepositoryMaxFiles  int                     `yaml:"repository_max_files"`
 	Transcription       fileTranscriptionConfig `yaml:"transcription"`
 }
 
@@ -143,6 +145,10 @@ func Load(configPath string) (Config, error) {
 	if isProduction && mcpOAuthRedirectURL == "http://localhost:8080/api/v1/mcp/oauth/callback" {
 		return Config{}, fmt.Errorf("JUSTAI_MCP_OAUTH_REDIRECT_URL must be configured in production")
 	}
+	repositoryMaxFiles := intOrFile("JUSTAI_REPOSITORY_MAX_FILES", fileValues.RepositoryMaxFiles, 200)
+	if repositoryMaxFiles < 1 || repositoryMaxFiles > 5000 {
+		return Config{}, fmt.Errorf("JUSTAI_REPOSITORY_MAX_FILES must be between 1 and 5000")
+	}
 	return Config{
 		Port:            getenvOrFile("JUSTAI_PORT", fileValues.Port, "8080"),
 		DatabaseURL:     getenvOrFile("JUSTAI_DATABASE_URL", fileValues.DatabaseURL, ""),
@@ -161,6 +167,7 @@ func Load(configPath string) (Config, error) {
 		SecureCookies:       secureCookies,
 		CookieSameSite:      cookieSameSite,
 		CookieDomain:        getenvOrFile("JUSTAI_COOKIE_DOMAIN", fileValues.CookieDomain, ""),
+		RepositoryMaxFiles:  repositoryMaxFiles,
 		Transcription:       transcriptionConfig(fileValues.Transcription),
 	}, nil
 }

@@ -238,6 +238,30 @@ export type KnowledgeSource = {
   updatedAt: string
 }
 
+export type RepositoryContext = {
+  id: string
+  conversationId?: string | null
+  scopeType: string
+  scopeId?: string | null
+  provider: "github" | "gitlab" | string
+  repositoryUrl: string
+  owner: string
+  repository: string
+  ref: string
+  resolvedRef?: string
+  title: string
+  contextScope?: "persistent" | "message"
+  status: "processing" | "queued" | "ready" | "failed" | string
+  error?: string
+  fileCount: number
+  readyFileCount: number
+  skippedFileCount: number
+  totalBytes: number
+  progress: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type MCPServer = {
   id: string
   scopeType: string
@@ -270,6 +294,7 @@ export type Citation = {
 
 export type ConversationContext = {
   knowledgeSources: KnowledgeSource[]
+  repositories: RepositoryContext[]
   mcpServers: MCPServer[]
   transcriptionSessions: TranscriptionSession[]
   notes?: Note[]

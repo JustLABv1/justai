@@ -34,6 +34,14 @@ type assistantUIRequest struct {
 	Model          string            `json:"model"`
 	RequestID      string            `json:"requestId"`
 	UseMemory      bool              `json:"useMemory"`
+	DeepContext    bool              `json:"deepContext"`
+}
+
+func assistantUIRetrievalMode(deepContext bool) string {
+	if deepContext {
+		return "deep-context"
+	}
+	return "quick"
 }
 
 type assistantUIMessage struct {
@@ -435,15 +443,19 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		_ = writeChunk(map[string]any{
 			"type": "data-retrieval-status",
 			"id":   "retrieval-status",
-			"data": map[string]any{"status": "started", "query": latestUser.Text},
+			"data": map[string]any{
+				"status": "started",
+				"mode":   assistantUIRetrievalMode(request.DeepContext),
+				"query":  latestUser.Text,
+			},
 		})
 		var retrievalErr error
-		citations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6, latestUser.AttachmentSourceIDs)
+		citations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6, latestUser.AttachmentSourceIDs, request.DeepContext)
 		if retrievalErr != nil {
 			_ = writeChunk(map[string]any{
 				"type": "data-retrieval-status",
 				"id":   "retrieval-status",
-				"data": map[string]any{"status": "failed", "error": retrievalErr.Error()},
+				"data": map[string]any{"status": "failed", "mode": assistantUIRetrievalMode(request.DeepContext), "error": retrievalErr.Error()},
 			})
 		} else {
 			_ = writeChunk(map[string]any{
@@ -451,6 +463,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 				"id":   "retrieval-status",
 				"data": map[string]any{
 					"status":        "completed",
+					"mode":          assistantUIRetrievalMode(request.DeepContext),
 					"citationCount": len(deduplicateAssistantUICitations(citations)),
 					"sourceCount":   len(deduplicateAssistantUICitations(citations)),
 					"passageCount":  len(citations),
@@ -557,7 +570,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		}
 		toolHistory = append([]provider.ToolMessage{{Role: "system", Content: chatToolInstructions()}}, toolHistory...)
 		if len(citations) > 0 {
-			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: citationPrompt(citations)}}, toolHistory...)
+			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: citationPromptForMode(citations, request.DeepContext)}}, toolHistory...)
 		}
 		requiresAction, streamErr := a.streamAssistantUIWithTools(c, principal.UserID, organizationID, conversationID, runID, &outputParent, endpoint, toolHistory, definitions, bindings, latestUser, writeChunk, &response, assistantMessageID, textID, &toolParts)
 		if streamErr != nil {
@@ -606,7 +619,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			history = append([]provider.Message{{Role: "system", Content: chatBuiltInFallbackInstructions()}}, history...)
 		}
 		if len(citations) > 0 {
-			history = append([]provider.Message{{Role: "system", Content: citationPrompt(citations)}}, history...)
+			history = append([]provider.Message{{Role: "system", Content: citationPromptForMode(citations, request.DeepContext)}}, history...)
 		}
 		streamErr := a.streamAssistantUIWithoutTools(c, principal.UserID, organizationID, conversationID, runID, &outputParent, endpoint, history, latestUser, writeChunk, &response, textID, &toolParts)
 		if streamErr != nil {

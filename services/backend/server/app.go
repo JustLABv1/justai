@@ -27,15 +27,18 @@ type App struct {
 	Secrets *security.SecretBox
 	RAG     *rag.Worker
 	Live    *TranscriptionManager
+
+	repositoryImportSlots chan struct{}
 }
 
 func New(cfg config.Config, db *sql.DB) *App {
 	application := &App{
-		Config:  cfg,
-		DB:      db,
-		Tokens:  auth.NewTokenManager(cfg.JWTSecret),
-		Secrets: security.NewSecretBox(cfg.EncryptionKey),
-		RAG:     rag.NewWorker(db, cfg.AllowPrivate),
+		Config:                cfg,
+		DB:                    db,
+		Tokens:                auth.NewTokenManager(cfg.JWTSecret),
+		Secrets:               security.NewSecretBox(cfg.EncryptionKey),
+		RAG:                   rag.NewWorker(db, cfg.AllowPrivate),
+		repositoryImportSlots: make(chan struct{}, 2),
 	}
 	application.RAG.SetSecretBox(application.Secrets)
 	application.Live = NewTranscriptionManager(cfg, db, application.Secrets)
@@ -61,8 +64,12 @@ func (a *App) Router() *gin.Engine {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database unavailable"})
 			return
 		}
-		var migrated bool
-		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '026_mcp_server_icon_uploads.sql')`).Scan(&migrated); err != nil || !migrated {
+		var repositoryStorageReady bool
+		if err := a.DB.QueryRowContext(c, `
+			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '028_persistent_repository_context.sql')
+			   AND to_regclass('public.repository_contexts') IS NOT NULL
+			   AND to_regclass('public.repository_context_files') IS NOT NULL
+			   AND to_regclass('public.conversation_repository_contexts') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
@@ -192,6 +199,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/knowledge/sources", a.platformFeature("knowledge"), a.createKnowledgeSource)
 	org.POST("/knowledge/sources/:id/reindex", a.platformFeature("knowledge"), a.reindexKnowledgeSource)
 	org.DELETE("/knowledge/sources/:id", a.platformFeature("knowledge"), a.deleteKnowledgeSource)
+	org.GET("/repositories", a.platformFeature("knowledge"), a.listUserRepositoryContexts)
 	org.GET("/memories", a.listMemories)
 	org.POST("/memories", a.createMemory)
 	org.PATCH("/memories/:id", a.updateMemory)
@@ -217,6 +225,8 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/images/edit", a.editImage)
 	org.GET("/images/:id", a.serveGeneratedImage)
 	org.GET("/conversations/:id/context", a.getConversationContext)
+	org.POST("/conversations/:id/repositories", a.platformFeature("knowledge"), a.createRepositoryContext)
+	org.DELETE("/conversations/:id/context/repositories/:repositoryId", a.platformFeature("knowledge"), a.deleteRepositoryContext)
 	org.POST("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.attachConversationKnowledge)
 	org.PATCH("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.updateConversationKnowledge)
 	org.DELETE("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.detachConversationKnowledge)
