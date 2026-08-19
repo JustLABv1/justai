@@ -6,9 +6,10 @@ not an OpenAI-compatible language model.
 
 The image uses the versioned Minimus Python build/runtime pair
 (`reg.mini.dev/python:3.14-dev` and `reg.mini.dev/python:3.14`). It installs the
-matching CPU `torch`/`torchaudio` 2.9.1 wheels. FFmpeg is installed only in the
-build stage; the final image contains the executable and its resolved runtime
-libraries without a shell or package manager.
+matching CPU `torch`/`torchaudio` 2.10.0 wheels. A source-verified, fully
+static FFmpeg 9.0.1 binary (with static OpenSSL) is built in a separate stage,
+then copied into the shell-less production image. This keeps FFmpeg’s HTTPS
+support while avoiding Alpine’s vulnerable FFmpeg package tree.
 
 ## Hugging Face setup
 
