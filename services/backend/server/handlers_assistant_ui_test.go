@@ -483,6 +483,7 @@ func TestAssistantUIToolPartCarriesMCPAppMetadata(t *testing.T) {
 	part := assistantUIDynamicToolPart(chatToolEvent{
 		Status:            "completed",
 		ServerID:          uuid.New(),
+		IconURL:           "https://cdn.example.test/kairos.svg",
 		ToolName:          "weather",
 		MCPAppResourceURI: "ui://weather/widget",
 		CallID:            "call-app",
@@ -495,6 +496,14 @@ func TestAssistantUIToolPartCarriesMCPAppMetadata(t *testing.T) {
 	appMetadata, ok := mcpMetadata["app"].(map[string]any)
 	if !ok || appMetadata["resourceUri"] != "ui://weather/widget" {
 		t.Fatalf("unexpected MCP app metadata: %+v", mcpMetadata)
+	}
+	providerMetadata, ok := part["callProviderMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected tool provider metadata, got %+v", part)
+	}
+	details, ok := providerMetadata["justai"].(map[string]any)
+	if !ok || details["iconUrl"] != "https://cdn.example.test/kairos.svg" {
+		t.Fatalf("unexpected MCP display metadata: %+v", providerMetadata)
 	}
 }
 

@@ -164,12 +164,15 @@ function justAIToolMetadata(part: ToolCallPart) {
   const metadata = rawMetadata as {
     serverName?: unknown
     toolName?: unknown
+    iconUrl?: unknown
   }
   return {
     serverName:
       typeof metadata.serverName === "string" ? metadata.serverName : undefined,
     toolName:
       typeof metadata.toolName === "string" ? metadata.toolName : undefined,
+    iconUrl:
+      typeof metadata.iconUrl === "string" ? metadata.iconUrl : undefined,
   }
 }
 
@@ -266,6 +269,7 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
             show_category: true,
             tool_call_id: part.toolCallId,
             integration_name: displayMetadata.serverName,
+            icon_url: displayMetadata.iconUrl,
             inputs: parseToolInputs(part),
             output:
               part.result === undefined

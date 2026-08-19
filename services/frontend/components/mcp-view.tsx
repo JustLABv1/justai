@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   AlertTriangle,
   Check,
+  ImagePlus,
   KeyRound,
   LoaderCircle,
   LockKeyhole,
@@ -15,9 +16,10 @@ import {
   TerminalSquare,
   Trash2,
   Wrench,
+  X,
 } from "lucide-react"
 
-import { APIError, api, API_URL } from "@/lib/api"
+import { APIError, api, API_URL, resolveAPIURL } from "@/lib/api"
 import type { MCPServer } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -134,7 +136,12 @@ export function MCPView({
   const [activeAction, setActiveAction] = useState<MCPAction | null>(null)
   const [saving, setSaving] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<MCPServer | null>(null)
+  const [iconFile, setIconFile] = useState<File | null>(null)
+  const [iconPreview, setIconPreview] = useState("")
+  const [iconRemoved, setIconRemoved] = useState(false)
   const actionAbortRef = useRef<AbortController | null>(null)
+  const iconInputRef = useRef<HTMLInputElement | null>(null)
+  const iconObjectURLRef = useRef("")
   const createRequestRef = useRef(createRequest ?? 0)
   const canManageOrganization =
     platformAdmin ||
@@ -148,14 +155,54 @@ export function MCPView({
     return server.scopeType === "organization" && canManageOrganization
   }
 
+  const resetIconSelection = useCallback((preview = "") => {
+    if (iconObjectURLRef.current) {
+      URL.revokeObjectURL(iconObjectURLRef.current)
+      iconObjectURLRef.current = ""
+    }
+    setIconFile(null)
+    setIconPreview(preview)
+    setIconRemoved(false)
+    if (iconInputRef.current) iconInputRef.current.value = ""
+  }, [])
+
+  function chooseIcon(file: File | null) {
+    if (!file) return
+    if (file.size > 512 * 1024) {
+      setNotice("MCP icons are limited to 512 KB.")
+      if (iconInputRef.current) iconInputRef.current.value = ""
+      return
+    }
+    const allowedTypes = new Set([
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/vnd.microsoft.icon",
+      "image/webp",
+      "image/x-icon",
+    ])
+    if (!allowedTypes.has(file.type)) {
+      setNotice("Use a PNG, JPEG, GIF, WebP, or ICO image for the MCP logo.")
+      if (iconInputRef.current) iconInputRef.current.value = ""
+      return
+    }
+    if (iconObjectURLRef.current) URL.revokeObjectURL(iconObjectURLRef.current)
+    iconObjectURLRef.current = URL.createObjectURL(file)
+    setIconFile(file)
+    setIconPreview(iconObjectURLRef.current)
+    setIconRemoved(false)
+    setNotice("")
+  }
+
   const openCreate = useCallback(() => {
     setEditingServer(null)
+    resetIconSelection()
     setForm({
       ...emptyForm,
       scopeType: canManageOrganization ? "organization" : "user",
     })
     setOpen(true)
-  }, [canManageOrganization])
+  }, [canManageOrganization, resetIconSelection])
 
   useEffect(() => {
     if (!createRequest || createRequest === createRequestRef.current) return
@@ -164,7 +211,10 @@ export function MCPView({
   }, [createRequest, openCreate])
 
   useEffect(() => {
-    return () => actionAbortRef.current?.abort()
+    return () => {
+      actionAbortRef.current?.abort()
+      if (iconObjectURLRef.current) URL.revokeObjectURL(iconObjectURLRef.current)
+    }
   }, [])
 
   function update<K extends keyof MCPForm>(key: K, value: MCPForm[K]) {
@@ -179,7 +229,7 @@ export function MCPView({
       .map((tool) => tool.trim())
       .filter(Boolean)
     try {
-      const server = editingServer
+      let server = editingServer
         ? await api.patch<MCPServer>(
             `/api/v1/mcp/servers/${editingServer.id}`,
             { ...form, allowedTools }
@@ -188,6 +238,18 @@ export function MCPView({
             ...form,
             allowedTools,
           })
+      if (iconFile) {
+        const body = new FormData()
+        body.set("icon", iconFile)
+        server = await api.upload<MCPServer>(
+          `/api/v1/mcp/servers/${server.id}/icon`,
+          body
+        )
+      } else if (iconRemoved && editingServer) {
+        server = await api.delete<MCPServer>(
+          `/api/v1/mcp/servers/${editingServer.id}/icon`
+        )
+      }
       onChange(
         editingServer
           ? servers.map((item) => (item.id === server.id ? server : item))
@@ -210,6 +272,7 @@ export function MCPView({
     } finally {
       setSaving(false)
     }
+    resetIconSelection()
     setForm(emptyForm)
     setEditingServer(null)
     setOpen(false)
@@ -217,6 +280,7 @@ export function MCPView({
 
   function edit(server: MCPServer) {
     setEditingServer(server)
+    resetIconSelection(server.iconUrl ?? "")
     setForm({
       name: server.name,
       endpointUrl: server.endpointUrl,
@@ -414,7 +478,18 @@ export function MCPView({
           <Card key={server.id} size="sm" className="gap-0">
             <CardHeader className="flex-row items-start gap-3 border-b pb-3">
               <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                <Plug aria-hidden="true" />
+                {server.iconUrl ? (
+                  // MCP icons are served by JustAI, so Next Image does not need
+                  // a global host allowlist here.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    alt=""
+                    className="size-7 rounded-md object-contain"
+                    src={resolveAPIURL(server.iconUrl)}
+                  />
+                ) : (
+                  <Plug aria-hidden="true" />
+                )}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -698,11 +773,12 @@ export function MCPView({
           setOpen(value)
           if (!value) {
             setEditingServer(null)
+            resetIconSelection()
             setForm(emptyForm)
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
               {editingServer ? "Edit MCP server" : "Add MCP server"}
@@ -723,6 +799,77 @@ export function MCPView({
                   placeholder="Linear tools"
                   required
                 />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="mcp-icon">Logo</FieldLabel>
+                <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-2">
+                  <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
+                    {iconPreview && !iconRemoved ? (
+                      // Uploaded MCP icons are served by JustAI and do not need
+                      // a Next Image host allowlist.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        alt="Selected MCP logo preview"
+                        className="size-full rounded-md object-contain"
+                        src={resolveAPIURL(iconPreview)}
+                      />
+                    ) : (
+                      <Plug
+                        aria-hidden="true"
+                        className="size-6 text-muted-foreground"
+                      />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Input
+                      ref={iconInputRef}
+                      id="mcp-icon"
+                      type="file"
+                      className="sr-only"
+                      accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
+                      onChange={(event) =>
+                        chooseIcon(event.target.files?.[0] ?? null)
+                      }
+                    />
+                    <p className="truncate text-sm font-medium">
+                      {iconFile?.name ??
+                        (iconPreview && !iconRemoved
+                          ? "Current logo"
+                          : "No logo selected")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      PNG, JPEG, GIF, WebP, or ICO · Max 512 KB
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => iconInputRef.current?.click()}
+                      >
+                        <ImagePlus data-icon="inline-start" aria-hidden="true" />
+                        {iconPreview && !iconRemoved
+                          ? "Replace logo"
+                          : "Choose logo"}
+                      </Button>
+                      {((iconPreview && !iconRemoved) ||
+                        (editingServer?.iconUrl && !iconRemoved)) && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            resetIconSelection()
+                            setIconRemoved(Boolean(editingServer))
+                          }}
+                        >
+                          <X data-icon="inline-start" aria-hidden="true" />
+                          Remove logo
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </Field>
               <Field>
                 <FieldLabel htmlFor="mcp-url">Endpoint URL</FieldLabel>

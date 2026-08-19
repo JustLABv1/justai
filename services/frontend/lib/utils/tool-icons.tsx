@@ -34,6 +34,7 @@ import {
   TwitterIcon,
 } from "@hugeicons/core-free-icons"
 import { cn } from "@/lib/utils"
+import { resolveAPIURL } from "@/lib/api"
 
 export interface IconProps {
   size?: number
@@ -286,7 +287,7 @@ const iconConfigs: Record<string, IconConfig> = {
 }
 
 /**
- * Get icon for a tool category with optional URL-based icon fallback.
+ * Get icon for a tool category with optional MCP branding.
  * Supports built-in categories and custom integration icons via iconUrl.
  */
 export const getToolCategoryIcon = (
@@ -315,6 +316,30 @@ export const getToolCategoryIcon = (
 
   const finalCategory = normalizeCategoryName(aliasedCategory)
 
+  // MCP branding is more specific than the generic integrations category or
+  // any built-in category inferred from the provider-facing tool name.
+  if (iconUrl) {
+    const iconElement = (
+      // Integration icons can come from an MCP server and therefore cannot
+      // be restricted to Next's statically configured image hosts.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        alt={`${category} Icon`}
+        className={`${restProps.className || ""} aspect-square object-contain`}
+        height={defaultProps.height}
+        src={resolveAPIURL(iconUrl)}
+        width={defaultProps.width}
+      />
+    )
+    return showBackground ? (
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-zinc-200 p-1 dark:bg-zinc-700">
+        {iconElement}
+      </div>
+    ) : (
+      iconElement
+    )
+  }
+
   let config = iconConfigs[finalCategory]
 
   // Fallback search
@@ -328,29 +353,7 @@ export const getToolCategoryIcon = (
     }
   }
 
-  // If no predefined config found, try iconUrl fallback for custom integrations
   if (!config) {
-    if (iconUrl) {
-      const iconElement = (
-        // Integration icons can come from an MCP server and therefore cannot
-        // be restricted to Next's statically configured image hosts.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          alt={`${category} Icon`}
-          className={`${restProps.className || ""} aspect-square object-contain`}
-          height={defaultProps.height}
-          src={iconUrl}
-          width={defaultProps.width}
-        />
-      )
-      return showBackground ? (
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-zinc-200 p-1 dark:bg-zinc-700">
-          {iconElement}
-        </div>
-      ) : (
-        iconElement
-      )
-    }
     return null
   }
 

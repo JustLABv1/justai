@@ -99,6 +99,7 @@ func (a *App) loadConversationKnowledge(c *gin.Context, conversationID uuid.UUID
 func (a *App) loadConversationMCP(c *gin.Context, conversationID uuid.UUID, result *models.ConversationContext) error {
 	rows, err := a.DB.QueryContext(c, `
 		SELECT ms.id, ms.scope_type, ms.scope_id, ms.name, ms.endpoint_url, ms.auth_type,
+		       CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = ms.id) THEN '/api/v1/mcp/servers/' || ms.id::text || '/icon' ELSE COALESCE(ms.icon_url, '') END,
 		       ms.encrypted_credential IS NOT NULL, ms.enabled, ms.allowed_tools,
 		       ms.trusted_read_only, ms.last_tested_at, COALESCE(ms.last_error, ''),
 		       COALESCE(ms.protocol_version, ''),
@@ -402,7 +403,7 @@ func scanMCPServerContext(scanner interface{ Scan(dest ...any) error }) (models.
 	var item models.MCPServer
 	var scopeID sql.NullString
 	var allowed []byte
-	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.EndpointURL, &item.AuthType, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.EndpointURL, &item.AuthType, &item.IconURL, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	item.ScopeID = parseMCPScopeID(scopeID)

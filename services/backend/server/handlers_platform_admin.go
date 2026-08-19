@@ -822,7 +822,7 @@ func (a *App) listPlatformMCPServers(c *gin.Context) {
 			return
 		}
 	}
-	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, name, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE ($1 = '' OR scope_type = $1) AND (NULLIF($2, '') IS NULL OR (scope_type = 'organization' AND scope_id = NULLIF($2, '')::uuid)) ORDER BY created_at DESC`, scope, organizationID)
+	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = mcp_servers.id) THEN '/api/v1/mcp/servers/' || mcp_servers.id::text || '/icon' ELSE COALESCE(icon_url, '') END, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE ($1 = '' OR scope_type = $1) AND (NULLIF($2, '') IS NULL OR (scope_type = 'organization' AND scope_id = NULLIF($2, '')::uuid)) ORDER BY created_at DESC`, scope, organizationID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return

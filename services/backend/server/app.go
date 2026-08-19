@@ -62,7 +62,7 @@ func (a *App) Router() *gin.Engine {
 			return
 		}
 		var migrated bool
-		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '024_chat_run_approval_recovery.sql')`).Scan(&migrated); err != nil || !migrated {
+		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '026_mcp_server_icon_uploads.sql')`).Scan(&migrated); err != nil || !migrated {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
@@ -143,6 +143,8 @@ func (a *App) Router() *gin.Engine {
 	protected.POST("/admin/mcp/servers", a.createPlatformMCPServer)
 	protected.PATCH("/admin/mcp/servers/:id", a.updatePlatformMCPServer)
 	protected.DELETE("/admin/mcp/servers/:id", a.deletePlatformMCPServer)
+	protected.POST("/admin/mcp/servers/:id/icon", a.uploadPlatformMCPServerIcon)
+	protected.DELETE("/admin/mcp/servers/:id/icon", a.deletePlatformMCPServerIcon)
 	protected.POST("/admin/mcp/servers/:id/test", a.testPlatformMCPServer)
 	protected.GET("/admin/mcp/servers/:id/tools", a.discoverPlatformMCPTools)
 	protected.GET("/admin/audit", a.listPlatformAudit)
@@ -251,6 +253,9 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/chat/resume/:streamId", a.platformFeature("ai"), a.resumeChatStream)
 
 	protected.GET("/ws/voice", a.platformFeature("voice"), a.voiceWebSocket)
+	protected.GET("/mcp/servers/:id/icon", a.serveMCPServerIcon)
+	protected.POST("/mcp/servers/:id/icon", a.uploadMCPServerIcon)
+	protected.DELETE("/mcp/servers/:id/icon", a.deleteMCPServerIcon)
 	router.GET("/api/v1/ws/transcription", a.platformFeature("transcription"), a.transcriptionWebSocket)
 	organizationRoutes := protected.Group("/organizations/:id")
 	organizationRoutes.Use(middleware.RequireOrg(a.DB))

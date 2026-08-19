@@ -103,6 +103,7 @@ type assistantUIRepository struct {
 type assistantUIToolDisplayBinding struct {
 	ServerID   uuid.UUID
 	ServerName string
+	IconURL    string
 	ToolName   string
 }
 
@@ -1127,6 +1128,9 @@ func assistantUIToolProviderMetadata(event chatToolEvent) map[string]any {
 	if strings.TrimSpace(event.ToolName) != "" {
 		details["toolName"] = event.ToolName
 	}
+	if strings.TrimSpace(event.IconURL) != "" {
+		details["iconUrl"] = event.IconURL
+	}
 	return map[string]any{"justai": details}
 }
 
@@ -1585,7 +1589,7 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			if binding.Builtin {
 				eventKind = "builtin_tool"
 			}
-			event := chatToolEvent{Kind: eventKind, Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, ProviderToolName: call.Name, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
+			event := chatToolEvent{Kind: eventKind, Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, IconURL: binding.IconURL, ToolName: binding.ToolName, ProviderToolName: call.Name, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
 			messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 			if messageRowID != uuid.Nil {
 				*parentID = messageRowID
@@ -1594,6 +1598,9 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			if !binding.Builtin {
 				toolMetadata["serverId"] = binding.ServerID.String()
 				toolMetadata["serverName"] = binding.ServerName
+				if strings.TrimSpace(binding.IconURL) != "" {
+					toolMetadata["iconUrl"] = binding.IconURL
+				}
 			}
 			toolInput := map[string]any{"type": "tool-input-available", "toolCallId": call.ID, "toolName": call.Name, "input": arguments, "dynamic": true, "toolMetadata": toolMetadata}
 			if providerMetadata := assistantUIToolProviderMetadata(event); providerMetadata != nil {
@@ -2056,7 +2063,7 @@ func mergeAssistantUIToolDisplayMetadata(repository *assistantUIRepository) {
 // metadata by matching the call against tools attached to the conversation.
 func (a *App) enrichAssistantUIToolDisplayMetadata(ctx context.Context, conversationID uuid.UUID, repository *assistantUIRepository) {
 	rows, err := a.DB.QueryContext(ctx, `
-		SELECT ms.id, ms.name, COALESCE(mst.name, '')
+		SELECT ms.id, ms.name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = ms.id) THEN '/api/v1/mcp/servers/' || ms.id::text || '/icon' ELSE COALESCE(ms.icon_url, '') END, COALESCE(mst.name, '')
 		FROM conversation_mcp_servers cms
 		JOIN mcp_servers ms ON ms.id = cms.server_id AND ms.enabled = TRUE
 		LEFT JOIN mcp_server_tools mst ON mst.server_id = ms.id
@@ -2074,7 +2081,7 @@ func (a *App) enrichAssistantUIToolDisplayMetadata(ctx context.Context, conversa
 	bindings := make([]assistantUIToolDisplayBinding, 0)
 	for rows.Next() {
 		var binding assistantUIToolDisplayBinding
-		if err := rows.Scan(&binding.ServerID, &binding.ServerName, &binding.ToolName); err != nil {
+		if err := rows.Scan(&binding.ServerID, &binding.ServerName, &binding.IconURL, &binding.ToolName); err != nil {
 			return
 		}
 		bindings = append(bindings, binding)
@@ -2122,6 +2129,9 @@ func assistantUIEnrichToolPartDisplayMetadata(part map[string]any, bindings []as
 	}
 	if current, _ := details["toolName"].(string); strings.TrimSpace(current) == "" && strings.TrimSpace(match.ToolName) != "" {
 		details["toolName"] = match.ToolName
+	}
+	if current, _ := details["iconUrl"].(string); strings.TrimSpace(current) == "" && strings.TrimSpace(match.IconURL) != "" {
+		details["iconUrl"] = match.IconURL
 	}
 	providerMetadata["justai"] = details
 	part["callProviderMetadata"] = providerMetadata

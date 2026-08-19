@@ -54,6 +54,7 @@ type voiceApproval struct {
 type voiceToolBinding struct {
 	ServerID          uuid.UUID
 	ServerName        string
+	IconURL           string
 	ToolName          string
 	Builtin           bool
 	MCPAppResourceURI string
@@ -511,7 +512,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 					arguments := map[string]any{}
 					if strings.TrimSpace(call.Arguments) != "" {
 						if err := json.Unmarshal([]byte(call.Arguments), &arguments); err != nil {
-							event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, CallID: call.ID, Error: "The tool arguments were invalid JSON."}
+							event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, IconURL: binding.IconURL, ToolName: binding.ToolName, CallID: call.ID, Error: "The tool arguments were invalid JSON."}
 							messageID := a.persistChatToolEvent(ctx, conversationID, event)
 							toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The tool arguments were invalid JSON."})
 							if messageID != uuid.Nil {
@@ -520,7 +521,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 							continue
 						}
 					}
-					event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, ToolName: binding.ToolName, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
+					event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, IconURL: binding.IconURL, ToolName: binding.ToolName, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
 					messageID := a.persistChatToolEvent(ctx, conversationID, event)
 					approvalID := ""
 					approved := true
@@ -640,7 +641,7 @@ func (a *App) discoverConversationToolsWithRefresh(ctx context.Context, userID, 
 		result.Errors = []string{"MCP tools require an active conversation context"}
 		return result
 	}
-	rows, err := a.DB.QueryContext(ctx, `SELECT ms.id, ms.name FROM conversation_mcp_servers cms JOIN mcp_servers ms ON ms.id = cms.server_id WHERE cms.conversation_id = $1 AND ms.enabled = TRUE ORDER BY cms.created_at`, conversationID)
+	rows, err := a.DB.QueryContext(ctx, `SELECT ms.id, ms.name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = ms.id) THEN '/api/v1/mcp/servers/' || ms.id::text || '/icon' ELSE COALESCE(ms.icon_url, '') END FROM conversation_mcp_servers cms JOIN mcp_servers ms ON ms.id = cms.server_id WHERE cms.conversation_id = $1 AND ms.enabled = TRUE ORDER BY cms.created_at`, conversationID)
 	if err != nil {
 		result.Errors = []string{"could not load configured MCP servers: " + err.Error()}
 		return result
@@ -649,7 +650,8 @@ func (a *App) discoverConversationToolsWithRefresh(ctx context.Context, userID, 
 	for rows.Next() {
 		var serverID uuid.UUID
 		var serverName string
-		if err := rows.Scan(&serverID, &serverName); err != nil {
+		var iconURL string
+		if err := rows.Scan(&serverID, &serverName, &iconURL); err != nil {
 			result.Errors = append(result.Errors, "could not read an MCP server configuration: "+err.Error())
 			continue
 		}
@@ -698,6 +700,7 @@ func (a *App) discoverConversationToolsWithRefresh(ctx context.Context, userID, 
 			result.Bindings[name] = voiceToolBinding{
 				ServerID:          serverID,
 				ServerName:        serverName,
+				IconURL:           iconURL,
 				ToolName:          tool.Name,
 				MCPAppResourceURI: appMetadata.ResourceURI,
 				MCPAppMIMEType:    appMetadata.MIMEType,

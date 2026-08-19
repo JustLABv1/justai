@@ -243,6 +243,7 @@ export type MCPServer = {
   scopeType: string
   scopeId?: string | null
   name: string
+  iconUrl?: string
   endpointUrl: string
   authType: string
   credentialConfigured: boolean

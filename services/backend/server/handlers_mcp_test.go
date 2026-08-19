@@ -9,6 +9,41 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestNormalizeMCPIconURL(t *testing.T) {
+	valid := " https://cdn.example.test/icons/kairos.svg "
+	tooLong := "https://example.test/" + string(make([]byte, 2049))
+	tests := []struct {
+		name    string
+		raw     *string
+		want    string
+		wantErr bool
+	}{
+		{name: "unset", want: ""},
+		{name: "blank", raw: stringPtr("  "), want: ""},
+		{name: "http and https are supported", raw: &valid, want: "https://cdn.example.test/icons/kairos.svg"},
+		{name: "relative URL", raw: stringPtr("/icons/kairos.svg"), wantErr: true},
+		{name: "javascript URL", raw: stringPtr("javascript:alert(1)"), wantErr: true},
+		{name: "userinfo is rejected", raw: stringPtr("https://user:pass@example.test/icon.svg"), wantErr: true},
+		{name: "too long", raw: &tooLong, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeMCPIconURL(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("normalizeMCPIconURL() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeMCPIconURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func stringPtr(value string) *string {
+	return &value
+}
+
 func TestLoadMCPServerAllowsUnsetOAuthTokenURL(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

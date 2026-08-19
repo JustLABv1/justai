@@ -9,6 +9,11 @@ const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL
 export const API_URL =
   configuredApiUrl ??
   (process.env.NODE_ENV === "development" ? "http://localhost:8080" : "")
+
+export function resolveAPIURL(path: string) {
+  if (!path.startsWith("/") || !API_URL) return path
+  return `${API_URL.replace(/\/$/, "")}${path}`
+}
 const REQUEST_TIMEOUT_MS = 30_000
 
 let selectedOrganizationId = ""

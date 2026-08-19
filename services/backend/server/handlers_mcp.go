@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
@@ -21,6 +24,7 @@ type mcpRequest struct {
 	ScopeType             string   `json:"scopeType"`
 	ScopeID               *string  `json:"scopeId"`
 	Name                  string   `json:"name"`
+	IconURL               *string  `json:"iconUrl"`
 	EndpointURL           string   `json:"endpointUrl"`
 	AuthType              string   `json:"authType"`
 	Credential            string   `json:"credential"`
@@ -35,8 +39,11 @@ type mcpRequest struct {
 
 func (a *App) listMCPServers(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
-	organizationID, _ := middleware.GetOrganizationID(c)
-	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, name, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE (scope_type = 'global') OR (scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) ORDER BY created_at DESC`, organizationID, principal.UserID)
+	organizationID, hasOrganization := middleware.GetOrganizationID(c)
+	if !hasOrganization {
+		organizationID, _, _ = middleware.ResolveOrganization(c, a.DB, principal)
+	}
+	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = mcp_servers.id) THEN '/api/v1/mcp/servers/' || mcp_servers.id::text || '/icon' ELSE COALESCE(icon_url, '') END, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE (scope_type = 'global') OR (scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) ORDER BY created_at DESC`, organizationID, principal.UserID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -114,6 +121,11 @@ func (a *App) createMCPServer(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("name and endpointUrl are required"))
 		return
 	}
+	iconURL, err := normalizeMCPIconURL(request.IconURL)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
 	if request.AuthType == "" {
 		request.AuthType = "none"
 	}
@@ -157,7 +169,7 @@ func (a *App) createMCPServer(c *gin.Context) {
 	if request.TrustedReadOnly != nil && *request.TrustedReadOnly && (middleware.GetOrganizationRole(c) == "owner" || middleware.GetOrganizationRole(c) == "admin" || principal.PlatformAdmin || scopeType == "user") {
 		trustedReadOnly = true
 	}
-	if err := a.DB.QueryRowContext(c, `INSERT INTO mcp_servers (scope_type, scope_id, name, endpoint_url, auth_type, encrypted_credential, oauth_authorization_url, oauth_token_url, oauth_client_id, oauth_scopes, enabled, allowed_tools, trusted_read_only, created_by) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), $11, $12, $13, $14) RETURNING id`, scopeType, scopeID, request.Name, request.EndpointURL, request.AuthType, nullableBytes(credential), request.OAuthAuthorizationURL, request.OAuthTokenURL, request.OAuthClientID, request.OAuthScopes, boolValue(request.Enabled, true), jsonRaw(request.AllowedTools), trustedReadOnly, principal.UserID).Scan(&serverID); err != nil {
+	if err := a.DB.QueryRowContext(c, `INSERT INTO mcp_servers (scope_type, scope_id, name, icon_url, endpoint_url, auth_type, encrypted_credential, oauth_authorization_url, oauth_token_url, oauth_client_id, oauth_scopes, enabled, allowed_tools, trusted_read_only, created_by) VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), $12, $13, $14, $15) RETURNING id`, scopeType, scopeID, request.Name, iconURL, request.EndpointURL, request.AuthType, nullableBytes(credential), request.OAuthAuthorizationURL, request.OAuthTokenURL, request.OAuthClientID, request.OAuthScopes, boolValue(request.Enabled, true), jsonRaw(request.AllowedTools), trustedReadOnly, principal.UserID).Scan(&serverID); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -184,6 +196,12 @@ func (a *App) updateMCPServer(c *gin.Context) {
 		return
 	}
 	request.Credential = strings.TrimSpace(request.Credential)
+	iconURL, err := normalizeMCPIconURL(request.IconURL)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	iconURLSet := request.IconURL != nil
 	if request.EndpointURL != "" {
 		if err := (mcp.Server{EndpointURL: request.EndpointURL}).ValidateURL(a.Config.AllowPrivate); err != nil {
 			writeError(c, http.StatusBadRequest, err)
@@ -225,12 +243,12 @@ func (a *App) updateMCPServer(c *gin.Context) {
 				return
 			}
 		}
-		_, err = a.DB.ExecContext(c, `UPDATE mcp_servers SET name = COALESCE(NULLIF($2, ''), name), endpoint_url = COALESCE(NULLIF($3, ''), endpoint_url), auth_type = COALESCE(NULLIF($4, ''), auth_type), encrypted_credential = $5, oauth_refresh_credential = NULL, oauth_expires_at = NULL, oauth_authorization_url = COALESCE(NULLIF($6, ''), oauth_authorization_url), oauth_token_url = COALESCE(NULLIF($7, ''), oauth_token_url), oauth_client_id = COALESCE(NULLIF($8, ''), oauth_client_id), oauth_scopes = COALESCE(NULLIF($9, ''), oauth_scopes), enabled = COALESCE($10, enabled), allowed_tools = COALESCE($11, allowed_tools), trusted_read_only = COALESCE($12, trusted_read_only), last_tested_at = NULL, last_error = NULL, protocol_version = NULL, updated_at = now() WHERE id = $1`, id, request.Name, request.EndpointURL, request.AuthType, nullableBytes(requestCredential), request.OAuthAuthorizationURL, request.OAuthTokenURL, request.OAuthClientID, request.OAuthScopes, request.Enabled, allowedTools, request.TrustedReadOnly)
+		_, err = a.DB.ExecContext(c, `UPDATE mcp_servers SET name = COALESCE(NULLIF($2, ''), name), icon_url = CASE WHEN $3 THEN NULLIF($4, '') ELSE icon_url END, endpoint_url = COALESCE(NULLIF($5, ''), endpoint_url), auth_type = COALESCE(NULLIF($6, ''), auth_type), encrypted_credential = $7, oauth_refresh_credential = NULL, oauth_expires_at = NULL, oauth_authorization_url = COALESCE(NULLIF($8, ''), oauth_authorization_url), oauth_token_url = COALESCE(NULLIF($9, ''), oauth_token_url), oauth_client_id = COALESCE(NULLIF($10, ''), oauth_client_id), oauth_scopes = COALESCE(NULLIF($11, ''), oauth_scopes), enabled = COALESCE($12, enabled), allowed_tools = COALESCE($13, allowed_tools), trusted_read_only = COALESCE($14, trusted_read_only), last_tested_at = NULL, last_error = NULL, protocol_version = NULL, updated_at = now() WHERE id = $1`, id, request.Name, iconURLSet, iconURL, request.EndpointURL, request.AuthType, nullableBytes(requestCredential), request.OAuthAuthorizationURL, request.OAuthTokenURL, request.OAuthClientID, request.OAuthScopes, request.Enabled, allowedTools, request.TrustedReadOnly)
 		if err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
-	} else if _, err := a.DB.ExecContext(c, `UPDATE mcp_servers SET name = COALESCE(NULLIF($2, ''), name), endpoint_url = COALESCE(NULLIF($3, ''), endpoint_url), auth_type = COALESCE(NULLIF($4, ''), auth_type), oauth_authorization_url = COALESCE(NULLIF($5, ''), oauth_authorization_url), oauth_token_url = COALESCE(NULLIF($6, ''), oauth_token_url), oauth_client_id = COALESCE(NULLIF($7, ''), oauth_client_id), oauth_scopes = COALESCE(NULLIF($8, ''), oauth_scopes), enabled = COALESCE($9, enabled), allowed_tools = COALESCE($10, allowed_tools), trusted_read_only = COALESCE($11, trusted_read_only), last_tested_at = NULL, last_error = NULL, protocol_version = NULL, updated_at = now() WHERE id = $1`, id, request.Name, request.EndpointURL, request.AuthType, request.OAuthAuthorizationURL, request.OAuthTokenURL, request.OAuthClientID, request.OAuthScopes, request.Enabled, allowedTools, request.TrustedReadOnly); err != nil {
+	} else if _, err := a.DB.ExecContext(c, `UPDATE mcp_servers SET name = COALESCE(NULLIF($2, ''), name), icon_url = CASE WHEN $3 THEN NULLIF($4, '') ELSE icon_url END, endpoint_url = COALESCE(NULLIF($5, ''), endpoint_url), auth_type = COALESCE(NULLIF($6, ''), auth_type), oauth_authorization_url = COALESCE(NULLIF($7, ''), oauth_authorization_url), oauth_token_url = COALESCE(NULLIF($8, ''), oauth_token_url), oauth_client_id = COALESCE(NULLIF($9, ''), oauth_client_id), oauth_scopes = COALESCE(NULLIF($10, ''), oauth_scopes), enabled = COALESCE($11, enabled), allowed_tools = COALESCE($12, allowed_tools), trusted_read_only = COALESCE($13, trusted_read_only), last_tested_at = NULL, last_error = NULL, protocol_version = NULL, updated_at = now() WHERE id = $1`, id, request.Name, iconURLSet, iconURL, request.EndpointURL, request.AuthType, request.OAuthAuthorizationURL, request.OAuthTokenURL, request.OAuthClientID, request.OAuthScopes, request.Enabled, allowedTools, request.TrustedReadOnly); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -428,7 +446,10 @@ func (a *App) authorizeMCPServer(c *gin.Context, rawID string) error {
 		return fmt.Errorf("invalid MCP server id")
 	}
 	principal, _ := middleware.GetPrincipal(c)
-	organizationID, _ := middleware.GetOrganizationID(c)
+	organizationID, hasOrganization := middleware.GetOrganizationID(c)
+	if !hasOrganization {
+		organizationID, _, _ = middleware.ResolveOrganization(c, a.DB, principal)
+	}
 	var scopeType string
 	var scopeID sql.NullString
 	if err := a.DB.QueryRowContext(c, `SELECT scope_type, scope_id FROM mcp_servers WHERE id = $1`, id).Scan(&scopeType, &scopeID); err != nil {
@@ -490,7 +511,7 @@ func scanMCPServer(scanner interface{ Scan(dest ...any) error }) (models.MCPServ
 	var item models.MCPServer
 	var scopeID sql.NullString
 	var allowed []byte
-	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.EndpointURL, &item.AuthType, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.IconURL, &item.EndpointURL, &item.AuthType, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	item.ScopeID = parseMCPScopeID(scopeID)
@@ -513,7 +534,193 @@ func parseMCPScopeID(value sql.NullString) *uuid.UUID {
 }
 
 func (a *App) getMCPServer(ctx context.Context, id uuid.UUID) (models.MCPServer, error) {
-	return scanMCPServer(a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, name, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE id = $1`, id))
+	return scanMCPServer(a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = mcp_servers.id) THEN '/api/v1/mcp/servers/' || mcp_servers.id::text || '/icon' ELSE COALESCE(icon_url, '') END, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE id = $1`, id))
+}
+
+const maxMCPServerIconBytes = 512 * 1024
+
+var allowedMCPServerIconTypes = map[string]bool{
+	"image/gif":                true,
+	"image/jpeg":               true,
+	"image/png":                true,
+	"image/vnd.microsoft.icon": true,
+	"image/webp":               true,
+	"image/x-icon":             true,
+}
+
+func (a *App) uploadPlatformMCPServerIcon(c *gin.Context) {
+	markPlatformCatalogRoute(c)
+	a.uploadMCPServerIcon(c)
+}
+
+func (a *App) deletePlatformMCPServerIcon(c *gin.Context) {
+	markPlatformCatalogRoute(c)
+	a.deleteMCPServerIcon(c)
+}
+
+func (a *App) uploadMCPServerIcon(c *gin.Context) {
+	serverID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid MCP server id"))
+		return
+	}
+	if err := a.authorizeMCPServerManage(c, serverID.String()); err != nil {
+		writeError(c, http.StatusForbidden, err)
+		return
+	}
+	fileHeader, err := c.FormFile("icon")
+	if err != nil || fileHeader.Size <= 0 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("an icon file is required"))
+		return
+	}
+	if fileHeader.Size > maxMCPServerIconBytes {
+		writeError(c, http.StatusRequestEntityTooLarge, fmt.Errorf("MCP icons are limited to 512 KB"))
+		return
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxMCPServerIconBytes+1))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	if len(data) == 0 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("an icon file is required"))
+		return
+	}
+	if len(data) > maxMCPServerIconBytes {
+		writeError(c, http.StatusRequestEntityTooLarge, fmt.Errorf("MCP icons are limited to 512 KB"))
+		return
+	}
+	mimeType := mimetype.Detect(data).String()
+	if !allowedMCPServerIconTypes[mimeType] {
+		writeError(c, http.StatusUnsupportedMediaType, fmt.Errorf("use a PNG, JPEG, GIF, WebP, or ICO image"))
+		return
+	}
+	_, err = a.DB.ExecContext(c, `INSERT INTO mcp_server_icons (server_id, mime_type, image_data, updated_at) VALUES ($1, $2, $3, now()) ON CONFLICT (server_id) DO UPDATE SET mime_type = EXCLUDED.mime_type, image_data = EXCLUDED.image_data, updated_at = now()`, serverID, mimeType, data)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if _, err := a.DB.ExecContext(c, `UPDATE mcp_servers SET icon_url = NULL, updated_at = now() WHERE id = $1`, serverID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	item, err := a.getMCPServer(c, serverID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
+func (a *App) deleteMCPServerIcon(c *gin.Context) {
+	serverID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid MCP server id"))
+		return
+	}
+	if err := a.authorizeMCPServerManage(c, serverID.String()); err != nil {
+		writeError(c, http.StatusForbidden, err)
+		return
+	}
+	if _, err := a.DB.ExecContext(c, `DELETE FROM mcp_server_icons WHERE server_id = $1`, serverID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if _, err := a.DB.ExecContext(c, `UPDATE mcp_servers SET icon_url = NULL, updated_at = now() WHERE id = $1`, serverID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	item, err := a.getMCPServer(c, serverID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
+func (a *App) serveMCPServerIcon(c *gin.Context) {
+	serverID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid MCP server id"))
+		return
+	}
+	if err := a.authorizeMCPServerIcon(c, serverID); err != nil {
+		writeError(c, http.StatusForbidden, err)
+		return
+	}
+	var mimeType string
+	var data []byte
+	err = a.DB.QueryRowContext(c, `SELECT mime_type, image_data FROM mcp_server_icons WHERE server_id = $1`, serverID).Scan(&mimeType, &data)
+	if err == sql.ErrNoRows {
+		writeError(c, http.StatusNotFound, fmt.Errorf("MCP server icon not found"))
+		return
+	}
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.Header("Cache-Control", "private, max-age=3600")
+	c.Data(http.StatusOK, mimeType, data)
+}
+
+func (a *App) authorizeMCPServerIcon(c *gin.Context, serverID uuid.UUID) error {
+	principal, ok := middleware.GetPrincipal(c)
+	if !ok {
+		return fmt.Errorf("authentication required")
+	}
+	var scopeType string
+	var scopeID sql.NullString
+	if err := a.DB.QueryRowContext(c, `SELECT scope_type, scope_id FROM mcp_servers WHERE id = $1`, serverID).Scan(&scopeType, &scopeID); err != nil {
+		return fmt.Errorf("MCP server not found")
+	}
+	if principal.PlatformAdmin || scopeType == "global" {
+		return nil
+	}
+	parsedScopeID := parseMCPScopeID(scopeID)
+	if parsedScopeID == nil {
+		return fmt.Errorf("MCP server scope is invalid")
+	}
+	if scopeType == "user" {
+		if *parsedScopeID == principal.UserID {
+			return nil
+		}
+		return fmt.Errorf("MCP server belongs to another scope")
+	}
+	if scopeType != "organization" {
+		return fmt.Errorf("MCP server scope is invalid")
+	}
+	var member bool
+	if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM organization_members WHERE organization_id = $1 AND user_id = $2)`, *parsedScopeID, principal.UserID).Scan(&member); err != nil {
+		return err
+	}
+	if !member {
+		return fmt.Errorf("MCP server belongs to another scope")
+	}
+	return nil
+}
+
+func normalizeMCPIconURL(raw *string) (string, error) {
+	if raw == nil {
+		return "", nil
+	}
+	value := strings.TrimSpace(*raw)
+	if value == "" {
+		return "", nil
+	}
+	if len(value) > 2048 {
+		return "", fmt.Errorf("icon URL must be 2048 characters or fewer")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil {
+		return "", fmt.Errorf("icon URL must be an absolute HTTP or HTTPS URL")
+	}
+	return parsed.String(), nil
 }
 
 func (a *App) loadMCPServer(ctx context.Context, rawID string) (mcp.Server, error) {

@@ -32,6 +32,7 @@ type chatToolEvent struct {
 	Round      int       `json:"round,omitempty"`
 	ServerID   uuid.UUID `json:"serverId"`
 	ServerName string    `json:"serverName"`
+	IconURL    string    `json:"iconUrl,omitempty"`
 	// ToolName is the original MCP name used when executing the tool. The
 	// provider-facing name is kept separately because model tool definitions
 	// must be unique and may be normalized for the provider.
@@ -545,6 +546,7 @@ func chatToolEventData(messageID uuid.UUID, event chatToolEvent) gin.H {
 		"status":     event.Status,
 		"serverId":   event.ServerID,
 		"serverName": event.ServerName,
+		"iconUrl":    event.IconURL,
 		"toolName":   event.ToolName,
 		"callId":     event.CallID,
 	}

@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Database,
   Globe2,
+  ImagePlus,
   KeyRound,
   LoaderCircle,
   MoreHorizontal,
@@ -34,14 +35,16 @@ import {
   TestTube2,
   UsersRound,
   Wrench,
+  X,
 } from "lucide-react"
 
-import { APIError, api } from "@/lib/api"
+import { APIError, api, resolveAPIURL } from "@/lib/api"
 import type {
   AdminAnalyticsResponse,
   AdminDashboardResponse,
   AdminTab,
   Endpoint,
+  MCPServer,
   PlatformSettings,
   User,
 } from "@/lib/types"
@@ -1424,6 +1427,8 @@ function InventoryView({
   const [createOpen, setCreateOpen] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState("")
+  const [createIconFile, setCreateIconFile] = useState<File | null>(null)
+  const [createIconPreview, setCreateIconPreview] = useState("")
   const [createValues, setCreateValues] = useState({
     name: "",
     providerType: "openai-compatible",
@@ -1440,11 +1445,57 @@ function InventoryView({
     scopeId: "",
   })
   const actionAbortRef = useRef<AbortController | null>(null)
+  const createIconInputRef = useRef<HTMLInputElement | null>(null)
+  const createIconObjectURLRef = useRef("")
   const createRequestRef = useRef(createRequest ?? 0)
   const resourceLabel = kind === "endpoint" ? "Endpoint" : "MCP server"
 
+  const resetCreateIcon = useCallback(() => {
+    if (createIconObjectURLRef.current) {
+      URL.revokeObjectURL(createIconObjectURLRef.current)
+      createIconObjectURLRef.current = ""
+    }
+    setCreateIconFile(null)
+    setCreateIconPreview("")
+    if (createIconInputRef.current) createIconInputRef.current.value = ""
+  }, [])
+
+  function chooseCreateIcon(file: File | null) {
+    if (!file) return
+    if (file.size > 512 * 1024) {
+      setCreateError("MCP icons are limited to 512 KB.")
+      if (createIconInputRef.current) createIconInputRef.current.value = ""
+      return
+    }
+    const allowedTypes = new Set([
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/vnd.microsoft.icon",
+      "image/webp",
+      "image/x-icon",
+    ])
+    if (!allowedTypes.has(file.type)) {
+      setCreateError("Use a PNG, JPEG, GIF, WebP, or ICO image for the MCP logo.")
+      if (createIconInputRef.current) createIconInputRef.current.value = ""
+      return
+    }
+    if (createIconObjectURLRef.current) {
+      URL.revokeObjectURL(createIconObjectURLRef.current)
+    }
+    createIconObjectURLRef.current = URL.createObjectURL(file)
+    setCreateIconFile(file)
+    setCreateIconPreview(createIconObjectURLRef.current)
+    setCreateError("")
+  }
+
   useEffect(() => {
-    return () => actionAbortRef.current?.abort()
+    return () => {
+      actionAbortRef.current?.abort()
+      if (createIconObjectURLRef.current) {
+        URL.revokeObjectURL(createIconObjectURLRef.current)
+      }
+    }
   }, [])
 
   async function runAction(
@@ -1484,6 +1535,48 @@ function InventoryView({
 
   function stopActiveAction() {
     actionAbortRef.current?.abort()
+  }
+
+  function uploadCatalogIcon(itemId: string, file: File | null) {
+    if (!file) return
+    if (file.size > 512 * 1024) {
+      setItemErrors((current) => ({
+        ...current,
+        [itemId]: "MCP icons are limited to 512 KB.",
+      }))
+      return
+    }
+    const allowedTypes = new Set([
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/vnd.microsoft.icon",
+      "image/webp",
+      "image/x-icon",
+    ])
+    if (!allowedTypes.has(file.type)) {
+      setItemErrors((current) => ({
+        ...current,
+        [itemId]: "Use a PNG, JPEG, GIF, WebP, or ICO image for the MCP logo.",
+      }))
+      return
+    }
+    const body = new FormData()
+    body.set("icon", file)
+    void runAction(
+      itemId,
+      {
+        label: "Uploading logo…",
+        cancellable: false,
+        stoppedMessage: "MCP logo upload was stopped.",
+      },
+      async () => {
+        await api.upload<MCPServer>(
+          `/api/v1/admin/mcp/servers/${itemId}/icon`,
+          body
+        )
+      }
+    )
   }
 
   const resourcePath = kind === "endpoint" ? "endpoints" : "mcp/servers"
@@ -1533,7 +1626,7 @@ function InventoryView({
           enabled: true,
         })
       } else {
-        await api.post("/api/v1/admin/mcp/servers", {
+        const server = await api.post<MCPServer>("/api/v1/admin/mcp/servers", {
           scopeType: createValues.scopeType,
           scopeId: createValues.scopeType === "global" ? null : scopeId,
           name,
@@ -1546,8 +1639,17 @@ function InventoryView({
           oauthScopes: createValues.oauthScopes.trim(),
           enabled: true,
         })
+        if (createIconFile) {
+          const body = new FormData()
+          body.set("icon", createIconFile)
+          await api.upload<MCPServer>(
+            `/api/v1/admin/mcp/servers/${server.id}/icon`,
+            body
+          )
+        }
       }
       setCreateOpen(false)
+      resetCreateIcon()
       setCreateValues((current) => ({
         ...current,
         name: "",
@@ -1580,8 +1682,9 @@ function InventoryView({
     setCreateValues((current) => ({ ...current, [key]: value }))
   const openCreate = useCallback(() => {
     setCreateError("")
+    resetCreateIcon()
     setCreateOpen(true)
-  }, [])
+  }, [resetCreateIcon])
 
   useEffect(() => {
     if (!createRequest || createRequest === createRequestRef.current) return
@@ -1643,7 +1746,21 @@ function InventoryView({
                       : "Personal"
                 return (
                   <tr className="border-b last:border-0" key={item.id}>
-                    <td className="p-2 font-medium">{item.name}</td>
+                    <td className="p-2 font-medium">
+                      <div className="flex items-center gap-2">
+                        {kind === "mcp" && item.iconUrl ? (
+                          // MCP icons are served by JustAI, so Next Image does
+                          // not need a host allowlist here.
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            alt=""
+                            className="size-5 rounded object-contain"
+                            src={resolveAPIURL(item.iconUrl)}
+                          />
+                        ) : null}
+                        <span>{item.name}</span>
+                      </div>
+                    </td>
                     <td className="p-2">
                       <Badge
                         variant={
@@ -1673,6 +1790,20 @@ function InventoryView({
                       )}
                     </td>
                     <td className="p-2">
+                      {kind === "mcp" && (
+                        <input
+                          aria-label={`Choose logo for ${item.name}`}
+                          className="hidden"
+                          id={`mcp-logo-${item.id}`}
+                          type="file"
+                          accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0] ?? null
+                            event.currentTarget.value = ""
+                            uploadCatalogIcon(item.id, file)
+                          }}
+                        />
+                      )}
                       <div className="flex justify-end">
                         {busy ? (
                           <div className="flex items-center justify-end gap-2">
@@ -1820,6 +1951,16 @@ function InventoryView({
                                       <Wrench aria-hidden="true" /> Discover
                                       tools
                                     </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      disabled={busy}
+                                      onClick={() =>
+                                        document
+                                          .getElementById(`mcp-logo-${item.id}`)
+                                          ?.click()
+                                      }
+                                    >
+                                      <ImagePlus aria-hidden="true" /> Set logo
+                                    </DropdownMenuItem>
                                   </>
                                 )}
                               </DropdownMenuGroup>
@@ -1873,7 +2014,10 @@ function InventoryView({
       <Dialog
         open={createOpen}
         onOpenChange={(open) => {
-          if (!open && !createBusy) setCreateOpen(false)
+          if (!open && !createBusy) {
+            resetCreateIcon()
+            setCreateOpen(false)
+          }
         }}
       >
         <DialogContent className="max-w-lg">
@@ -1905,6 +2049,71 @@ function InventoryView({
                 }
               />
             </label>
+            {kind === "mcp" && (
+              <label className="grid gap-1 text-sm">
+                Logo (optional)
+                <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-2">
+                  <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
+                    {createIconPreview ? (
+                      // Uploaded MCP icons are served by JustAI and do not need
+                      // a Next Image host allowlist.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        alt="Selected MCP logo preview"
+                        className="size-full rounded-md object-contain"
+                        src={createIconPreview}
+                      />
+                    ) : (
+                      <ImagePlus
+                        aria-hidden="true"
+                        className="size-6 text-muted-foreground"
+                      />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Input
+                      ref={createIconInputRef}
+                      type="file"
+                      className="sr-only"
+                      accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
+                      onChange={(event) =>
+                        chooseCreateIcon(event.target.files?.[0] ?? null)
+                      }
+                    />
+                    <p className="truncate text-sm font-medium">
+                      {createIconFile?.name ??
+                        (createIconPreview ? "Logo selected" : "No logo selected")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      PNG, JPEG, GIF, WebP, or ICO · Max 512 KB
+                    </p>
+                    <div className="pt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => createIconInputRef.current?.click()}
+                      >
+                        <ImagePlus data-icon="inline-start" aria-hidden="true" />
+                        {createIconPreview ? "Replace logo" : "Choose logo"}
+                      </Button>
+                      {createIconPreview && (
+                        <Button
+                          className="ml-2"
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={resetCreateIcon}
+                        >
+                          <X data-icon="inline-start" aria-hidden="true" />
+                          Remove logo
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </label>
+            )}
             <div className="grid gap-1 text-sm">
               <span className="font-medium">Scope</span>
               <Select

@@ -252,6 +252,7 @@ type MCPServer struct {
 	ScopeType            string          `json:"scopeType"`
 	ScopeID              *uuid.UUID      `json:"scopeId,omitempty"`
 	Name                 string          `json:"name"`
+	IconURL              string          `json:"iconUrl,omitempty"`
 	EndpointURL          string          `json:"endpointUrl"`
 	AuthType             string          `json:"authType"`
 	CredentialConfigured bool            `json:"credentialConfigured"`
