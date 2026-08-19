@@ -34,6 +34,17 @@ type Worker struct {
 	secrets      *security.SecretBox
 }
 
+// DeepContextLimit is the number of grounded passages exposed to the model in
+// explicit deep-context mode. The regular chat path keeps its smaller,
+// low-latency retrieval window.
+const DeepContextLimit = 24
+
+const (
+	defaultConversationSearchLimit = 6
+	maxConversationSearchLimit     = 12
+	maxDeepContextCandidateLimit   = DeepContextLimit * 2
+)
+
 func NewWorker(db *sql.DB, allowPrivate bool) *Worker {
 	return &Worker{db: db, allowPrivate: allowPrivate}
 }
@@ -361,12 +372,12 @@ func Search(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, q
 		WHERE ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2))
 		  AND ks.status = 'ready'
 		  AND (
-			to_tsvector('simple', kc.content) @@ plainto_tsquery('simple', $3)
-			OR to_tsvector('simple', kc.content) @@ to_tsquery('simple', $4)
+			to_tsvector('simple', ks.title || ' ' || kc.content) @@ plainto_tsquery('simple', $3)
+			OR to_tsvector('simple', ks.title || ' ' || kc.content) @@ to_tsquery('simple', $4)
 		  )
 		ORDER BY GREATEST(
-			ts_rank(to_tsvector('simple', kc.content), plainto_tsquery('simple', $3)),
-			ts_rank(to_tsvector('simple', kc.content), to_tsquery('simple', $4))
+			ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), plainto_tsquery('simple', $3)),
+			ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), to_tsquery('simple', $4))
 		) DESC
 		LIMIT $5`, organizationID, userID, query, orQuery, limit)
 	if err != nil {
@@ -422,7 +433,7 @@ func (w *Worker) Search(ctx context.Context, organizationID, userID uuid.UUID, q
 // must be named explicitly by the current user message so a file does not
 // silently remain active for every later turn.
 func SearchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int) ([]models.Citation, error) {
-	return searchConversation(ctx, db, conversationID, query, limit, "")
+	return searchConversation(ctx, db, conversationID, query, normalizeConversationSearchLimit(limit), "")
 }
 
 // SearchConversationSources searches the explicitly attached source ids for a
@@ -430,7 +441,35 @@ func SearchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 // ids against the current conversation before calling this method; the SQL
 // still joins the conversation relation as a second isolation boundary.
 func SearchConversationSources(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int, sourceIDs []uuid.UUID) ([]models.Citation, error) {
-	return searchConversation(ctx, db, conversationID, query, limit, sourceIDsCSV(sourceIDs))
+	return searchConversation(ctx, db, conversationID, query, normalizeConversationSearchLimit(limit), sourceIDsCSV(sourceIDs))
+}
+
+// SearchConversationDeepContext searches a broader persistent context window
+// and spreads the final passages across source files. It is intentionally
+// opt-in; ordinary chat continues to use SearchConversation's smaller window.
+func SearchConversationDeepContext(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int) ([]models.Citation, error) {
+	deepContextLimit := normalizeDeepContextLimit(limit)
+	candidateLimit := deepContextCandidateLimit(deepContextLimit)
+	citations, err := searchConversation(ctx, db, conversationID, query, candidateLimit, "")
+	if err != nil {
+		return nil, err
+	}
+	citations = appendDeepContextCandidates(ctx, db, conversationID, citations, "", candidateLimit)
+	return diversifyCitations(citations, deepContextLimit), nil
+}
+
+// SearchConversationSourcesDeepContext is the explicit-upload counterpart to
+// SearchConversationDeepContext. The source allowlist remains enforced.
+func SearchConversationSourcesDeepContext(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int, sourceIDs []uuid.UUID) ([]models.Citation, error) {
+	deepContextLimit := normalizeDeepContextLimit(limit)
+	candidateLimit := deepContextCandidateLimit(deepContextLimit)
+	selectedSourceIDs := sourceIDsCSV(sourceIDs)
+	citations, err := searchConversation(ctx, db, conversationID, query, candidateLimit, selectedSourceIDs)
+	if err != nil {
+		return nil, err
+	}
+	citations = appendDeepContextCandidates(ctx, db, conversationID, citations, selectedSourceIDs, candidateLimit)
+	return diversifyCitations(citations, deepContextLimit), nil
 }
 
 func sourceIDsCSV(sourceIDs []uuid.UUID) string {
@@ -443,13 +482,38 @@ func sourceIDsCSV(sourceIDs []uuid.UUID) string {
 	return strings.Join(values, ",")
 }
 
+func normalizeConversationSearchLimit(limit int) int {
+	if limit <= 0 || limit > maxConversationSearchLimit {
+		return defaultConversationSearchLimit
+	}
+	return limit
+}
+
+func normalizeDeepContextLimit(limit int) int {
+	if limit <= 0 {
+		return DeepContextLimit
+	}
+	if limit > DeepContextLimit {
+		return DeepContextLimit
+	}
+	return limit
+}
+
+func deepContextCandidateLimit(limit int) int {
+	limit = normalizeDeepContextLimit(limit)
+	return min(limit*2, maxDeepContextCandidateLimit)
+}
+
 func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int, selectedSourceIDs string) ([]models.Citation, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
 	}
-	if limit <= 0 || limit > 12 {
-		limit = 6
+	if limit <= 0 {
+		limit = defaultConversationSearchLimit
+	}
+	if limit > maxDeepContextCandidateLimit {
+		limit = maxDeepContextCandidateLimit
 	}
 	orQuery := lexicalOrQuery(query)
 	if orQuery == "" {
@@ -464,10 +528,10 @@ func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 		  AND CASE WHEN $2 = '' THEN cks.context_scope = 'persistent'
 		           ELSE cks.source_id = ANY(string_to_array($2, ',')::uuid[])
 		      END
-		  AND (to_tsvector('simple', kc.content) @@ plainto_tsquery('simple', $3)
-		       OR to_tsvector('simple', kc.content) @@ to_tsquery('simple', $4))
-		ORDER BY GREATEST(ts_rank(to_tsvector('simple', kc.content), plainto_tsquery('simple', $3)),
-		                  ts_rank(to_tsvector('simple', kc.content), to_tsquery('simple', $4))) DESC
+		  AND (to_tsvector('simple', ks.title || ' ' || kc.content) @@ plainto_tsquery('simple', $3)
+		       OR to_tsvector('simple', ks.title || ' ' || kc.content) @@ to_tsquery('simple', $4))
+		ORDER BY GREATEST(ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), plainto_tsquery('simple', $3)),
+		                  ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), to_tsquery('simple', $4))) DESC
 		LIMIT $5`, conversationID, selectedSourceIDs, query, orQuery, limit)
 	if err != nil {
 		return nil, err
@@ -581,56 +645,71 @@ func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 // organization/user scope, while the vector query itself can only see sources
 // explicitly attached to that conversation.
 func (w *Worker) SearchConversation(ctx context.Context, conversationID uuid.UUID, query string, limit int) ([]models.Citation, error) {
-	if w == nil || w.db == nil {
-		return nil, fmt.Errorf("knowledge worker is not configured")
-	}
-	lexical, err := SearchConversation(ctx, w.db, conversationID, query, limit)
-	if err != nil || w.secrets == nil {
-		return lexical, err
-	}
-	endpoint, err := w.conversationEmbeddingEndpoint(ctx, conversationID)
-	if err != nil || endpoint == nil {
-		return lexical, nil
-	}
-	embeddingContext, cancel := context.WithTimeout(ctx, 10*time.Second)
-	values, err := provider.Embed(embeddingContext, *endpoint, query)
-	cancel()
-	if err != nil || len(values) == 0 {
-		return lexical, nil
-	}
-	semantic, err := searchConversationByEmbedding(ctx, w.db, conversationID, vectorLiteral(values), len(values), limit, "")
-	if err != nil {
-		return lexical, nil
-	}
-	return mergeCitations(lexical, semantic, limit), nil
+	return w.searchConversationMode(ctx, conversationID, query, limit, nil, false)
+}
+
+// SearchConversationDeepContext is the broader, diversified retrieval path
+// used by explicit deep-context mode.
+func (w *Worker) SearchConversationDeepContext(ctx context.Context, conversationID uuid.UUID, query string, limit int) ([]models.Citation, error) {
+	return w.searchConversationMode(ctx, conversationID, query, limit, nil, true)
 }
 
 // SearchConversationSources is the explicit-upload variant of
 // SearchConversation. It keeps semantic retrieval inside the same source
 // allowlist as lexical retrieval.
 func (w *Worker) SearchConversationSources(ctx context.Context, conversationID uuid.UUID, query string, limit int, sourceIDs []uuid.UUID) ([]models.Citation, error) {
+	return w.searchConversationMode(ctx, conversationID, query, limit, sourceIDs, false)
+}
+
+// SearchConversationSourcesDeepContext is the explicit-upload counterpart to
+// SearchConversationDeepContext.
+func (w *Worker) SearchConversationSourcesDeepContext(ctx context.Context, conversationID uuid.UUID, query string, limit int, sourceIDs []uuid.UUID) ([]models.Citation, error) {
+	return w.searchConversationMode(ctx, conversationID, query, limit, sourceIDs, true)
+}
+
+func (w *Worker) searchConversationMode(ctx context.Context, conversationID uuid.UUID, query string, limit int, sourceIDs []uuid.UUID, deepContext bool) ([]models.Citation, error) {
 	if w == nil || w.db == nil {
 		return nil, fmt.Errorf("knowledge worker is not configured")
 	}
-	lexical, err := SearchConversationSources(ctx, w.db, conversationID, query, limit, sourceIDs)
+	resultLimit := normalizeConversationSearchLimit(limit)
+	retrievalLimit := resultLimit
+	if deepContext {
+		resultLimit = normalizeDeepContextLimit(limit)
+		retrievalLimit = deepContextCandidateLimit(resultLimit)
+	}
+	selectedSourceIDs := sourceIDsCSV(sourceIDs)
+	lexical, err := searchConversation(ctx, w.db, conversationID, query, retrievalLimit, selectedSourceIDs)
+	if deepContext {
+		lexical = appendDeepContextCandidates(ctx, w.db, conversationID, lexical, selectedSourceIDs, retrievalLimit)
+	}
+	finish := func(citations []models.Citation) []models.Citation {
+		if deepContext {
+			return diversifyCitations(citations, resultLimit)
+		}
+		return citations
+	}
 	if err != nil || w.secrets == nil {
-		return lexical, err
+		return finish(lexical), err
 	}
 	endpoint, err := w.conversationEmbeddingEndpoint(ctx, conversationID)
 	if err != nil || endpoint == nil {
-		return lexical, nil
+		return finish(lexical), nil
 	}
 	embeddingContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	values, err := provider.Embed(embeddingContext, *endpoint, query)
 	cancel()
 	if err != nil || len(values) == 0 {
-		return lexical, nil
+		return finish(lexical), nil
 	}
-	semantic, err := searchConversationByEmbedding(ctx, w.db, conversationID, vectorLiteral(values), len(values), limit, sourceIDsCSV(sourceIDs))
+	semantic, err := searchConversationByEmbedding(ctx, w.db, conversationID, vectorLiteral(values), len(values), retrievalLimit, selectedSourceIDs)
 	if err != nil {
-		return lexical, nil
+		return finish(lexical), nil
 	}
-	return mergeCitations(lexical, semantic, limit), nil
+	merged := mergeCitations(lexical, semantic, retrievalLimit)
+	if deepContext {
+		return diversifyCitations(merged, resultLimit), nil
+	}
+	return merged, nil
 }
 
 func (w *Worker) conversationEmbeddingEndpoint(ctx context.Context, conversationID uuid.UUID) (*provider.Endpoint, error) {
@@ -743,9 +822,136 @@ func searchByEmbedding(ctx context.Context, db *sql.DB, organizationID, userID u
 	return result, rows.Err()
 }
 
+// appendDeepContextCandidates adds representative first chunks from repository
+// files that did not match the query lexically. Architecture questions often
+// mention concepts such as "structure" or "backend" that are absent from the
+// most important entry-point files; a small representative sample makes deep
+// context useful even when embeddings are unavailable.
+// This supplemental query is best effort because lexical retrieval remains the
+// authoritative failure path.
+func appendDeepContextCandidates(ctx context.Context, db *sql.DB, conversationID uuid.UUID, citations []models.Citation, selectedSourceIDs string, limit int) []models.Citation {
+	if db == nil || limit <= len(citations) {
+		return citations
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
+		FROM knowledge_chunks kc
+		JOIN knowledge_sources ks ON ks.id = kc.source_id
+		JOIN conversation_knowledge_sources cks ON cks.source_id = kc.source_id
+		WHERE cks.conversation_id = $1
+		  AND ks.status = 'ready'
+		  AND ks.source_type = 'repository'
+		  AND kc.chunk_index = 0
+		  AND CASE WHEN $2 = '' THEN cks.context_scope = 'persistent'
+		           ELSE cks.source_id = ANY(string_to_array($2, ',')::uuid[])
+		      END
+		ORDER BY CASE
+		           WHEN lower(ks.title) LIKE '%readme%' THEN 0
+		           WHEN lower(ks.title) IN ('go.mod', 'package.json', 'pyproject.toml', 'cargo.toml', 'dockerfile') THEN 1
+		           ELSE 2
+		         END, ks.title
+		LIMIT $3`, conversationID, selectedSourceIDs, limit-len(citations))
+	if err != nil {
+		return citations
+	}
+	defer rows.Close()
+
+	result := append([]models.Citation(nil), citations...)
+	seen := make(map[string]struct{}, len(citations))
+	for _, citation := range citations {
+		seen[citationKey(citation)] = struct{}{}
+	}
+	for rows.Next() {
+		var citation models.Citation
+		if err := rows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); err != nil {
+			return citations
+		}
+		citation.Kind = "knowledge"
+		citation.ResourceID = citation.SourceID
+		citation.Snippet = truncateSnippet(citation.Snippet)
+		key := citationKey(citation)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, citation)
+		if len(result) >= limit {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return citations
+	}
+	return result
+}
+
+// diversifyCitations keeps the relevance order within each pass while making
+// sure a broad deep-context result is not dominated by the first matching file.
+// The first pass takes one passage per source, the second allows a second
+// passage, and only then fills any remaining slots from the ranked candidates.
+func diversifyCitations(citations []models.Citation, limit int) []models.Citation {
+	limit = normalizeDeepContextLimit(limit)
+	if len(citations) <= limit {
+		return citations
+	}
+
+	result := make([]models.Citation, 0, min(limit, len(citations)))
+	used := make([]bool, len(citations))
+	counts := make(map[string]int)
+	appendPass := func(maxPerSource int) {
+		for index, citation := range citations {
+			if len(result) >= limit || used[index] {
+				continue
+			}
+			key := citationSourceKey(citation)
+			if counts[key] >= maxPerSource {
+				continue
+			}
+			used[index] = true
+			counts[key]++
+			result = append(result, citation)
+		}
+	}
+
+	appendPass(1)
+	appendPass(2)
+	if len(result) < limit {
+		for index, citation := range citations {
+			if len(result) >= limit || used[index] {
+				continue
+			}
+			used[index] = true
+			result = append(result, citation)
+		}
+	}
+	return result
+}
+
+func citationSourceKey(citation models.Citation) string {
+	resourceID := citation.ResourceID
+	if resourceID == uuid.Nil {
+		resourceID = citation.SourceID
+	}
+	if resourceID != uuid.Nil {
+		return citation.Kind + ":" + resourceID.String()
+	}
+	return citation.Kind + ":" + citation.Title
+}
+
+func citationKey(citation models.Citation) string {
+	key := citation.ResourceID.String() + ":" + citation.SourceID.String() + ":" + strconv.Itoa(citation.ChunkIndex)
+	if citation.ResourceID == uuid.Nil && citation.SourceID == uuid.Nil {
+		key = citation.Title + ":" + citation.Snippet
+	}
+	return key
+}
+
 func mergeCitations(first, second []models.Citation, limit int) []models.Citation {
-	if limit <= 0 || limit > 12 {
-		limit = 6
+	if limit <= 0 {
+		limit = defaultConversationSearchLimit
+	}
+	if limit > maxDeepContextCandidateLimit {
+		limit = maxDeepContextCandidateLimit
 	}
 	type ranked struct {
 		citation models.Citation
@@ -756,10 +962,7 @@ func mergeCitations(first, second []models.Citation, limit int) []models.Citatio
 	order := 0
 	for _, citations := range [][]models.Citation{first, second} {
 		for rank, citation := range citations {
-			key := citation.ResourceID.String() + ":" + citation.SourceID.String() + ":" + strconv.Itoa(citation.ChunkIndex)
-			if citation.ResourceID == uuid.Nil && citation.SourceID == uuid.Nil {
-				key = citation.Title + ":" + citation.Snippet
-			}
+			key := citationKey(citation)
 			item, exists := rankedByKey[key]
 			if !exists {
 				item = &ranked{citation: citation, order: order}
@@ -827,7 +1030,7 @@ func NewSource(ctx context.Context, db *sql.DB, scopeType string, scopeID, userI
 	if scopeType != "organization" && scopeType != "user" {
 		return models.KnowledgeSource{}, fmt.Errorf("unsupported source scope")
 	}
-	if sourceType != "upload" && sourceType != "url" && sourceType != "text" {
+	if sourceType != "upload" && sourceType != "url" && sourceType != "text" && sourceType != "repository" {
 		return models.KnowledgeSource{}, fmt.Errorf("unsupported source type")
 	}
 	if sourceType == "url" {
@@ -844,6 +1047,9 @@ func NewSource(ctx context.Context, db *sql.DB, scopeType string, scopeID, userI
 	}
 	if sourceType == "text" && len(content) > 10*1024*1024 {
 		return models.KnowledgeSource{}, fmt.Errorf("text sources are limited to 10 MB")
+	}
+	if sourceType == "repository" && len(content) > 2*1024*1024 {
+		return models.KnowledgeSource{}, fmt.Errorf("repository files are limited to 2 MB")
 	}
 	if title == "" {
 		title = "Untitled source"

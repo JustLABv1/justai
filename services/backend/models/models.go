@@ -247,6 +247,30 @@ type KnowledgeSource struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
+type RepositoryContext struct {
+	ID               uuid.UUID  `json:"id"`
+	ConversationID   *uuid.UUID `json:"conversationId,omitempty"`
+	ScopeType        string     `json:"scopeType"`
+	ScopeID          uuid.UUID  `json:"scopeId"`
+	Provider         string     `json:"provider"`
+	RepositoryURL    string     `json:"repositoryUrl"`
+	Owner            string     `json:"owner"`
+	Repository       string     `json:"repository"`
+	Ref              string     `json:"ref"`
+	ResolvedRef      string     `json:"resolvedRef,omitempty"`
+	Title            string     `json:"title"`
+	ContextScope     string     `json:"contextScope,omitempty"`
+	Status           string     `json:"status"`
+	Error            string     `json:"error,omitempty"`
+	FileCount        int        `json:"fileCount"`
+	ReadyFileCount   int        `json:"readyFileCount"`
+	SkippedFileCount int        `json:"skippedFileCount"`
+	TotalBytes       int64      `json:"totalBytes"`
+	Progress         int        `json:"progress"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+}
+
 type MCPServer struct {
 	ID                   uuid.UUID       `json:"id"`
 	ScopeType            string          `json:"scopeType"`
@@ -279,6 +303,7 @@ type Citation struct {
 
 type ConversationContext struct {
 	KnowledgeSources      []KnowledgeSource      `json:"knowledgeSources"`
+	Repositories          []RepositoryContext    `json:"repositories"`
 	MCPServers            []MCPServer            `json:"mcpServers"`
 	TranscriptionSessions []TranscriptionSession `json:"transcriptionSessions"`
 	Notes                 []Note                 `json:"notes,omitempty"`

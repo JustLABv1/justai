@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -89,6 +90,24 @@ func TestAssistantUIRunStatusForTool(t *testing.T) {
 	for _, item := range cases {
 		if got := assistantUIRunStatusForTool(chatToolEvent{Status: item.status}); got != item.want {
 			t.Fatalf("status %q: expected %q, got %q", item.status, item.want, got)
+		}
+	}
+}
+
+func TestAssistantUIRetrievalMode(t *testing.T) {
+	if got := assistantUIRetrievalMode(true); got != "deep-context" {
+		t.Fatalf("expected deep-context mode, got %q", got)
+	}
+	if got := assistantUIRetrievalMode(false); got != "quick" {
+		t.Fatalf("expected quick mode, got %q", got)
+	}
+}
+
+func TestCitationPromptForDeepContextSetsEvidenceExpectations(t *testing.T) {
+	prompt := citationPromptForMode([]models.Citation{{Title: "main.go", Snippet: "func main() {}"}}, true)
+	for _, expected := range []string{"Deep context mode is active", "relevant sample", "main.go"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("expected deep-context prompt to contain %q, got %q", expected, prompt)
 		}
 	}
 }

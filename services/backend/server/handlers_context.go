@@ -43,11 +43,16 @@ func (a *App) getConversationContext(c *gin.Context) {
 	}
 	contextValue := models.ConversationContext{
 		KnowledgeSources:      []models.KnowledgeSource{},
+		Repositories:          []models.RepositoryContext{},
 		MCPServers:            []models.MCPServer{},
 		TranscriptionSessions: []models.TranscriptionSession{},
 		Notes:                 []models.Note{},
 	}
 	if err := a.loadConversationKnowledge(c, conversationID, &contextValue); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := a.loadConversationRepositories(c, conversationID, &contextValue); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -81,7 +86,7 @@ func (a *App) loadConversationKnowledge(c *gin.Context, conversationID uuid.UUID
 			ORDER BY created_at DESC, id DESC
 			LIMIT 1
 		) ij ON TRUE
-		WHERE cks.conversation_id = $1 ORDER BY cks.created_at`, conversationID)
+		WHERE cks.conversation_id = $1 AND ks.source_type <> 'repository' ORDER BY cks.created_at`, conversationID)
 	if err != nil {
 		return err
 	}

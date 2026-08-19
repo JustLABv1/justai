@@ -50,6 +50,7 @@ func main() {
 	workerContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	application.RAG.Start(workerContext)
+	application.StartRepositoryWorker(workerContext)
 	application.Live.Start(workerContext)
 	server := &http.Server{
 		Addr:              cfg.Address(),

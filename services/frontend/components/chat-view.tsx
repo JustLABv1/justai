@@ -10,6 +10,7 @@ import {
 } from "react"
 import {
   ArrowUp,
+  BrainCircuit,
   Check,
   ChevronDown,
   Copy,
@@ -289,6 +290,7 @@ function createHistoryAdapter(
 
 const EMPTY_CONTEXT: ConversationContext = {
   knowledgeSources: [],
+  repositories: [],
   mcpServers: [],
   transcriptionSessions: [],
   notes: [],
@@ -961,6 +963,12 @@ function ContextDisplay({
         detail: source.sourceType || "knowledge",
         kind: "knowledge" as const,
       })),
+    ...(context.repositories ?? []).map((repository) => ({
+      id: `repository:${repository.id}`,
+      label: repository.title,
+      detail: `repository · ${repository.status}`,
+      kind: "knowledge" as const,
+    })),
     ...context.mcpServers.map((server) => ({
       id: `mcp:${server.id}`,
       label: server.name,
@@ -1604,6 +1612,8 @@ function Composer({
   modelId,
   modelDiscoveryLoading,
   onModelChange,
+  deepContext,
+  onDeepContextChange,
   compact = false,
   onOpenHistory,
   conversationContext,
@@ -1622,6 +1632,8 @@ function Composer({
   modelId: string
   modelDiscoveryLoading?: boolean
   onModelChange: (id: string) => void
+  deepContext: boolean
+  onDeepContextChange: (enabled: boolean) => void
   compact?: boolean
   onOpenHistory?: () => void
   conversationContext: ConversationContext
@@ -1639,6 +1651,24 @@ function Composer({
       attachment.status.type === "running" ||
       attachment.status.type === "incomplete"
   )
+  const readyRepositories = (conversationContext.repositories ?? []).filter(
+    (repository) => repository.status === "ready"
+  )
+  const deepContextAvailable = readyRepositories.length > 0
+  const deepContextTitle = deepContextAvailable
+    ? deepContext
+      ? "Deep context is on · use broader context across files"
+      : "Use broader context for this question"
+    : (conversationContext.repositories ?? []).length > 0
+      ? "Repository is still indexing"
+      : "Connect a repository in Context first"
+
+  useEffect(() => {
+    if (!deepContextAvailable && deepContext) {
+      onDeepContextChange(false)
+    }
+  }, [onDeepContextChange, deepContext, deepContextAvailable])
+
   const mcpItems = useMemo<Unstable_TriggerItem[]>(() => {
     const attachedServerIds = new Set(
       conversationContext.mcpServers.map((server) => server.id)
@@ -2071,6 +2101,29 @@ function Composer({
                   )}
                 </div>
                 <div className="order-3 flex shrink-0 items-center gap-1">
+                  <Button
+                    aria-label={
+                      deepContextAvailable
+                        ? "Toggle deep context mode"
+                        : deepContextTitle
+                    }
+                    aria-pressed={deepContext}
+                    className={cn(
+                      "rounded-full text-muted-foreground hover:text-foreground",
+                      compact ? "size-9 p-0" : "gap-1.5 px-2.5",
+                      deepContext &&
+                        "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                    )}
+                    disabled={!deepContextAvailable}
+                    onClick={() => onDeepContextChange(!deepContext)}
+                    size={compact ? "icon" : "sm"}
+                    title={deepContextTitle}
+                    type="button"
+                    variant="ghost"
+                  >
+                    <BrainCircuit className="size-4" aria-hidden="true" />
+                    {!compact && <span>Deep context</span>}
+                  </Button>
                   <ModelEndpointPicker
                     compact={compact}
                     endpointId={endpointId}
@@ -2248,6 +2301,7 @@ function AssistantChatSurface({
     import("@assistant-ui/react").ToolCallMessagePartProps | null
   >(null)
   const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [deepContext, setDeepContext] = useState(false)
   const selectedEndpointId =
     endpointId && endpoints.some((item) => item.id === endpointId)
       ? endpointId
@@ -2349,6 +2403,7 @@ function AssistantChatSurface({
           endpointId: selectedEndpointId,
           model: selectedModel,
           useMemory: true,
+          deepContext,
         }),
         resumable: {
           storage: resumableStorage,
@@ -2385,12 +2440,19 @@ function AssistantChatSurface({
               endpointId: selectedEndpointId,
               model: selectedModel,
               useMemory: true,
+              deepContext,
               requestId,
             },
           }
         },
       }),
-    [onEnsureConversation, resumableStorage, selectedEndpointId, selectedModel]
+    [
+      onEnsureConversation,
+      deepContext,
+      resumableStorage,
+      selectedEndpointId,
+      selectedModel,
+    ]
   )
 
   const attachments = useMemo(
@@ -2533,6 +2595,8 @@ function AssistantChatSurface({
           models: availableModels,
           modelDiscoveryLoading,
           modelId: selectedModel,
+          deepContext,
+          onDeepContextChange: setDeepContext,
           onEndpointChange: setEndpointId,
           onModelChange: (model) =>
             setModelByEndpoint((current) => ({
@@ -2579,6 +2643,7 @@ export function ChatView({
   const [historyLoading, setHistoryLoading] = useState(Boolean(conversationId))
   const [conversationContext, setConversationContext] =
     useState<ConversationContext>(EMPTY_CONTEXT)
+  const [contextHintDismissed, setContextHintDismissed] = useState(contextOpen)
   const locallyCreatedConversationRef = useRef<string | null>(null)
   const pendingConversationRef = useRef(false)
   const conversationCreationRef = useRef<Promise<string> | null>(null)
@@ -2941,6 +3006,18 @@ export function ChatView({
     Boolean(conversationId) &&
     (historyLoading || activeConversationId !== conversationId || !surfaceReady)
   const surfaceMatchesRoute = activeConversationId === conversationId
+  const showContextHint =
+    Boolean(onOpenContext) &&
+    !contextOpen &&
+    !contextHintDismissed &&
+    surfaceReady &&
+    !conversationLoading &&
+    (conversationContext.repositories ?? []).length === 0
+  const hasKnowledgeSources = conversationContext.knowledgeSources.length > 0
+  const handleOpenContext = () => {
+    setContextHintDismissed(true)
+    onOpenContext?.()
+  }
 
   return (
     <div
@@ -2951,18 +3028,58 @@ export function ChatView({
         className="chat-surface-content relative flex min-h-0 flex-1 flex-col"
         data-loading={conversationLoading ? "true" : undefined}
       >
+        {showContextHint && (
+          <div
+            aria-live="polite"
+            className="absolute top-12 right-3 z-30 flex max-w-[280px] items-start gap-2 rounded-xl border bg-background/95 p-3 text-xs shadow-lg backdrop-blur"
+            role="status"
+          >
+            <div className="min-w-0">
+              <p className="font-medium text-foreground">
+                {hasKnowledgeSources
+                  ? "Add a repository"
+                  : "Add files or a repository"}
+              </p>
+              <p className="mt-1 leading-relaxed text-muted-foreground">
+                {hasKnowledgeSources
+                  ? "Open Context in the top right to connect a read-only GitHub/GitLab repository."
+                  : "Open Context in the top right to attach files or connect a read-only GitHub/GitLab repository."}
+              </p>
+              <button
+                className="mt-2 font-medium text-foreground underline underline-offset-2 hover:no-underline"
+                onClick={handleOpenContext}
+                type="button"
+              >
+                Open Context
+              </button>
+            </div>
+            <button
+              aria-label="Dismiss context tip"
+              className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setContextHintDismissed(true)}
+              type="button"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
         {onOpenContext && (
           <Button
             aria-expanded={contextOpen}
             aria-label={
               contextOpen
                 ? "Close conversation context"
-                : "Open conversation context"
+                : "Open conversation context to add files or repositories"
             }
             className="absolute top-3 right-3 z-30 h-8 gap-1.5 rounded-full border bg-background/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground"
-            onClick={onOpenContext}
+            onClick={handleOpenContext}
             size="sm"
             type="button"
+            title={
+              contextOpen
+                ? "Close conversation context"
+                : "Open Context to add files or repositories"
+            }
             variant="ghost"
           >
             {contextOpen ? (
@@ -3027,7 +3144,8 @@ export function ChatView({
             (source) => source.contextScope !== "message"
           ).length
         }{" "}
-        knowledge sources, {conversationContext.mcpServers.length} MCP servers,{" "}
+        knowledge sources, {(conversationContext.repositories ?? []).length}{" "}
+        repositories, {conversationContext.mcpServers.length} MCP servers,{" "}
         {conversationContext.notes?.length ?? 0} notes,{" "}
         {conversationContext.transcriptionSessions.length} transcription
         sessions attached.

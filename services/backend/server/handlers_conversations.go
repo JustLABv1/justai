@@ -33,9 +33,16 @@ func (a *App) createConversation(c *gin.Context) {
 		return
 	}
 
+	transaction, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer transaction.Rollback()
+
 	var item models.Conversation
 	var rawEndpointID sql.NullString
-	err := a.DB.QueryRowContext(c, `
+	err = transaction.QueryRowContext(c, `
 		INSERT INTO conversations (user_id, organization_id)
 		VALUES ($1, $2)
 		RETURNING id, title, endpoint_id::text, created_at, updated_at
@@ -47,6 +54,14 @@ func (a *App) createConversation(c *gin.Context) {
 		&item.UpdatedAt,
 	)
 	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := attachUserRepositories(c, transaction, item.ID, principal.UserID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := transaction.Commit(); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}

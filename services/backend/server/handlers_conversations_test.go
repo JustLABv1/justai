@@ -51,10 +51,18 @@ func TestCreateConversationIsScopedToUserAndOrganization(t *testing.T) {
 	organizationID := uuid.New()
 	conversationID := uuid.New()
 	createdAt := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
 	mock.ExpectQuery("INSERT INTO conversations").
 		WithArgs(userID, organizationID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "endpoint_id", "created_at", "updated_at"}).
 			AddRow(conversationID, defaultConversationTitle, nil, createdAt, createdAt))
+	mock.ExpectExec("INSERT INTO conversation_repository_contexts").
+		WithArgs(conversationID, userID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO conversation_knowledge_sources").
+		WithArgs(conversationID, userID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
 
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)

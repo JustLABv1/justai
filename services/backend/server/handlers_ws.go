@@ -17,6 +17,7 @@ import (
 	"justai-backend/middleware"
 	"justai-backend/models"
 	"justai-backend/provider"
+	"justai-backend/rag"
 )
 
 type wsTicketRequest struct {
@@ -196,13 +197,24 @@ func (a *App) conversationHasKnowledge(ctx context.Context, conversationID uuid.
 	return attached, err
 }
 
-func (a *App) searchKnowledge(ctx context.Context, organizationID, userID, conversationID uuid.UUID, query string, limit int, selectedSourceIDs []uuid.UUID) ([]models.Citation, error) {
+func (a *App) searchKnowledge(ctx context.Context, organizationID, userID, conversationID uuid.UUID, query string, limit int, selectedSourceIDs []uuid.UUID, deepContext bool) ([]models.Citation, error) {
+	if deepContext {
+		limit = rag.DeepContextLimit
+	}
 	var citations []models.Citation
 	var err error
 	if len(selectedSourceIDs) > 0 {
-		citations, err = a.RAG.SearchConversationSources(ctx, conversationID, query, limit, selectedSourceIDs)
+		if deepContext {
+			citations, err = a.RAG.SearchConversationSourcesDeepContext(ctx, conversationID, query, limit, selectedSourceIDs)
+		} else {
+			citations, err = a.RAG.SearchConversationSources(ctx, conversationID, query, limit, selectedSourceIDs)
+		}
 	} else {
-		citations, err = a.RAG.SearchConversation(ctx, conversationID, query, limit)
+		if deepContext {
+			citations, err = a.RAG.SearchConversationDeepContext(ctx, conversationID, query, limit)
+		} else {
+			citations, err = a.RAG.SearchConversation(ctx, conversationID, query, limit)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -657,9 +669,22 @@ func (a *App) ensureConversation(ctx context.Context, userID, organizationID uui
 		}
 		return id, nil
 	}
+	transaction, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer transaction.Rollback()
 	var id uuid.UUID
-	err := a.DB.QueryRowContext(ctx, `INSERT INTO conversations (user_id, organization_id) VALUES ($1, $2) RETURNING id`, userID, organizationID).Scan(&id)
-	return id, err
+	if err := transaction.QueryRowContext(ctx, `INSERT INTO conversations (user_id, organization_id) VALUES ($1, $2) RETURNING id`, userID, organizationID).Scan(&id); err != nil {
+		return uuid.Nil, err
+	}
+	if err := attachUserRepositories(ctx, transaction, id, userID); err != nil {
+		return uuid.Nil, err
+	}
+	if err := transaction.Commit(); err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
 }
 
 func (a *App) conversationHistory(ctx context.Context, conversationID uuid.UUID) ([]provider.Message, error) {
@@ -752,8 +777,16 @@ func (a *App) resolveEndpoint(ctx context.Context, userID, organizationID uuid.U
 }
 
 func citationPrompt(citations []models.Citation) string {
+	return citationPromptForMode(citations, false)
+}
+
+func citationPromptForMode(citations []models.Citation, deepContext bool) string {
 	var builder strings.Builder
-	builder.WriteString("Use the following retrieved context when it helps. Cite source titles naturally.\n")
+	if deepContext {
+		builder.WriteString("Deep context mode is active. Synthesize evidence across the retrieved context and explain how the pieces relate. Treat these passages as a relevant sample, not an exhaustive dump of the available context. Name files or notes when useful, distinguish direct evidence from inference, and say when the retrieved context is insufficient. Do not invent relationships.\n")
+	} else {
+		builder.WriteString("Use the following retrieved context when it helps. Cite source titles naturally.\n")
+	}
 	for _, citation := range citations {
 		builder.WriteString("[")
 		builder.WriteString(citation.Title)

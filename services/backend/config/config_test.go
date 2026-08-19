@@ -52,6 +52,9 @@ dev_seed: false
 	if !loaded.AllowPrivate || loaded.DevSeed || !loaded.OIDCEnabled() {
 		t.Fatalf("unexpected feature config: %+v", loaded)
 	}
+	if loaded.RepositoryMaxFiles != 200 {
+		t.Fatalf("unexpected repository file limit: %d", loaded.RepositoryMaxFiles)
+	}
 	if loaded.Transcription.StreamingChunkMs != 2500 || loaded.Transcription.StreamingOverlapMs != 500 || loaded.Transcription.StreamingPromptChars != 160 {
 		t.Fatalf("unexpected streaming transcription defaults: %+v", loaded.Transcription)
 	}
@@ -70,6 +73,7 @@ func TestEnvironmentOverridesYAML(t *testing.T) {
 	t.Setenv("JUSTAI_DATABASE_URL", "postgres://from-env")
 	t.Setenv("JUSTAI_DEV_SEED", "false")
 	t.Setenv("JUSTAI_TRANSCRIPTION_S3_PROCESSING_ENDPOINT", "http://host.containers.internal:9000")
+	t.Setenv("JUSTAI_REPOSITORY_MAX_FILES", "1000")
 
 	loaded, err := Load(configPath)
 	if err != nil {
@@ -77,6 +81,9 @@ func TestEnvironmentOverridesYAML(t *testing.T) {
 	}
 	if loaded.Port != "9191" || loaded.DatabaseURL != "postgres://from-env" || loaded.DevSeed {
 		t.Fatalf("environment values did not override YAML: %+v", loaded)
+	}
+	if loaded.RepositoryMaxFiles != 1000 {
+		t.Fatalf("repository file limit did not load from the environment: %d", loaded.RepositoryMaxFiles)
 	}
 	if loaded.Transcription.S3ProcessingEndpoint != "http://host.containers.internal:9000" {
 		t.Fatalf("S3 processing endpoint did not load from the environment: %q", loaded.Transcription.S3ProcessingEndpoint)
@@ -120,6 +127,7 @@ func clearConfigEnv(t *testing.T) {
 		"JUSTAI_SECURE_COOKIES",
 		"JUSTAI_COOKIE_SAMESITE",
 		"JUSTAI_COOKIE_DOMAIN",
+		"JUSTAI_REPOSITORY_MAX_FILES",
 		"JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_MAX_BYTES",
 		"JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_PART_BYTES",
 		"JUSTAI_TRANSCRIPTION_VIDEO_MAX_DURATION_HOURS",

@@ -33,7 +33,7 @@ func TestRunMigrationsIntegration(t *testing.T) {
 	}
 
 	checks := map[string]string{
-		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '026_mcp_server_icon_uploads.sql')`,
+		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '028_persistent_repository_context.sql')`,
 		"platform settings":                    `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'platform_settings')`,
 		"organization endpoint default":        `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'organization_default_endpoints')`,
 		"chat runs":                            `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_runs')`,
@@ -59,6 +59,9 @@ func TestRunMigrationsIntegration(t *testing.T) {
 		"pyannote endpoint provider":           `SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.endpoint_settings'::regclass AND conname = 'endpoint_settings_provider_type_check' AND pg_get_constraintdef(oid) LIKE '%pyannote%')`,
 		"endpoint kind":                        `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'endpoint_settings' AND column_name = 'endpoint_kind')`,
 		"video pipeline steps":                 `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'transcription_video_uploads' AND column_name = 'pipeline_steps')`,
+		"repository contexts":                  `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'repository_contexts')`,
+		"repository context files":             `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'repository_context_files')`,
+		"conversation repository context":      `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'conversation_repository_contexts')`,
 	}
 	for name, query := range checks {
 		var present bool

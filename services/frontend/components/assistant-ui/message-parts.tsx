@@ -3,8 +3,11 @@
 import Image from "next/image"
 import { Children, useMemo } from "react"
 import {
+  ChevronDown,
   CircleAlert,
+  BrainCircuit,
   FileText,
+  Files,
   LoaderCircle,
   Quote,
   Sparkles,
@@ -37,6 +40,7 @@ type RetrievalStatus = {
   citationCount?: number
   sourceCount?: number
   passageCount?: number
+  mode?: string
   error?: string
 }
 
@@ -63,14 +67,20 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
     typeof passageCount === "number" && passageCount > sourceCount
       ? ` · ${passageCount} matches`
       : ""
+  // Keep recognizing the previous mode name so messages persisted before the
+  // rename continue to render with the enhanced-context treatment.
+  const deepContext =
+    value.mode === "deep-context" || value.mode === "repository-analysis"
   const label =
     status === "completed"
-      ? `Grounding ready · ${sourceLabel}${passageLabel}`
+      ? `${deepContext ? "Deep context ready" : "Grounding ready"} · ${sourceLabel}${passageLabel}`
       : status === "failed"
         ? "Grounding unavailable"
         : status === "disabled"
           ? "Knowledge grounding is disabled"
-          : "Searching attached context…"
+          : deepContext
+            ? "Analyzing deeper context…"
+            : "Searching attached context…"
 
   return (
     <div
@@ -84,7 +94,11 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
       {status === "started" ? (
         <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
       ) : status === "completed" ? (
-        <Sparkles className="size-3.5 text-primary" aria-hidden="true" />
+        deepContext ? (
+          <BrainCircuit className="size-3.5 text-primary" aria-hidden="true" />
+        ) : (
+          <Sparkles className="size-3.5 text-primary" aria-hidden="true" />
+        )
       ) : (
         <FileText className="size-3.5" aria-hidden="true" />
       )}
@@ -303,11 +317,53 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
   )
 }
 
-type AssistantGroupKey = "group-reasoning" | "group-tool" | "group-retrieval"
+type SourcePart = Extract<PartState, { type: "source" }>
+
+function SourceGroup({ indices }: { indices: readonly number[] }) {
+  const messageParts = useAuiState((state) => state.message.parts)
+  const sourceParts = useMemo(
+    () =>
+      indices.flatMap((index): SourcePart[] => {
+        const part = messageParts[index]
+        return part?.type === "source" ? [part] : []
+      }),
+    [indices, messageParts]
+  )
+
+  if (sourceParts.length === 0) return null
+  if (sourceParts.length === 1) {
+    return <AssistantSource {...sourceParts[0]} />
+  }
+
+  return (
+    <details className="my-2 w-full max-w-2xl overflow-hidden rounded-xl border bg-muted/20 text-xs">
+      <summary className="group flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 font-medium text-foreground [&::-webkit-details-marker]:hidden">
+        <Files className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        <span>Sources used</span>
+        <span className="font-normal text-muted-foreground">
+          · {sourceParts.length} sources
+        </span>
+        <ChevronDown
+          className="ml-auto size-3.5 text-muted-foreground transition-transform duration-150 ease-out group-open:rotate-180"
+          aria-hidden="true"
+        />
+      </summary>
+      <div className="space-y-1 border-t p-2">
+        {sourceParts.map((part) => (
+          <AssistantSource key={part.id} {...part} />
+        ))}
+      </div>
+    </details>
+  )
+}
+
+type AssistantGroupKey =
+  "group-reasoning" | "group-tool" | "group-retrieval" | "group-sources"
 
 const assistantGroupByType = groupPartByType<AssistantGroupKey>({
   reasoning: ["group-reasoning"],
   "tool-call": ["group-tool"],
+  source: ["group-sources"],
 })
 
 const groupAssistantParts = (
@@ -414,6 +470,9 @@ export function AssistantMessageParts() {
         if (part.type === "group-retrieval") {
           const statuses = Children.toArray(children)
           return statuses[statuses.length - 1] ?? null
+        }
+        if (part.type === "group-sources") {
+          return <SourceGroup indices={part.indices} />
         }
         if (part.type === "indicator") {
           return (
