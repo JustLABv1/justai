@@ -582,6 +582,15 @@ func serverIDFromParam(raw string) uuid.UUID {
 }
 
 func (a *App) cacheMCPTools(ctx context.Context, serverID uuid.UUID, tools []mcp.Tool) error {
+	// Do not replace a known-good tool snapshot with an empty response. A
+	// transient disconnect or a server that is still starting can legitimately
+	// make tools/list return no tools; marking that response fresh would make
+	// every chat turn believe the server has no tools until the cache expires.
+	// Keep the old rows as a stale fallback and force the next discovery.
+	if len(tools) == 0 {
+		_, err := a.DB.ExecContext(ctx, `UPDATE mcp_servers SET tools_discovered_at = NULL WHERE id = $1`, serverID)
+		return err
+	}
 	transaction, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -602,18 +611,30 @@ func (a *App) cacheMCPTools(ctx context.Context, serverID uuid.UUID, tools []mcp
 	return transaction.Commit()
 }
 
+func (a *App) refreshMCPTools(ctx context.Context, server mcp.Server, serverID uuid.UUID) ([]mcp.Tool, error) {
+	// A forced discovery is also a connection reset. This is the same recovery
+	// operation exposed by the MCP configuration screen, but it is now safe to
+	// perform automatically when a chat detects stale bindings.
+	mcp.Invalidate(server.ID)
+	tools, err := server.ListTools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.cacheMCPTools(ctx, serverID, tools); err != nil {
+		return nil, fmt.Errorf("MCP tools were discovered but could not be cached: %w", err)
+	}
+	return tools, nil
+}
+
 func (a *App) cachedMCPTools(ctx context.Context, serverID uuid.UUID) ([]mcp.Tool, bool, error) {
 	var cached bool
 	if err := a.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM mcp_servers WHERE id = $1 AND tools_discovered_at > now() - interval '10 minutes')`, serverID).Scan(&cached); err != nil {
 		return nil, false, err
 	}
-	// A successful discovery can legitimately return zero tools. Use the
-	// discovery timestamp as the cache marker instead of treating an empty
-	// result as a cache miss and repeatedly reconnecting to the server.
-	if !cached {
-		return nil, false, nil
-	}
-	rows, err := a.DB.QueryContext(ctx, `SELECT name, COALESCE(description, ''), input_schema, annotations, metadata FROM mcp_server_tools WHERE server_id = $1 AND discovered_at > now() - interval '10 minutes' ORDER BY name`, serverID)
+	// Always load the last known tool snapshot. When the marker is stale, the
+	// caller refreshes it, but these rows keep the chat usable if discovery is
+	// temporarily unavailable. An empty snapshot remains a cache miss.
+	rows, err := a.DB.QueryContext(ctx, `SELECT name, COALESCE(description, ''), input_schema, annotations, metadata FROM mcp_server_tools WHERE server_id = $1 ORDER BY name`, serverID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -639,7 +660,7 @@ func (a *App) cachedMCPTools(ctx context.Context, serverID uuid.UUID) ([]mcp.Too
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
-	return tools, true, nil
+	return tools, cached && len(tools) > 0, nil
 }
 
 func nullableJSON(value []string) any {

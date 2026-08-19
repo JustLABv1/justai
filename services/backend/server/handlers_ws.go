@@ -41,7 +41,7 @@ type chatToolEvent struct {
 	MCPAppMIMEType    string         `json:"mcpAppMimeType,omitempty"`
 	CallID            string         `json:"callId"`
 	ApprovalID        string         `json:"approvalId,omitempty"`
-	Arguments         map[string]any `json:"arguments,omitempty"`
+	Arguments         map[string]any `json:"arguments"`
 	Result            string         `json:"result,omitempty"`
 	ResultPreview     string         `json:"resultPreview,omitempty"`
 	Error             string         `json:"error,omitempty"`
@@ -602,6 +602,20 @@ func (a *App) executeChatMCPTool(ctx context.Context, userID, organizationID, co
 		"arguments":      arguments,
 	})
 	result, err := server.CallTool(ctx, binding.ToolName, arguments)
+	if err != nil && !binding.RequiresApproval {
+		// Trusted read-only tools can be safely retried after a forced
+		// rediscovery. This repairs both stale transport sessions and a tool
+		// snapshot that changed upstream without duplicating a destructive call.
+		if tools, refreshErr := a.refreshMCPTools(ctx, server, binding.ServerID); refreshErr == nil {
+			for _, tool := range tools {
+				if tool.Name != binding.ToolName || !mcpToolAllowed(server.Allowed, tool.Name) {
+					continue
+				}
+				result, err = server.CallTool(ctx, binding.ToolName, arguments)
+				break
+			}
+		}
+	}
 	details := map[string]any{"conversationId": conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "success": err == nil}
 	if err != nil {
 		details["error"] = err.Error()

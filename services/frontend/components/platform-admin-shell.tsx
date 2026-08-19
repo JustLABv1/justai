@@ -20,6 +20,7 @@ import {
   Database,
   Globe2,
   KeyRound,
+  LoaderCircle,
   MoreHorizontal,
   Megaphone,
   Network,
@@ -28,13 +29,14 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
+  Square,
   Trash2,
   TestTube2,
   UsersRound,
   Wrench,
 } from "lucide-react"
 
-import { api } from "@/lib/api"
+import { APIError, api } from "@/lib/api"
 import type {
   AdminAnalyticsResponse,
   AdminDashboardResponse,
@@ -118,6 +120,10 @@ function settingLabel(key: string) {
     .replace(/Enabled$/, "")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/^./, (value) => value.toUpperCase())
+}
+
+function isRequestAborted(caught: unknown) {
+  return caught instanceof APIError && caught.code === "request_aborted"
 }
 
 type PlatformControlKey = Exclude<
@@ -1390,6 +1396,13 @@ function ResourceCount({ label, value }: { label: string; value: unknown }) {
   )
 }
 
+type InventoryAction = {
+  id: string
+  label: string
+  cancellable: boolean
+  stoppedMessage: string
+}
+
 function InventoryView({
   title,
   items,
@@ -1404,7 +1417,10 @@ function InventoryView({
   createRequest?: number
 }) {
   const [actionError, setActionError] = useState("")
+  const [actionNotice, setActionNotice] = useState("")
   const [busyId, setBusyId] = useState("")
+  const [activeAction, setActiveAction] = useState<InventoryAction | null>(null)
+  const [itemErrors, setItemErrors] = useState<Record<string, string>>({})
   const [createOpen, setCreateOpen] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState("")
@@ -1423,27 +1439,51 @@ function InventoryView({
     scopeType: "global",
     scopeId: "",
   })
+  const actionAbortRef = useRef<AbortController | null>(null)
   const createRequestRef = useRef(createRequest ?? 0)
   const resourceLabel = kind === "endpoint" ? "Endpoint" : "MCP server"
 
-  async function runAction(id: string, action: () => Promise<void>) {
+  useEffect(() => {
+    return () => actionAbortRef.current?.abort()
+  }, [])
+
+  async function runAction(
+    id: string,
+    actionDetails: Omit<InventoryAction, "id">,
+    action: (signal: AbortSignal) => Promise<void>
+  ) {
+    const controller = new AbortController()
+    actionAbortRef.current = controller
     setBusyId(id)
     setActionError("")
+    setActionNotice("")
+    setActiveAction({ id, ...actionDetails })
+    setItemErrors((current) => ({ ...current, [id]: "" }))
     try {
-      await action()
+      await action(controller.signal)
       notifySuccess(`${resourceLabel} action completed`)
       onRefresh()
     } catch (caught) {
-      setActionError(
-        notifyError(
-          `${resourceLabel} action failed`,
-          caught,
-          "The action could not be completed."
-        )
+      if (isRequestAborted(caught)) {
+        setActionNotice(actionDetails.stoppedMessage)
+        return
+      }
+      const message = notifyError(
+        `${resourceLabel} action failed`,
+        caught,
+        "The action could not be completed."
       )
+      setActionError(message)
+      setItemErrors((current) => ({ ...current, [id]: message }))
     } finally {
+      if (actionAbortRef.current === controller) actionAbortRef.current = null
+      setActiveAction(null)
       setBusyId("")
     }
+  }
+
+  function stopActiveAction() {
+    actionAbortRef.current?.abort()
   }
 
   const resourcePath = kind === "endpoint" ? "endpoints" : "mcp/servers"
@@ -1568,6 +1608,15 @@ function InventoryView({
               <AlertDescription>{actionError}</AlertDescription>
             </Alert>
           )}
+          {actionNotice && (
+            <div
+              aria-live="polite"
+              className="rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+              role="status"
+            >
+              {actionNotice}
+            </div>
+          )}
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
@@ -1581,6 +1630,11 @@ function InventoryView({
             <tbody>
               {items.map((item) => {
                 const busy = busyId === item.id
+                const rowAction =
+                  activeAction?.id === item.id ? activeAction : null
+                const itemError =
+                  itemErrors[item.id] ||
+                  (kind === "mcp" ? String(item.lastError || "") : "")
                 const scopeLabel =
                   item.scopeType === "global"
                     ? "Platform"
@@ -1608,108 +1662,200 @@ function InventoryView({
                       <Badge variant={item.enabled ? "default" : "destructive"}>
                         {item.enabled ? "enabled" : "disabled"}
                       </Badge>
+                      {itemError && (
+                        <p
+                          aria-live="assertive"
+                          className="mt-1 max-w-xs text-xs break-words text-destructive"
+                          role="alert"
+                        >
+                          {itemError}
+                        </p>
+                      )}
                     </td>
                     <td className="p-2">
                       <div className="flex justify-end">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={
-                              <Button
-                                aria-label={`Actions for ${item.name}`}
-                                disabled={busy}
-                                size="icon-sm"
-                                variant="ghost"
+                        {busy ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <div
+                              aria-live="polite"
+                              className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                              role="status"
+                            >
+                              <LoaderCircle
+                                aria-hidden="true"
+                                className="size-3.5 animate-spin"
                               />
-                            }
-                          >
-                            <MoreHorizontal aria-hidden="true" />
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuGroup>
-                              <DropdownMenuItem
-                                disabled={busy}
-                                onClick={() =>
-                                  void runAction(item.id, async () => {
-                                    await api.patch(
-                                      `/api/v1/admin/${resourcePath}/${item.id}`,
-                                      { enabled: !item.enabled }
-                                    )
-                                  })
-                                }
+                              <span>{rowAction?.label ?? "Working…"}</span>
+                            </div>
+                            {rowAction?.cancellable && (
+                              <Button
+                                aria-label={`Stop action for ${item.name}`}
+                                onClick={stopActiveAction}
+                                size="sm"
+                                type="button"
+                                variant="outline"
                               >
-                                {item.enabled ? (
-                                  <Ban aria-hidden="true" />
-                                ) : (
-                                  <CheckCircle2 aria-hidden="true" />
-                                )}
-                                {item.enabled ? "Disable" : "Enable"}
-                              </DropdownMenuItem>
-                              {kind === "endpoint" && (
+                                <Square
+                                  data-icon="inline-start"
+                                  aria-hidden="true"
+                                />
+                                Stop
+                              </Button>
+                            )}
+                          </div>
+                        ) : (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  aria-label={`Actions for ${item.name}`}
+                                  disabled={busy}
+                                  size="icon-sm"
+                                  variant="ghost"
+                                />
+                              }
+                            >
+                              <MoreHorizontal aria-hidden="true" />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuGroup>
                                 <DropdownMenuItem
                                   disabled={busy}
                                   onClick={() =>
-                                    void runAction(item.id, async () => {
-                                      await api.post(
-                                        `/api/v1/admin/endpoints/${item.id}/test`,
-                                        {}
-                                      )
-                                    })
+                                    void runAction(
+                                      item.id,
+                                      {
+                                        label: item.enabled
+                                          ? "Disabling…"
+                                          : "Enabling…",
+                                        cancellable: false,
+                                        stoppedMessage: `${resourceLabel} update was stopped.`,
+                                      },
+                                      async () => {
+                                        await api.patch(
+                                          `/api/v1/admin/${resourcePath}/${item.id}`,
+                                          { enabled: !item.enabled }
+                                        )
+                                      }
+                                    )
                                   }
                                 >
-                                  <TestTube2 aria-hidden="true" /> Test endpoint
+                                  {item.enabled ? (
+                                    <Ban aria-hidden="true" />
+                                  ) : (
+                                    <CheckCircle2 aria-hidden="true" />
+                                  )}
+                                  {item.enabled ? "Disable" : "Enable"}
                                 </DropdownMenuItem>
-                              )}
-                              {kind === "mcp" && (
-                                <>
+                                {kind === "endpoint" && (
                                   <DropdownMenuItem
                                     disabled={busy}
                                     onClick={() =>
-                                      void runAction(item.id, async () => {
-                                        await api.post(
-                                          `/api/v1/admin/mcp/servers/${item.id}/test`
-                                        )
-                                      })
+                                      void runAction(
+                                        item.id,
+                                        {
+                                          label: "Testing endpoint…",
+                                          cancellable: true,
+                                          stoppedMessage:
+                                            "Endpoint test was stopped.",
+                                        },
+                                        async (signal) => {
+                                          await api.post(
+                                            `/api/v1/admin/endpoints/${item.id}/test`,
+                                            {},
+                                            { signal }
+                                          )
+                                        }
+                                      )
                                     }
                                   >
-                                    <TestTube2 aria-hidden="true" /> Test server
+                                    <TestTube2 aria-hidden="true" /> Test
+                                    endpoint
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    disabled={busy}
-                                    onClick={() =>
-                                      void runAction(item.id, async () => {
-                                        await api.get(
-                                          `/api/v1/admin/mcp/servers/${item.id}/tools`
+                                )}
+                                {kind === "mcp" && (
+                                  <>
+                                    <DropdownMenuItem
+                                      disabled={busy}
+                                      onClick={() =>
+                                        void runAction(
+                                          item.id,
+                                          {
+                                            label: "Testing connection…",
+                                            cancellable: true,
+                                            stoppedMessage: `${item.name} connection test was stopped.`,
+                                          },
+                                          async (signal) => {
+                                            await api.post(
+                                              `/api/v1/admin/mcp/servers/${item.id}/test`,
+                                              undefined,
+                                              { signal }
+                                            )
+                                          }
                                         )
-                                      })
-                                    }
-                                  >
-                                    <Wrench aria-hidden="true" /> Discover tools
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                            </DropdownMenuGroup>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              disabled={busy}
-                              variant="destructive"
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `Permanently delete this ${kind === "endpoint" ? "endpoint" : "MCP server"}: ${item.name}?`
-                                  )
-                                )
-                                  void runAction(item.id, async () => {
-                                    await api.delete(
-                                      `/api/v1/admin/${resourcePath}/${item.id}`
+                                      }
+                                    >
+                                      <TestTube2 aria-hidden="true" /> Test
+                                      server
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      disabled={busy}
+                                      onClick={() =>
+                                        void runAction(
+                                          item.id,
+                                          {
+                                            label: "Discovering tools…",
+                                            cancellable: true,
+                                            stoppedMessage: `${item.name} tool discovery was stopped.`,
+                                          },
+                                          async (signal) => {
+                                            await api.get(
+                                              `/api/v1/admin/mcp/servers/${item.id}/tools`,
+                                              { signal }
+                                            )
+                                          }
+                                        )
+                                      }
+                                    >
+                                      <Wrench aria-hidden="true" /> Discover
+                                      tools
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuGroup>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                disabled={busy}
+                                variant="destructive"
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `Permanently delete this ${kind === "endpoint" ? "endpoint" : "MCP server"}: ${item.name}?`
                                     )
-                                  })
-                              }}
-                            >
-                              <Trash2 aria-hidden="true" /> Delete{" "}
-                              {kind === "endpoint" ? "endpoint" : "MCP server"}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                                  )
+                                    void runAction(
+                                      item.id,
+                                      {
+                                        label: "Deleting…",
+                                        cancellable: false,
+                                        stoppedMessage: `${resourceLabel} deletion was stopped.`,
+                                      },
+                                      async () => {
+                                        await api.delete(
+                                          `/api/v1/admin/${resourcePath}/${item.id}`
+                                        )
+                                      }
+                                    )
+                                }}
+                              >
+                                <Trash2 aria-hidden="true" /> Delete{" "}
+                                {kind === "endpoint"
+                                  ? "endpoint"
+                                  : "MCP server"}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                       </div>
                     </td>
                   </tr>

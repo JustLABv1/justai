@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
 	"encoding/binary"
+	"regexp"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 
 	"justai-backend/provider"
@@ -99,5 +102,59 @@ func TestFindMCPBindingReturnsProviderSafeName(t *testing.T) {
 	}, serverID, "search_plain_docs")
 	if !ok || providerName != "mcp_12345678_search_plain_docs" || binding.ToolName != "search_plain_docs" {
 		t.Fatalf("unexpected MCP binding lookup: %q %+v (ok=%v)", providerName, binding, ok)
+	}
+}
+
+func TestFindVoiceToolBindingAcceptsRawAndNormalizedNames(t *testing.T) {
+	serverID := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
+	bindings := map[string]voiceToolBinding{
+		"mcp_12345678_getcheckhistory": {
+			ServerID: serverID,
+			ToolName: "getCheckHistory",
+		},
+	}
+
+	for _, name := range []string{"mcp_12345678_getcheckhistory", "getCheckHistory", "getcheckhistory"} {
+		binding, ok := findVoiceToolBinding(bindings, name)
+		if !ok || binding.ServerID != serverID || binding.ToolName != "getCheckHistory" {
+			t.Fatalf("expected %q to resolve to the MCP binding, got %+v (ok=%v)", name, binding, ok)
+		}
+	}
+}
+
+func TestFindVoiceToolBindingRejectsAmbiguousNormalizedNames(t *testing.T) {
+	bindings := map[string]voiceToolBinding{
+		"mcp_12345678_getcheckhistory": {
+			ServerID: uuid.MustParse("12345678-1234-1234-1234-123456789abc"),
+			ToolName: "getCheckHistory",
+		},
+		"mcp_abcdefab_getcheckhistory": {
+			ServerID: uuid.MustParse("abcdefab-cdef-abcd-efab-cdefabcdefab"),
+			ToolName: "GETCHECKHISTORY",
+		},
+	}
+	if _, ok := findVoiceToolBinding(bindings, "getcheckhistory"); ok {
+		t.Fatal("expected an ambiguous normalized MCP name to be rejected")
+	}
+}
+
+func TestCacheMCPToolsDoesNotMarkEmptyDiscoveryFresh(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	serverID := uuid.New()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE mcp_servers SET tools_discovered_at = NULL WHERE id = $1")).
+		WithArgs(serverID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	app := &App{DB: db}
+	if err := app.cacheMCPTools(context.Background(), serverID, nil); err != nil {
+		t.Fatalf("expected empty discovery to invalidate the marker, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

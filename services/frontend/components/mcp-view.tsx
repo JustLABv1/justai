@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  AlertTriangle,
   Check,
   KeyRound,
   LoaderCircle,
@@ -10,6 +11,7 @@ import {
   Pencil,
   Plug,
   ShieldCheck,
+  Square,
   TerminalSquare,
   Trash2,
   Wrench,
@@ -104,6 +106,15 @@ const emptyForm: MCPForm = {
   trustedReadOnly: false,
 }
 
+type MCPAction = {
+  serverId: string
+  label: string
+}
+
+function isRequestAborted(caught: unknown) {
+  return caught instanceof APIError && caught.code === "request_aborted"
+}
+
 export function MCPView({
   servers,
   onChange,
@@ -120,8 +131,10 @@ export function MCPView({
     Record<string, Array<{ name: string; description?: string }>>
   >({})
   const [busyId, setBusyId] = useState("")
+  const [activeAction, setActiveAction] = useState<MCPAction | null>(null)
   const [saving, setSaving] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<MCPServer | null>(null)
+  const actionAbortRef = useRef<AbortController | null>(null)
   const createRequestRef = useRef(createRequest ?? 0)
   const canManageOrganization =
     platformAdmin ||
@@ -149,6 +162,10 @@ export function MCPView({
     createRequestRef.current = createRequest
     openCreate()
   }, [createRequest, openCreate])
+
+  useEffect(() => {
+    return () => actionAbortRef.current?.abort()
+  }, [])
 
   function update<K extends keyof MCPForm>(key: K, value: MCPForm[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -240,11 +257,22 @@ export function MCPView({
   }
 
   async function discover(server: MCPServer) {
+    const controller = new AbortController()
+    actionAbortRef.current = controller
     setBusyId(server.id)
+    setActiveAction({ serverId: server.id, label: "Discovering tools…" })
+    setNotice("")
+    onChange(
+      servers.map((item) =>
+        item.id === server.id ? { ...item, lastError: "" } : item
+      )
+    )
     try {
       const result = await api.get<{
         tools: Array<{ name: string; description?: string }>
-      }>(`/api/v1/mcp/servers/${server.id}/tools`)
+      }>(`/api/v1/mcp/servers/${server.id}/tools`, {
+        signal: controller.signal,
+      })
       setTools((current) => ({ ...current, [server.id]: result.tools }))
       onChange(
         servers.map((item) =>
@@ -255,6 +283,10 @@ export function MCPView({
       )
       setNotice(`${result.tools.length} allowlisted tools discovered.`)
     } catch (caught) {
+      if (isRequestAborted(caught)) {
+        setNotice(`${server.name} tool discovery was stopped.`)
+        return
+      }
       const message =
         caught instanceof Error
           ? caught.message
@@ -266,22 +298,42 @@ export function MCPView({
       )
       setNotice(message)
     } finally {
+      if (actionAbortRef.current === controller) actionAbortRef.current = null
+      setActiveAction(null)
       setBusyId("")
     }
   }
 
   async function test(server: MCPServer) {
+    const controller = new AbortController()
+    actionAbortRef.current = controller
     setBusyId(server.id)
+    setActiveAction({ serverId: server.id, label: "Testing connection…" })
+    setNotice("")
+    onChange(
+      servers.map((item) =>
+        item.id === server.id ? { ...item, lastError: "" } : item
+      )
+    )
     try {
       const result = await api.post<{ server?: MCPServer }>(
-        `/api/v1/mcp/servers/${server.id}/test`
+        `/api/v1/mcp/servers/${server.id}/test`,
+        undefined,
+        { signal: controller.signal }
       )
-      if (result.server)
-        onChange(
-          servers.map((item) => (item.id === server.id ? result.server! : item))
+      onChange(
+        servers.map((item) =>
+          item.id === server.id
+            ? { ...item, ...(result.server ?? {}), lastError: "" }
+            : item
         )
+      )
       setNotice(`${server.name} responded successfully.`)
     } catch (caught) {
+      if (isRequestAborted(caught)) {
+        setNotice(`${server.name} connection test was stopped.`)
+        return
+      }
       const message =
         caught instanceof Error
           ? caught.message
@@ -299,8 +351,14 @@ export function MCPView({
       )
       setNotice(message)
     } finally {
+      if (actionAbortRef.current === controller) actionAbortRef.current = null
+      setActiveAction(null)
       setBusyId("")
     }
+  }
+
+  function stopActiveAction() {
+    actionAbortRef.current?.abort()
   }
 
   function authorize(server: MCPServer) {
@@ -328,7 +386,11 @@ export function MCPView({
   return (
     <div className="space-y-6">
       {notice && (
-        <div className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+        <div
+          aria-live="polite"
+          className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground"
+          role="status"
+        >
           {notice}
         </div>
       )}
@@ -442,99 +504,137 @@ export function MCPView({
                 </div>
               )}
               {server.lastError && (
-                <p className="mt-2 text-xs text-destructive">
-                  {server.lastError}
-                </p>
+                <div
+                  aria-live="assertive"
+                  className="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive"
+                  role="alert"
+                >
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 size-3.5 shrink-0"
+                  />
+                  <span className="min-w-0 break-words">
+                    <span className="font-medium">MCP action failed: </span>
+                    {server.lastError}
+                  </span>
+                </div>
               )}
               {canManageServer(server) && (
                 <div className="flex items-center justify-end border-t pt-3">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          aria-label={`Actions for ${server.name}`}
+                  {activeAction?.serverId === server.id ? (
+                    <div className="flex w-full items-center justify-end gap-2">
+                      <div
+                        aria-live="polite"
+                        className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"
+                        role="status"
+                      >
+                        <LoaderCircle
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0 animate-spin"
                         />
-                      }
-                    >
-                      <MoreHorizontal
-                        data-icon="inline-start"
-                        aria-hidden="true"
-                      />
-                      Actions
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        disabled={busyId === server.id}
-                        onClick={() => void discover(server)}
+                        <span className="truncate">{activeAction.label}</span>
+                      </div>
+                      <Button
+                        aria-label={`Stop action for ${server.name}`}
+                        onClick={stopActiveAction}
+                        size="sm"
+                        type="button"
+                        variant="outline"
                       >
-                        <TerminalSquare aria-hidden="true" /> Discover tools
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={busyId === server.id}
-                        onClick={() => void test(server)}
+                        <Square data-icon="inline-start" aria-hidden="true" />
+                        Stop
+                      </Button>
+                    </div>
+                  ) : (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button
+                            disabled={busyId === server.id}
+                            variant="outline"
+                            size="sm"
+                            aria-label={`Actions for ${server.name}`}
+                          />
+                        }
                       >
-                        <Check aria-hidden="true" /> Test connection
-                      </DropdownMenuItem>
-                      {server.authType === "oauth" && (
+                        <MoreHorizontal
+                          data-icon="inline-start"
+                          aria-hidden="true"
+                        />
+                        Actions
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
                         <DropdownMenuItem
                           disabled={busyId === server.id}
-                          onClick={() => authorize(server)}
+                          onClick={() => void discover(server)}
                         >
-                          <KeyRound aria-hidden="true" />
-                          {server.credentialConfigured
-                            ? "Reconnect OAuth"
-                            : "Authorize"}
+                          <TerminalSquare aria-hidden="true" /> Discover tools
                         </DropdownMenuItem>
-                      )}
-                      {canManageServer(server) && (
-                        <>
-                          <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          disabled={busyId === server.id}
+                          onClick={() => void test(server)}
+                        >
+                          <Check aria-hidden="true" /> Test connection
+                        </DropdownMenuItem>
+                        {server.authType === "oauth" && (
                           <DropdownMenuItem
                             disabled={busyId === server.id}
-                            onClick={() => edit(server)}
+                            onClick={() => authorize(server)}
                           >
-                            <Pencil aria-hidden="true" /> Edit server
+                            <KeyRound aria-hidden="true" />
+                            {server.credentialConfigured
+                              ? "Reconnect OAuth"
+                              : "Authorize"}
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={busyId === server.id}
-                            className={
-                              server.enabled
-                                ? "text-destructive focus:text-destructive"
-                                : "text-primary focus:text-primary"
-                            }
-                            onClick={() =>
-                              void patchServer(server, {
-                                enabled: !server.enabled,
-                              })
-                            }
-                          >
-                            {server.enabled ? "Disable" : "Enable"}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={busyId === server.id}
-                            onClick={() =>
-                              void patchServer(server, {
-                                trustedReadOnly: !server.trustedReadOnly,
-                              })
-                            }
-                          >
-                            {server.trustedReadOnly
-                              ? "Remove read-only trust"
-                              : "Trust read-only tools"}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={busyId === server.id}
-                            variant="destructive"
-                            onClick={() => setRemoveTarget(server)}
-                          >
-                            <Trash2 aria-hidden="true" /> Remove
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                        )}
+                        {canManageServer(server) && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              disabled={busyId === server.id}
+                              onClick={() => edit(server)}
+                            >
+                              <Pencil aria-hidden="true" /> Edit server
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={busyId === server.id}
+                              className={
+                                server.enabled
+                                  ? "text-destructive focus:text-destructive"
+                                  : "text-primary focus:text-primary"
+                              }
+                              onClick={() =>
+                                void patchServer(server, {
+                                  enabled: !server.enabled,
+                                })
+                              }
+                            >
+                              {server.enabled ? "Disable" : "Enable"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={busyId === server.id}
+                              onClick={() =>
+                                void patchServer(server, {
+                                  trustedReadOnly: !server.trustedReadOnly,
+                                })
+                              }
+                            >
+                              {server.trustedReadOnly
+                                ? "Remove read-only trust"
+                                : "Trust read-only tools"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={busyId === server.id}
+                              variant="destructive"
+                              onClick={() => setRemoveTarget(server)}
+                            >
+                              <Trash2 aria-hidden="true" /> Remove
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               )}
             </CardContent>

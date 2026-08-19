@@ -29,10 +29,84 @@ func (a *App) startChatRun(ctx context.Context, requestID string, conversationID
 	}
 	var existingID uuid.UUID
 	var status string
-	if err := a.DB.QueryRowContext(ctx, `SELECT id, status FROM chat_runs WHERE conversation_id = $1 AND client_request_id = $2`, conversationID, requestID).Scan(&existingID, &status); err != nil {
+	var streamStatus string
+	if err := a.DB.QueryRowContext(ctx, `
+		SELECT run.id, run.status, COALESCE((
+			SELECT stream.status
+			FROM chat_streams stream
+			WHERE stream.run_id = run.id
+			ORDER BY stream.created_at DESC
+			LIMIT 1
+		), '')
+		FROM chat_runs run
+		WHERE run.conversation_id = $1 AND run.client_request_id = $2
+	`, conversationID, requestID).Scan(&existingID, &status, &streamStatus); err != nil {
 		return uuid.Nil, false, err
 	}
+	// The stream is the durable source of truth for requests that made it far
+	// enough to send an SSE response. Reconcile a run left at "running" when a
+	// process restart or a failed status write happened after its stream had
+	// already reached a terminal state. This prevents a dead stream from making
+	// the request id return conflicts forever.
+	if status == "running" && isTerminalChatStreamStatus(streamStatus) {
+		result, err := a.DB.ExecContext(ctx, `
+			UPDATE chat_runs
+			SET status = $2, finished_at = COALESCE(finished_at, now())
+			WHERE id = $1 AND status = 'running'
+		`, existingID, streamStatus)
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		if affected > 0 {
+			status = streamStatus
+		} else if err := a.DB.QueryRowContext(ctx, `SELECT status FROM chat_runs WHERE id = $1`, existingID).Scan(&status); err != nil {
+			return uuid.Nil, false, err
+		}
+	}
+	// A failed, cancelled, or incomplete request can be retried with the same
+	// client id. Reopening the existing row preserves idempotency for concurrent
+	// submissions while allowing the user to recover from a transient provider
+	// or MCP failure without receiving a permanent duplicate-run conflict.
+	if status == "error" || status == "cancelled" || status == "incomplete" {
+		result, err := a.DB.ExecContext(ctx, `
+			UPDATE chat_runs
+			SET status = 'running', started_at = now(), first_token_at = NULL,
+			    finished_at = NULL, input_tokens = NULL, output_tokens = NULL,
+			    total_tokens = NULL, tool_call_count = 0, error_message = NULL,
+			    user_id = $2, organization_id = $3, endpoint_id = $4, model = $5
+			WHERE id = $1 AND status IN ('error', 'cancelled', 'incomplete')
+		`, existingID, userID, organizationID, endpointID, model)
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		if affected > 0 {
+			return existingID, false, nil
+		}
+
+		// Another retry won the conditional update. Read the current status so
+		// the caller treats it as a duplicate instead of starting a second run.
+		if err := a.DB.QueryRowContext(ctx, `SELECT status FROM chat_runs WHERE id = $1`, existingID).Scan(&status); err != nil {
+			return uuid.Nil, false, err
+		}
+	}
 	return existingID, true, nil
+}
+
+func isTerminalChatStreamStatus(status string) bool {
+	switch status {
+	case "complete", "requires-action", "error", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) markChatRunFirstToken(ctx context.Context, runID uuid.UUID, at time.Time) error {

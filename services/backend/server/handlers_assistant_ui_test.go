@@ -93,6 +93,18 @@ func TestAssistantUIRunStatusForTool(t *testing.T) {
 	}
 }
 
+func TestAssistantUIApprovalArgumentsMatchTreatsEmptyObjectsAsEqual(t *testing.T) {
+	if !assistantUIApprovalArgumentsMatch(nil, map[string]any{}) {
+		t.Fatal("expected nil and empty arguments to match")
+	}
+	if !assistantUIApprovalArgumentsMatch(map[string]any{}, nil) {
+		t.Fatal("expected empty and nil arguments to match")
+	}
+	if assistantUIApprovalArgumentsMatch(map[string]any{"query": "one"}, map[string]any{"query": "two"}) {
+		t.Fatal("expected different arguments not to match")
+	}
+}
+
 func TestAssistantBuiltinToolDiscoveryIncludesChatCapabilities(t *testing.T) {
 	discovery := assistantBuiltInToolDiscovery()
 	for _, name := range []string{"web_search", "browse_url", "generate_image", "edit_image"} {
@@ -190,6 +202,52 @@ func TestAssistantUIToolNameUsesProviderSafeName(t *testing.T) {
 	}
 }
 
+func TestAssistantUIToolPartCarriesDisplayMetadata(t *testing.T) {
+	part := assistantUIDynamicToolPart(chatToolEvent{
+		Kind:             "mcp_tool",
+		Status:           "completed",
+		ServerID:         uuid.MustParse("bcf5f2e0-031c-4172-9ea1-3e73c4e42da1"),
+		ServerName:       "Kairos",
+		ToolName:         "getCheckHistory",
+		ProviderToolName: "mcp_bcf5f2e0_getcheckhistory",
+		CallID:           "call-display",
+	})
+	providerMetadata, ok := part["callProviderMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected display provider metadata, got %+v", part)
+	}
+	details, ok := providerMetadata["justai"].(map[string]any)
+	if !ok || details["serverName"] != "Kairos" || details["toolName"] != "getCheckHistory" {
+		t.Fatalf("unexpected display provider metadata: %+v", providerMetadata)
+	}
+}
+
+func TestAssistantUIFindToolDisplayBindingMatchesProviderSafeName(t *testing.T) {
+	binding := assistantUIToolDisplayBinding{
+		ServerID:   uuid.MustParse("bcf5f2e0-031c-4172-9ea1-3e73c4e42da1"),
+		ServerName: "Kairos",
+		ToolName:   "getCheckHistory",
+	}
+
+	matched, ok := assistantUIFindToolDisplayBinding("mcp_bcf5f2e0_getcheckhistory", []assistantUIToolDisplayBinding{binding})
+	if !ok || matched != binding {
+		t.Fatalf("expected provider-safe name to match %+v, got %+v, ok=%v", binding, matched, ok)
+	}
+}
+
+func TestAssistantUIFindToolDisplayBindingMatchesNormalizedName(t *testing.T) {
+	binding := assistantUIToolDisplayBinding{
+		ServerID:   uuid.MustParse("bcf5f2e0-031c-4172-9ea1-3e73c4e42da1"),
+		ServerName: "Kairos",
+		ToolName:   "getCheckHistory",
+	}
+
+	matched, ok := assistantUIFindToolDisplayBinding("getcheckhistory", []assistantUIToolDisplayBinding{binding})
+	if !ok || matched != binding {
+		t.Fatalf("expected normalized name to match %+v, got %+v, ok=%v", binding, matched, ok)
+	}
+}
+
 func TestMergeAssistantUIToolMessagePreservesPartsAndPendingStatus(t *testing.T) {
 	target := map[string]any{
 		"id": "call-1",
@@ -232,9 +290,17 @@ func TestFilterAssistantUIRepositoryToolsHidesCanonicalDuplicates(t *testing.T) 
 				ParentID:   "user-1",
 				LegacyTool: true,
 				Message: map[string]any{
-					"id":    "tool-row-1",
-					"role":  "assistant",
-					"parts": []any{map[string]any{"type": "dynamic-tool", "toolCallId": "call-1", "state": "output-available"}},
+					"id":   "tool-row-1",
+					"role": "assistant",
+					"parts": []any{map[string]any{
+						"type":       "dynamic-tool",
+						"toolCallId": "call-1",
+						"state":      "output-available",
+						"callProviderMetadata": map[string]any{"justai": map[string]any{
+							"serverName": "Kairos",
+							"toolName":   "getCheckHistory",
+						}},
+					}},
 				},
 			},
 			{
@@ -260,6 +326,16 @@ func TestFilterAssistantUIRepositoryToolsHidesCanonicalDuplicates(t *testing.T) 
 	if got := repository.HeadID; got != "assistant-1" {
 		t.Fatalf("expected canonical assistant head, got %q", got)
 	}
+	canonicalParts := repository.Messages[1].Message["parts"].([]any)
+	canonicalToolPart := canonicalParts[0].(map[string]any)
+	providerMetadata, ok := canonicalToolPart["callProviderMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected legacy display metadata to be copied to canonical message, got %+v", canonicalToolPart)
+	}
+	details := providerMetadata["justai"].(map[string]any)
+	if details["serverName"] != "Kairos" || details["toolName"] != "getCheckHistory" {
+		t.Fatalf("unexpected copied display metadata: %+v", providerMetadata)
+	}
 }
 
 func TestReplaceAssistantUIToolPartReturnsUpdatedSlice(t *testing.T) {
@@ -284,6 +360,19 @@ func TestAssistantUIMessageContainsApproval(t *testing.T) {
 	}
 	if assistantUIMessageContainsApproval(raw, "approval-1", "tampered-call") {
 		t.Fatal("did not expect a mismatched call id to validate")
+	}
+}
+
+func TestAssistantUIApprovalEventTerminalStates(t *testing.T) {
+	for _, status := range []string{"completed", "failed", "declined"} {
+		if !assistantUIApprovalEventIsTerminal(status) {
+			t.Fatalf("expected %q to be terminal", status)
+		}
+	}
+	for _, status := range []string{"awaiting_approval", "running", ""} {
+		if assistantUIApprovalEventIsTerminal(status) {
+			t.Fatalf("did not expect %q to be terminal", status)
+		}
 	}
 }
 

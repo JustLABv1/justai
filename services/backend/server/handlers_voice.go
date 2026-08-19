@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"justai-backend/mcp"
 	"justai-backend/middleware"
 	"justai-backend/models"
 	"justai-backend/provider"
@@ -465,6 +464,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 			}
 			toolRounds := 0
 			lastHadTools := false
+			freshDiscoveryAttempted := false
 			for toolRounds < 4 {
 				response.Reset()
 				calls := []provider.ToolCall{}
@@ -492,7 +492,13 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 				toolRounds++
 				toolMessages = append(toolMessages, provider.ToolMessage{Role: "assistant", Content: response.String(), ToolCalls: calls})
 				for _, call := range calls {
-					binding, exists := bindings[call.Name]
+					binding, exists := findVoiceToolBinding(bindings, call.Name)
+					if !exists && !freshDiscoveryAttempted {
+						freshDiscoveryAttempted = true
+						fresh := a.discoverConversationToolsFresh(ctx, userID, organizationID, conversationID)
+						definitions = mergeVoiceToolDiscovery(definitions, bindings, fresh)
+						binding, exists = findVoiceToolBinding(bindings, call.Name)
+					}
 					if !exists {
 						event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: toolRounds, ServerName: "MCP server", ToolName: call.Name, CallID: call.ID, Error: "The requested MCP tool is not available."}
 						messageID := a.persistChatToolEvent(ctx, conversationID, event)
@@ -614,6 +620,14 @@ func voiceToolMessages(history []provider.Message) []provider.ToolMessage {
 }
 
 func (a *App) discoverConversationTools(ctx context.Context, userID, organizationID, conversationID uuid.UUID) voiceToolDiscovery {
+	return a.discoverConversationToolsWithRefresh(ctx, userID, organizationID, conversationID, false)
+}
+
+func (a *App) discoverConversationToolsFresh(ctx context.Context, userID, organizationID, conversationID uuid.UUID) voiceToolDiscovery {
+	return a.discoverConversationToolsWithRefresh(ctx, userID, organizationID, conversationID, true)
+}
+
+func (a *App) discoverConversationToolsWithRefresh(ctx context.Context, userID, organizationID, conversationID uuid.UUID, forceRefresh bool) voiceToolDiscovery {
 	result := voiceToolDiscovery{
 		Definitions: []provider.ToolDefinition{},
 		Bindings:    map[string]voiceToolBinding{},
@@ -650,18 +664,24 @@ func (a *App) discoverConversationTools(ctx context.Context, userID, organizatio
 			result.Errors = append(result.Errors, fmt.Sprintf("%s tool cache could not be loaded: %v", serverName, cacheErr))
 			continue
 		}
-		if !cached {
-			mcp.Invalidate(server.ID)
-			tools, err = server.ListTools(ctx)
-			if err == nil {
-				if cacheErr := a.cacheMCPTools(ctx, serverID, tools); cacheErr != nil {
-					err = fmt.Errorf("MCP tools were discovered but could not be cached: %w", cacheErr)
-				}
-			}
+		if forceRefresh {
+			cached = false
 		}
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s tool discovery failed: %v", serverName, err))
-			continue
+		if !cached {
+			freshTools, refreshErr := a.refreshMCPTools(ctx, server, serverID)
+			if refreshErr != nil {
+				if len(tools) == 0 {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s tool discovery failed: %v", serverName, refreshErr))
+					continue
+				}
+				// Keep exposing the last known tool definitions. The actual call
+				// path has its own reconnect logic, and dropping all bindings here
+				// would turn a temporary discovery outage into a permanent
+				// "tool is not available" chat failure.
+				result.Errors = append(result.Errors, fmt.Sprintf("%s tool discovery failed; using stale tools: %v", serverName, refreshErr))
+			} else {
+				tools = freshTools
+			}
 		}
 		for _, tool := range tools {
 			if !mcpToolAllowed(server.Allowed, tool.Name) {
@@ -713,6 +733,66 @@ func findMCPBindingWithProviderName(bindings map[string]voiceToolBinding, server
 		}
 	}
 	return "", voiceToolBinding{}, false
+}
+
+// findVoiceToolBinding accepts both the provider-safe name exposed in the
+// current tool definitions and the original MCP name. Some compatible model
+// gateways replay the latter even after receiving namespaced definitions.
+func findVoiceToolBinding(bindings map[string]voiceToolBinding, requestedName string) (voiceToolBinding, bool) {
+	if binding, ok := bindings[requestedName]; ok {
+		return binding, true
+	}
+
+	var exact *voiceToolBinding
+	for _, binding := range bindings {
+		if binding.Builtin || binding.ToolName != requestedName {
+			continue
+		}
+		if exact != nil {
+			return voiceToolBinding{}, false
+		}
+		candidate := binding
+		exact = &candidate
+	}
+	if exact != nil {
+		return *exact, true
+	}
+
+	normalizedName := normalizeVoiceToolPart(requestedName)
+	var normalized *voiceToolBinding
+	for _, binding := range bindings {
+		if binding.Builtin || normalizeVoiceToolPart(binding.ToolName) != normalizedName {
+			continue
+		}
+		if normalized != nil {
+			return voiceToolBinding{}, false
+		}
+		candidate := binding
+		normalized = &candidate
+	}
+	if normalized != nil {
+		return *normalized, true
+	}
+	return voiceToolBinding{}, false
+}
+
+func mergeVoiceToolDiscovery(definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding, fresh voiceToolDiscovery) []provider.ToolDefinition {
+	definitionIndexes := make(map[string]int, len(definitions)+len(fresh.Definitions))
+	for index, definition := range definitions {
+		definitionIndexes[definition.Name] = index
+	}
+	for name, binding := range fresh.Bindings {
+		bindings[name] = binding
+	}
+	for _, definition := range fresh.Definitions {
+		if index, exists := definitionIndexes[definition.Name]; exists {
+			definitions[index] = definition
+			continue
+		}
+		definitionIndexes[definition.Name] = len(definitions)
+		definitions = append(definitions, definition)
+	}
+	return definitions
 }
 
 func voiceToolName(serverID uuid.UUID, toolName string, existing map[string]voiceToolBinding) string {
@@ -815,6 +895,20 @@ func (a *App) executeVoiceTool(ctx context.Context, userID, organizationID, conv
 		"arguments":      arguments,
 	})
 	result, err := server.CallTool(ctx, binding.ToolName, arguments)
+	if err != nil && !binding.RequiresApproval {
+		// Trusted read-only tools can be safely retried after a forced
+		// rediscovery. This repairs both stale transport sessions and a tool
+		// snapshot that changed upstream without duplicating a destructive call.
+		if tools, refreshErr := a.refreshMCPTools(ctx, server, binding.ServerID); refreshErr == nil {
+			for _, tool := range tools {
+				if tool.Name != binding.ToolName || !mcpToolAllowed(server.Allowed, tool.Name) {
+					continue
+				}
+				result, err = server.CallTool(ctx, binding.ToolName, arguments)
+				break
+			}
+		}
+	}
 	details := map[string]any{"conversationId": conversationID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "success": err == nil}
 	if err != nil {
 		details["error"] = err.Error()

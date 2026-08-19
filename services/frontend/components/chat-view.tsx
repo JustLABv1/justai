@@ -86,6 +86,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { APIError, api, API_URL } from "@/lib/api"
+import { chatRequestId } from "@/lib/chat-request-id"
 import type {
   Conversation,
   ConversationContext,
@@ -2370,17 +2371,7 @@ function AssistantChatSurface({
           const requestMessages = Array.isArray(messages)
             ? await normalizeOutgoingImageMessages(messages)
             : []
-          const latestUser = [...requestMessages]
-            .reverse()
-            .find((message) => message?.role === "user")
-          const latestMessage = requestMessages.at(-1)
-          const requestId =
-            latestMessage?.role === "assistant" &&
-            typeof latestMessage.id === "string"
-              ? `approval:${latestMessage.id}`
-              : typeof latestUser?.id === "string"
-                ? `turn:${latestUser.id}`
-                : undefined
+          const requestId = chatRequestId(requestMessages)
           return {
             body: {
               ...(body ?? {}),

@@ -11,6 +11,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -97,6 +98,12 @@ type assistantUIRepositoryItem struct {
 type assistantUIRepository struct {
 	HeadID   string                      `json:"headId,omitempty"`
 	Messages []assistantUIRepositoryItem `json:"messages"`
+}
+
+type assistantUIToolDisplayBinding struct {
+	ServerID   uuid.UUID
+	ServerName string
+	ToolName   string
 }
 
 // assistantUIToolGroup is the read-side representation used while legacy
@@ -233,6 +240,19 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	runStatus := "complete"
 	runToolCalls := 0
 	runID := uuid.Nil
+	runFinished := false
+	finishRun := func() {
+		if runID == uuid.Nil || runFinished {
+			return
+		}
+		runFinished = true
+		if c.Request.Context().Err() != nil {
+			runStatus = "cancelled"
+		}
+		if err := a.finishChatRun(context.Background(), runID, runStatus, runToolCalls); err != nil {
+			slog.Error("could not persist assistant UI run status", "runId", runID, "status", runStatus, "error", err)
+		}
+	}
 	// Every Assistant UI request gets a durable run record. The browser sends a
 	// stable per-turn id for idempotency; fall back to the server request id for
 	// older clients so analytics still includes those turns.
@@ -251,13 +271,8 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			writeError(c, http.StatusConflict, fmt.Errorf("chat request is already being processed"))
 			return
 		}
-		defer func() {
-			if c.Request.Context().Err() != nil {
-				runStatus = "cancelled"
-			}
-			_ = a.finishChatRun(context.Background(), runID, runStatus, runToolCalls)
-		}()
 	}
+	defer finishRun()
 
 	if approval == nil {
 		if latestUser != nil {
@@ -364,16 +379,22 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		streamStatus := runStatus
 		if requestContext := c.Request.Context(); requestContext.Err() != nil {
 			streamStatus = "cancelled"
+			runStatus = streamStatus
 			if payload, marshalErr := json.Marshal(map[string]any{"type": "abort", "reason": requestContext.Err().Error()}); marshalErr == nil {
 				_ = a.appendChatStreamChunk(context.Background(), streamID, string(payload))
 				_, _ = fmt.Fprintf(writer, "data: %s\n\n", payload)
 			}
 		}
-		_ = a.appendChatStreamChunk(context.Background(), streamID, "[DONE]")
-		_, _ = fmt.Fprint(writer, "data: [DONE]\n\n")
 		if streamStatus == "running" {
 			streamStatus = "complete"
+			runStatus = streamStatus
 		}
+		// Mark the run before publishing [DONE]. A fast follow-up (especially an
+		// approval retry) must not observe the old row as still running during
+		// the tiny window between the final stream event and the deferred cleanup.
+		finishRun()
+		_ = a.appendChatStreamChunk(context.Background(), streamID, "[DONE]")
+		_, _ = fmt.Fprint(writer, "data: [DONE]\n\n")
 		_ = a.finishChatStream(context.Background(), streamID, streamStatus)
 		if flusher != nil {
 			flusher.Flush()
@@ -1055,6 +1076,9 @@ func assistantUIDynamicToolPart(event chatToolEvent) map[string]any {
 		"state":      state,
 		"dynamic":    true,
 	}
+	if providerMetadata := assistantUIToolProviderMetadata(event); providerMetadata != nil {
+		part["callProviderMetadata"] = providerMetadata
+	}
 	if app := assistantUIMCPAppMetadata(event); app != nil {
 		part["mcp"] = map[string]any{"app": app}
 	}
@@ -1086,6 +1110,24 @@ func assistantUIDynamicToolPart(event chatToolEvent) map[string]any {
 
 func assistantUIToolName(event chatToolEvent) string {
 	return firstNonEmptyChatToolString(event.ProviderToolName, event.ToolName)
+}
+
+// assistantUIToolProviderMetadata carries display-only MCP identity alongside
+// the provider-safe tool name. The safe name remains the canonical toolName
+// used for model calls and approval matching; the frontend uses this metadata
+// to render the saved server and raw MCP tool names in chat history.
+func assistantUIToolProviderMetadata(event chatToolEvent) map[string]any {
+	if event.ServerID == uuid.Nil {
+		return nil
+	}
+	details := map[string]any{"serverId": event.ServerID.String()}
+	if strings.TrimSpace(event.ServerName) != "" {
+		details["serverName"] = event.ServerName
+	}
+	if strings.TrimSpace(event.ToolName) != "" {
+		details["toolName"] = event.ToolName
+	}
+	return map[string]any{"justai": details}
 }
 
 func assistantUIApprovalToolNameMatchesEvent(approvalToolName string, event chatToolEvent) bool {
@@ -1134,6 +1176,25 @@ func assistantUIApprovalToolParts(messages []assistantUIMessage) []map[string]an
 		}
 	}
 	return parts
+}
+
+func assistantUIAttachToolProviderMetadata(message map[string]any, event chatToolEvent) {
+	providerMetadata := assistantUIToolProviderMetadata(event)
+	if providerMetadata == nil {
+		return
+	}
+	parts, _ := message["parts"].([]any)
+	for _, rawPart := range parts {
+		part, _ := rawPart.(map[string]any)
+		partType, _ := part["type"].(string)
+		callID, _ := part["toolCallId"].(string)
+		if (partType != "dynamic-tool" && !strings.HasPrefix(partType, "tool-")) || callID != event.CallID {
+			continue
+		}
+		if _, exists := part["callProviderMetadata"]; !exists {
+			part["callProviderMetadata"] = providerMetadata
+		}
+	}
 }
 
 func assistantUIMessageContainsApproval(raw []byte, approvalID, callID string) bool {
@@ -1303,7 +1364,7 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 			return nil, uuid.Nil, err
 		}
 		var candidate chatToolEvent
-		if json.Unmarshal([]byte(content), &candidate) == nil && candidate.ApprovalID == approval.ApprovalID && candidate.Status == "awaiting_approval" {
+		if json.Unmarshal([]byte(content), &candidate) == nil && candidate.ApprovalID == approval.ApprovalID {
 			messageID, event, found = id, candidate, true
 			break
 		}
@@ -1341,10 +1402,17 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 	if !assistantUIApprovalToolNameMatchesEvent(approval.ToolName, event) && (!pendingBindingFound || approval.ToolName != providerToolName) {
 		return nil, uuid.Nil, fmt.Errorf("approval tool does not match the pending tool")
 	}
-	expected, _ := json.Marshal(event.Arguments)
-	actual, _ := json.Marshal(approval.Arguments)
-	if string(expected) != string(actual) {
+	if !assistantUIApprovalArgumentsMatch(event.Arguments, approval.Arguments) {
 		return nil, uuid.Nil, fmt.Errorf("approval arguments do not match the pending tool")
+	}
+	// A retry may arrive after the MCP side effect was persisted but before the
+	// resumed model stream completed. Reuse that durable result instead of
+	// executing the tool again or trapping the UI in a non-retryable state.
+	if assistantUIApprovalEventIsTerminal(event.Status) {
+		return &event, messageID, nil
+	}
+	if event.Status != "awaiting_approval" {
+		return nil, uuid.Nil, fmt.Errorf("approval is already being processed")
 	}
 	if event.ServerID == uuid.Nil {
 		return nil, uuid.Nil, fmt.Errorf("pending tool server is invalid")
@@ -1397,9 +1465,38 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 	return &event, messageID, nil
 }
 
+func assistantUIApprovalEventIsTerminal(status string) bool {
+	switch status {
+	case "completed", "failed", "declined":
+		return true
+	default:
+		return false
+	}
+}
+
+func assistantUIApprovalArgumentsMatch(expected, actual map[string]any) bool {
+	// A tool with no arguments may be represented as either a nil map (for
+	// legacy events persisted with omitempty) or an empty JSON object (the
+	// shape sent back by the UI runtime). Those representations are equivalent
+	// for an MCP tool call.
+	if len(expected) == 0 && len(actual) == 0 {
+		return true
+	}
+	expectedJSON, err := json.Marshal(expected)
+	if err != nil {
+		return false
+	}
+	actualJSON, err := json.Marshal(actual)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(expectedJSON, actualJSON)
+}
+
 func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizationID, conversationID, runID uuid.UUID, parentID *any, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding, latestUser *assistantUserMessage, writeChunk func(any) error, response *strings.Builder, messageID, textID string, toolParts *[]map[string]any) (bool, error) {
 	toolMessages := append([]provider.ToolMessage(nil), history...)
 	textStarted := false
+	freshDiscoveryAttempted := false
 	for round := 1; round <= 4; round++ {
 		if round > 1 {
 			if err := writeChunk(map[string]any{"type": "start-step"}); err != nil {
@@ -1465,7 +1562,13 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 					continue
 				}
 			}
-			binding, exists := bindings[call.Name]
+			binding, exists := findVoiceToolBinding(bindings, call.Name)
+			if !exists && !freshDiscoveryAttempted {
+				freshDiscoveryAttempted = true
+				fresh := a.discoverConversationToolsFresh(ctx, userID, organizationID, conversationID)
+				definitions = mergeVoiceToolDiscovery(definitions, bindings, fresh)
+				binding, exists = findVoiceToolBinding(bindings, call.Name)
+			}
 			if !exists {
 				errorText := "The requested tool is not available."
 				event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, ProviderToolName: call.Name, CallID: call.ID, Arguments: arguments, Error: errorText}
@@ -1493,6 +1596,9 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 				toolMetadata["serverName"] = binding.ServerName
 			}
 			toolInput := map[string]any{"type": "tool-input-available", "toolCallId": call.ID, "toolName": call.Name, "input": arguments, "dynamic": true, "toolMetadata": toolMetadata}
+			if providerMetadata := assistantUIToolProviderMetadata(event); providerMetadata != nil {
+				toolInput["providerMetadata"] = providerMetadata
+			}
 			if app := assistantUIMCPAppMetadata(event); app != nil {
 				toolInput["mcp"] = map[string]any{"app": app}
 			}
@@ -1654,6 +1760,10 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 			parent = parentID.String
 		}
 		if isAssistantUIMCPToolRow(role, content) {
+			var event chatToolEvent
+			if json.Unmarshal([]byte(content), &event) == nil {
+				assistantUIAttachToolProviderMetadata(message, event)
+			}
 			messageID, _ := message["id"].(string)
 			if messageID == "" {
 				messageID = id.String()
@@ -1683,6 +1793,7 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	a.enrichAssistantUIToolDisplayMetadata(c, conversationID, &repository)
 	filterAssistantUIRepositoryTools(&repository)
 	c.JSON(http.StatusOK, gin.H{"repository": repository})
 }
@@ -1845,6 +1956,7 @@ func deduplicateAssistantUISourceParts(message map[string]any) {
 }
 
 func filterAssistantUIRepositoryTools(repository *assistantUIRepository) {
+	mergeAssistantUIToolDisplayMetadata(repository)
 	canonicalCallIDs := make(map[string]struct{})
 	for _, item := range repository.Messages {
 		if item.LegacyTool {
@@ -1901,6 +2013,179 @@ func filterAssistantUIRepositoryTools(repository *assistantUIRepository) {
 	}
 }
 
+func mergeAssistantUIToolDisplayMetadata(repository *assistantUIRepository) {
+	metadataByCallID := make(map[string]map[string]any)
+	for _, item := range repository.Messages {
+		if !item.LegacyTool {
+			continue
+		}
+		parts, _ := item.Message["parts"].([]any)
+		for _, rawPart := range parts {
+			part, _ := rawPart.(map[string]any)
+			callID, _ := part["toolCallId"].(string)
+			providerMetadata, _ := part["callProviderMetadata"].(map[string]any)
+			if callID != "" && providerMetadata != nil {
+				metadataByCallID[callID] = providerMetadata
+			}
+		}
+	}
+	if len(metadataByCallID) == 0 {
+		return
+	}
+	for _, item := range repository.Messages {
+		if item.LegacyTool {
+			continue
+		}
+		parts, _ := item.Message["parts"].([]any)
+		for _, rawPart := range parts {
+			part, _ := rawPart.(map[string]any)
+			callID, _ := part["toolCallId"].(string)
+			if _, exists := part["callProviderMetadata"]; exists {
+				continue
+			}
+			if providerMetadata := metadataByCallID[callID]; providerMetadata != nil {
+				part["callProviderMetadata"] = providerMetadata
+			}
+		}
+	}
+}
+
+// enrichAssistantUIToolDisplayMetadata repairs older tool rows that were
+// persisted before display metadata was added. The provider-facing name is
+// intentionally kept as the part's toolName; this only adds presentation
+// metadata by matching the call against tools attached to the conversation.
+func (a *App) enrichAssistantUIToolDisplayMetadata(ctx context.Context, conversationID uuid.UUID, repository *assistantUIRepository) {
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT ms.id, ms.name, COALESCE(mst.name, '')
+		FROM conversation_mcp_servers cms
+		JOIN mcp_servers ms ON ms.id = cms.server_id AND ms.enabled = TRUE
+		LEFT JOIN mcp_server_tools mst ON mst.server_id = ms.id
+		WHERE cms.conversation_id = $1
+		ORDER BY cms.created_at, mst.name
+	`, conversationID)
+	if err != nil {
+		// Display enrichment is best effort. A history request should still
+		// succeed when an older deployment does not have the tool cache table
+		// or the cache is temporarily unavailable.
+		return
+	}
+	defer rows.Close()
+
+	bindings := make([]assistantUIToolDisplayBinding, 0)
+	for rows.Next() {
+		var binding assistantUIToolDisplayBinding
+		if err := rows.Scan(&binding.ServerID, &binding.ServerName, &binding.ToolName); err != nil {
+			return
+		}
+		bindings = append(bindings, binding)
+	}
+	if err := rows.Err(); err != nil || len(bindings) == 0 {
+		return
+	}
+
+	for _, item := range repository.Messages {
+		parts, _ := item.Message["parts"].([]any)
+		for _, rawPart := range parts {
+			part, _ := rawPart.(map[string]any)
+			assistantUIEnrichToolPartDisplayMetadata(part, bindings)
+		}
+	}
+}
+
+func assistantUIEnrichToolPartDisplayMetadata(part map[string]any, bindings []assistantUIToolDisplayBinding) {
+	if part == nil {
+		return
+	}
+	partType, _ := part["type"].(string)
+	if partType != "dynamic-tool" && !strings.HasPrefix(partType, "tool-") {
+		return
+	}
+	toolName, _ := part["toolName"].(string)
+	match, ok := assistantUIFindToolDisplayBinding(toolName, bindings)
+	if !ok {
+		return
+	}
+
+	providerMetadata, _ := part["callProviderMetadata"].(map[string]any)
+	if providerMetadata == nil {
+		providerMetadata = map[string]any{}
+	}
+	details, _ := providerMetadata["justai"].(map[string]any)
+	if details == nil {
+		details = map[string]any{}
+	}
+	if _, exists := details["serverId"]; !exists && match.ServerID != uuid.Nil {
+		details["serverId"] = match.ServerID.String()
+	}
+	if current, _ := details["serverName"].(string); strings.TrimSpace(current) == "" && strings.TrimSpace(match.ServerName) != "" {
+		details["serverName"] = match.ServerName
+	}
+	if current, _ := details["toolName"].(string); strings.TrimSpace(current) == "" && strings.TrimSpace(match.ToolName) != "" {
+		details["toolName"] = match.ToolName
+	}
+	providerMetadata["justai"] = details
+	part["callProviderMetadata"] = providerMetadata
+}
+
+func assistantUIFindToolDisplayBinding(toolName string, bindings []assistantUIToolDisplayBinding) (assistantUIToolDisplayBinding, bool) {
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return assistantUIToolDisplayBinding{}, false
+	}
+
+	var providerMatch *assistantUIToolDisplayBinding
+	for index := range bindings {
+		binding := bindings[index]
+		if binding.ToolName == "" || !assistantUIProviderToolNameMatches(toolName, binding) {
+			continue
+		}
+		if providerMatch != nil {
+			return assistantUIToolDisplayBinding{}, false
+		}
+		providerMatch = &bindings[index]
+	}
+	if providerMatch != nil {
+		return *providerMatch, true
+	}
+
+	normalized := normalizeVoiceToolPart(toolName)
+	var rawMatch *assistantUIToolDisplayBinding
+	for index := range bindings {
+		binding := bindings[index]
+		if binding.ToolName == "" || normalizeVoiceToolPart(binding.ToolName) != normalized {
+			continue
+		}
+		if rawMatch != nil {
+			return assistantUIToolDisplayBinding{}, false
+		}
+		rawMatch = &bindings[index]
+	}
+	if rawMatch == nil {
+		return assistantUIToolDisplayBinding{}, false
+	}
+	return *rawMatch, true
+}
+
+func assistantUIProviderToolNameMatches(toolName string, binding assistantUIToolDisplayBinding) bool {
+	base := voiceToolName(binding.ServerID, binding.ToolName, map[string]voiceToolBinding{})
+	if toolName == base {
+		return true
+	}
+	if !strings.HasPrefix(toolName, base+"_") {
+		return false
+	}
+	suffix := strings.TrimPrefix(toolName, base+"_")
+	if suffix == "" {
+		return false
+	}
+	for _, character := range suffix {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func assistantUIVisibleParent(parent string, removedParents map[string]string) string {
 	visited := make(map[string]struct{})
 	for parent != "" {
@@ -1939,6 +2224,9 @@ func (a *App) legacyAssistantUIMessage(ctx context.Context, id uuid.UUID, role, 
 		if json.Unmarshal([]byte(content), &event) == nil && isChatToolEventKind(event.Kind) {
 			state := "output-available"
 			part := map[string]any{"type": "dynamic-tool", "toolName": assistantUIToolName(event), "toolCallId": event.CallID, "input": event.Arguments, "state": state, "dynamic": true}
+			if providerMetadata := assistantUIToolProviderMetadata(event); providerMetadata != nil {
+				part["callProviderMetadata"] = providerMetadata
+			}
 			switch event.Status {
 			case "awaiting_approval":
 				part["state"] = "approval-requested"

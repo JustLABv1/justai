@@ -33,10 +33,11 @@ func TestRunMigrationsIntegration(t *testing.T) {
 	}
 
 	checks := map[string]string{
-		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '023_endpoint_kind.sql')`,
+		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '024_chat_run_approval_recovery.sql')`,
 		"platform settings":                    `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'platform_settings')`,
 		"organization endpoint default":        `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'organization_default_endpoints')`,
 		"chat runs":                            `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_runs')`,
+		"approval-paused chat runs":            `SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.chat_runs'::regclass AND conname = 'chat_runs_status_check' AND pg_get_constraintdef(oid) LIKE '%requires-action%')`,
 		"chat stream chunks":                   `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_stream_chunks')`,
 		"conversation knowledge context":       `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'conversation_knowledge_sources')`,
 		"message scoped context column":        `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'conversation_knowledge_sources' AND column_name = 'context_scope')`,

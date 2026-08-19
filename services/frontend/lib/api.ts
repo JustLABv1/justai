@@ -76,6 +76,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch (caught) {
     globalThis.clearTimeout(timeout)
     if (caught instanceof DOMException && caught.name === "AbortError") {
+      if (init?.signal?.aborted) {
+        throw new APIError("The request was cancelled.", 499, {
+          code: "request_aborted",
+        })
+      }
       throw new APIError("The request timed out. Please try again.", 408, {
         code: "request_timeout",
       })
@@ -109,7 +114,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
           typeof payload.error === "object" ? payload.error : undefined
         message =
           error?.message ??
-          (typeof payload.error === "string" ? payload.error : payload.message) ??
+          (typeof payload.error === "string"
+            ? payload.error
+            : payload.message) ??
           message
         code = error?.code ?? payload.code
         requestId = error?.requestId ?? payload.requestId
@@ -163,6 +170,11 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
     })
   } catch (caught) {
     if (caught instanceof DOMException && caught.name === "AbortError") {
+      if (init?.signal?.aborted) {
+        throw new APIError("The request was cancelled.", 499, {
+          code: "request_aborted",
+        })
+      }
       throw new APIError("The request timed out. Please try again.", 408, {
         code: "request_timeout",
       })
@@ -212,8 +224,9 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
 
 export const api = {
   get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
-  post: <T>(path: string, body?: unknown) =>
+  post: <T>(path: string, body?: unknown, init?: RequestInit) =>
     request<T>(path, {
+      ...init,
       method: "POST",
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
@@ -225,10 +238,15 @@ export const api = {
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   getBlob: (path: string) => requestBlob(path),
-  patch: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
-  delete: <T>(path: string, body?: unknown) =>
+  patch: <T>(path: string, body: unknown, init?: RequestInit) =>
     request<T>(path, {
+      ...init,
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  delete: <T>(path: string, body?: unknown, init?: RequestInit) =>
+    request<T>(path, {
+      ...init,
       method: "DELETE",
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
@@ -251,8 +269,7 @@ export const api = {
       headers: { "Content-Type": body.type || "application/octet-stream" },
     }),
   getOrganizationId: () => organizationIdForRequest() || null,
-  getAuthConfig: () =>
-    request<AuthConfig>("/api/v1/auth/config"),
+  getAuthConfig: () => request<AuthConfig>("/api/v1/auth/config"),
   setOrganizationId: (organizationId: string | null) => {
     selectedOrganizationId = organizationId || ""
     hasLoadedOrganizationId = true
@@ -272,7 +289,9 @@ export const api = {
 export function socketURL(path: string, ticket: string) {
   const httpURL = new URL(
     API_URL ||
-      (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000")
+      (typeof window !== "undefined"
+        ? window.location.origin
+        : "http://localhost:3000")
   )
   httpURL.protocol = httpURL.protocol === "https:" ? "wss:" : "ws:"
   httpURL.pathname = path

@@ -1,7 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
@@ -134,7 +134,30 @@ export function ToolCallsSection({
   const hasPendingApprovals = pendingApprovalIndices.length > 0
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
   const [expandedCalls, setExpandedCalls] = useState<Set<number>>(new Set())
+  const [submittingApprovalIds, setSubmittingApprovalIds] = useState<
+    Set<string>
+  >(new Set())
+  const submittingApprovalIdsRef = useRef<Set<string>>(new Set())
   const isGroupExpanded = isExpanded || hasPendingApprovals
+
+  useEffect(() => {
+    const waitingCallIds = new Set(
+      toolCalls
+        .filter((call) => call.status === "waiting")
+        .map((call) => call.tool_call_id)
+        .filter((id): id is string => Boolean(id))
+    )
+    let changed = false
+    for (const id of submittingApprovalIdsRef.current) {
+      if (!waitingCallIds.has(id)) {
+        submittingApprovalIdsRef.current.delete(id)
+        changed = true
+      }
+    }
+    if (changed) {
+      setSubmittingApprovalIds(new Set(submittingApprovalIdsRef.current))
+    }
+  }, [toolCalls])
 
   // Create a lookup map for custom integrations by id
   const integrationLookup = useMemo(() => {
@@ -165,7 +188,44 @@ export function ToolCallsSection({
     })
   }
 
+  const submitApproval = (
+    call: ToolCallEntry,
+    response: ToolApprovalResponse
+  ) => {
+    const callId = call.tool_call_id
+    if (
+      !callId ||
+      !call.respondToApproval ||
+      submittingApprovalIdsRef.current.has(callId)
+    ) {
+      return
+    }
+
+    submittingApprovalIdsRef.current.add(callId)
+    setSubmittingApprovalIds(new Set(submittingApprovalIdsRef.current))
+    try {
+      call.respondToApproval(response)
+    } catch (error) {
+      // The runtime can reject a stale approval after a reconnect. Allow the
+      // user to retry it instead of leaving both buttons permanently locked.
+      submittingApprovalIdsRef.current.delete(callId)
+      setSubmittingApprovalIds(new Set(submittingApprovalIdsRef.current))
+      console.error("MCP approval could not be submitted", error)
+    }
+  }
+
   if (toolCalls.length === 0) return null
+
+  const summaryCalls = toolCalls.slice(0, 2)
+  const summary = summaryCalls
+    .map((call) => {
+      const label = call.message || formatToolName(call.tool_name)
+      return call.integration_name
+        ? `${call.integration_name}: ${label}`
+        : label
+    })
+    .join(", ")
+  const remainingCount = toolCalls.length - summaryCalls.length
 
   // Default icon renderer
   const defaultRenderIcon = (call: ToolCallEntry, size: number) => {
@@ -245,6 +305,15 @@ export function ToolCallsSection({
           Used {toolCalls.length} tool
           {toolCalls.length > 1 ? "s" : ""}
         </span>
+        {summary && (
+          <span
+            className="max-w-72 truncate text-[11px] font-normal text-zinc-400 dark:text-zinc-500"
+            title={summary}
+          >
+            · {summary}
+            {remainingCount > 0 ? ` +${remainingCount}` : ""}
+          </span>
+        )}
         {hasPendingApprovals && (
           <span
             aria-live="polite"
@@ -273,6 +342,9 @@ export function ToolCallsSection({
               call.tool_category &&
               call.tool_category !== "unknown"
             const requiresApproval = call.status === "waiting"
+            const approvalIsSubmitting = Boolean(
+              call.tool_call_id && submittingApprovalIds.has(call.tool_call_id)
+            )
             const hasInput = Boolean(
               call.inputs && Object.keys(call.inputs).length > 0
             )
@@ -382,18 +454,21 @@ export function ToolCallsSection({
                           {call.respondToApproval && (
                             <div className="mt-2 flex flex-wrap gap-2">
                               <Button
+                                aria-busy={approvalIsSubmitting}
+                                disabled={approvalIsSubmitting}
                                 size="sm"
                                 onClick={() =>
-                                  call.respondToApproval?.({ approved: true })
+                                  submitApproval(call, { approved: true })
                                 }
                               >
-                                Allow
+                                {approvalIsSubmitting ? "Submitting…" : "Allow"}
                               </Button>
                               <Button
+                                disabled={approvalIsSubmitting}
                                 size="sm"
                                 variant="outline"
                                 onClick={() =>
-                                  call.respondToApproval?.({
+                                  submitApproval(call, {
                                     approved: false,
                                     reason: "Denied by user",
                                   })

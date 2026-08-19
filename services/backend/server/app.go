@@ -62,7 +62,7 @@ func (a *App) Router() *gin.Engine {
 			return
 		}
 		var migrated bool
-		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '010_platform_admin.sql')`).Scan(&migrated); err != nil || !migrated {
+		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '024_chat_run_approval_recovery.sql')`).Scan(&migrated); err != nil || !migrated {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}

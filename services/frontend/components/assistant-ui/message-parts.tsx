@@ -141,8 +141,36 @@ function toolCategory(toolName: string) {
   return "integrations"
 }
 
-function toolLabel(toolName: string) {
+function formatMCPToolName(toolName: string) {
+  const normalized = toolName
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+  if (!normalized) return "MCP tool"
+  return normalized
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ")
+}
+
+function toolLabel(toolName: string, rawToolName?: string) {
+  if (rawToolName) return formatMCPToolName(rawToolName)
   return toolLabels[toolName] ?? formatToolName(toolName)
+}
+
+function justAIToolMetadata(part: ToolCallPart) {
+  const rawMetadata = part.providerMetadata?.justai
+  if (!rawMetadata || typeof rawMetadata !== "object") return {}
+  const metadata = rawMetadata as {
+    serverName?: unknown
+    toolName?: unknown
+  }
+  return {
+    serverName:
+      typeof metadata.serverName === "string" ? metadata.serverName : undefined,
+    toolName:
+      typeof metadata.toolName === "string" ? metadata.toolName : undefined,
+  }
 }
 
 function parseToolInputs(
@@ -176,7 +204,10 @@ function formatToolValue(value: unknown) {
   }
 }
 
-function toolCallStatus(part: ToolCallPart): ToolCallEntry["status"] {
+function toolCallStatus(
+  part: ToolCallPart,
+  threadIsRunning: boolean
+): ToolCallEntry["status"] {
   if (
     part.approval?.resolution === "cancelled" ||
     part.approval?.resolution === "expired"
@@ -190,9 +221,22 @@ function toolCallStatus(part: ToolCallPart): ToolCallEntry["status"] {
   ) {
     return "waiting"
   }
-  if (part.status.type === "requires-action") return "waiting"
   if (part.isError || part.status.type === "incomplete") return "failed"
-  if (part.status.type === "running") return "running"
+  if (
+    part.status.type === "running" ||
+    (threadIsRunning &&
+      part.status.type === "requires-action" &&
+      part.approval?.approved === true)
+  ) {
+    return "running"
+  }
+  if (
+    part.status.type === "requires-action" &&
+    part.approval?.approved !== undefined
+  ) {
+    return "failed"
+  }
+  if (part.status.type === "requires-action") return "waiting"
   return "completed"
 }
 
@@ -206,33 +250,36 @@ function toolCallError(part: ToolCallPart) {
 function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
   const aui = useAui()
   const messageParts = useAuiState((state) => state.message.parts)
+  const threadIsRunning = useAuiState((state) => state.thread.isRunning)
   const toolCalls = useMemo(
     () =>
       indices.flatMap((index): ToolCallEntry[] => {
         const part = messageParts[index]
         if (!part || part.type !== "tool-call") return []
+        const displayMetadata = justAIToolMetadata(part)
 
         return [
           {
             tool_name: part.toolName,
             tool_category: toolCategory(part.toolName),
-            message: toolLabel(part.toolName),
+            message: toolLabel(part.toolName, displayMetadata.toolName),
             show_category: true,
             tool_call_id: part.toolCallId,
+            integration_name: displayMetadata.serverName,
             inputs: parseToolInputs(part),
             output:
               part.result === undefined
                 ? undefined
                 : formatToolValue(part.result),
             error: toolCallError(part),
-            status: toolCallStatus(part),
+            status: toolCallStatus(part, threadIsRunning),
             approval: part.approval,
             respondToApproval: (response) =>
               aui.message.part({ index }).respondToToolApproval(response),
           },
         ]
       }),
-    [aui, indices, messageParts]
+    [aui, indices, messageParts, threadIsRunning]
   )
 
   if (toolCalls.length === 0) return null
