@@ -1,57 +1,39 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="245 268 770 720"
-     role="img"
-     aria-label="JustAI logo">
-  <defs>
-    <linearGradient id="justai-signal" x1="0" y1="0" x2="0.75" y2="1">
-      <stop offset="0%" stop-color="#A855F7"/>
-      <stop offset="38%" stop-color="#7C3AED"/>
-      <stop offset="70%" stop-color="#4F46E5"/>
-      <stop offset="100%" stop-color="#2563EB"/>
-    </linearGradient>
-  </defs>
-
-  <g id="justai-logo">
-    <path d="M 887 298
-L 491 294
-Q 450 294 419 332
-L 287 547
-Q 267 580 272 594
-Q 275 624 281 643
-L 360 772
-L 360 953
-Q 360 963 381 963
-L 535 890
-L 766 889
-Q 810 889 840 846
-L 986 602
-Q 989 587 981 574
-L 926 484
-L 807 484
-L 861 573
-Q 871 588 868 600
-L 792 737
-Q 760 790 723 795
-L 540 796
-L 448 850
-L 472 773
-L 386 636
-Q 370 611 377 591
-Q 377 578 386 566
-L 476 420
-Q 492 398 525 390
-L 829 389
-Q 842 389 845 378
-L 890 313
-Q 895 299 887 298
-Z" fill="currentColor"/>
-
-    <rect x="501" y="538" width="58" height="118" rx="29"
-          fill="url(#justai-signal)"/>
-    <rect x="591" y="469" width="66" height="254" rx="33"
-          fill="url(#justai-signal)"/>
-    <rect x="688" y="538" width="58" height="118" rx="29"
-          fill="url(#justai-signal)"/>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 64 64"
+  role="img"
+  aria-labelledby="justai-logo-title"
+>
+  <title id="justai-logo-title">JustAI</title>
+  <style>
+    #justai-logo { color: #6b5144; }
+    @media (prefers-color-scheme: dark) {
+      #justai-logo { color: #f3d7b5; }
+    }
+  </style>
+  <g id="justai-logo" fill="none">
+    <path
+      d="M10 12v6c0 7 6 12 15 12"
+      opacity=".48"
+      stroke="currentColor"
+      stroke-linecap="round"
+      stroke-width="6"
+    />
+    <path
+      d="M54 12v6c0 7-6 12-15 12"
+      opacity=".48"
+      stroke="currentColor"
+      stroke-linecap="round"
+      stroke-width="6"
+    />
+    <path
+      d="M32 20v19c0 9-5 14-13 14-6 0-10-3-13-7"
+      stroke="currentColor"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      stroke-width="7"
+    />
+    <circle cx="32" cy="9" r="4.5" fill="currentColor" />
   </g>
 </svg>
