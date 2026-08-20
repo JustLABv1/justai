@@ -1906,6 +1906,9 @@ function VideoPipeline({
   const workerStatus = upload.workerStatus
   const workerCapacity = workerStatus?.capacity ?? 0
   const skipSpeakerRequested = upload.stage === "skipping_diarization"
+  const showSpeakerSkipAction =
+    upload.status === "processing" &&
+    (upload.stage === "diarizing" || skipSpeakerRequested)
   const workersSaturated = Boolean(
     workerStatus && workerStatus.active >= workerStatus.capacity
   )
@@ -2096,8 +2099,7 @@ function VideoPipeline({
                           {step.error}
                         </p>
                       ) : null}
-                      {step.key === "diarization" &&
-                      step.status === "active" ? (
+                      {step.key === "diarization" && showSpeakerSkipAction ? (
                         <Button
                           className="mt-2 w-full justify-center"
                           disabled={skipSpeakerInFlight || skipSpeakerRequested}

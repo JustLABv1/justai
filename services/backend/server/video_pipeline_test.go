@@ -47,6 +47,49 @@ func TestVideoPipelineTracksStagesAndDurations(t *testing.T) {
 	}
 }
 
+func TestVideoDiarizationStageIsActive(t *testing.T) {
+	tests := []struct {
+		stage string
+		want  bool
+	}{
+		{stage: "diarizing", want: true},
+		{stage: videoDiarizationSkipStage, want: true},
+		{stage: "polishing", want: false},
+		{stage: "completed", want: false},
+		{stage: "", want: false},
+	}
+
+	for _, test := range tests {
+		if got := videoDiarizationStageIsActive(test.stage); got != test.want {
+			t.Fatalf("videoDiarizationStageIsActive(%q) = %t, want %t", test.stage, got, test.want)
+		}
+	}
+}
+
+func TestVideoRetryStepForUploadStage(t *testing.T) {
+	tests := []struct {
+		stage string
+		want  string
+	}{
+		{stage: "starting", want: videoRetryStepTranscription},
+		{stage: "extracting", want: videoRetryStepTranscription},
+		{stage: "transcribing", want: videoRetryStepTranscription},
+		{stage: "fusing", want: videoRetryStepTranscription},
+		{stage: "diarizing", want: videoRetryStepDiarization},
+		{stage: videoDiarizationSkipStage, want: videoRetryStepDiarization},
+		{stage: "polishing", want: videoRetryStepGrammar},
+		{stage: "finalizing", want: videoRetryStepFinalization},
+		{stage: "retrying", want: ""},
+		{stage: "completed", want: ""},
+	}
+
+	for _, test := range tests {
+		if got := videoRetryStepForUploadStage(test.stage); got != test.want {
+			t.Fatalf("videoRetryStepForUploadStage(%q) = %q, want %q", test.stage, got, test.want)
+		}
+	}
+}
+
 func TestVideoPipelinePreservesOptionalFailureOnCompletion(t *testing.T) {
 	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
 	steps := initialVideoPipeline(started)

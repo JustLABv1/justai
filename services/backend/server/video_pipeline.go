@@ -94,6 +94,15 @@ func videoRetryStepForPipelineKey(key string) string {
 	}
 }
 
+// The upload stage is the authoritative state of the worker. pipeline_steps is
+// a UI projection and can lag briefly while progress is being persisted.
+func videoRetryStepForUploadStage(stage string) string {
+	if stage == videoDiarizationSkipStage {
+		return videoRetryStepDiarization
+	}
+	return videoRetryStepForPipelineKey(videoPipelineKeyForStage(stage))
+}
+
 func videoRetryStepForPipeline(steps []models.TranscriptionVideoPipelineStep) string {
 	// Prefer the latest active step because progress updates can briefly leave
 	// more than one stage active while a worker and a status write race.
@@ -469,8 +478,14 @@ func timePointer(value time.Time) *time.Time {
 }
 
 func (m *TranscriptionManager) updateStoredVideoPipeline(ctx context.Context, uploadID uuid.UUID, allowTerminal bool, mutate func([]models.TranscriptionVideoPipelineStep)) error {
+	transaction, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+
 	var raw []byte
-	if err := m.DB.QueryRowContext(ctx, `SELECT pipeline_steps FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&raw); err != nil {
+	if err := transaction.QueryRowContext(ctx, `SELECT pipeline_steps FROM transcription_video_uploads WHERE id = $1 FOR UPDATE`, uploadID).Scan(&raw); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -487,10 +502,10 @@ func (m *TranscriptionManager) updateStoredVideoPipeline(ctx context.Context, up
 	if !allowTerminal {
 		query += ` AND status NOT IN ('cancelled', 'completed')`
 	}
-	if _, err := m.DB.ExecContext(ctx, query, uploadID, pipeline); err != nil {
+	if _, err := transaction.ExecContext(ctx, query, uploadID, pipeline); err != nil {
 		return err
 	}
-	return nil
+	return transaction.Commit()
 }
 
 func (m *TranscriptionManager) advanceVideoPipeline(ctx context.Context, uploadID uuid.UUID, stage, errorMessage string) error {

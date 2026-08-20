@@ -109,6 +109,10 @@ func videoRetryStage(retryFrom string) string {
 	}
 }
 
+func videoDiarizationStageIsActive(stage string) bool {
+	return stage == "diarizing" || stage == videoDiarizationSkipStage
+}
+
 func (m *TranscriptionManager) startVideoWorker(ctx context.Context) {
 	capacity := configuredVideoTranscriptionWorkerCapacity(m.Config)
 	slots := make(chan struct{}, capacity)
@@ -265,8 +269,9 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 
 func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, uploadID uuid.UUID, processingErr error) error {
 	var uploadStatus string
+	var uploadStage string
 	var sessionID uuid.UUID
-	if err := m.DB.QueryRowContext(ctx, `SELECT status, session_id FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&uploadStatus, &sessionID); err == nil && uploadStatus == "cancelled" {
+	if err := m.DB.QueryRowContext(ctx, `SELECT status, session_id, stage FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&uploadStatus, &sessionID, &uploadStage); err == nil && uploadStatus == "cancelled" {
 		if err := m.cancelVideoPipeline(ctx, uploadID); err != nil {
 			slog.Warn("could not persist cancelled video pipeline", "uploadId", uploadID, "error", err)
 		}
@@ -321,7 +326,10 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 	}
 	if attempts < maxAttempts {
 		delay := time.Duration(attempts*10) * time.Second
-		retryFrom := m.videoRetryStepFromStoredPipeline(ctx, uploadID)
+		retryFrom := videoRetryStepForUploadStage(uploadStage)
+		if retryFrom == "" {
+			retryFrom = m.videoRetryStepFromStoredPipeline(ctx, uploadID)
+		}
 		switch retryFrom {
 		case videoRetryStepTranscription:
 			// A transcription attempt can have left partial or overlapping rows.
@@ -557,23 +565,17 @@ func (m *TranscriptionManager) skipVideoDiarization(ctx context.Context, uploadI
 
 	var sessionID uuid.UUID
 	var status, stage string
-	var pipelineRaw []byte
 	if err := transaction.QueryRowContext(ctx, `
-		SELECT session_id, status, stage, pipeline_steps
+		SELECT session_id, status, stage
 		FROM transcription_video_uploads
 		WHERE id = $1
-		FOR UPDATE`, uploadID).Scan(&sessionID, &status, &stage, &pipelineRaw); err != nil {
+		FOR UPDATE`, uploadID).Scan(&sessionID, &status, &stage); err != nil {
 		return models.TranscriptionVideoUpload{}, err
 	}
 	if status != "processing" {
 		return models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation can only be skipped while processing (video is %s)", status)
 	}
-	if stage != "diarizing" && stage != videoDiarizationSkipStage {
-		return models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation is not currently running")
-	}
-	steps := decodeVideoPipeline(pipelineRaw)
-	index := videoPipelineIndex(videoRetryStepDiarization)
-	if index < 0 || len(steps) <= index || (steps[index].Status != "active" && steps[index].Status != "retrying") {
+	if !videoDiarizationStageIsActive(stage) {
 		return models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation is not currently running")
 	}
 	if stage == "diarizing" {
