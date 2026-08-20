@@ -105,6 +105,7 @@ import { cn } from "@/lib/utils"
 type EnsureConversationOptions = {
   activate?: boolean
   assistantId?: string | null
+  inheritRepositories?: boolean
 }
 
 type Props = {
@@ -1871,7 +1872,11 @@ function Composer({
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+  const hasThreadMessages = useAuiState(
+    (state) => state.thread.messages.length > 0
+  )
   const composerAttachments = useAuiState((state) => state.composer.attachments)
+  const assistantSelectionLocked = assistantLocked || hasThreadMessages
   const hasAttachments = composerAttachments.length > 0
   const hasUnreadyAttachments = composerAttachments.some(
     (attachment) =>
@@ -2287,7 +2292,7 @@ function Composer({
                 className={cn(
                   "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
                   compact &&
-                    "order-2 min-h-10 min-w-0 flex-1 px-2 py-2 leading-6"
+                    "order-1 basis-full min-h-10 min-w-0 flex-none px-2 py-2 leading-6"
                 )}
                 placeholder={
                   compact
@@ -2305,7 +2310,7 @@ function Composer({
                 <div
                   className={cn(
                     "flex min-w-0 items-center gap-1",
-                    compact && "order-1"
+                    compact && "order-2"
                   )}
                 >
                   <ComposerPrimitive.AddAttachment
@@ -2328,12 +2333,18 @@ function Composer({
                     </Button>
                   )}
                 </div>
-                <div className="order-3 flex shrink-0 items-center gap-1">
+                <div
+                  className={cn(
+                    "order-3 flex shrink-0 items-center gap-1",
+                    compact &&
+                      "ml-auto min-w-0 max-w-full flex-wrap justify-end"
+                  )}
+                >
                   <AssistantPicker
                     assistantId={assistantId}
                     assistants={assistants}
                     compact={compact}
-                    disabled={assistantLocked}
+                    disabled={assistantSelectionLocked}
                     onAssistantChange={onAssistantChange}
                   />
                   <DeepContextToggle
@@ -2554,7 +2565,9 @@ function AssistantChatSurface({
   const selectedAssistant = assistants.find(
     (assistant) => assistant.id === selectedAssistantId
   )
-  const assistantLocked = Boolean(conversationId || initialMessages.length > 0)
+  // Creating a conversation is also required to upload a file. Keep the
+  // assistant selectable until the first message is sent.
+  const assistantLocked = Boolean(initialMessages.length > 0)
 
   const applyAssistant = useCallback(
     (id: string) => {
@@ -3151,7 +3164,10 @@ export function ChatView({
   }, [conversationId])
 
   const ensureLocalConversation = useCallback(
-    async ({ assistantId }: EnsureConversationOptions = {}) => {
+    async ({
+      assistantId,
+      inheritRepositories,
+    }: EnsureConversationOptions = {}) => {
       if (activeConversationRef.current) return activeConversationRef.current
       if (conversationCreationRef.current)
         return conversationCreationRef.current
@@ -3159,6 +3175,7 @@ export function ChatView({
       const creation = api
         .post<{ conversation: Conversation }>("/api/v1/conversations", {
           assistantId: assistantId || undefined,
+          inheritRepositories,
         })
         .then((response) => {
           locallyCreatedConversationRef.current = response.conversation.id
@@ -3180,6 +3197,7 @@ export function ChatView({
     async ({
       activate = true,
       assistantId,
+      inheritRepositories,
     }: EnsureConversationOptions = {}) => {
       const resolvedAssistantId =
         assistantId !== undefined ? assistantId : selectedAssistantIdRef.current
@@ -3189,7 +3207,12 @@ export function ChatView({
         const id = await (onEnsureConversationRef.current?.({
           activate,
           assistantId: resolvedAssistantId,
-        }) ?? ensureLocalConversation({ assistantId: resolvedAssistantId }))
+          inheritRepositories,
+        }) ??
+          ensureLocalConversation({
+            assistantId: resolvedAssistantId,
+            inheritRepositories,
+          }))
         if (creatingFromRoot) {
           pendingConversationRef.current = false
           locallyCreatedConversationRef.current = id
@@ -3293,7 +3316,10 @@ export function ChatView({
 
   const uploadFile = useCallback(
     async (file: File): Promise<UploadedConversationAttachment> => {
-      const id = await ensureConversation({ activate: false })
+      const id = await ensureConversation({
+        activate: false,
+        inheritRepositories: false,
+      })
       invalidateConversationCache(id)
       const body = new FormData()
       body.append("file", file)
@@ -3366,15 +3392,22 @@ export function ChatView({
     setContextHintDismissed(true)
     onOpenContext?.()
   }
-  const assistantSurfaceKey = conversation?.assistantId
-    ? `${conversation.assistantId}:${
-        assistants.some(
-          (assistant) => assistant.id === conversation.assistantId
-        )
-          ? "ready"
-          : "pending"
-      }`
-    : "default"
+  // A locally created surface owns the live runtime while the URL and the
+  // conversation list catch up. Refreshing the conversation after the first
+  // response can fill in assistantId; including that metadata in the React
+  // key would remount the runtime with initialMessages still empty.
+  const assistantSurfaceKey =
+    surfaceKey === "new"
+      ? "local"
+      : conversation?.assistantId
+        ? `${conversation.assistantId}:${
+            assistants.some(
+              (assistant) => assistant.id === conversation.assistantId
+            )
+              ? "ready"
+              : "pending"
+          }`
+        : "default"
 
   return (
     <div

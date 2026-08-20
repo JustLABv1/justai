@@ -318,6 +318,10 @@ type Citation struct {
 	ChunkIndex int       `json:"chunkIndex,omitempty"`
 	Locator    string    `json:"locator,omitempty"`
 	Snippet    string    `json:"snippet"`
+	// PromptText keeps the complete retrieved chunk in memory for the provider
+	// prompt. It is intentionally excluded from API responses and persistence;
+	// Snippet remains the compact UI citation representation.
+	PromptText string `json:"-"`
 }
 
 type ConversationContext struct {

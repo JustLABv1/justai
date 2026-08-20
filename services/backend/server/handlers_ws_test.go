@@ -1,9 +1,69 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"regexp"
 	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 )
+
+func TestEnsureConversationPersistsAssistantForEmptyExistingConversation(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	app := &App{DB: db}
+	conversationID := uuid.New()
+	userID := uuid.New()
+	organizationID := uuid.New()
+	assistantID := uuid.New()
+	assistantVersionID := uuid.New()
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs(conversationID, userID, organizationID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs(conversationID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT a.id, v.id, v.version, a.name, a.description, a.icon, a.visibility")).
+		WithArgs(assistantID, organizationID, userID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "version_id", "version", "name", "description", "icon", "visibility",
+			"instructions", "endpoint_id", "model", "use_memory", "deep_context", "created_at", "updated_at",
+		}).AddRow(
+			assistantID, assistantVersionID, 1, "Meeting Editor", "Edit meeting transcripts", "sparkles", "private",
+			"Turn raw transcripts into clear meeting notes.", "", "model", true, false, now, now,
+		))
+	mock.ExpectExec("UPDATE conversations").
+		WithArgs(conversationID, assistantID, assistantVersionID, userID, organizationID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	got, err := app.ensureConversation(
+		context.Background(),
+		userID,
+		organizationID,
+		conversationID.String(),
+		assistantID.String(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != conversationID {
+		t.Fatalf("expected conversation %s, got %s", conversationID, got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestBuildConversationToolHistoryReconstructsProviderToolSequence(t *testing.T) {
 	encode := func(event chatToolEvent) string {

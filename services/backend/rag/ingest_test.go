@@ -39,4 +39,7 @@ func TestDeepContextLimits(t *testing.T) {
 	if got := deepContextCandidateLimit(DeepContextLimit); got != 48 {
 		t.Fatalf("expected twice as many deep-context candidates, got %d", got)
 	}
+	if got := normalizeAttachedDocumentSearchLimit(6); got != AttachedDocumentContextLimit {
+		t.Fatalf("expected attached documents to use the broad context window, got %d", got)
+	}
 }

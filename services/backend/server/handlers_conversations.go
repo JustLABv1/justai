@@ -33,7 +33,8 @@ func (a *App) createConversation(c *gin.Context) {
 		return
 	}
 	var request struct {
-		AssistantID string `json:"assistantId"`
+		AssistantID         string `json:"assistantId"`
+		InheritRepositories *bool  `json:"inheritRepositories"`
 	}
 	if c.Request.ContentLength > 0 && !decodeJSON(c, &request) {
 		return
@@ -85,9 +86,11 @@ func (a *App) createConversation(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if err := attachUserRepositories(c, transaction, item.ID, principal.UserID); err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
+	if request.InheritRepositories == nil || *request.InheritRepositories {
+		if err := attachUserRepositories(c, transaction, item.ID, principal.UserID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	if err := transaction.Commit(); err != nil {
 		writeError(c, http.StatusInternalServerError, err)

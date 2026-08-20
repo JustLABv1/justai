@@ -102,6 +102,8 @@ export function Workspace() {
   const [pendingConversationId, setPendingConversationId] = useState<
     string | null
   >(null)
+  const [pendingConversation, setPendingConversation] =
+    useState<Conversation | null>(null)
   const [conversationRouteTarget, setConversationRouteTarget] = useState<{
     id: string | null
   } | null>(null)
@@ -421,9 +423,16 @@ export function Workspace() {
     conversationRouteTarget !== null
       ? conversationRouteTarget.id
       : (requestedConversationId ?? pendingConversationId)
-  const activeConversation = [...conversations, ...archivedConversations].find(
-    (conversation) => conversation.id === activeConversationId
-  )
+  // Attachment uploads create the conversation before the first message, so
+  // it is not in the history list yet. Keep its assistant metadata available
+  // while the pending chat surface is mounted.
+  const activeConversation =
+    [...conversations, ...archivedConversations].find(
+      (conversation) => conversation.id === activeConversationId
+    ) ??
+    (pendingConversationId === activeConversationId
+      ? (pendingConversation ?? undefined)
+      : undefined)
 
   useEffect(() => {
     activeConversationRef.current = activeConversationId
@@ -458,6 +467,7 @@ export function Workspace() {
     pendingConversationRef.current = null
     pendingConversationAddedRef.current = false
     setPendingConversationId(null)
+    setPendingConversation(null)
   }, [requestedConversationId])
 
   useEffect(() => {
@@ -580,6 +590,7 @@ export function Workspace() {
           pendingConversationRef.current = null
           pendingConversationAddedRef.current = false
           setPendingConversationId(null)
+          setPendingConversation(null)
         }
       }
       const path = workspacePath(
@@ -638,7 +649,12 @@ export function Workspace() {
     async ({
       activate = true,
       assistantId,
-    }: { activate?: boolean; assistantId?: string | null } = {}) => {
+      inheritRepositories,
+    }: {
+      activate?: boolean
+      assistantId?: string | null
+      inheritRepositories?: boolean
+    } = {}) => {
       const selectedAssistantId =
         assistantId !== undefined ? assistantId : draftAssistantId
       // A root chat can hold a server-side context draft without changing the
@@ -665,6 +681,7 @@ export function Workspace() {
       const creation = api
         .post<{ conversation: Conversation }>("/api/v1/conversations", {
           assistantId: selectedAssistantId || undefined,
+          inheritRepositories,
         })
         .then((result) => {
           activeConversationRef.current = result.conversation.id
@@ -672,6 +689,7 @@ export function Workspace() {
           pendingConversationRef.current = result.conversation
           pendingConversationAddedRef.current = false
           setPendingConversationId(result.conversation.id)
+          setPendingConversation(result.conversation)
           return result.conversation.id
         })
         .finally(() => {
@@ -699,6 +717,7 @@ export function Workspace() {
       pendingConversationRef.current = null
       pendingConversationAddedRef.current = false
       setPendingConversationId(null)
+      setPendingConversation(null)
       return
     }
     if (requestedConversationId) return
@@ -720,6 +739,7 @@ export function Workspace() {
     pendingConversationRef.current = null
     pendingConversationAddedRef.current = false
     setPendingConversationId(null)
+    setPendingConversation(null)
     navigate("chat", null, true)
   }, [navigate, requestedConversationId])
 

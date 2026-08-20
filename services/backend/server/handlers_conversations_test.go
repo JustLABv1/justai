@@ -90,6 +90,40 @@ func TestCreateConversationIsScopedToUserAndOrganization(t *testing.T) {
 	}
 }
 
+func TestCreateConversationCanSkipRepositoryInheritance(t *testing.T) {
+	app, mock, cleanup := newConversationTestApp(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	organizationID := uuid.New()
+	conversationID := uuid.New()
+	createdAt := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery("INSERT INTO conversations").
+		WithArgs(userID, organizationID, nil, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "endpoint_id", "created_at", "updated_at"}).
+			AddRow(conversationID, defaultConversationTitle, nil, createdAt, createdAt))
+	mock.ExpectCommit()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/conversations",
+		strings.NewReader(`{"inheritRepositories":false}`),
+	)
+	context.Request.Header.Set("Content-Type", "application/json")
+	setConversationPrincipal(context, userID, organizationID)
+	app.createConversation(context)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListConversationsReturnsCountsAndScopesRows(t *testing.T) {
 	app, mock, cleanup := newConversationTestApp(t)
 	defer cleanup()

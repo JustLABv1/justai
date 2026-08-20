@@ -45,6 +45,12 @@ const (
 	maxDeepContextCandidateLimit   = DeepContextLimit * 2
 )
 
+// AttachedDocumentContextLimit gives an explicitly uploaded document a broad
+// enough ordered context window for summaries. Quick retrieval stays small for
+// persistent context, but a file the user attached to this turn should not be
+// reduced to only the six highest-ranked snippets.
+const AttachedDocumentContextLimit = DeepContextLimit
+
 func NewWorker(db *sql.DB, allowPrivate bool) *Worker {
 	return &Worker{db: db, allowPrivate: allowPrivate}
 }
@@ -386,13 +392,10 @@ func Search(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, q
 	defer rows.Close()
 	result := make([]models.Citation, 0, limit)
 	for rows.Next() {
-		var citation models.Citation
-		if err := rows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); err != nil {
-			return nil, err
+		citation, scanErr := scanKnowledgeCitation(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		citation.Kind = "knowledge"
-		citation.ResourceID = citation.SourceID
-		citation.Snippet = truncateSnippet(citation.Snippet)
 		result = append(result, citation)
 	}
 	return result, rows.Err()
@@ -441,7 +444,7 @@ func SearchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 // ids against the current conversation before calling this method; the SQL
 // still joins the conversation relation as a second isolation boundary.
 func SearchConversationSources(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int, sourceIDs []uuid.UUID) ([]models.Citation, error) {
-	return searchConversation(ctx, db, conversationID, query, normalizeConversationSearchLimit(limit), sourceIDsCSV(sourceIDs))
+	return searchConversation(ctx, db, conversationID, query, normalizeAttachedDocumentSearchLimit(limit), sourceIDsCSV(sourceIDs))
 }
 
 // SearchConversationDeepContext searches a broader persistent context window
@@ -489,6 +492,16 @@ func normalizeConversationSearchLimit(limit int) int {
 	return limit
 }
 
+func normalizeAttachedDocumentSearchLimit(limit int) int {
+	if limit <= 0 || limit > AttachedDocumentContextLimit {
+		return AttachedDocumentContextLimit
+	}
+	if limit < AttachedDocumentContextLimit {
+		return AttachedDocumentContextLimit
+	}
+	return limit
+}
+
 func normalizeDeepContextLimit(limit int) int {
 	if limit <= 0 {
 		return DeepContextLimit
@@ -506,18 +519,31 @@ func deepContextCandidateLimit(limit int) int {
 
 func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUID, query string, limit int, selectedSourceIDs string) ([]models.Citation, error) {
 	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil, nil
-	}
 	if limit <= 0 {
 		limit = defaultConversationSearchLimit
 	}
 	if limit > maxDeepContextCandidateLimit {
 		limit = maxDeepContextCandidateLimit
 	}
+	if query == "" {
+		if selectedSourceIDs != "" {
+			return appendSelectedSourceCoverage(ctx, db, conversationID, nil, selectedSourceIDs, limit)
+		}
+		return nil, nil
+	}
 	orQuery := lexicalOrQuery(query)
 	if orQuery == "" {
+		if selectedSourceIDs != "" {
+			return appendSelectedSourceCoverage(ctx, db, conversationID, nil, selectedSourceIDs, limit)
+		}
 		return nil, nil
+	}
+	lexicalLimit := limit
+	if selectedSourceIDs != "" && limit > 1 {
+		// Reserve half of the explicit-document window for ordered coverage so
+		// a query that happens to match a few terms cannot crowd out the rest of
+		// a transcript.
+		lexicalLimit = max(1, limit/2)
 	}
 	rows, err := db.QueryContext(ctx, `
 		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
@@ -532,60 +558,24 @@ func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 		       OR to_tsvector('simple', ks.title || ' ' || kc.content) @@ to_tsquery('simple', $4))
 		ORDER BY GREATEST(ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), plainto_tsquery('simple', $3)),
 		                  ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), to_tsquery('simple', $4))) DESC
-		LIMIT $5`, conversationID, selectedSourceIDs, query, orQuery, limit)
+		LIMIT $5`, conversationID, selectedSourceIDs, query, orQuery, lexicalLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	result := make([]models.Citation, 0, limit)
 	for rows.Next() {
-		var citation models.Citation
-		if err := rows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); err != nil {
-			return nil, err
+		citation, scanErr := scanKnowledgeCitation(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		citation.Kind = "knowledge"
-		citation.ResourceID = citation.SourceID
-		citation.Snippet = truncateSnippet(citation.Snippet)
 		result = append(result, citation)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	if selectedSourceIDs != "" {
-		// Queries such as “summarize this file” often share no terms with the
-		// document. Keep the attachment useful by falling back to its first
-		// chunks instead of handing the model an empty grounding set.
-		if len(result) == 0 {
-			fallbackRows, fallbackErr := db.QueryContext(ctx, `
-				SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
-				FROM knowledge_chunks kc
-				JOIN knowledge_sources ks ON ks.id = kc.source_id
-				JOIN conversation_knowledge_sources cks ON cks.source_id = kc.source_id
-				WHERE cks.conversation_id = $1 AND ks.status = 'ready'
-				  AND cks.source_id = ANY(string_to_array($2, ',')::uuid[])
-				ORDER BY cks.source_id, kc.chunk_index
-				LIMIT $3`, conversationID, selectedSourceIDs, limit)
-			if fallbackErr != nil {
-				return nil, fallbackErr
-			}
-			for fallbackRows.Next() {
-				var citation models.Citation
-				if scanErr := fallbackRows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); scanErr != nil {
-					fallbackRows.Close()
-					return nil, scanErr
-				}
-				citation.Kind = "knowledge"
-				citation.ResourceID = citation.SourceID
-				citation.Snippet = truncateSnippet(citation.Snippet)
-				result = append(result, citation)
-			}
-			if scanErr := fallbackRows.Err(); scanErr != nil {
-				fallbackRows.Close()
-				return nil, scanErr
-			}
-			fallbackRows.Close()
-		}
-		return result, nil
+		return appendSelectedSourceCoverage(ctx, db, conversationID, result, selectedSourceIDs, limit)
 	}
 	transcriptionRows, err := db.QueryContext(ctx, `
 		SELECT ts.id, ts.title, tsg.start_offset_ms, tsg.end_offset_ms, tsg.text
@@ -640,6 +630,64 @@ func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 	return mergeCitations(knowledge, transcripts, limit), nil
 }
 
+type citationRowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanKnowledgeCitation(scanner citationRowScanner) (models.Citation, error) {
+	var citation models.Citation
+	var content string
+	if err := scanner.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &content); err != nil {
+		return citation, err
+	}
+	citation.Kind = "knowledge"
+	citation.ResourceID = citation.SourceID
+	citation.PromptText = content
+	citation.Snippet = truncateSnippet(content)
+	return citation, nil
+}
+
+func appendSelectedSourceCoverage(ctx context.Context, db *sql.DB, conversationID uuid.UUID, citations []models.Citation, selectedSourceIDs string, limit int) ([]models.Citation, error) {
+	if db == nil || selectedSourceIDs == "" || len(citations) >= limit {
+		return citations, nil
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
+		FROM knowledge_chunks kc
+		JOIN knowledge_sources ks ON ks.id = kc.source_id
+		JOIN conversation_knowledge_sources cks ON cks.source_id = kc.source_id
+		WHERE cks.conversation_id = $1 AND ks.status = 'ready'
+		  AND cks.source_id = ANY(string_to_array($2, ',')::uuid[])
+		ORDER BY cks.source_id, kc.chunk_index
+		LIMIT $3`, conversationID, selectedSourceIDs, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := append([]models.Citation(nil), citations...)
+	seen := make(map[string]struct{}, len(citations))
+	for _, citation := range citations {
+		seen[citationKey(citation)] = struct{}{}
+	}
+	for rows.Next() {
+		citation, scanErr := scanKnowledgeCitation(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		key := citationKey(citation)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, citation)
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result, rows.Err()
+}
+
 // SearchConversation adds optional vector retrieval to the conversation-scoped
 // lexical search. The embedding endpoint is selected from the conversation's
 // organization/user scope, while the vector query itself can only see sources
@@ -678,6 +726,10 @@ func (w *Worker) searchConversationMode(ctx context.Context, conversationID uuid
 		retrievalLimit = deepContextCandidateLimit(resultLimit)
 	}
 	selectedSourceIDs := sourceIDsCSV(sourceIDs)
+	if selectedSourceIDs != "" && !deepContext {
+		resultLimit = AttachedDocumentContextLimit
+		retrievalLimit = AttachedDocumentContextLimit
+	}
 	lexical, err := searchConversation(ctx, w.db, conversationID, query, retrievalLimit, selectedSourceIDs)
 	if deepContext {
 		lexical = appendDeepContextCandidates(ctx, w.db, conversationID, lexical, selectedSourceIDs, retrievalLimit)
@@ -758,13 +810,10 @@ func searchConversationByEmbedding(ctx context.Context, db *sql.DB, conversation
 	defer rows.Close()
 	result := make([]models.Citation, 0, limit)
 	for rows.Next() {
-		var citation models.Citation
-		if err := rows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); err != nil {
-			return nil, err
+		citation, scanErr := scanKnowledgeCitation(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		citation.Kind = "knowledge"
-		citation.ResourceID = citation.SourceID
-		citation.Snippet = truncateSnippet(citation.Snippet)
 		result = append(result, citation)
 	}
 	return result, rows.Err()
@@ -810,13 +859,10 @@ func searchByEmbedding(ctx context.Context, db *sql.DB, organizationID, userID u
 	defer rows.Close()
 	result := make([]models.Citation, 0, limit)
 	for rows.Next() {
-		var citation models.Citation
-		if err := rows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); err != nil {
-			return nil, err
+		citation, scanErr := scanKnowledgeCitation(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		citation.Kind = "knowledge"
-		citation.ResourceID = citation.SourceID
-		citation.Snippet = truncateSnippet(citation.Snippet)
 		result = append(result, citation)
 	}
 	return result, rows.Err()
@@ -862,13 +908,10 @@ func appendDeepContextCandidates(ctx context.Context, db *sql.DB, conversationID
 		seen[citationKey(citation)] = struct{}{}
 	}
 	for rows.Next() {
-		var citation models.Citation
-		if err := rows.Scan(&citation.SourceID, &citation.Title, &citation.ChunkIndex, &citation.Snippet); err != nil {
+		citation, scanErr := scanKnowledgeCitation(rows)
+		if scanErr != nil {
 			return citations
 		}
-		citation.Kind = "knowledge"
-		citation.ResourceID = citation.SourceID
-		citation.Snippet = truncateSnippet(citation.Snippet)
 		key := citationKey(citation)
 		if _, exists := seen[key]; exists {
 			continue
