@@ -10,6 +10,7 @@ import {
 } from "react"
 import {
   ArrowUp,
+  Bot,
   BrainCircuit,
   Check,
   ChevronDown,
@@ -96,14 +97,21 @@ import type {
   KnowledgeSource,
   MCPServer,
   Note,
+  SavedAssistant,
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-type EnsureConversationOptions = { activate?: boolean }
+type EnsureConversationOptions = {
+  activate?: boolean
+  assistantId?: string | null
+  inheritRepositories?: boolean
+}
 
 type Props = {
   conversationId: string | null
+  conversation?: Conversation
+  assistants: SavedAssistant[]
   endpoints: Endpoint[]
   mcpServers: MCPServer[]
   notes: Note[]
@@ -113,6 +121,7 @@ type Props = {
   onConversationCreated?: (conversation: Conversation) => void
   onConversationUpdated?: () => void
   onConversationSettled?: () => void
+  onAssistantSelectionChange?: (assistantId: string | null) => void
   onConversationMissing?: () => void
   onNavigate?: (view: ViewId) => void
   onOpenHistory?: () => void
@@ -1618,6 +1627,107 @@ function ModelEndpointPicker({
   )
 }
 
+function AssistantPicker({
+  assistants,
+  assistantId,
+  compact,
+  disabled,
+  onAssistantChange,
+}: {
+  assistants: SavedAssistant[]
+  assistantId: string
+  compact: boolean
+  disabled?: boolean
+  onAssistantChange: (id: string) => void
+}) {
+  const selectedAssistant = assistants.find(
+    (assistant) => assistant.id === assistantId
+  )
+  const label = selectedAssistant?.name ?? "JustAI default"
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        disabled={disabled}
+        render={
+          <Button
+            aria-label="Select saved assistant"
+            className={cn(
+              "h-9 max-w-48 min-w-0 justify-start gap-1.5 rounded-full border-0 bg-transparent px-2 text-xs font-normal text-foreground hover:bg-muted/70",
+              compact && "max-w-36 px-1.5"
+            )}
+            size="sm"
+            type="button"
+            variant="ghost"
+          />
+        }
+      >
+        <Bot
+          className="size-3.5 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <span className="truncate text-muted-foreground">{label}</span>
+        {!disabled && (
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-80">
+        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+          Assistant
+        </div>
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => onAssistantChange("")}>
+            <Bot data-icon="inline-start" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium">
+                JustAI default
+              </span>
+              <span className="block truncate text-[11px] text-muted-foreground">
+                Use the normal workspace behavior
+              </span>
+            </span>
+            <Check
+              className={cn(
+                "size-3.5",
+                assistantId ? "opacity-0" : "opacity-100"
+              )}
+            />
+          </DropdownMenuItem>
+          {assistants.length > 0 ? (
+            assistants.map((assistant) => (
+              <DropdownMenuItem
+                className="items-start py-2"
+                key={assistant.id}
+                onClick={() => onAssistantChange(assistant.id)}
+              >
+                <Bot data-icon="inline-start" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium">
+                    {assistant.name}
+                  </span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {assistant.description || "Saved instructions and defaults"}
+                  </span>
+                </span>
+                <Check
+                  className={cn(
+                    "mt-0.5 size-3.5 shrink-0",
+                    assistant.id === assistantId ? "opacity-100" : "opacity-0"
+                  )}
+                />
+              </DropdownMenuItem>
+            ))
+          ) : (
+            <p className="px-2 py-2 text-xs text-muted-foreground">
+              Create an assistant in the Assistants workspace first.
+            </p>
+          )}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function DeepContextToggle({
   available,
   compact,
@@ -1711,6 +1821,10 @@ function DeepContextToggle({
 }
 
 function Composer({
+  assistants,
+  assistantId,
+  assistantLocked,
+  onAssistantChange,
   endpoints,
   mcpServers,
   notes,
@@ -1732,6 +1846,10 @@ function Composer({
   onRemoveRepository,
   toolApproval,
 }: {
+  assistants: SavedAssistant[]
+  assistantId: string
+  assistantLocked: boolean
+  onAssistantChange: (id: string) => void
   endpoints: Endpoint[]
   mcpServers: MCPServer[]
   notes: Note[]
@@ -1754,7 +1872,11 @@ function Composer({
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+  const hasThreadMessages = useAuiState(
+    (state) => state.thread.messages.length > 0
+  )
   const composerAttachments = useAuiState((state) => state.composer.attachments)
+  const assistantSelectionLocked = assistantLocked || hasThreadMessages
   const hasAttachments = composerAttachments.length > 0
   const hasUnreadyAttachments = composerAttachments.some(
     (attachment) =>
@@ -2170,7 +2292,7 @@ function Composer({
                 className={cn(
                   "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
                   compact &&
-                    "order-2 min-h-10 min-w-0 flex-1 px-2 py-2 leading-6"
+                    "order-1 basis-full min-h-10 min-w-0 flex-none px-2 py-2 leading-6"
                 )}
                 placeholder={
                   compact
@@ -2188,7 +2310,7 @@ function Composer({
                 <div
                   className={cn(
                     "flex min-w-0 items-center gap-1",
-                    compact && "order-1"
+                    compact && "order-2"
                   )}
                 >
                   <ComposerPrimitive.AddAttachment
@@ -2211,7 +2333,20 @@ function Composer({
                     </Button>
                   )}
                 </div>
-                <div className="order-3 flex shrink-0 items-center gap-1">
+                <div
+                  className={cn(
+                    "order-3 flex shrink-0 items-center gap-1",
+                    compact &&
+                      "ml-auto min-w-0 max-w-full flex-wrap justify-end"
+                  )}
+                >
+                  <AssistantPicker
+                    assistantId={assistantId}
+                    assistants={assistants}
+                    compact={compact}
+                    disabled={assistantSelectionLocked}
+                    onAssistantChange={onAssistantChange}
+                  />
                   <DeepContextToggle
                     available={deepContextAvailable}
                     compact={compact}
@@ -2348,7 +2483,9 @@ function AssistantThreadLayout({
 
 function AssistantChatSurface({
   conversationId,
+  conversationAssistantId,
   initialMessages,
+  assistants,
   endpoints,
   mcpServers,
   notes,
@@ -2365,15 +2502,18 @@ function AssistantChatSurface({
   onConversationUpdated,
   onConversationSettled,
   onOpenHistory,
+  onAssistantSelectionChange,
   conversationContext,
 }: {
   conversationId: string | null
+  conversationAssistantId?: string | null
   initialMessages: UIMessage[]
+  assistants: SavedAssistant[]
   endpoints: Endpoint[]
   mcpServers: MCPServer[]
   notes: Note[]
   activeEndpoint?: Endpoint
-  onEnsureConversation: () => Promise<string>
+  onEnsureConversation: (options?: EnsureConversationOptions) => Promise<string>
   onAttachMCP: (serverId: string) => Promise<void>
   onRemoveMCP: (serverId: string) => Promise<void>
   onAttachNote: (noteId: string) => Promise<void>
@@ -2385,20 +2525,90 @@ function AssistantChatSurface({
   onConversationUpdated?: () => void
   onConversationSettled?: () => void
   onOpenHistory?: () => void
+  onAssistantSelectionChange?: (assistantId: string | null) => void
   conversationContext: ConversationContext
 }) {
-  const [endpointId, setEndpointId] = useState(activeEndpoint?.id ?? "")
+  const initialAssistant = assistants.find(
+    (assistant) => assistant.id === conversationAssistantId
+  )
+  const initialAssistantModelEndpointId =
+    initialAssistant?.endpointId ?? activeEndpoint?.id
+  const [selectedAssistantId, setSelectedAssistantId] = useState(
+    conversationAssistantId ?? ""
+  )
+  const [endpointId, setEndpointId] = useState(
+    initialAssistant?.endpointId ?? activeEndpoint?.id ?? ""
+  )
   const [modelsByEndpoint, setModelsByEndpoint] = useState<
     Record<string, DiscoveredChatModel[]>
-  >({})
+  >(() =>
+    initialAssistantModelEndpointId && initialAssistant?.model
+      ? {
+          [initialAssistantModelEndpointId]: [{ id: initialAssistant.model }],
+        }
+      : {}
+  )
   const [modelByEndpoint, setModelByEndpoint] = useState<
     Record<string, string>
-  >({})
+  >(() =>
+    initialAssistantModelEndpointId && initialAssistant?.model
+      ? { [initialAssistantModelEndpointId]: initialAssistant.model }
+      : {}
+  )
   const [voiceApproval, setVoiceApproval] = useState<
     import("@assistant-ui/react").ToolCallMessagePartProps | null
   >(null)
   const [voiceError, setVoiceError] = useState<string | null>(null)
-  const [deepContext, setDeepContext] = useState(false)
+  const [deepContext, setDeepContext] = useState(
+    initialAssistant?.deepContext ?? false
+  )
+  const selectedAssistant = assistants.find(
+    (assistant) => assistant.id === selectedAssistantId
+  )
+  // Creating a conversation is also required to upload a file. Keep the
+  // assistant selectable until the first message is sent.
+  const assistantLocked = Boolean(initialMessages.length > 0)
+
+  const applyAssistant = useCallback(
+    (id: string) => {
+      if (assistantLocked) return
+      const assistant = assistants.find((item) => item.id === id)
+      const nextEndpointId =
+        assistant?.endpointId &&
+        endpoints.some((item) => item.id === assistant.endpointId)
+          ? assistant.endpointId
+          : (activeEndpoint?.id ?? "")
+
+      setSelectedAssistantId(id)
+      onAssistantSelectionChange?.(id || null)
+      setEndpointId(nextEndpointId)
+      setDeepContext(assistant?.deepContext ?? false)
+      const assistantModel = assistant?.model
+      if (assistantModel && nextEndpointId) {
+        setModelByEndpoint((current) => ({
+          ...current,
+          [nextEndpointId]: assistantModel,
+        }))
+      }
+    },
+    [
+      activeEndpoint?.id,
+      assistants,
+      assistantLocked,
+      endpoints,
+      onAssistantSelectionChange,
+    ]
+  )
+
+  const ensureSelectedConversation = useCallback(
+    (options: EnsureConversationOptions = {}) =>
+      onEnsureConversation({
+        ...options,
+        assistantId: selectedAssistantId || null,
+      }),
+    [onEnsureConversation, selectedAssistantId]
+  )
+
   const selectedEndpointId =
     endpointId && endpoints.some((item) => item.id === endpointId)
       ? endpointId
@@ -2497,9 +2707,10 @@ function AssistantChatSurface({
         },
         body: () => ({
           conversationId: "",
+          assistantId: selectedAssistantId || undefined,
           endpointId: selectedEndpointId,
           model: selectedModel,
-          useMemory: true,
+          useMemory: selectedAssistant?.useMemory ?? true,
           deepContext,
         }),
         resumable: {
@@ -2519,7 +2730,7 @@ function AssistantChatSurface({
           }
         },
         prepareSendMessagesRequest: async ({ body, messages }) => {
-          const id = await onEnsureConversation()
+          const id = await ensureSelectedConversation()
           const requestMessages = Array.isArray(messages)
             ? await normalizeOutgoingImageMessages(messages)
             : []
@@ -2534,9 +2745,10 @@ function AssistantChatSurface({
               // "list index out of range" error.
               messages: requestMessages,
               conversationId: id,
+              assistantId: selectedAssistantId || undefined,
               endpointId: selectedEndpointId,
               model: selectedModel,
-              useMemory: true,
+              useMemory: selectedAssistant?.useMemory ?? true,
               deepContext,
               requestId,
             },
@@ -2544,9 +2756,11 @@ function AssistantChatSurface({
         },
       }),
     [
-      onEnsureConversation,
+      ensureSelectedConversation,
       deepContext,
       resumableStorage,
+      selectedAssistant?.useMemory,
+      selectedAssistantId,
       selectedEndpointId,
       selectedModel,
     ]
@@ -2608,8 +2822,8 @@ function AssistantChatSurface({
     }
   }, [conversationId, onConversationUpdated])
   const history = useMemo(
-    () => createHistoryAdapter(conversationId, onEnsureConversation),
-    [conversationId, onEnsureConversation]
+    () => createHistoryAdapter(conversationId, ensureSelectedConversation),
+    [conversationId, ensureSelectedConversation]
   )
 
   const runtime = useChatRuntime<UIMessage>({
@@ -2684,6 +2898,10 @@ function AssistantChatSurface({
     <AssistantRuntimeProvider runtime={runtime} config={assistantConfig}>
       <AssistantThreadLayout
         composerProps={{
+          assistants,
+          assistantId: selectedAssistantId,
+          assistantLocked,
+          onAssistantChange: applyAssistant,
           conversationContext,
           mcpServers,
           notes,
@@ -2718,12 +2936,15 @@ function AssistantChatSurface({
 
 export function ChatView({
   conversationId,
+  conversation,
+  assistants,
   endpoints,
   mcpServers,
   notes,
   onConversationCreated,
   onConversationUpdated,
   onConversationSettled,
+  onAssistantSelectionChange,
   onConversationMissing,
   onEnsureConversation,
   onOpenHistory,
@@ -2751,19 +2972,33 @@ export function ChatView({
   const onConversationMissingRef = useRef(onConversationMissing)
   const onConversationCreatedRef = useRef(onConversationCreated)
   const onConversationUpdatedRef = useRef(onConversationUpdated)
+  const selectedAssistantIdRef = useRef<string | null>(
+    conversation?.assistantId ?? null
+  )
+  const handleAssistantSelectionChange = useCallback(
+    (assistantId: string | null) => {
+      selectedAssistantIdRef.current = assistantId
+      onAssistantSelectionChange?.(assistantId)
+    },
+    [onAssistantSelectionChange]
+  )
 
   useEffect(() => {
     activeConversationRef.current = conversationId
     routeConversationIdRef.current = conversationId
+    selectedAssistantIdRef.current = conversation?.assistantId ?? null
+    onAssistantSelectionChange?.(conversation?.assistantId ?? null)
     onEnsureConversationRef.current = onEnsureConversation
     onConversationMissingRef.current = onConversationMissing
     onConversationCreatedRef.current = onConversationCreated
     onConversationUpdatedRef.current = onConversationUpdated
   }, [
     conversationId,
+    conversation?.assistantId,
     onConversationCreated,
     onConversationMissing,
     onConversationUpdated,
+    onAssistantSelectionChange,
     onEnsureConversation,
   ])
 
@@ -2928,33 +3163,56 @@ export function ChatView({
     }
   }, [conversationId])
 
-  const ensureLocalConversation = useCallback(async () => {
-    if (activeConversationRef.current) return activeConversationRef.current
-    if (conversationCreationRef.current) return conversationCreationRef.current
+  const ensureLocalConversation = useCallback(
+    async ({
+      assistantId,
+      inheritRepositories,
+    }: EnsureConversationOptions = {}) => {
+      if (activeConversationRef.current) return activeConversationRef.current
+      if (conversationCreationRef.current)
+        return conversationCreationRef.current
 
-    const creation = api
-      .post<{ conversation: Conversation }>("/api/v1/conversations")
-      .then((response) => {
-        locallyCreatedConversationRef.current = response.conversation.id
-        activeConversationRef.current = response.conversation.id
-        setActiveConversationId(response.conversation.id)
-        onConversationCreatedRef.current?.(response.conversation)
-        return response.conversation.id
-      })
-      .finally(() => {
-        conversationCreationRef.current = null
-      })
-    conversationCreationRef.current = creation
-    return creation
-  }, [])
+      const creation = api
+        .post<{ conversation: Conversation }>("/api/v1/conversations", {
+          assistantId: assistantId || undefined,
+          inheritRepositories,
+        })
+        .then((response) => {
+          locallyCreatedConversationRef.current = response.conversation.id
+          activeConversationRef.current = response.conversation.id
+          setActiveConversationId(response.conversation.id)
+          onConversationCreatedRef.current?.(response.conversation)
+          return response.conversation.id
+        })
+        .finally(() => {
+          conversationCreationRef.current = null
+        })
+      conversationCreationRef.current = creation
+      return creation
+    },
+    []
+  )
 
   const ensureConversation = useCallback(
-    async ({ activate = true }: EnsureConversationOptions = {}) => {
+    async ({
+      activate = true,
+      assistantId,
+      inheritRepositories,
+    }: EnsureConversationOptions = {}) => {
+      const resolvedAssistantId =
+        assistantId !== undefined ? assistantId : selectedAssistantIdRef.current
       const creatingFromRoot = routeConversationIdRef.current === null
       if (creatingFromRoot) pendingConversationRef.current = true
       try {
-        const id = await (onEnsureConversationRef.current?.({ activate }) ??
-          ensureLocalConversation())
+        const id = await (onEnsureConversationRef.current?.({
+          activate,
+          assistantId: resolvedAssistantId,
+          inheritRepositories,
+        }) ??
+          ensureLocalConversation({
+            assistantId: resolvedAssistantId,
+            inheritRepositories,
+          }))
         if (creatingFromRoot) {
           pendingConversationRef.current = false
           locallyCreatedConversationRef.current = id
@@ -3058,7 +3316,10 @@ export function ChatView({
 
   const uploadFile = useCallback(
     async (file: File): Promise<UploadedConversationAttachment> => {
-      const id = await ensureConversation({ activate: false })
+      const id = await ensureConversation({
+        activate: false,
+        inheritRepositories: false,
+      })
       invalidateConversationCache(id)
       const body = new FormData()
       body.append("file", file)
@@ -3131,6 +3392,22 @@ export function ChatView({
     setContextHintDismissed(true)
     onOpenContext?.()
   }
+  // A locally created surface owns the live runtime while the URL and the
+  // conversation list catch up. Refreshing the conversation after the first
+  // response can fill in assistantId; including that metadata in the React
+  // key would remount the runtime with initialMessages still empty.
+  const assistantSurfaceKey =
+    surfaceKey === "new"
+      ? "local"
+      : conversation?.assistantId
+        ? `${conversation.assistantId}:${
+            assistants.some(
+              (assistant) => assistant.id === conversation.assistantId
+            )
+              ? "ready"
+              : "pending"
+          }`
+        : "default"
 
   return (
     <div
@@ -3205,12 +3482,14 @@ export function ChatView({
         )}
         {surfaceReady && surfaceMatchesRoute && (
           <div
-            key={surfaceKey}
+            key={`${surfaceKey}:${assistantSurfaceKey}`}
             className="chat-surface-enter flex min-h-0 flex-1 flex-col"
           >
             <AssistantChatSurface
               activeEndpoint={activeEndpoint}
+              assistants={assistants}
               conversationId={activeConversationId}
+              conversationAssistantId={conversation?.assistantId}
               endpoints={activeChatEndpoints}
               mcpServers={mcpServers}
               notes={notes}
@@ -3219,6 +3498,7 @@ export function ChatView({
               onConversationUpdated={handleSurfaceConversationUpdated}
               onConversationSettled={onConversationSettled}
               onEnsureConversation={ensureConversation}
+              onAssistantSelectionChange={handleAssistantSelectionChange}
               onAttachMCP={attachMCPServer}
               onRemoveMCP={removeMCPServer}
               onAttachNote={attachNote}

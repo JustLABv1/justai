@@ -112,6 +112,21 @@ func TestCitationPromptForDeepContextSetsEvidenceExpectations(t *testing.T) {
 	}
 }
 
+func TestCitationPromptUsesFullRetrievedChunkForDocumentGrounding(t *testing.T) {
+	fullChunk := strings.Repeat("late transcript detail ", 40)
+	prompt := citationPromptForMode([]models.Citation{{
+		Title:      "Meeting 01.pdf",
+		Snippet:    "short citation preview",
+		PromptText: fullChunk,
+	}}, false)
+	if !strings.Contains(prompt, "late transcript detail late transcript detail") {
+		t.Fatalf("expected the full retrieved chunk in the provider prompt, got %q", prompt)
+	}
+	if strings.Contains(prompt, "short citation preview") {
+		t.Fatalf("expected PromptText to take precedence over the compact UI snippet")
+	}
+}
+
 func TestAssistantUIApprovalArgumentsMatchTreatsEmptyObjectsAsEqual(t *testing.T) {
 	if !assistantUIApprovalArgumentsMatch(nil, map[string]any{}) {
 		t.Fatal("expected nil and empty arguments to match")

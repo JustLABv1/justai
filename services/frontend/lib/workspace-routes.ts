@@ -9,6 +9,7 @@ const validViews: ViewId[] = [
   "mcp",
   "notes",
   "memory",
+  "assistants",
   "settings",
   "admin",
   "profile",

@@ -1,5 +1,38 @@
 {
-  "generated_at": "2026-08-13T06:52:21.883798+00:00",
-  "nodes": {},
+  "generated_at": "2026-08-20T08:24:30.282761+00:00",
+  "nodes": {
+    "services_frontend_components_chat_view_chatview": {
+      "code_fingerprint": "cd271ab0d6615f4fd7fb478db4d66e9a586d41e2b0609eb36ae367da99490160",
+      "label": "ChatView()",
+      "last": "2026-08-20T08:21:34.030795+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-20T08:21:34.030795+00:00",
+          "outcome": "useful",
+          "q": "Trace the post-send lifecycle after the first chat and explain why a persisted two-message conversation can show a fresh empty composer until a manual browser refresh."
+        }
+      ],
+      "score": 0.999952868,
+      "source_file": "services/frontend/components/chat-view.tsx",
+      "status": "tentative",
+      "uses": 1
+    },
+    "services_frontend_components_workspace_workspace": {
+      "code_fingerprint": "dce999327350a8cdfc70c85a566da1508ca0d8519651e8995f84bd82ccbd1723",
+      "label": "Workspace()",
+      "last": "2026-08-20T08:21:34.030795+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-20T08:21:34.030795+00:00",
+          "outcome": "useful",
+          "q": "Trace the post-send lifecycle after the first chat and explain why a persisted two-message conversation can show a fresh empty composer until a manual browser refresh."
+        }
+      ],
+      "score": 0.999952868,
+      "source_file": "services/frontend/components/workspace.tsx",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
   "version": 1
 }

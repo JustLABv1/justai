@@ -71,6 +71,12 @@ const railNavigation: Array<{
 }> = [
   { id: "chat", label: "Chat", hint: "Conversations", icon: MessageSquare },
   {
+    id: "assistants",
+    label: "Assistants",
+    hint: "Reusable chat roles",
+    icon: Bot,
+  },
+  {
     id: "transcription",
     label: "Live transcription",
     hint: "Rooms and transcripts",

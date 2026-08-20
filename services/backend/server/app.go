@@ -66,10 +66,12 @@ func (a *App) Router() *gin.Engine {
 		}
 		var repositoryStorageReady bool
 		if err := a.DB.QueryRowContext(c, `
-			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '028_persistent_repository_context.sql')
+			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '029_saved_assistants.sql')
 			   AND to_regclass('public.repository_contexts') IS NOT NULL
 			   AND to_regclass('public.repository_context_files') IS NOT NULL
-			   AND to_regclass('public.conversation_repository_contexts') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
+			   AND to_regclass('public.conversation_repository_contexts') IS NOT NULL
+			   AND to_regclass('public.saved_assistants') IS NOT NULL
+			   AND to_regclass('public.saved_assistant_versions') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
@@ -204,6 +206,11 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/memories", a.createMemory)
 	org.PATCH("/memories/:id", a.updateMemory)
 	org.DELETE("/memories/:id", a.deleteMemory)
+	org.GET("/assistants", a.listSavedAssistants)
+	org.POST("/assistants", a.createSavedAssistant)
+	org.GET("/assistants/:id", a.getSavedAssistant)
+	org.PATCH("/assistants/:id", a.updateSavedAssistant)
+	org.DELETE("/assistants/:id", a.deleteSavedAssistant)
 	org.GET("/conversation-folders", a.listConversationFolders)
 	org.POST("/conversation-folders", a.createConversationFolder)
 	org.PATCH("/conversation-folders/:id", a.updateConversationFolder)
