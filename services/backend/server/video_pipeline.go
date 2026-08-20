@@ -79,6 +79,47 @@ func videoPipelineKeyForStage(stage string) string {
 	}
 }
 
+func videoRetryStepForPipelineKey(key string) string {
+	switch key {
+	case "upload", "transcription":
+		return videoRetryStepTranscription
+	case "diarization":
+		return videoRetryStepDiarization
+	case "grammar":
+		return videoRetryStepGrammar
+	case "finalization":
+		return videoRetryStepFinalization
+	default:
+		return ""
+	}
+}
+
+func videoRetryStepForPipeline(steps []models.TranscriptionVideoPipelineStep) string {
+	// Prefer the latest active step because progress updates can briefly leave
+	// more than one stage active while a worker and a status write race.
+	for index := len(steps) - 1; index >= 0; index-- {
+		step := steps[index]
+		if step.Status != "active" && step.Status != "retrying" && step.Status != "failed" {
+			continue
+		}
+		if retryStep := videoRetryStepForPipelineKey(step.Key); retryStep != "" {
+			return retryStep
+		}
+	}
+	// A failure can happen between a database write and the corresponding
+	// pipeline update. In that case the next pending stage is the safest place
+	// to resume without discarding already completed work.
+	for _, step := range steps {
+		if step.Status != "pending" {
+			continue
+		}
+		if retryStep := videoRetryStepForPipelineKey(step.Key); retryStep != "" {
+			return retryStep
+		}
+	}
+	return videoRetryStepTranscription
+}
+
 func applyVideoPipelineStage(steps []models.TranscriptionVideoPipelineStep, stage, errorMessage string, now time.Time) []models.TranscriptionVideoPipelineStep {
 	steps = normalizeVideoPipeline(steps, now)
 	switch stage {
@@ -174,6 +215,14 @@ func failVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now ti
 	for current := range steps {
 		if steps[current].Status == "active" || steps[current].Status == "retrying" {
 			index = current
+		}
+	}
+	if index < 0 {
+		for current := len(steps) - 1; current >= 0; current-- {
+			if steps[current].Status == "failed" {
+				index = current
+				break
+			}
 		}
 	}
 	if index < 0 {

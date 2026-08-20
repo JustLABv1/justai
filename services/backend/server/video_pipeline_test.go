@@ -66,6 +66,22 @@ func TestVideoPipelinePreservesOptionalFailureOnCompletion(t *testing.T) {
 	}
 }
 
+func TestVideoPipelineFailureKeepsExistingFailedStage(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	steps := initialVideoPipeline(started)
+	steps[0].Status = "completed"
+	steps[1].Status = "completed"
+	steps[2].Status = "skipped"
+	steps[3].Status = "failed"
+	steps[3].Error = "grammar unavailable"
+
+	failVideoPipelineStep(steps, started.Add(time.Second), "grammar unavailable")
+
+	if steps[3].Status != "failed" || steps[4].Status != "pending" {
+		t.Fatalf("failure should remain on the failed stage: %+v", steps)
+	}
+}
+
 func TestVideoPipelineDoesNotChargeProcessingTimeToUpload(t *testing.T) {
 	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
 	steps := initialVideoPipeline(started)
@@ -167,5 +183,61 @@ func TestVideoPipelineTracksParallelFusionPhase(t *testing.T) {
 	decoded := decodeVideoPipeline(encoded)
 	if decoded[1].Parallel == nil || decoded[1].Parallel.WorkerCount != 3 {
 		t.Fatalf("parallel progress did not survive JSON storage: %+v", decoded[1].Parallel)
+	}
+}
+
+func TestVideoRetryStepForPipelineUsesLatestActiveStage(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	steps := initialVideoPipeline(started)
+	steps[0].Status = "completed"
+	steps[1].Status = "completed"
+	steps[2].Status = "active"
+	steps[2].StartedAt = timePointer(started.Add(time.Second))
+
+	if got := videoRetryStepForPipeline(steps); got != videoRetryStepDiarization {
+		t.Fatalf("retry step = %q, want %q", got, videoRetryStepDiarization)
+	}
+}
+
+func TestVideoRetryStepForPipelineSupportsGrammarAndFinalization(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	steps := initialVideoPipeline(started)
+	steps[0].Status = "completed"
+	steps[1].Status = "completed"
+	steps[2].Status = "skipped"
+	steps[3].Status = "failed"
+	if got := videoRetryStepForPipeline(steps); got != videoRetryStepGrammar {
+		t.Fatalf("failed grammar retry step = %q, want %q", got, videoRetryStepGrammar)
+	}
+
+	steps[3].Status = "completed"
+	steps[4].Status = "active"
+	if got := videoRetryStepForPipeline(steps); got != videoRetryStepFinalization {
+		t.Fatalf("active finalization retry step = %q, want %q", got, videoRetryStepFinalization)
+	}
+	if got := videoRetryStage(videoRetryStepFinalization); got != "finalizing" {
+		t.Fatalf("finalization retry stage = %q, want finalizing", got)
+	}
+}
+
+func TestRetryVideoPipelineStepFromPreservesEarlierCompletedStages(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	steps := initialVideoPipeline(started)
+	for index := 0; index < 2; index++ {
+		completeVideoPipelineStep(&steps[index], started.Add(time.Duration(index+1)*time.Second))
+	}
+	steps[2].Status = "active"
+	steps[2].StartedAt = timePointer(started.Add(3 * time.Second))
+
+	retryVideoPipelineStepFrom(steps, videoRetryStepDiarization, "speaker diarization failed")
+
+	if steps[0].Status != "completed" || steps[1].Status != "completed" {
+		t.Fatalf("completed stages were reset: %+v", steps)
+	}
+	if steps[2].Status != "retrying" || steps[2].Error != "speaker diarization failed" {
+		t.Fatalf("diarization stage was not marked for retry: %+v", steps[2])
+	}
+	if steps[3].Status != "pending" || steps[4].Status != "pending" {
+		t.Fatalf("downstream stages were not reset: %+v", steps)
 	}
 }

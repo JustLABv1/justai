@@ -75,6 +75,7 @@ const (
 	videoRetryStepTranscription = "transcription"
 	videoRetryStepDiarization   = "diarization"
 	videoRetryStepGrammar       = "grammar"
+	videoRetryStepFinalization  = "finalization"
 )
 
 func normalizeVideoRetryStep(value string) string {
@@ -85,6 +86,8 @@ func normalizeVideoRetryStep(value string) string {
 		return videoRetryStepDiarization
 	case videoRetryStepGrammar:
 		return videoRetryStepGrammar
+	case videoRetryStepFinalization:
+		return videoRetryStepFinalization
 	default:
 		return ""
 	}
@@ -96,6 +99,8 @@ func videoRetryStage(retryFrom string) string {
 		return "diarizing"
 	case videoRetryStepGrammar:
 		return "polishing"
+	case videoRetryStepFinalization:
+		return "finalizing"
 	default:
 		return "starting"
 	}
@@ -273,11 +278,28 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 	}
 	if attempts < maxAttempts {
 		delay := time.Duration(attempts*10) * time.Second
-		_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL`, sessionID)
-		_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
-		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'queued', lease_until = NULL, run_after = now() + $2 * interval '1 second', error_message = $3, updated_at = now() WHERE id = $1`, jobID, int64(delay/time.Second), processingErr.Error())
+		retryFrom := m.videoRetryStepFromStoredPipeline(ctx, uploadID)
+		switch retryFrom {
+		case videoRetryStepTranscription:
+			// A transcription attempt can have left partial or overlapping rows.
+			// Rebuild that stage, but leave later-stage data untouched until the
+			// stage is reached again.
+			_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL`, sessionID)
+			_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
+		case videoRetryStepDiarization:
+			// The transcript is already valid; only speaker assignments need to be
+			// recomputed.
+			_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
+		case videoRetryStepGrammar:
+			// Keep the verbatim transcript and speakers, but do not reuse a partial
+			// polished result from the failed attempt.
+			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID)
+		}
+		retryPayload, _ := json.Marshal(videoJobPayload{UploadID: uploadID.String(), RetryFrom: retryFrom})
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET payload = $2, status = 'queued', lease_until = NULL, run_after = now() + $3 * interval '1 second', error_message = $4, updated_at = now() WHERE id = $1`, jobID, retryPayload, int64(delay/time.Second), processingErr.Error())
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', stage = 'retrying', error_message = $2, updated_at = now() WHERE id = $1`, uploadID, processingErr.Error())
-		if err := m.retryVideoPipeline(ctx, uploadID, processingErr.Error()); err != nil {
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', polish_status = CASE WHEN $2 = 'transcription' THEN CASE WHEN grammar_endpoint_id IS NULL THEN 'not_requested' ELSE 'queued' END WHEN $2 = 'grammar' THEN 'queued' ELSE polish_status END, ended_at = NULL, updated_at = now() WHERE id = $1`, sessionID, retryFrom)
+		if err := m.retryVideoPipelineFrom(ctx, uploadID, retryFrom, processingErr.Error()); err != nil {
 			slog.Warn("could not persist retrying video pipeline", "uploadId", uploadID, "error", err)
 		}
 		m.broadcast(sessionID, "transcription.session", ginData{"status": "processing"})
@@ -293,6 +315,14 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 	m.broadcast(sessionID, "transcription.session", ginData{"status": "failed"})
 	m.broadcastVideoProgress(uploadID, "failed", 0, "failed", processingErr.Error())
 	return processingErr
+}
+
+func (m *TranscriptionManager) videoRetryStepFromStoredPipeline(ctx context.Context, uploadID uuid.UUID) string {
+	var raw []byte
+	if err := m.DB.QueryRowContext(ctx, `SELECT pipeline_steps FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&raw); err != nil {
+		return videoRetryStepTranscription
+	}
+	return videoRetryStepForPipeline(decodeVideoPipeline(raw))
 }
 
 func (m *TranscriptionManager) queueVideoTranscription(ctx context.Context, uploadID uuid.UUID) (uuid.UUID, models.TranscriptionVideoUpload, error) {
@@ -347,7 +377,10 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 		return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("unsupported video retry step %q", requestedStep)
 	}
 	if retryFrom == "" {
-		retryFrom = videoRetryStepTranscription
+		retryFrom = m.videoRetryStepFromStoredPipeline(ctx, uploadID)
+		if retryFrom == "" {
+			retryFrom = videoRetryStepTranscription
+		}
 	}
 
 	transaction, err := m.DB.BeginTx(ctx, nil)
@@ -407,6 +440,9 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 		if _, err := transaction.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID); err != nil {
 			return uuid.Nil, models.TranscriptionVideoUpload{}, err
 		}
+		if _, err := transaction.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, err
+		}
 	case videoRetryStepGrammar:
 		if _, err := transaction.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
 			return uuid.Nil, models.TranscriptionVideoUpload{}, err
@@ -421,7 +457,7 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', progress = 0, stage = 'queued', duration_ms = CASE WHEN $2 = 'transcription' THEN 0 ELSE duration_ms END, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID, retryFrom); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', polish_status = CASE WHEN $2 = 'transcription' THEN CASE WHEN grammar_endpoint_id IS NULL THEN 'not_requested' ELSE 'queued' END WHEN $2 = 'grammar' THEN 'queued' ELSE polish_status END, started_at = COALESCE(started_at, now()), ended_at = NULL, updated_at = now() WHERE id = $1`, sessionID, retryFrom); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', polish_status = CASE WHEN $2 = 'transcription' THEN CASE WHEN grammar_endpoint_id IS NULL THEN 'not_requested' ELSE 'queued' END WHEN $2 IN ('diarization', 'grammar') THEN CASE WHEN grammar_endpoint_id IS NULL THEN polish_status ELSE 'queued' END ELSE polish_status END, started_at = COALESCE(started_at, now()), ended_at = NULL, updated_at = now() WHERE id = $1`, sessionID, retryFrom); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
 	if err := transaction.Commit(); err != nil {
@@ -476,6 +512,9 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 	if retryFrom == "" {
 		retryFrom = videoRetryStepTranscription
 	}
+	if retryFrom == videoRetryStepFinalization {
+		return m.updateVideoProgress(jobCtx, uploadID, 99, "finalizing", "")
+	}
 	record, err := loadVideoUploadRecord(jobCtx, m.DB, uploadID)
 	if err != nil {
 		return err
@@ -489,29 +528,37 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 	if err := m.DB.QueryRowContext(jobCtx, `SELECT transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, language FROM transcription_sessions WHERE id = $1`, record.model.SessionID).Scan(&sessionEndpoint, &diarizationEndpoint, &grammarEndpoint, &language); err != nil {
 		return err
 	}
-	if m.app == nil {
-		return fmt.Errorf("%w: transcription manager is not attached to the app", errVideoTranscriptionPermanent)
-	}
-	endpoint, err := m.app.providerEndpoint(jobCtx, sessionEndpoint)
-	if err != nil {
-		return err
-	}
-	mode := transcriptionMode(endpoint)
-	if mode == "" {
-		return fmt.Errorf("%w: provider %s does not support a compatible transcription transport", errVideoTranscriptionPermanent, endpoint.ProviderType)
-	}
-	storage, err := newS3Storage(m.Config)
-	if err != nil {
-		return err
-	}
 	shouldTranscribe := retryFrom == videoRetryStepTranscription
 	shouldDiarize := diarizationEndpoint.Valid &&
 		(retryFrom == videoRetryStepTranscription || retryFrom == videoRetryStepDiarization)
 	shouldPolish := grammarEndpoint.Valid &&
-		(retryFrom == videoRetryStepTranscription || retryFrom == videoRetryStepGrammar)
+		(retryFrom == videoRetryStepTranscription || retryFrom == videoRetryStepDiarization || retryFrom == videoRetryStepGrammar)
+	if m.app == nil && (shouldTranscribe || shouldDiarize || shouldPolish) {
+		return fmt.Errorf("%w: transcription manager is not attached to the app", errVideoTranscriptionPermanent)
+	}
+	var endpoint provider.Endpoint
+	var mode string
+	if shouldTranscribe {
+		endpoint, err = m.app.providerEndpoint(jobCtx, sessionEndpoint)
+		if err != nil {
+			return err
+		}
+		mode = transcriptionMode(endpoint)
+		if mode == "" {
+			return fmt.Errorf("%w: provider %s does not support a compatible transcription transport", errVideoTranscriptionPermanent, endpoint.ProviderType)
+		}
+	}
+	var storage *s3Storage
+	needsMedia := shouldTranscribe || retryFrom == videoRetryStepDiarization
+	if needsMedia {
+		storage, err = newS3Storage(m.Config)
+		if err != nil {
+			return err
+		}
+	}
 	var durationMs int64 = record.model.DurationMs
 	var videoURL string
-	if shouldTranscribe || retryFrom == videoRetryStepDiarization {
+	if needsMedia {
 		// Keep the media seekable. Piping a large MP4 through one S3 response can
 		// make ffmpeg lose the input when it needs to seek or when realtime
 		// transcription applies backpressure to the decoder.
@@ -562,6 +609,7 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 				return err
 			}
 			m.broadcast(record.model.SessionID, "transcription.polish-error", ginData{"message": err.Error()})
+			return err
 		}
 	}
 	if err := m.updateVideoProgress(jobCtx, uploadID, 99, "finalizing", ""); err != nil {
