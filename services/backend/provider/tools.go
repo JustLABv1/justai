@@ -69,9 +69,18 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 
 	messages := make([]map[string]any, 0, len(options.Messages))
 	for _, message := range options.Messages {
+		content := openAIMessageContent(Message{Content: message.Content, ContentParts: message.ContentParts})
+		// OpenAI-compatible gateways commonly expect an assistant tool-call
+		// message to have a JSON null content value. Sending an empty string (or
+		// pre-tool narration) is accepted by some gateways but makes others
+		// return an empty follow-up after the tool result. The narration was
+		// already streamed to the user, so it does not need to be replayed here.
+		if message.Role == "assistant" && len(message.ToolCalls) > 0 {
+			content = nil
+		}
 		item := map[string]any{
 			"role":    message.Role,
-			"content": openAIMessageContent(Message{Content: message.Content, ContentParts: message.ContentParts}),
+			"content": content,
 		}
 		if message.ToolCallID != "" {
 			item["tool_call_id"] = message.ToolCallID
@@ -144,7 +153,16 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 		Name      string
 		Arguments strings.Builder
 	}
+	type toolCallChunk struct {
+		Index    int    `json:"index"`
+		ID       string `json:"id"`
+		Function struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"function"`
+	}
 	accumulators := map[int]*accumulator{}
+	seenContent := false
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
 	for scanner.Scan() {
@@ -158,16 +176,13 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content   string `json:"content"`
-					ToolCalls []struct {
-						Index    int    `json:"index"`
-						ID       string `json:"id"`
-						Function struct {
-							Name      string `json:"name"`
-							Arguments string `json:"arguments"`
-						} `json:"function"`
-					} `json:"tool_calls"`
+					Content   json.RawMessage `json:"content"`
+					ToolCalls []toolCallChunk `json:"tool_calls"`
 				} `json:"delta"`
+				Message struct {
+					Content   json.RawMessage `json:"content"`
+					ToolCalls []toolCallChunk `json:"tool_calls"`
+				} `json:"message"`
 			} `json:"choices"`
 			Usage *struct {
 				PromptTokens     int64 `json:"prompt_tokens"`
@@ -184,13 +199,23 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 		if len(chunk.Choices) == 0 {
 			continue
 		}
-		delta := chunk.Choices[0].Delta
-		if delta.Content != "" {
-			if err := onEvent(ToolChatEvent{Delta: delta.Content}); err != nil {
+		choice := chunk.Choices[0]
+		content := choice.Delta.Content
+		toolCalls := choice.Delta.ToolCalls
+		// A few OpenAI-compatible gateways ignore stream=true and return a
+		// normal Chat Completions message. Accept that shape as well so the
+		// post-tool assistant response is not silently discarded.
+		if len(content) == 0 && len(toolCalls) == 0 {
+			content = choice.Message.Content
+			toolCalls = choice.Message.ToolCalls
+		}
+		if text := openAIStreamText(content); text != "" {
+			seenContent = true
+			if err := onEvent(ToolChatEvent{Delta: text}); err != nil {
 				return err
 			}
 		}
-		for _, call := range delta.ToolCalls {
+		for _, call := range toolCalls {
 			item := accumulators[call.Index]
 			if item == nil {
 				item = &accumulator{}
@@ -209,6 +234,9 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 		return err
 	}
 	if len(accumulators) == 0 {
+		if !seenContent {
+			return fmt.Errorf("provider returned no chat content or tool calls")
+		}
 		return nil
 	}
 	indices := make([]int, 0, len(accumulators))
@@ -228,6 +256,36 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 		calls = append(calls, ToolCall{ID: item.ID, Name: item.Name, Arguments: item.Arguments.String()})
 	}
 	return onEvent(ToolChatEvent{ToolCalls: calls})
+}
+
+// openAIStreamText normalizes the string and content-array variants returned
+// by OpenAI-compatible gateways. The array form is common when a gateway uses
+// multimodal message serialization even for a text-only response.
+func openAIStreamText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &parts) == nil {
+		var result strings.Builder
+		for _, part := range parts {
+			result.WriteString(part.Text)
+		}
+		return result.String()
+	}
+	var part struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &part) == nil {
+		return part.Text
+	}
+	return ""
 }
 
 // SynthesizeSpeech uses the OpenAI-compatible audio speech contract and keeps

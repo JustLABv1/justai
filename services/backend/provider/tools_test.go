@@ -68,6 +68,72 @@ func TestStreamChatWithToolsAggregatesOpenAIChunks(t *testing.T) {
 	}
 }
 
+func TestStreamChatWithToolsUsesNullContentForAssistantToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(payload.Messages) < 2 {
+			t.Fatalf("expected assistant and tool messages, got %d", len(payload.Messages))
+		}
+		var assistant map[string]json.RawMessage
+		if err := json.Unmarshal(payload.Messages[0], &assistant); err != nil {
+			t.Fatal(err)
+		}
+		if content, ok := assistant["content"]; !ok || string(content) != "null" {
+			t.Fatalf("expected assistant tool-call content to be null, got %s", content)
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(writer, `data: {"choices":[{"delta":{"content":"The scan is clear."}}]}`)
+		_, _ = fmt.Fprintln(writer, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	var response strings.Builder
+	err := StreamChatWithTools(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", Capabilities: map[string]bool{"tool-calling": true}}, ToolChatOptions{
+		Messages: []ToolMessage{
+			{Role: "assistant", Content: "I am checking.", ToolCalls: []ToolCall{{ID: "call_1", Name: "mcp_get_scan", Arguments: "{}"}}},
+			{Role: "tool", ToolCallID: "call_1", Content: `{"status":"ok"}`},
+		},
+		Tools: []ToolDefinition{{Name: "mcp_get_scan", Parameters: []byte(`{"type":"object"}`)}},
+	}, func(event ToolChatEvent) error {
+		response.WriteString(event.Delta)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.String() != "The scan is clear." {
+		t.Fatalf("unexpected follow-up response: %q", response.String())
+	}
+}
+
+func TestStreamChatWithToolsAcceptsNonStreamingMessageShape(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(writer, `{"choices":[{"message":{"content":"The scan is clear."}}]}`)
+	}))
+	defer server.Close()
+
+	var response strings.Builder
+	err := StreamChatWithTools(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", Capabilities: map[string]bool{"tool-calling": true}}, ToolChatOptions{
+		Messages: []ToolMessage{{Role: "tool", ToolCallID: "call_1", Content: `{"status":"ok"}`}},
+		Tools:    []ToolDefinition{{Name: "mcp_get_scan", Parameters: []byte(`{"type":"object"}`)}},
+	}, func(event ToolChatEvent) error {
+		response.WriteString(event.Delta)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.String() != "The scan is clear." {
+		t.Fatalf("unexpected non-streaming response: %q", response.String())
+	}
+}
+
 func TestSynthesizeSpeechUsesConfiguredSpeechModel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/audio/speech" {

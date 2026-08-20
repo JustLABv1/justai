@@ -86,7 +86,9 @@ func (a *App) createConversation(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if request.InheritRepositories == nil || *request.InheritRepositories {
+	// Repository indexes are user-owned library entries, not automatic chat
+	// context. Only attach them when a caller explicitly opts in.
+	if request.InheritRepositories != nil && *request.InheritRepositories {
 		if err := attachUserRepositories(c, transaction, item.ID, principal.UserID); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return

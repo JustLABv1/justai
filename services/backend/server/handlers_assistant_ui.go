@@ -28,14 +28,15 @@ import (
 // standard AI SDK UIMessage objects, while assistantId/conversationId/
 // endpointId/model are host-owned routing fields added by AssistantChatTransport.
 type assistantUIRequest struct {
-	Messages       []json.RawMessage `json:"messages"`
-	AssistantID    string            `json:"assistantId"`
-	ConversationID string            `json:"conversationId"`
-	EndpointID     string            `json:"endpointId"`
-	Model          string            `json:"model"`
-	RequestID      string            `json:"requestId"`
-	UseMemory      bool              `json:"useMemory"`
-	DeepContext    bool              `json:"deepContext"`
+	Messages            []json.RawMessage `json:"messages"`
+	AssistantID         string            `json:"assistantId"`
+	ConversationID      string            `json:"conversationId"`
+	EndpointID          string            `json:"endpointId"`
+	Model               string            `json:"model"`
+	RequestID           string            `json:"requestId"`
+	UseMemory           bool              `json:"useMemory"`
+	DeepContext         bool              `json:"deepContext"`
+	InheritRepositories bool              `json:"inheritRepositories"`
 }
 
 func assistantUIRetrievalMode(deepContext bool) string {
@@ -125,6 +126,11 @@ type assistantUIToolGroup struct {
 	headID string
 }
 
+// Keep the ceiling across approval continuations, not just inside one HTTP
+// request. Otherwise every approval can restart the local round counter and a
+// model that keeps proposing the same MCP call can run indefinitely.
+const maxAssistantUIToolRounds = 4
+
 func mergeAssistantUIToolMessage(target, source map[string]any) {
 	targetParts, _ := target["parts"].([]any)
 	sourceParts, _ := source["parts"].([]any)
@@ -207,7 +213,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("a non-empty user message is required"))
 		return
 	}
-	conversationID, err := a.ensureConversation(c, principal.UserID, organizationID, request.ConversationID, request.AssistantID)
+	conversationID, err := a.ensureConversation(c, principal.UserID, organizationID, request.ConversationID, request.AssistantID, request.InheritRepositories)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
@@ -496,6 +502,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	}
 
 	var outputParent any
+	toolRoundOffset := 0
 	toolParts := assistantUIApprovalToolParts(requestMessages)
 	if approval != nil {
 		resumedEvent, resumedMessageID, resumeErr := a.resumeAssistantUIApproval(c, principal.UserID, organizationID, conversationID, *approval)
@@ -508,6 +515,13 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			outputParent = resumedMessageID
 		}
 		if resumedEvent != nil {
+			if resumedEvent.Round > 0 {
+				// A resumed approval is the result of the previous model step.
+				// Continue numbering from that persisted step so provider history
+				// keeps each approval continuation as a separate assistant/tool
+				// exchange and the global round ceiling remains effective.
+				toolRoundOffset = resumedEvent.Round
+			}
 			toolParts = replaceAssistantUIToolPart(toolParts, *resumedEvent)
 			switch resumedEvent.Status {
 			case "completed":
@@ -595,7 +609,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		if len(citations) > 0 {
 			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: citationPromptForMode(citations, request.DeepContext)}}, toolHistory...)
 		}
-		requiresAction, streamErr := a.streamAssistantUIWithTools(c, principal.UserID, organizationID, conversationID, runID, &outputParent, endpoint, toolHistory, definitions, bindings, latestUser, writeChunk, &response, assistantMessageID, textID, &toolParts)
+		requiresAction, streamErr := a.streamAssistantUIWithTools(c, principal.UserID, organizationID, conversationID, runID, &outputParent, endpoint, toolHistory, definitions, bindings, latestUser, writeChunk, &response, assistantMessageID, textID, &toolParts, toolRoundOffset)
 		if streamErr != nil {
 			persistError(streamErr)
 			_ = writeChunk(map[string]any{"type": "error", "errorText": streamErr.Error()})
@@ -1536,11 +1550,25 @@ func assistantUIApprovalArgumentsMatch(expected, actual map[string]any) bool {
 	return bytes.Equal(expectedJSON, actualJSON)
 }
 
-func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizationID, conversationID, runID uuid.UUID, parentID *any, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding, latestUser *assistantUserMessage, writeChunk func(any) error, response *strings.Builder, messageID, textID string, toolParts *[]map[string]any) (bool, error) {
+func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizationID, conversationID, runID uuid.UUID, parentID *any, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding, latestUser *assistantUserMessage, writeChunk func(any) error, response *strings.Builder, messageID, textID string, toolParts *[]map[string]any, roundOffset int) (bool, error) {
 	toolMessages := append([]provider.ToolMessage(nil), history...)
 	textStarted := false
 	freshDiscoveryAttempted := false
-	for round := 1; round <= 4; round++ {
+	if roundOffset >= maxAssistantUIToolRounds {
+		message := "\n\nI stopped after four MCP tool rounds to keep this turn bounded."
+		if err := writeChunk(map[string]any{"type": "text-start", "id": textID}); err != nil {
+			return false, err
+		}
+		response.WriteString(message)
+		if err := writeChunk(map[string]any{"type": "text-delta", "id": textID, "delta": message}); err != nil {
+			return false, err
+		}
+		if err := writeChunk(map[string]any{"type": "text-end", "id": textID}); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	for round := roundOffset + 1; round <= maxAssistantUIToolRounds; round++ {
 		if round > 1 {
 			if err := writeChunk(map[string]any{"type": "start-step"}); err != nil {
 				return false, err
@@ -1695,7 +1723,7 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			}
 			toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: string(result)})
 		}
-		if round == 4 {
+		if round == maxAssistantUIToolRounds {
 			message := "\n\nI stopped after four tool rounds to keep this turn bounded."
 			if !textStarted {
 				textStarted = true
