@@ -166,7 +166,7 @@ func (a *App) getVideoTranscriptionPlayback(c *gin.Context) {
 		writeError(c, http.StatusConflict, fmt.Errorf("video upload is still in progress"))
 		return
 	}
-	if record.model.Status == "cancelled" {
+	if record.model.Status == "cancelled" && !videoUploadHasCompleteObject(record.model) {
 		writeError(c, http.StatusGone, fmt.Errorf("video upload was cancelled"))
 		return
 	}
@@ -277,8 +277,6 @@ func (a *App) cancelVideoTranscription(c *gin.Context) {
 	if storage, storageErr := newS3Storage(a.Config); storageErr == nil {
 		if upload.model.Status == "uploading" {
 			_ = storage.abortMultipart(c, upload.storageKey, upload.multipartID)
-		} else {
-			_ = storage.delete(c, upload.storageKey)
 		}
 	}
 	updated, err := loadVideoUpload(c, a.DB, uploadID)
@@ -286,6 +284,7 @@ func (a *App) cancelVideoTranscription(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	a.attachVideoPlaybackURL(c, &updated)
 	c.JSON(http.StatusOK, gin.H{"upload": updated})
 }
 
@@ -303,7 +302,7 @@ func (a *App) authorizedVideoUpload(c *gin.Context, id uuid.UUID) (videoUploadRe
 }
 
 func (a *App) attachVideoPlaybackURL(ctx context.Context, upload *models.TranscriptionVideoUpload) {
-	if upload == nil || upload.PlaybackURL != "" || upload.Status == "uploading" || upload.Status == "cancelled" {
+	if upload == nil || upload.PlaybackURL != "" || upload.Status == "uploading" || (upload.Status == "cancelled" && !videoUploadHasCompleteObject(*upload)) {
 		return
 	}
 	record, err := loadVideoUploadRecord(ctx, a.DB, upload.ID)
@@ -314,6 +313,10 @@ func (a *App) attachVideoPlaybackURL(ctx context.Context, upload *models.Transcr
 	if err == nil {
 		upload.PlaybackURL = urlValue
 	}
+}
+
+func videoUploadHasCompleteObject(upload models.TranscriptionVideoUpload) bool {
+	return upload.ExpectedBytes > 0 && upload.Bytes >= upload.ExpectedBytes
 }
 
 func (a *App) videoPlaybackURL(ctx context.Context, record videoUploadRecord) (string, time.Time, error) {

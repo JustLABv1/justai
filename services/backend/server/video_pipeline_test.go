@@ -3,6 +3,8 @@ package server
 import (
 	"testing"
 	"time"
+
+	"justai-backend/models"
 )
 
 func TestVideoPipelineTracksStagesAndDurations(t *testing.T) {
@@ -78,5 +80,28 @@ func TestVideoPipelineDoesNotChargeProcessingTimeToUpload(t *testing.T) {
 	}
 	if got := steps[0].CompletedAt; got == nil || !got.Equal(transcriptionStarted) {
 		t.Fatalf("upload completedAt = %v, want %v", got, transcriptionStarted)
+	}
+}
+
+func TestVideoPipelineCancellationIsIdempotent(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	steps := initialVideoPipeline(started)
+	steps = applyVideoPipelineStage(steps, "starting", "", started.Add(time.Second))
+
+	cancelledAt := started.Add(2 * time.Second)
+	cancelVideoPipelineStep(steps, cancelledAt)
+	first := append([]models.TranscriptionVideoPipelineStep(nil), steps...)
+	cancelVideoPipelineStep(steps, cancelledAt.Add(time.Second))
+
+	for index := range steps {
+		if steps[index].Status != first[index].Status {
+			t.Fatalf("step %q changed after repeated cancellation: %q -> %q", steps[index].Key, first[index].Status, steps[index].Status)
+		}
+	}
+	if steps[0].Status != "completed" || steps[1].Status != "cancelled" {
+		t.Fatalf("unexpected cancellation state: %+v", steps)
+	}
+	if steps[2].Status != "pending" || steps[3].Status != "pending" || steps[4].Status != "pending" {
+		t.Fatalf("repeated cancellation should not cancel pending steps: %+v", steps)
 	}
 }

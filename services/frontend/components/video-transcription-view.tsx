@@ -167,6 +167,7 @@ export function VideoTranscriptionView({
   const requestRef = useRef(0)
   const videoUploadAbortRef = useRef<AbortController | null>(null)
   const videoUploadInFlightRef = useRef(false)
+  const videoUploadRef = useRef<TranscriptionVideoUpload | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   const transcriptionEndpoints = useMemo(
@@ -250,7 +251,11 @@ export function VideoTranscriptionView({
   }, [loadSession, sessionId])
 
   useEffect(() => {
-    const upload = snapshot?.videoUpload
+    videoUploadRef.current = snapshot?.videoUpload ?? null
+  }, [snapshot?.videoUpload])
+
+  useEffect(() => {
+    const upload = videoUploadRef.current
     if (
       !upload ||
       !["uploading", "queued", "processing"].includes(upload.status)
@@ -263,22 +268,24 @@ export function VideoTranscriptionView({
           `/api/v1/transcription/sessions/${upload.sessionId}`
         )
         if (cancelled) return
-        const nextUpload = result.videoUpload ?? upload
-        const mergedUpload =
-          upload.status === "uploading" && nextUpload.status === "uploading"
-            ? {
-                ...nextUpload,
-                progress: Math.max(upload.progress, nextUpload.progress),
-              }
-            : nextUpload
-        setSnapshot({
+        setSnapshot((current) => ({
+          ...(current ?? {
+            session: { ...result.session, kind: "video" },
+            segments: [],
+            speakers: [],
+          }),
           session: { ...result.session, kind: "video" },
           segments: result.segments ?? [],
           speakers: result.speakers ?? [],
-          videoUpload: mergedUpload,
-        })
+          videoUpload: mergeVideoUploadSnapshot(
+            current?.videoUpload ?? upload,
+            result.videoUpload
+          ),
+        }))
+        const nextStatus = result.videoUpload?.status
         if (
-          ["completed", "failed", "cancelled"].includes(mergedUpload.status)
+          nextStatus &&
+          ["completed", "failed", "cancelled"].includes(nextStatus)
         ) {
           onSessionsChanged()
         }
@@ -291,7 +298,11 @@ export function VideoTranscriptionView({
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [onSessionsChanged, snapshot?.videoUpload])
+  }, [
+    onSessionsChanged,
+    snapshot?.videoUpload?.id,
+    snapshot?.videoUpload?.status,
+  ])
 
   useEffect(() => {
     if (!createSessionRequested || sessionId) return
@@ -461,9 +472,13 @@ export function VideoTranscriptionView({
     if (!snapshot?.videoUpload) return
     const currentUpload = snapshot.videoUpload
     const file = videoFile
+    const cancelledUploadHasVideo =
+      currentUpload.status === "cancelled" &&
+      currentUpload.bytes >= currentUpload.expectedBytes
     if (
       currentUpload.status !== "failed" &&
       currentUpload.status !== "uploaded" &&
+      !cancelledUploadHasVideo &&
       !file
     ) {
       return
@@ -472,7 +487,7 @@ export function VideoTranscriptionView({
     setVideoStarting(true)
     setError("")
     try {
-      if (currentUpload.status === "failed") {
+      if (currentUpload.status === "failed" || cancelledUploadHasVideo) {
         const retried = await api.post<{
           upload: TranscriptionVideoUpload
           jobId?: string
@@ -1278,12 +1293,13 @@ export function VideoTranscriptionView({
                 </CardContent>
               </Card>
               {snapshot.videoUpload &&
-              !["completed", "cancelled"].includes(
-                snapshot.videoUpload.status
-              ) ? (
+              snapshot.videoUpload.status !== "completed" ? (
                 <div className="flex flex-col gap-2 px-1 text-xs">
                   {snapshot.videoUpload.status === "failed" ||
                   snapshot.videoUpload.status === "uploaded" ||
+                  (snapshot.videoUpload.status === "cancelled" &&
+                    snapshot.videoUpload.bytes >=
+                      snapshot.videoUpload.expectedBytes) ||
                   (snapshot.videoUpload.status === "uploading" &&
                     Boolean(videoFile) &&
                     !videoStarting) ? (
@@ -1293,7 +1309,9 @@ export function VideoTranscriptionView({
                           ? "Processing failed"
                           : snapshot.videoUpload.status === "uploaded"
                             ? "Upload complete"
-                            : "Upload paused"}
+                            : snapshot.videoUpload.status === "cancelled"
+                              ? "Processing cancelled"
+                              : "Upload paused"}
                       </span>
                       <Button
                         disabled={videoStarting}
@@ -1306,7 +1324,9 @@ export function VideoTranscriptionView({
                           ? "Retry"
                           : snapshot.videoUpload.status === "uploaded"
                             ? "Queue processing"
-                            : "Resume upload"}
+                            : snapshot.videoUpload.status === "cancelled"
+                              ? "Retry processing"
+                              : "Resume upload"}
                       </Button>
                     </div>
                   ) : null}
@@ -1612,8 +1632,8 @@ export function VideoTranscriptionView({
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel this video?</AlertDialogTitle>
             <AlertDialogDescription>
-              This stops the upload and cancels transcription. The video will
-              not be processed.
+              This stops the upload and cancels transcription. A completed
+              upload is retained so you can still view the source or retry it.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2380,6 +2400,31 @@ function formatVideoTimestamp(value: number) {
   return hours > 0
     ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+}
+
+function mergeVideoUploadSnapshot(
+  current: TranscriptionVideoUpload | null | undefined,
+  next: TranscriptionVideoUpload | null | undefined
+) {
+  if (!next) return current ?? null
+  if (!current || current.id !== next.id) return next
+
+  const sourceStillExists =
+    next.status !== "cancelled" || next.bytes >= next.expectedBytes
+  return {
+    ...current,
+    ...next,
+    progress:
+      current.status === "uploading" && next.status === "uploading"
+        ? Math.max(current.progress, next.progress)
+        : next.progress,
+    // A snapshot can be produced while the signed playback URL is being
+    // regenerated. Keep the last usable URL instead of making the source
+    // video flicker in and out between polls.
+    playbackUrl: sourceStillExists
+      ? next.playbackUrl || current.playbackUrl
+      : undefined,
+  }
 }
 
 function transcriptionModeLabel(endpoint: Endpoint) {
