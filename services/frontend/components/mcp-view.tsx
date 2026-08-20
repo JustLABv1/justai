@@ -58,6 +58,7 @@ import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -111,6 +112,19 @@ const emptyForm: MCPForm = {
 type MCPAction = {
   serverId: string
   label: string
+}
+
+function mcpAuthLabel(authType: string) {
+  switch (authType) {
+    case "none":
+      return "No auth"
+    case "api_key":
+      return "Bearer token"
+    case "oauth":
+      return "OAuth 2.1"
+    default:
+      return authType
+  }
 }
 
 function isRequestAborted(caught: unknown) {
@@ -495,11 +509,7 @@ export function MCPView({
                 <div className="flex flex-wrap items-center gap-2">
                   <CardTitle className="text-base">{server.name}</CardTitle>
                   <Badge variant="outline">
-                    {server.authType === "none"
-                      ? "No auth"
-                      : server.authType === "api_key"
-                        ? "API key"
-                        : "OAuth"}
+                    {mcpAuthLabel(server.authType)}
                   </Badge>
                 </div>
                 <CardDescription className="mt-1 truncate font-mono text-xs">
@@ -892,6 +902,11 @@ export function MCPView({
                 <Field>
                   <FieldLabel>Authentication</FieldLabel>
                   <Select
+                    items={{
+                      none: "No auth",
+                      api_key: "Bearer token",
+                      oauth: "OAuth 2.1",
+                    }}
                     value={form.authType}
                     onValueChange={(value) =>
                       update("authType", value ?? "none")
@@ -901,15 +916,28 @@ export function MCPView({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">No auth</SelectItem>
-                      <SelectItem value="api_key">API key</SelectItem>
-                      <SelectItem value="oauth">OAuth 2.1</SelectItem>
+                      <SelectGroup>
+                        <SelectItem value="none">No auth</SelectItem>
+                        <SelectItem value="api_key">Bearer token</SelectItem>
+                        <SelectItem value="oauth">OAuth 2.1</SelectItem>
+                      </SelectGroup>
                     </SelectContent>
                   </Select>
+                  {(form.authType === "none" || form.authType === "oauth") && (
+                    <FieldDescription>
+                      {form.authType === "none"
+                        ? "No credential is sent to this server."
+                        : "Sign in with the provider after saving; JustAI manages the access and refresh tokens."}
+                    </FieldDescription>
+                  )}
                 </Field>
                 <Field>
                   <FieldLabel>Visibility</FieldLabel>
                   <Select
+                    items={{
+                      organization: "Workspace",
+                      user: "Only me",
+                    }}
                     value={form.scopeType}
                     onValueChange={(value) =>
                       update(
@@ -923,10 +951,14 @@ export function MCPView({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {canManageOrganization && (
-                        <SelectItem value="organization">Workspace</SelectItem>
-                      )}
-                      <SelectItem value="user">Only me</SelectItem>
+                      <SelectGroup>
+                        {canManageOrganization && (
+                          <SelectItem value="organization">
+                            Workspace
+                          </SelectItem>
+                        )}
+                        <SelectItem value="user">Only me</SelectItem>
+                      </SelectGroup>
                     </SelectContent>
                   </Select>
                 </Field>
@@ -991,21 +1023,38 @@ export function MCPView({
                   </FieldDescription>
                 </div>
               )}
-              <Field>
-                <FieldLabel htmlFor="mcp-credential">Credential</FieldLabel>
-                <Input
-                  id="mcp-credential"
-                  type="password"
-                  value={form.credential}
-                  onChange={(event) => update("credential", event.target.value)}
-                  placeholder={
-                    form.authType === "oauth"
-                      ? "Optional existing access token"
-                      : "Stored encrypted by JustAI"
-                  }
-                  autoComplete="off"
-                />
-              </Field>
+              {form.authType !== "none" && (
+                <Field>
+                  <FieldLabel htmlFor="mcp-credential">
+                    {form.authType === "oauth"
+                      ? "Access token (optional)"
+                      : "Bearer token"}
+                  </FieldLabel>
+                  <Input
+                    id="mcp-credential"
+                    type="password"
+                    value={form.credential}
+                    onChange={(event) =>
+                      update("credential", event.target.value)
+                    }
+                    placeholder={
+                      form.authType === "oauth"
+                        ? "Leave blank to authorize after saving"
+                        : "Paste the token from your MCP provider"
+                    }
+                    autoComplete="off"
+                  />
+                  <FieldDescription>
+                    {form.authType === "oauth"
+                      ? editingServer
+                        ? "Leave blank to keep the stored token, or authorize again after saving."
+                        : "Leave blank to authorize after saving."
+                      : editingServer
+                        ? "Leave blank to keep the stored token."
+                        : "Stored encrypted by JustAI."}
+                  </FieldDescription>
+                </Field>
+              )}
               <Field>
                 <FieldLabel htmlFor="mcp-tools">Allowlisted tools</FieldLabel>
                 <Input

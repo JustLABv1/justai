@@ -2117,6 +2117,11 @@ function InventoryView({
             <div className="grid gap-1 text-sm">
               <span className="font-medium">Scope</span>
               <Select
+                items={{
+                  global: "Global",
+                  organization: "Organization",
+                  user: "User",
+                }}
                 value={createValues.scopeType}
                 onValueChange={(value) =>
                   updateCreateValue("scopeType", value ?? "global")
@@ -2151,6 +2156,14 @@ function InventoryView({
                 <div className="grid gap-1 text-sm">
                   <span className="font-medium">Provider</span>
                   <Select
+                    items={{
+                      "openai-compatible": "OpenAI-compatible",
+                      openai: "OpenAI",
+                      gemini: "Gemini",
+                      anthropic: "Anthropic",
+                      ollama: "Ollama",
+                      mock: "JustAI demo",
+                    }}
                     value={createValues.providerType}
                     onValueChange={(value) =>
                       updateCreateValue(
@@ -2223,6 +2236,11 @@ function InventoryView({
                 <div className="grid gap-1 text-sm">
                   <span className="font-medium">Authentication</span>
                   <Select
+                    items={{
+                      none: "No auth",
+                      api_key: "Bearer token",
+                      oauth: "OAuth 2.1",
+                    }}
                     value={createValues.authType}
                     onValueChange={(value) =>
                       updateCreateValue("authType", value ?? "none")
@@ -2234,23 +2252,44 @@ function InventoryView({
                     <SelectContent>
                       <SelectGroup>
                         <SelectItem value="none">No auth</SelectItem>
-                        <SelectItem value="api_key">API key</SelectItem>
-                        <SelectItem value="oauth">OAuth</SelectItem>
+                        <SelectItem value="api_key">Bearer token</SelectItem>
+                        <SelectItem value="oauth">OAuth 2.1</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                  {(createValues.authType === "none" ||
+                    createValues.authType === "oauth") && (
+                    <p className="text-xs text-muted-foreground">
+                      {createValues.authType === "none"
+                        ? "No credential is sent to this server."
+                        : "Sign in with the provider after saving; JustAI manages the access and refresh tokens."}
+                    </p>
+                  )}
                 </div>
-                <label className="grid gap-1 text-sm">
-                  Credential (optional)
-                  <Input
-                    type="password"
-                    value={createValues.credential}
-                    onChange={(event) =>
-                      updateCreateValue("credential", event.target.value)
-                    }
-                    placeholder="Stored encrypted on the backend"
-                  />
-                </label>
+                {createValues.authType !== "none" && (
+                  <label className="grid gap-1 text-sm">
+                    {createValues.authType === "oauth"
+                      ? "Access token (optional)"
+                      : "Bearer token"}
+                    <Input
+                      type="password"
+                      value={createValues.credential}
+                      onChange={(event) =>
+                        updateCreateValue("credential", event.target.value)
+                      }
+                      placeholder={
+                        createValues.authType === "oauth"
+                          ? "Leave blank to authorize after saving"
+                          : "Paste the token from your MCP provider"
+                      }
+                    />
+                    {createValues.authType === "oauth" && (
+                      <span className="text-xs text-muted-foreground">
+                        Leave blank to authorize after saving.
+                      </span>
+                    )}
+                  </label>
+                )}
                 {createValues.authType === "oauth" && (
                   <>
                     <label className="grid gap-1 text-sm">
