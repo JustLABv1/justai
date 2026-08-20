@@ -766,12 +766,9 @@ function EndpointTable({
                             {endpoint.enabled ? "Enabled" : "Disabled"}
                           </Badge>
                           {endpoint.credentialConfigured && (
-                            <span
-                              className="inline-flex items-center gap-1 text-muted-foreground"
-                              title="Credential stored"
-                            >
+                            <Badge variant="outline" title="Credential stored">
                               <KeyRound aria-hidden="true" /> Credential
-                            </span>
+                            </Badge>
                           )}
                         </div>
                       </td>
