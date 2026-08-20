@@ -307,9 +307,9 @@ func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, upload
 		characters := 0
 		for index < len(segments) && len(batch) < 20 {
 			segment := segments[index]
-			raw := strings.TrimSpace(segment.RawText)
+			raw := strings.TrimSpace(segment.Text)
 			if raw == "" {
-				raw = strings.TrimSpace(segment.Text)
+				raw = strings.TrimSpace(segment.RawText)
 			}
 			if raw == "" {
 				index++
@@ -349,9 +349,9 @@ func (m *TranscriptionManager) polishVideoTranscriptBatch(ctx context.Context, e
 		speakerNames[speaker.ID] = firstNonEmptyString(speaker.DisplayName, speaker.Label)
 	}
 	for _, segment := range segments {
-		raw := strings.TrimSpace(segment.RawText)
+		raw := strings.TrimSpace(segment.Text)
 		if raw == "" {
-			raw = strings.TrimSpace(segment.Text)
+			raw = strings.TrimSpace(segment.RawText)
 		}
 		item := videoPolishInput{ID: segment.ID.String(), Text: raw}
 		if segment.SpeakerID != nil {

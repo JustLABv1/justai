@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  AudioLines,
   Check,
   ChevronDown,
   Clock3,
@@ -8,6 +9,7 @@ import {
   CircleDashed,
   FileText,
   FileVideo,
+  GitMerge,
   LoaderCircle,
   Pause,
   Pencil,
@@ -94,6 +96,8 @@ import type {
   TranscriptionSegment,
   TranscriptionSpeaker,
   TranscriptionSession,
+  TranscriptionVideoPreviewSegment,
+  TranscriptionVideoParallelProgress,
   TranscriptionVideoPipelineStep,
   TranscriptionVideoUpload,
   User,
@@ -628,7 +632,7 @@ export function VideoTranscriptionView({
   const displaySegments = useMemo(
     () =>
       (snapshot?.segments ?? []).map((segment) => {
-        const verbatim = segment.rawText?.trim() || segment.text.trim()
+		const verbatim = segment.text.trim() || segment.rawText?.trim() || ""
         return {
           ...segment,
           text:
@@ -642,6 +646,34 @@ export function VideoTranscriptionView({
   const transcript = useMemo(
     () => groupTranscriptionSegments(displaySegments),
     [displaySegments]
+  )
+  const isVideoProcessing = ["uploading", "queued", "processing"].includes(
+    snapshot?.videoUpload?.status ?? ""
+  )
+  const livePreviewSegments = useMemo<TranscriptionVideoPreviewSegment[]>(
+    () => {
+      const parallelProgress = snapshot?.videoUpload?.pipeline?.find(
+        (step) => step.key === "transcription"
+      )?.parallel
+      const isPreviewActive =
+        isVideoProcessing &&
+        ["preparing", "transcribing", "fusing"].includes(
+          parallelProgress?.phase ?? ""
+        )
+      if (!isPreviewActive) {
+        return []
+      }
+      const preview = parallelProgress?.previewSegments ?? []
+      return [...preview]
+        .filter((segment) => segment.text.trim())
+        .sort((left, right) => {
+          if (left.startOffsetMs !== right.startOffsetMs) {
+            return left.startOffsetMs - right.startOffsetMs
+          }
+          return left.endOffsetMs - right.endOffsetMs
+        })
+    },
+    [isVideoProcessing, snapshot?.videoUpload?.pipeline]
   )
   const speakerById = useMemo(
     () =>
@@ -811,7 +843,7 @@ export function VideoTranscriptionView({
       : "Cancel transcription"
 
   return (
-    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6">
+    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
       {error && (
         <Alert className="shrink-0" variant="destructive">
           <AlertTitle>Video transcription needs attention</AlertTitle>
@@ -920,8 +952,8 @@ export function VideoTranscriptionView({
             />
           ) : null}
 
-          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)] lg:overflow-hidden">
-            <Card className="min-h-[28rem] overflow-hidden shadow-none lg:min-h-0">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)]">
+            <Card className="flex max-h-[min(70vh,42rem)] min-h-[28rem] flex-col overflow-hidden shadow-none">
               <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -935,6 +967,9 @@ export function VideoTranscriptionView({
                     <CardDescription>
                       {transcript.length} messages · {snapshot.segments.length}{" "}
                       segments
+                      {livePreviewSegments.length > 0
+                        ? ` · ${livePreviewSegments.length} live preview lines`
+                        : ""}
                       {transcriptQuery
                         ? ` · ${filteredTranscript.length} matches`
                         : ""}
@@ -974,7 +1009,7 @@ export function VideoTranscriptionView({
                   />
                 </div>
               </CardHeader>
-              <CardContent className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4">
+              <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
                 {filteredTranscript.length > 0 ? (
                   <div className="flex flex-col gap-1">
                     {filteredTranscript.map((message) => {
@@ -1065,6 +1100,18 @@ export function VideoTranscriptionView({
                       Clear search
                     </Button>
                   </Empty>
+                ) : livePreviewSegments.length > 0 ? (
+                  <LiveTranscriptPreview segments={livePreviewSegments} />
+                ) : isVideoProcessing ? (
+                  <Empty className="min-h-48 border-0 p-4">
+                    <EmptyHeader>
+                      <EmptyTitle>Waiting for the first slice</EmptyTitle>
+                      <EmptyDescription>
+                        Workers are transcribing in parallel. Preview lines will
+                        appear as output arrives.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 ) : (
                   <Empty className="min-h-48 border-0 p-4">
                     <EmptyHeader>
@@ -1079,7 +1126,7 @@ export function VideoTranscriptionView({
               </CardContent>
             </Card>
 
-            <aside className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto overscroll-contain">
+            <aside className="flex flex-col gap-4">
               {speakerSummaries.length > 0 ? (
                 <Card
                   aria-label="Speaker summary"
@@ -1653,6 +1700,55 @@ export function VideoTranscriptionView({
   )
 }
 
+function LiveTranscriptPreview({
+  segments,
+}: {
+  segments: TranscriptionVideoPreviewSegment[]
+}) {
+  return (
+    <div
+      aria-label="Live transcript preview"
+      aria-live="polite"
+      className="space-y-3"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <AudioLines aria-hidden="true" className="size-4 text-primary" />
+            Live transcript preview
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Recent output from active workers. The final fused transcript will
+            replace this preview.
+          </p>
+        </div>
+        <Badge className="shrink-0" variant="outline">
+          <LoaderCircle
+            aria-hidden="true"
+            className="size-3 motion-safe:animate-spin motion-reduce:animate-none"
+          />
+          Live
+        </Badge>
+      </div>
+      <div className="divide-y rounded-xl border border-border/70 bg-muted/10">
+        {segments.map((segment, index) => (
+          <div
+            className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-3 py-2.5 text-sm"
+            key={`${segment.startOffsetMs}-${segment.endOffsetMs}-${index}`}
+          >
+            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+              {formatVideoTimestamp(segment.startOffsetMs)}
+            </span>
+            <span className="min-w-0 leading-6 text-foreground">
+              {segment.text}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function VideoPipeline({
   hasDiarizedSpeakers,
   upload,
@@ -1693,6 +1789,9 @@ function VideoPipeline({
   }
 
   const steps = getVideoPipelineSteps(upload, session, hasDiarizedSpeakers)
+  const parallelProgress = steps.find(
+    (step) => step.key === "transcription"
+  )?.parallel
   const activeStep = steps.find(
     (step) => step.status === "active" || step.status === "retrying"
   )
@@ -1718,7 +1817,13 @@ function VideoPipeline({
         : upload.status === "cancelled"
           ? "Processing cancelled"
           : activeStep
-            ? `${videoPipelineStepLabel(activeStep.key)} in progress`
+            ? parallelProgress?.phase === "preparing"
+              ? "Preparing audio slices"
+              : parallelProgress?.phase === "fusing"
+                ? "Fusing transcript in progress"
+                : parallelProgress?.phase === "transcribing"
+                  ? "Transcribing slices in parallel"
+                  : `${videoPipelineStepLabel(activeStep.key)} in progress`
             : upload.status === "queued"
               ? "Waiting to start"
               : "Preparing video"
@@ -1731,7 +1836,7 @@ function VideoPipeline({
     >
       <Card
         aria-label="Video processing pipeline"
-        className="overflow-hidden border-border/80 shadow-none"
+        className="flex min-h-0 flex-col overflow-hidden border-border/80 shadow-none"
       >
         <CardHeader className="gap-3 px-4 py-4 sm:px-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1758,6 +1863,11 @@ function VideoPipeline({
               >
                 {completedCount}/{steps.length} steps
               </Badge>
+              {parallelProgress ? (
+                <Badge className="h-5 px-2 text-[10px]" variant="outline">
+                  {parallelProgress.workerCount ?? 1} parallel workers
+                </Badge>
+              ) : null}
               <span className="whitespace-nowrap">
                 Run time · {formatPipelineStepDuration(runTimeMs)}
               </span>
@@ -1788,8 +1898,20 @@ function VideoPipeline({
         </CardHeader>
         <CollapsibleContent>
           <CardContent className="px-4 pb-4 sm:px-5">
+            {parallelProgress ? (
+              <ParallelTranscriptionFlow
+                key={
+                  upload.status === "completed" ||
+                  parallelProgress.phase === "complete"
+                    ? "complete"
+                    : "active"
+                }
+                progress={parallelProgress}
+                upload={upload}
+              />
+            ) : null}
             <div
-              className="flex flex-col gap-0 md:flex-row md:items-stretch"
+              className="flex min-w-0 flex-row items-stretch gap-0 overflow-x-auto pb-2 md:overflow-visible md:pb-0"
               role="list"
             >
               {steps.map((step, index) => {
@@ -1800,7 +1922,7 @@ function VideoPipeline({
                   <Fragment key={step.key}>
                     <div
                       className={cn(
-                        "min-w-0 flex-1 rounded-xl border p-3 transition-[transform,opacity,background-color,border-color] duration-200 ease-out motion-reduce:transition-none",
+                        "w-[13rem] min-w-0 flex-none rounded-xl border p-3 transition-[transform,opacity,background-color,border-color] duration-200 ease-out motion-reduce:transition-none md:w-auto md:flex-1",
                         videoPipelineStepClass(step.status),
                         active && "md:-translate-y-0.5"
                       )}
@@ -1845,7 +1967,7 @@ function VideoPipeline({
                         <span className="font-medium text-foreground tabular-nums">
                           {step.durationEstimated ? "~" : ""}
                           {formatPipelineStepDuration(
-                            getVideoPipelineStepDuration(step, now)
+                            getVideoPipelineStepDuration(step, now, steps, index)
                           )}
                         </span>
                       </div>
@@ -1859,7 +1981,7 @@ function VideoPipeline({
                       <div
                         aria-hidden="true"
                         className={cn(
-                          "mx-4 h-3 w-px shrink-0 bg-border md:mx-2 md:my-auto md:h-px md:w-5",
+                          "mx-2 my-auto h-px w-5 shrink-0 bg-border",
                           ["completed", "skipped"].includes(step.status) &&
                             "bg-primary/40"
                         )}
@@ -1872,6 +1994,232 @@ function VideoPipeline({
           </CardContent>
         </CollapsibleContent>
       </Card>
+    </Collapsible>
+  )
+}
+
+function ParallelTranscriptionFlow({
+  progress,
+  upload,
+}: {
+  progress: TranscriptionVideoParallelProgress
+  upload: TranscriptionVideoUpload
+}) {
+  const phase =
+    upload.status === "completed" ? "complete" : progress.phase || "preparing"
+  const [open, setOpen] = useState(() => phase !== "complete")
+  const phaseOrder: Record<string, number> = {
+    preparing: 0,
+    transcribing: 1,
+    fusing: 2,
+    complete: 3,
+  }
+  const currentPhase = phaseOrder[phase] ?? 0
+  const interrupted =
+    upload.status === "failed" || upload.status === "cancelled"
+  const sliceCount = Math.max(0, progress.sliceCount ?? 0)
+  const completedSlices = Math.min(
+    sliceCount,
+    Math.max(0, progress.completedSlices ?? 0)
+  )
+  const workerCount = Math.max(1, Math.min(progress.workerCount ?? 1, 8))
+  const sliceProgress =
+    phase === "preparing"
+      ? 0
+      : phase === "fusing" || phase === "complete"
+        ? 100
+        : sliceCount > 0
+          ? Math.round((completedSlices / sliceCount) * 100)
+          : 0
+  const stages = [
+    {
+      key: "preparing",
+      label: "Prepare audio",
+      description: "Extract and cut overlapping slices",
+      icon: FileVideo,
+    },
+    {
+      key: "transcribing",
+      label: "Transcribe slices",
+      description: "Run multiple workers at once",
+      icon: AudioLines,
+    },
+    {
+      key: "fusing",
+      label: "Fuse transcript",
+      description: "Sort timestamps and remove overlap",
+      icon: GitMerge,
+    },
+  ]
+
+  return (
+    <Collapsible
+      className="mb-4"
+      onOpenChange={setOpen}
+      open={open}
+    >
+      <div
+        aria-label="Parallel transcription details"
+        className="rounded-xl border border-primary/15 bg-primary/[0.025] p-3 sm:p-4"
+      >
+        <CollapsibleTrigger
+          aria-label={
+            open
+              ? "Collapse parallel transcription details"
+              : "Expand parallel transcription details"
+          }
+          className="flex w-full items-start justify-between gap-3 text-left"
+          type="button"
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+              <AudioLines aria-hidden="true" className="size-3.5 text-primary" />
+              Parallel transcription
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              The source is split into overlapping audio slices so long videos do
+              not wait on one continuous transcription stream.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Badge className="text-[10px]" variant="outline">
+              {progress.workerCount ?? 1} workers
+            </Badge>
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                "size-4 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
+                !open && "-rotate-90"
+              )}
+            />
+          </div>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent>
+          <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
+            {stages.map((stage, index) => {
+              const stageIndex = phaseOrder[stage.key] ?? index
+              const complete = phase === "complete" || stageIndex < currentPhase
+              const active = !complete && stageIndex === currentPhase
+              const failed = interrupted && active
+              const Icon = failed
+                ? CircleAlert
+                : complete
+                  ? Check
+                  : active
+                    ? LoaderCircle
+                    : stage.icon
+              return (
+                <Fragment key={stage.key}>
+                  <div
+                    className={cn(
+                      "flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 transition-[background-color,border-color,transform] duration-200 ease-out motion-reduce:transition-none",
+                      complete && "border-primary/20 bg-primary/[0.04]",
+                      active &&
+                        !failed &&
+                        "-translate-y-0.5 border-primary/35 bg-primary/10",
+                      failed &&
+                        "border-destructive/30 bg-destructive/10 text-destructive",
+                      !complete && !active && "border-border/70 bg-background/50"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground",
+                        complete && "border-primary/25 bg-primary/10 text-primary",
+                        active && !failed && "border-primary/40 text-primary",
+                        failed &&
+                          "border-destructive/30 bg-destructive/10 text-destructive"
+                      )}
+                    >
+                      <Icon
+                        aria-hidden="true"
+                        className={cn(
+                          "size-3.5",
+                          active &&
+                            !failed &&
+                            "motion-safe:animate-spin motion-reduce:animate-none"
+                        )}
+                      />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[11px] font-medium">
+                        {stage.label}
+                      </span>
+                      <span className="block truncate text-[10px] text-muted-foreground">
+                        {failed
+                          ? upload.status === "cancelled"
+                            ? "Cancelled"
+                            : "Stopped"
+                          : stage.description}
+                      </span>
+                    </span>
+                  </div>
+                  {index < stages.length - 1 ? (
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "hidden h-px bg-border md:block",
+                        stageIndex < currentPhase && "bg-primary/40"
+                      )}
+                    />
+                  ) : null}
+                </Fragment>
+              )
+            })}
+          </div>
+
+          <div className="mt-3 rounded-lg border border-border/70 bg-background/70 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="font-medium text-foreground">
+                {sliceCount > 0
+                  ? `${completedSlices} of ${sliceCount} slices complete`
+                  : "Building the slice map…"}
+              </span>
+              <span className="text-muted-foreground">
+                {formatVideoDuration(progress.chunkDurationMs ?? 0)} windows ·{" "}
+                {formatVideoDuration(progress.overlapMs ?? 0)} overlap
+              </span>
+            </div>
+            <Progress
+              aria-label="Parallel slice transcription progress"
+              className="mt-2 h-1.5"
+              value={sliceProgress}
+            />
+            <div className="mt-3 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
+              {Array.from({ length: workerCount }, (_, index) => {
+                const workerActive = phase === "transcribing" && !interrupted
+                return (
+                  <div
+                    className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"
+                    key={index}
+                  >
+                    <span
+                      className={cn(
+                        "size-1.5 shrink-0 rounded-full bg-muted-foreground/40",
+                        workerActive &&
+                          "bg-primary motion-safe:animate-pulse motion-reduce:animate-none",
+                        (phase === "fusing" || phase === "complete") &&
+                          "bg-primary/70"
+                      )}
+                    />
+                    <span>Worker {String(index + 1).padStart(2, "0")}</span>
+                    <span className="ml-auto">
+                      {workerActive
+                        ? "processing"
+                        : phase === "preparing"
+                          ? "ready"
+                          : interrupted
+                            ? "stopped"
+                            : "joined"}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </CollapsibleContent>
+      </div>
     </Collapsible>
   )
 }
@@ -1917,6 +2265,7 @@ function getVideoPipelineSteps(
         status: "pending" as const,
       }),
     }))
+    repairCancelledVideoPipeline(steps, upload)
     const diarizationStep = steps.find((step) => step.key === "diarization")
     if (hasDiarizedSpeakers && diarizationStep?.status === "skipped") {
       diarizationStep.status = "completed"
@@ -1925,11 +2274,67 @@ function getVideoPipelineSteps(
     return hydrateVideoPipelineTiming(steps, upload, session)
   }
 
-  return hydrateVideoPipelineTiming(
-    fallbackVideoPipeline(upload, session, hasDiarizedSpeakers),
+  const fallbackSteps = fallbackVideoPipeline(
     upload,
-    session
+    session,
+    hasDiarizedSpeakers
   )
+  const parallelProgress = upload.pipeline?.find(
+    (step) => step.key === "transcription"
+  )?.parallel
+  if (parallelProgress) {
+    const transcriptionStep = fallbackSteps.find(
+      (step) => step.key === "transcription"
+    )
+    if (transcriptionStep) transcriptionStep.parallel = parallelProgress
+  }
+  return hydrateVideoPipelineTiming(fallbackSteps, upload, session)
+}
+
+function repairCancelledVideoPipeline(
+  steps: TranscriptionVideoPipelineStep[],
+  upload: TranscriptionVideoUpload
+) {
+  if (
+    upload.status !== "cancelled" ||
+    upload.expectedBytes <= 0 ||
+    upload.bytes < upload.expectedBytes
+  ) {
+    return
+  }
+
+  const uploadStep = steps.find((step) => step.key === "upload")
+  const transcriptionStep = steps.find((step) => step.key === "transcription")
+  if (
+    !uploadStep ||
+    !transcriptionStep ||
+    uploadStep.status !== "cancelled" ||
+    (transcriptionStep.status !== "pending" &&
+      transcriptionStep.status !== "cancelled")
+  ) {
+    return
+  }
+
+  // A complete source object means the user cancelled processing after the
+  // upload had finished. Repair a stale pipeline snapshot from an in-flight
+  // cancel race so the UI does not claim that the source upload was lost.
+  uploadStep.status = "completed"
+  transcriptionStep.status = "cancelled"
+  const completedAt =
+    transcriptionStep.completedAt ||
+    upload.updatedAt ||
+    upload.completedAt ||
+    upload.createdAt
+  transcriptionStep.startedAt =
+    transcriptionStep.startedAt || uploadStep.completedAt || completedAt
+  transcriptionStep.completedAt = completedAt
+  if (transcriptionStep.startedAt) {
+    const start = Date.parse(transcriptionStep.startedAt)
+    const end = Date.parse(completedAt)
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      transcriptionStep.durationMs = Math.max(0, end - start)
+    }
+  }
 }
 
 function hydrateVideoPipelineTiming(
@@ -1978,6 +2383,18 @@ function hydrateVideoPipelineTiming(
             : cursor
       if (startedAt !== null) step.startedAt = new Date(startedAt).toISOString()
     }
+    if (
+      startedAt !== null &&
+      cursor !== null &&
+      (step.status === "active" || step.status === "retrying") &&
+      startedAt < cursor
+    ) {
+      // Some legacy snapshots recorded the active step from the session start.
+      // Pipeline steps are sequential, so never let an active step include
+      // time that belongs to the preceding completed step.
+      startedAt = cursor
+      step.startedAt = new Date(startedAt).toISOString()
+    }
 
     if (
       step.status === "completed" ||
@@ -2000,7 +2417,9 @@ function hydrateVideoPipelineTiming(
         step.durationEstimated = true
       } else if (completedAt === null) {
         completedAt =
-          step.key === "upload"
+          step.durationMs && step.durationMs > 0 && startedAt !== null
+            ? startedAt + step.durationMs
+            : step.key === "upload"
             ? uploadProcessingBoundary
             : (nextKnownStart(index) ?? terminalEnd)
         if (completedAt !== null && startedAt !== null) {
@@ -2175,7 +2594,7 @@ function fallbackVideoPipeline(
     setStatus("transcription", "retrying")
     return steps
   }
-  if (["starting", "extracting", "transcribing"].includes(stage)) {
+  if (["starting", "extracting", "transcribing", "fusing"].includes(stage)) {
     setStatus("transcription", "active")
     return steps
   }
@@ -2310,11 +2729,21 @@ function videoPipelineStepClass(
 
 function getVideoPipelineStepDuration(
   step: TranscriptionVideoPipelineStep,
-  now: number
+  now: number,
+  steps: TranscriptionVideoPipelineStep[] = [],
+  index = -1
 ) {
   const storedDuration = step.durationMs ?? 0
   if (step.status === "active" || step.status === "retrying") {
-    const startedAt = step.startedAt ? Date.parse(step.startedAt) : NaN
+    let startedAt = step.startedAt ? Date.parse(step.startedAt) : NaN
+    const previousBoundary = getVideoPipelinePreviousBoundary(steps, index)
+    if (
+      previousBoundary !== null &&
+      Number.isFinite(previousBoundary) &&
+      (!Number.isFinite(startedAt) || startedAt < previousBoundary)
+    ) {
+      startedAt = previousBoundary
+    }
     if (Number.isFinite(startedAt)) return Math.max(0, now - startedAt)
   }
   if (storedDuration > 0) return storedDuration
@@ -2326,6 +2755,24 @@ function getVideoPipelineStepDuration(
     }
   }
   return 0
+}
+
+function getVideoPipelinePreviousBoundary(
+  steps: TranscriptionVideoPipelineStep[],
+  index: number
+) {
+  for (let current = index - 1; current >= 0; current -= 1) {
+    const step = steps[current]
+    if (step.status === "pending" || step.status === "skipped") continue
+    const completedAt = step.completedAt ? Date.parse(step.completedAt) : NaN
+    if (Number.isFinite(completedAt)) return completedAt
+    const startedAt = step.startedAt ? Date.parse(step.startedAt) : NaN
+    const duration = step.durationMs ?? 0
+    if (Number.isFinite(startedAt) && duration > 0) {
+      return startedAt + duration
+    }
+  }
+  return null
 }
 
 function getVideoPipelineRunTime(
@@ -2411,18 +2858,23 @@ function mergeVideoUploadSnapshot(
 
   const sourceStillExists =
     next.status !== "cancelled" || next.bytes >= next.expectedBytes
+  const pipeline =
+    next.pipeline && next.pipeline.length > 0
+      ? next.pipeline
+      : current.pipeline
   return {
     ...current,
     ...next,
+    pipeline,
     progress:
       current.status === "uploading" && next.status === "uploading"
         ? Math.max(current.progress, next.progress)
         : next.progress,
-    // A snapshot can be produced while the signed playback URL is being
-    // regenerated. Keep the last usable URL instead of making the source
-    // video flicker in and out between polls.
+    // Session snapshots generate a fresh signed URL on every request. Keep
+    // the existing URL during polling so React does not reload the video;
+    // the explicit "Refresh link" action replaces it when it actually expires.
     playbackUrl: sourceStillExists
-      ? next.playbackUrl || current.playbackUrl
+      ? current.playbackUrl || next.playbackUrl
       : undefined,
   }
 }

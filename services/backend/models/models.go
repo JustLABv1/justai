@@ -218,13 +218,31 @@ type TranscriptionRecording struct {
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 }
 
+type TranscriptionVideoParallelProgress struct {
+	Strategy        string                             `json:"strategy,omitempty"`
+	Phase           string                             `json:"phase,omitempty"`
+	ChunkDurationMs int64                              `json:"chunkDurationMs,omitempty"`
+	OverlapMs       int64                              `json:"overlapMs,omitempty"`
+	WorkerCount     int                                `json:"workerCount,omitempty"`
+	SliceCount      int                                `json:"sliceCount,omitempty"`
+	CompletedSlices int                                `json:"completedSlices,omitempty"`
+	PreviewSegments []TranscriptionVideoPreviewSegment `json:"previewSegments,omitempty"`
+}
+
+type TranscriptionVideoPreviewSegment struct {
+	StartOffsetMs int64  `json:"startOffsetMs"`
+	EndOffsetMs   int64  `json:"endOffsetMs"`
+	Text          string `json:"text"`
+}
+
 type TranscriptionVideoPipelineStep struct {
-	Key         string     `json:"key"`
-	Status      string     `json:"status"`
-	StartedAt   *time.Time `json:"startedAt,omitempty"`
-	CompletedAt *time.Time `json:"completedAt,omitempty"`
-	DurationMs  int64      `json:"durationMs,omitempty"`
-	Error       string     `json:"error,omitempty"`
+	Key         string                              `json:"key"`
+	Status      string                              `json:"status"`
+	StartedAt   *time.Time                          `json:"startedAt,omitempty"`
+	CompletedAt *time.Time                          `json:"completedAt,omitempty"`
+	DurationMs  int64                               `json:"durationMs,omitempty"`
+	Error       string                              `json:"error,omitempty"`
+	Parallel    *TranscriptionVideoParallelProgress `json:"parallel,omitempty"`
 }
 
 type TranscriptionVideoUpload struct {

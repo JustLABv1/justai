@@ -66,7 +66,7 @@ func encodeVideoPipeline(steps []models.TranscriptionVideoPipelineStep) ([]byte,
 
 func videoPipelineKeyForStage(stage string) string {
 	switch stage {
-	case "starting", "extracting", "transcribing", "processing":
+	case "starting", "extracting", "transcribing", "fusing", "processing":
 		return "transcription"
 	case "diarizing":
 		return "diarization"
@@ -198,22 +198,85 @@ func failVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now ti
 }
 
 func cancelVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now time.Time) {
-	for index := range steps {
-		if steps[index].Status != "active" && steps[index].Status != "retrying" {
+	index := -1
+	for current := range steps {
+		if steps[current].Key == "transcription" &&
+			steps[current].Status != "completed" &&
+			steps[current].Status != "failed" &&
+			steps[current].Status != "cancelled" &&
+			steps[current].Parallel != nil {
+			// Parallel progress is written before every coarse stage update. If
+			// the latter loses a read/modify/write race, it is stronger evidence
+			// of the active work than a stale upload status.
+			index = current
+			break
+		}
+	}
+	if index >= 0 {
+		cancelVideoPipelineStepAt(steps, index, now)
+		return
+	}
+	for current := range steps {
+		if steps[current].Status != "active" && steps[current].Status != "retrying" {
 			continue
 		}
-		step := &steps[index]
-		if step.StartedAt == nil {
-			step.StartedAt = timePointer(now)
-		}
-		step.Status = "cancelled"
-		step.CompletedAt = timePointer(now)
-		step.DurationMs = elapsedVideoPipelineStep(step, now)
-		return
+		// A stale pipeline can briefly expose more than one active step while
+		// the worker and the cancel request race. The latest active step is the
+		// one that should receive the cancellation.
+		index = current
 	}
 	// Cancellation can be persisted by both the request handler and the
 	// worker finishing the in-flight job. Once there is no active step left,
 	// leave the pending steps untouched so the second write is idempotent.
+	if index < 0 {
+		return
+	}
+	cancelVideoPipelineStepAt(steps, index, now)
+}
+
+func cancelVideoPipelineStepForKey(steps []models.TranscriptionVideoPipelineStep, key string, now time.Time) bool {
+	index := videoPipelineIndex(key)
+	if index < 0 {
+		return false
+	}
+	step := &steps[index]
+	if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" {
+		return false
+	}
+	cancelVideoPipelineStepAt(steps, index, now)
+	return true
+}
+
+func cancelVideoPipelineStepAt(steps []models.TranscriptionVideoPipelineStep, index int, now time.Time) {
+	for previous := 0; previous < index; previous++ {
+		step := &steps[previous]
+		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" {
+			continue
+		}
+		if isOptionalVideoPipelineStep(step.Key) {
+			skipVideoPipelineStep(step)
+			continue
+		}
+		completeVideoPipelineStepAt(step, now)
+	}
+	step := &steps[index]
+	if step.StartedAt == nil {
+		step.StartedAt = timePointer(now)
+	}
+	step.Status = "cancelled"
+	step.CompletedAt = timePointer(now)
+	step.DurationMs = elapsedVideoPipelineStep(step, now)
+}
+
+func videoPipelineCancellationKey(stage string) string {
+	switch stage {
+	case "uploading":
+		return "upload"
+	case "uploaded", "queued", "retrying", "starting", "extracting", "transcribing", "fusing", "processing":
+		return "transcription"
+	default:
+		return ""
+	}
 }
 
 func retryVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now time.Time, errorMessage string) {
@@ -231,8 +294,29 @@ func retryVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now t
 	step.StartedAt = nil
 	step.CompletedAt = nil
 	step.DurationMs = 0
+	step.Parallel = nil
 	if errorMessage != "" {
 		step.Error = errorMessage
+	}
+}
+
+func retryVideoPipelineStepFrom(steps []models.TranscriptionVideoPipelineStep, key, errorMessage string) {
+	index := videoPipelineIndex(key)
+	if index < 0 {
+		return
+	}
+	for current := index; current < len(steps); current++ {
+		step := &steps[current]
+		step.Status = "pending"
+		step.StartedAt = nil
+		step.CompletedAt = nil
+		step.DurationMs = 0
+		step.Error = ""
+		if current == index {
+			step.Status = "retrying"
+			step.Error = errorMessage
+		}
+		step.Parallel = nil
 	}
 }
 
@@ -367,6 +451,17 @@ func (m *TranscriptionManager) advanceVideoPipeline(ctx context.Context, uploadI
 	})
 }
 
+func (m *TranscriptionManager) updateVideoParallelProgress(ctx context.Context, uploadID uuid.UUID, progress models.TranscriptionVideoParallelProgress) error {
+	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) {
+		index := videoPipelineIndex("transcription")
+		if index < 0 {
+			return
+		}
+		value := progress
+		steps[index].Parallel = &value
+	})
+}
+
 func (m *TranscriptionManager) completeVideoPipeline(ctx context.Context, uploadID uuid.UUID) error {
 	now := time.Now().UTC()
 	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) {
@@ -382,8 +477,15 @@ func (m *TranscriptionManager) failVideoPipeline(ctx context.Context, uploadID u
 }
 
 func (m *TranscriptionManager) cancelVideoPipeline(ctx context.Context, uploadID uuid.UUID) error {
+	return m.cancelVideoPipelineAtStage(ctx, uploadID, "")
+}
+
+func (m *TranscriptionManager) cancelVideoPipelineAtStage(ctx context.Context, uploadID uuid.UUID, stage string) error {
 	now := time.Now().UTC()
 	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) {
+		if key := videoPipelineCancellationKey(stage); key != "" && cancelVideoPipelineStepForKey(steps, key, now) {
+			return
+		}
 		cancelVideoPipelineStep(steps, now)
 	})
 }
@@ -392,6 +494,12 @@ func (m *TranscriptionManager) retryVideoPipeline(ctx context.Context, uploadID 
 	now := time.Now().UTC()
 	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) {
 		retryVideoPipelineStep(steps, now, errorMessage)
+	})
+}
+
+func (m *TranscriptionManager) retryVideoPipelineFrom(ctx context.Context, uploadID uuid.UUID, key, errorMessage string) error {
+	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) {
+		retryVideoPipelineStepFrom(steps, key, errorMessage)
 	})
 }
 

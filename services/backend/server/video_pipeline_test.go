@@ -105,3 +105,67 @@ func TestVideoPipelineCancellationIsIdempotent(t *testing.T) {
 		t.Fatalf("repeated cancellation should not cancel pending steps: %+v", steps)
 	}
 }
+
+func TestVideoPipelineCancellationTargetsLatestActiveStep(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	steps := initialVideoPipeline(started)
+	steps[1].Status = "active"
+	steps[1].StartedAt = timePointer(started.Add(time.Second))
+
+	cancelVideoPipelineStep(steps, started.Add(2*time.Second))
+
+	if steps[0].Status != "completed" || steps[1].Status != "cancelled" {
+		t.Fatalf("cancellation should target the latest active step: %+v", steps)
+	}
+}
+
+func TestVideoPipelineCancellationRepairsStaleParallelState(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	steps := initialVideoPipeline(started)
+	steps[1].Parallel = &models.TranscriptionVideoParallelProgress{
+		Strategy:    "parallel",
+		Phase:       "transcribing",
+		WorkerCount: 3,
+		SliceCount:  14,
+	}
+
+	cancelVideoPipelineStep(steps, started.Add(2*time.Second))
+
+	if steps[0].Status != "completed" || steps[1].Status != "cancelled" {
+		t.Fatalf("stale parallel state should cancel transcription after upload: %+v", steps)
+	}
+	if steps[2].Status != "pending" || steps[3].Status != "pending" || steps[4].Status != "pending" {
+		t.Fatalf("downstream steps should remain pending: %+v", steps)
+	}
+}
+
+func TestVideoPipelineTracksParallelFusionPhase(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	steps := initialVideoPipeline(started)
+	steps = applyVideoPipelineStage(steps, "extracting", "", started.Add(time.Second))
+	steps[1].Parallel = &models.TranscriptionVideoParallelProgress{
+		Strategy:        "parallel",
+		Phase:           "transcribing",
+		ChunkDurationMs: 600000,
+		OverlapMs:       5000,
+		WorkerCount:     3,
+		SliceCount:      13,
+		CompletedSlices: 8,
+	}
+	steps = applyVideoPipelineStage(steps, "fusing", "", started.Add(2*time.Second))
+
+	if steps[1].Status != "active" {
+		t.Fatalf("transcription status = %q, want active during fusion", steps[1].Status)
+	}
+	if steps[1].Parallel == nil || steps[1].Parallel.CompletedSlices != 8 {
+		t.Fatalf("parallel progress was not preserved: %+v", steps[1].Parallel)
+	}
+	encoded, err := encodeVideoPipeline(steps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded := decodeVideoPipeline(encoded)
+	if decoded[1].Parallel == nil || decoded[1].Parallel.WorkerCount != 3 {
+		t.Fatalf("parallel progress did not survive JSON storage: %+v", decoded[1].Parallel)
+	}
+}

@@ -34,6 +34,9 @@ transcription:
   streaming_chunk_ms: 2500
   streaming_overlap_ms: 500
   streaming_prompt_chars: 160
+  video_transcription_chunk_ms: 600000
+  video_transcription_overlap_ms: 5000
+  video_transcription_workers: 3
   max_session_hours: 8
   video_upload_max_bytes: 5368709120
   video_upload_part_bytes: 16777216

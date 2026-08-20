@@ -246,7 +246,7 @@ func (a *App) retryVideoTranscription(c *gin.Context) {
 		writeError(c, http.StatusNotFound, err)
 		return
 	}
-	jobID, upload, err := a.Live.retryVideoJob(c, uploadID)
+	jobID, upload, err := a.Live.retryVideoJob(c, uploadID, c.Query("step"))
 	if err != nil {
 		writeError(c, http.StatusConflict, err)
 		return

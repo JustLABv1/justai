@@ -58,6 +58,9 @@ dev_seed: false
 	if loaded.Transcription.StreamingChunkMs != 2500 || loaded.Transcription.StreamingOverlapMs != 500 || loaded.Transcription.StreamingPromptChars != 160 {
 		t.Fatalf("unexpected streaming transcription defaults: %+v", loaded.Transcription)
 	}
+	if loaded.Transcription.VideoTranscriptionChunkMs != 600000 || loaded.Transcription.VideoTranscriptionOverlapMs != 5000 || loaded.Transcription.VideoTranscriptionWorkers != 3 {
+		t.Fatalf("unexpected parallel video transcription defaults: %+v", loaded.Transcription)
+	}
 	if loaded.Transcription.VideoUploadMaxBytes != 5*1024*1024*1024 || loaded.Transcription.VideoUploadPartBytes != 16*1024*1024 || loaded.Transcription.VideoMaxDurationHours != 4 {
 		t.Fatalf("unexpected video transcription defaults: %+v", loaded.Transcription)
 	}

@@ -471,6 +471,24 @@ export type TranscriptionVideoPipelineStep = {
   durationMs?: number
   durationEstimated?: boolean
   error?: string
+  parallel?: TranscriptionVideoParallelProgress
+}
+
+export type TranscriptionVideoParallelProgress = {
+  strategy?: string
+  phase?: "preparing" | "transcribing" | "fusing" | "complete" | string
+  chunkDurationMs?: number
+  overlapMs?: number
+  workerCount?: number
+  sliceCount?: number
+  completedSlices?: number
+  previewSegments?: TranscriptionVideoPreviewSegment[]
+}
+
+export type TranscriptionVideoPreviewSegment = {
+  startOffsetMs: number
+  endOffsetMs: number
+  text: string
 }
 
 export type TranscriptionVideoUpload = {

@@ -43,6 +43,10 @@ transcription:
   streaming_overlap_ms: 500
   # Keep the decoder prompt well below Whisper's small text context window.
   streaming_prompt_chars: 160
+  # Long videos are extracted once and transcribed in overlapping slices.
+  video_transcription_chunk_ms: 600000
+  video_transcription_overlap_ms: 5000
+  video_transcription_workers: 3
   max_session_hours: 8
   # Direct-to-S3 multipart video uploads and their processing bounds. Video
   # uploads require storage_driver: s3.

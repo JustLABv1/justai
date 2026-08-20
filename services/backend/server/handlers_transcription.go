@@ -1146,13 +1146,25 @@ func (a *App) processDiarizationWindow(sessionID, sourceID uuid.UUID, startOffse
 }
 
 func (a *App) persistTranscriptionSegment(ctx context.Context, sessionID, sourceID uuid.UUID, text string, start, end int64) (models.TranscriptionSegment, error) {
-	return a.persistTranscriptionSegmentWithSpeaker(ctx, sessionID, sourceID, uuid.Nil, text, start, end)
+	return a.persistTranscriptionSegmentWithRaw(ctx, sessionID, sourceID, text, text, start, end)
 }
 
 func (a *App) persistTranscriptionSegmentWithSpeaker(ctx context.Context, sessionID, sourceID, speakerID uuid.UUID, text string, start, end int64) (models.TranscriptionSegment, error) {
+	return a.persistTranscriptionSegmentWithRawAndSpeaker(ctx, sessionID, sourceID, speakerID, text, text, start, end)
+}
+
+func (a *App) persistTranscriptionSegmentWithRaw(ctx context.Context, sessionID, sourceID uuid.UUID, text, rawText string, start, end int64) (models.TranscriptionSegment, error) {
+	return a.persistTranscriptionSegmentWithRawAndSpeaker(ctx, sessionID, sourceID, uuid.Nil, text, rawText, start, end)
+}
+
+func (a *App) persistTranscriptionSegmentWithRawAndSpeaker(ctx context.Context, sessionID, sourceID, speakerID uuid.UUID, text, rawText string, start, end int64) (models.TranscriptionSegment, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return models.TranscriptionSegment{}, fmt.Errorf("transcript segment is empty")
+	}
+	rawText = strings.TrimSpace(rawText)
+	if rawText == "" {
+		rawText = text
 	}
 	if existing, merged, err := a.mergeTranscriptionSegment(ctx, sessionID, sourceID, speakerID, text, start, end); err != nil {
 		return models.TranscriptionSegment{}, err
@@ -1175,9 +1187,9 @@ func (a *App) persistTranscriptionSegmentWithSpeaker(ctx context.Context, sessio
 	}
 	heardJSON, _ := json.Marshal(heardBy)
 	var heard []byte
-	var rawText sql.NullString
+	var rawTextValue sql.NullString
 	var polishedText sql.NullString
-	err := a.DB.QueryRowContext(ctx, `INSERT INTO transcription_segments (session_id, source_id, speaker_id, text, raw_text, start_offset_ms, end_offset_ms, canonical, heard_by_source_ids) VALUES ($1, $2, $3, $4, $4, $5, $6, TRUE, $7) RETURNING id, session_id, source_id, speaker_id, text, raw_text, polished_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at`, sessionID, nullableUUIDValue(sourceValue), nullableUUIDValue(speakerValue), text, start, end, heardJSON).Scan(&segment.ID, &segment.SessionID, &sourceValue, &speakerValue, &segment.Text, &rawText, &polishedText, &segment.StartOffsetMs, &segment.EndOffsetMs, &segment.Confidence, &segment.SignalQuality, &segment.Canonical, &heard, &segment.CreatedAt, &segment.UpdatedAt)
+	err := a.DB.QueryRowContext(ctx, `INSERT INTO transcription_segments (session_id, source_id, speaker_id, text, raw_text, start_offset_ms, end_offset_ms, canonical, heard_by_source_ids) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8) RETURNING id, session_id, source_id, speaker_id, text, raw_text, polished_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at`, sessionID, nullableUUIDValue(sourceValue), nullableUUIDValue(speakerValue), text, rawText, start, end, heardJSON).Scan(&segment.ID, &segment.SessionID, &sourceValue, &speakerValue, &segment.Text, &rawTextValue, &polishedText, &segment.StartOffsetMs, &segment.EndOffsetMs, &segment.Confidence, &segment.SignalQuality, &segment.Canonical, &heard, &segment.CreatedAt, &segment.UpdatedAt)
 	if err != nil {
 		return segment, err
 	}
@@ -1191,7 +1203,7 @@ func (a *App) persistTranscriptionSegmentWithSpeaker(ctx context.Context, sessio
 	if speakerValue.Valid {
 		segment.SpeakerID = &speakerValue.UUID
 	}
-	segment.RawText = rawText.String
+	segment.RawText = rawTextValue.String
 	if segment.RawText == "" {
 		segment.RawText = segment.Text
 	}

@@ -320,6 +320,29 @@ func TestChunkedStreamDeduplicatesRollingWindowOverlap(t *testing.T) {
 	}
 }
 
+func TestSanitizeTranscriptRepetitionKeepsNaturalRepetition(t *testing.T) {
+	input := strings.TrimSpace(strings.Repeat("ich sage ", 7) + "dann sprechen wir weiter über das thema")
+	if got := SanitizeTranscriptRepetition(input); got != input {
+		t.Fatalf("natural repetition should remain unchanged: %q", got)
+	}
+}
+
+func TestSanitizeTranscriptRepetitionCollapsesPathologicalPhraseLoop(t *testing.T) {
+	input := strings.TrimSpace("Vorher " + strings.Repeat("ich sage ", 12) + "Danach geht es weiter")
+	want := "Vorher ich sage ich sage Danach geht es weiter"
+	if got := SanitizeTranscriptRepetition(input); got != want {
+		t.Fatalf("unexpected cleaned phrase loop: %q", got)
+	}
+}
+
+func TestSanitizeTranscriptRepetitionCollapsesPathologicalSingleWordLoop(t *testing.T) {
+	input := strings.TrimSpace("Vorher " + strings.Repeat("krkr ", 12) + "Danach")
+	want := "Vorher krkr krkr Danach"
+	if got := SanitizeTranscriptRepetition(input); got != want {
+		t.Fatalf("unexpected cleaned single-word loop: %q", got)
+	}
+}
+
 func TestTrimTranscriptPromptStaysWithinSmallWhisperContextBudget(t *testing.T) {
 	longTranscript := strings.Repeat("previous words from the room ", 100)
 	prompt := trimTranscriptPrompt(longTranscript, 160)
@@ -383,6 +406,64 @@ func TestChunkedStreamLimitsRollingPromptSentToProvider(t *testing.T) {
 	}
 	if prompts[0] != "" || len([]rune(prompts[1])) > 24 {
 		t.Fatalf("unexpected rolling prompts: %#v", prompts)
+	}
+}
+
+func TestChunkedStreamCanDisableRollingPrompt(t *testing.T) {
+	var prompts []string
+	var promptsMu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if err := request.ParseMultipartForm(2 << 20); err != nil {
+			t.Errorf("parse multipart form: %v", err)
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		promptsMu.Lock()
+		prompts = append(prompts, request.FormValue("prompt"))
+		promptsMu.Unlock()
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(writer, `{"text":"one two three four five six seven eight nine ten eleven twelve"}`)
+	}))
+	defer server.Close()
+
+	stream, err := OpenChunked(context.Background(), Endpoint{
+		ProviderType:       "openai-compatible",
+		BaseURL:            server.URL + "/v1",
+		TranscriptionModel: "whisper-large-v3-turbo",
+		TimeoutSeconds:     10,
+	}, "", "en", ChunkedOptions{
+		Window:         100 * time.Millisecond,
+		Overlap:        20 * time.Millisecond,
+		Minimum:        50 * time.Millisecond,
+		PromptMaxChars: 24,
+		DisablePrompt:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	done := make(chan struct{})
+	go func() {
+		for range stream.Events() {
+		}
+		close(done)
+	}()
+	if err := stream.SendPCM(nil, speechPCM(100*time.Millisecond), 16000); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.SendPCM(nil, speechPCM(80*time.Millisecond), 16000); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+
+	promptsMu.Lock()
+	defer promptsMu.Unlock()
+	if len(prompts) != 2 || prompts[0] != "" || prompts[1] != "" {
+		t.Fatalf("expected rolling prompts to stay disabled: %#v", prompts)
 	}
 }
 
