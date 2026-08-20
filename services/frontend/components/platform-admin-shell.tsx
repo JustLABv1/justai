@@ -1406,6 +1406,8 @@ type InventoryAction = {
   stoppedMessage: string
 }
 
+const maxMCPServerIconBytes = 2 * 1024 * 1024
+
 function InventoryView({
   title,
   items,
@@ -1462,8 +1464,8 @@ function InventoryView({
 
   function chooseCreateIcon(file: File | null) {
     if (!file) return
-    if (file.size > 512 * 1024) {
-      setCreateError("MCP icons are limited to 512 KB.")
+    if (file.size > maxMCPServerIconBytes) {
+      setCreateError("MCP icons are limited to 2 MB.")
       if (createIconInputRef.current) createIconInputRef.current.value = ""
       return
     }
@@ -1539,10 +1541,10 @@ function InventoryView({
 
   function uploadCatalogIcon(itemId: string, file: File | null) {
     if (!file) return
-    if (file.size > 512 * 1024) {
+    if (file.size > maxMCPServerIconBytes) {
       setItemErrors((current) => ({
         ...current,
-        [itemId]: "MCP icons are limited to 512 KB.",
+        [itemId]: "MCP icons are limited to 2 MB.",
       }))
       return
     }
@@ -2085,7 +2087,7 @@ function InventoryView({
                         (createIconPreview ? "Logo selected" : "No logo selected")}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      PNG, JPEG, GIF, WebP, or ICO · Max 512 KB
+                      PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on upload
                     </p>
                     <div className="pt-1">
                       <Button

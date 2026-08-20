@@ -1,11 +1,18 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	"image/png"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +21,9 @@ import (
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"golang.org/x/image/bmp"
+	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 
 	"justai-backend/mcp"
 	"justai-backend/middleware"
@@ -537,7 +547,12 @@ func (a *App) getMCPServer(ctx context.Context, id uuid.UUID) (models.MCPServer,
 	return scanMCPServer(a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = mcp_servers.id) THEN '/api/v1/mcp/servers/' || mcp_servers.id::text || '/icon' ELSE COALESCE(icon_url, '') END, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE id = $1`, id))
 }
 
-const maxMCPServerIconBytes = 512 * 1024
+const (
+	maxMCPServerIconUploadBytes = 2 * 1024 * 1024
+	maxMCPServerIconStoredBytes = 512 * 1024
+	maxMCPServerIconDimension   = 256
+	maxMCPServerIconPixels      = 16 * 1024 * 1024
+)
 
 var allowedMCPServerIconTypes = map[string]bool{
 	"image/gif":                true,
@@ -546,6 +561,232 @@ var allowedMCPServerIconTypes = map[string]bool{
 	"image/vnd.microsoft.icon": true,
 	"image/webp":               true,
 	"image/x-icon":             true,
+}
+
+func normalizeMCPServerIcon(data []byte, mimeType string) ([]byte, string, error) {
+	if mimeType == "image/vnd.microsoft.icon" || mimeType == "image/x-icon" {
+		if len(data) <= maxMCPServerIconStoredBytes {
+			return data, mimeType, nil
+		}
+		source, err := decodeMCPServerICO(data)
+		if err != nil {
+			return nil, "", fmt.Errorf("MCP ICO icon could not be optimized; use a valid PNG, JPEG, GIF, WebP, or ICO image")
+		}
+		optimized, err := encodeMCPServerIcon(source)
+		if err != nil {
+			return nil, "", err
+		}
+		return optimized, "image/png", nil
+	}
+
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("MCP icon could not be decoded; use a valid PNG, JPEG, GIF, WebP, or ICO image")
+	}
+	if config.Width <= 0 || config.Height <= 0 {
+		return nil, "", fmt.Errorf("MCP icon has invalid dimensions")
+	}
+	if config.Width > maxMCPServerIconPixels/config.Height {
+		return nil, "", fmt.Errorf("MCP icon dimensions are too large")
+	}
+
+	if len(data) <= maxMCPServerIconStoredBytes &&
+		config.Width <= maxMCPServerIconDimension &&
+		config.Height <= maxMCPServerIconDimension {
+		return data, mimeType, nil
+	}
+
+	source, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("MCP icon could not be optimized; use a valid PNG, JPEG, GIF, WebP, or ICO image")
+	}
+	optimized, err := encodeMCPServerIcon(source)
+	if err != nil {
+		return nil, "", err
+	}
+	return optimized, "image/png", nil
+}
+
+func decodeMCPServerICO(data []byte) (image.Image, error) {
+	if len(data) < 6 || binary.LittleEndian.Uint16(data[0:2]) != 0 || binary.LittleEndian.Uint16(data[2:4]) != 1 {
+		return nil, fmt.Errorf("invalid ICO header")
+	}
+	entryCount := int(binary.LittleEndian.Uint16(data[4:6]))
+	if entryCount == 0 || entryCount > 128 || len(data) < 6+entryCount*16 {
+		return nil, fmt.Errorf("invalid ICO entries")
+	}
+
+	type icoEntry struct {
+		width    int
+		height   int
+		bitDepth int
+		size     uint32
+		offset   uint32
+	}
+	entries := make([]icoEntry, 0, entryCount)
+	for index := 0; index < entryCount; index++ {
+		entry := data[6+index*16 : 6+(index+1)*16]
+		width := int(entry[0])
+		height := int(entry[1])
+		if width == 0 {
+			width = 256
+		}
+		if height == 0 {
+			height = 256
+		}
+		entries = append(entries, icoEntry{
+			width:    width,
+			height:   height,
+			bitDepth: int(binary.LittleEndian.Uint16(entry[6:8])),
+			size:     binary.LittleEndian.Uint32(entry[8:12]),
+			offset:   binary.LittleEndian.Uint32(entry[12:16]),
+		})
+	}
+
+	for candidate := 0; candidate < len(entries); candidate++ {
+		bestIndex := candidate
+		for index := candidate + 1; index < len(entries); index++ {
+			best := entries[bestIndex]
+			current := entries[index]
+			bestScore := best.width * best.height * max(1, best.bitDepth)
+			currentScore := current.width * current.height * max(1, current.bitDepth)
+			if currentScore > bestScore {
+				bestIndex = index
+			}
+		}
+		entries[candidate], entries[bestIndex] = entries[bestIndex], entries[candidate]
+	}
+
+	for _, entry := range entries {
+		end := uint64(entry.offset) + uint64(entry.size)
+		if entry.size == 0 || uint64(entry.offset) >= uint64(len(data)) || end > uint64(len(data)) {
+			continue
+		}
+		payload := data[entry.offset:end]
+		if len(payload) >= 8 && bytes.Equal(payload[:8], []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
+			config, _, err := image.DecodeConfig(bytes.NewReader(payload))
+			if err != nil || !validMCPServerIconDimensions(config.Width, config.Height) {
+				continue
+			}
+			decoded, _, err := image.Decode(bytes.NewReader(payload))
+			if err == nil {
+				return decoded, nil
+			}
+			continue
+		}
+
+		decoded, err := decodeMCPServerICODIB(payload)
+		if err == nil {
+			return decoded, nil
+		}
+	}
+	return nil, fmt.Errorf("ICO contains no supported image")
+}
+
+func decodeMCPServerICODIB(data []byte) (image.Image, error) {
+	if len(data) < 40 {
+		return nil, fmt.Errorf("invalid ICO bitmap")
+	}
+	headerSize := int(binary.LittleEndian.Uint32(data[0:4]))
+	if headerSize < 40 || headerSize > len(data) {
+		return nil, fmt.Errorf("invalid ICO bitmap header")
+	}
+	width := int64(int32(binary.LittleEndian.Uint32(data[4:8])))
+	rawHeight := int64(int32(binary.LittleEndian.Uint32(data[8:12])))
+	if width <= 0 || rawHeight == 0 {
+		return nil, fmt.Errorf("invalid ICO bitmap dimensions")
+	}
+	height := rawHeight
+	if height < 0 {
+		height = -height
+	}
+	if height%2 != 0 {
+		return nil, fmt.Errorf("invalid ICO bitmap height")
+	}
+	height /= 2
+	if !validMCPServerIconDimensions(int(width), int(height)) {
+		return nil, fmt.Errorf("ICO bitmap dimensions are too large")
+	}
+
+	bitDepth := int64(binary.LittleEndian.Uint16(data[14:16]))
+	if bitDepth != 1 && bitDepth != 2 && bitDepth != 4 && bitDepth != 8 && bitDepth != 24 && bitDepth != 32 {
+		return nil, fmt.Errorf("unsupported ICO bitmap depth")
+	}
+	if binary.LittleEndian.Uint32(data[16:20]) != 0 {
+		return nil, fmt.Errorf("compressed ICO bitmaps are not supported")
+	}
+
+	paletteSize := int64(0)
+	if bitDepth <= 8 {
+		colors := int64(binary.LittleEndian.Uint32(data[32:36]))
+		if colors == 0 {
+			colors = 1 << bitDepth
+		}
+		paletteSize = colors * 4
+	}
+	rowSize := ((width*bitDepth + 31) / 32) * 4
+	pixelOffset := int64(headerSize) + paletteSize
+	pixelBytes := rowSize * height
+	if pixelOffset < 0 || pixelBytes < 0 || pixelOffset+pixelBytes > int64(len(data)) {
+		return nil, fmt.Errorf("truncated ICO bitmap")
+	}
+
+	dibSize := int(pixelOffset + pixelBytes)
+	dib := make([]byte, dibSize)
+	copy(dib, data[:dibSize])
+	binary.LittleEndian.PutUint32(dib[8:12], uint32(height))
+
+	bmpOffset := 14 + int(pixelOffset)
+	bmpSize := bmpOffset + int(pixelBytes)
+	bmpData := make([]byte, bmpSize)
+	bmpData[0] = 'B'
+	bmpData[1] = 'M'
+	binary.LittleEndian.PutUint32(bmpData[2:6], uint32(bmpSize))
+	binary.LittleEndian.PutUint32(bmpData[10:14], uint32(bmpOffset))
+	copy(bmpData[14:], dib)
+	return bmp.Decode(bytes.NewReader(bmpData))
+}
+
+func validMCPServerIconDimensions(width, height int) bool {
+	return width > 0 && height > 0 && width <= maxMCPServerIconPixels/height
+}
+
+func encodeMCPServerIcon(source image.Image) ([]byte, error) {
+	width := source.Bounds().Dx()
+	height := source.Bounds().Dy()
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("MCP icon has invalid dimensions")
+	}
+
+	scale := math.Min(
+		1,
+		math.Min(
+			float64(maxMCPServerIconDimension)/float64(width),
+			float64(maxMCPServerIconDimension)/float64(height),
+		),
+	)
+	width = max(1, int(math.Round(float64(width)*scale)))
+	height = max(1, int(math.Round(float64(height)*scale)))
+
+	for {
+		resized := image.NewRGBA(image.Rect(0, 0, width, height))
+		draw.CatmullRom.Scale(resized, resized.Bounds(), source, source.Bounds(), draw.Over, nil)
+
+		var output bytes.Buffer
+		encoder := png.Encoder{CompressionLevel: png.BestCompression}
+		if err := encoder.Encode(&output, resized); err != nil {
+			return nil, fmt.Errorf("MCP icon could not be encoded: %w", err)
+		}
+		if output.Len() <= maxMCPServerIconStoredBytes {
+			return output.Bytes(), nil
+		}
+		if width <= 32 && height <= 32 {
+			return nil, fmt.Errorf("MCP icon could not be compressed below 512 KB")
+		}
+
+		width = max(1, int(math.Floor(float64(width)*0.8)))
+		height = max(1, int(math.Floor(float64(height)*0.8)))
+	}
 }
 
 func (a *App) uploadPlatformMCPServerIcon(c *gin.Context) {
@@ -573,8 +814,8 @@ func (a *App) uploadMCPServerIcon(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("an icon file is required"))
 		return
 	}
-	if fileHeader.Size > maxMCPServerIconBytes {
-		writeError(c, http.StatusRequestEntityTooLarge, fmt.Errorf("MCP icons are limited to 512 KB"))
+	if fileHeader.Size > maxMCPServerIconUploadBytes {
+		writeError(c, http.StatusRequestEntityTooLarge, fmt.Errorf("MCP icons are limited to 2 MB"))
 		return
 	}
 	file, err := fileHeader.Open()
@@ -583,7 +824,7 @@ func (a *App) uploadMCPServerIcon(c *gin.Context) {
 		return
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, maxMCPServerIconBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, maxMCPServerIconUploadBytes+1))
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
@@ -592,8 +833,8 @@ func (a *App) uploadMCPServerIcon(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("an icon file is required"))
 		return
 	}
-	if len(data) > maxMCPServerIconBytes {
-		writeError(c, http.StatusRequestEntityTooLarge, fmt.Errorf("MCP icons are limited to 512 KB"))
+	if len(data) > maxMCPServerIconUploadBytes {
+		writeError(c, http.StatusRequestEntityTooLarge, fmt.Errorf("MCP icons are limited to 2 MB"))
 		return
 	}
 	mimeType := mimetype.Detect(data).String()
@@ -601,7 +842,12 @@ func (a *App) uploadMCPServerIcon(c *gin.Context) {
 		writeError(c, http.StatusUnsupportedMediaType, fmt.Errorf("use a PNG, JPEG, GIF, WebP, or ICO image"))
 		return
 	}
-	_, err = a.DB.ExecContext(c, `INSERT INTO mcp_server_icons (server_id, mime_type, image_data, updated_at) VALUES ($1, $2, $3, now()) ON CONFLICT (server_id) DO UPDATE SET mime_type = EXCLUDED.mime_type, image_data = EXCLUDED.image_data, updated_at = now()`, serverID, mimeType, data)
+	normalizedData, normalizedMimeType, err := normalizeMCPServerIcon(data, mimeType)
+	if err != nil {
+		writeError(c, http.StatusUnprocessableEntity, err)
+		return
+	}
+	_, err = a.DB.ExecContext(c, `INSERT INTO mcp_server_icons (server_id, mime_type, image_data, updated_at) VALUES ($1, $2, $3, now()) ON CONFLICT (server_id) DO UPDATE SET mime_type = EXCLUDED.mime_type, image_data = EXCLUDED.image_data, updated_at = now()`, serverID, normalizedMimeType, normalizedData)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return

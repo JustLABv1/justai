@@ -114,6 +114,8 @@ type MCPAction = {
   label: string
 }
 
+const maxMCPServerIconBytes = 2 * 1024 * 1024
+
 function mcpAuthLabel(authType: string) {
   switch (authType) {
     case "none":
@@ -143,6 +145,7 @@ export function MCPView({
   const [form, setForm] = useState<MCPForm>(emptyForm)
   const [editingServer, setEditingServer] = useState<MCPServer | null>(null)
   const [notice, setNotice] = useState("")
+  const [dialogError, setDialogError] = useState("")
   const [tools, setTools] = useState<
     Record<string, Array<{ name: string; description?: string }>>
   >({})
@@ -177,13 +180,14 @@ export function MCPView({
     setIconFile(null)
     setIconPreview(preview)
     setIconRemoved(false)
+    setDialogError("")
     if (iconInputRef.current) iconInputRef.current.value = ""
   }, [])
 
   function chooseIcon(file: File | null) {
     if (!file) return
-    if (file.size > 512 * 1024) {
-      setNotice("MCP icons are limited to 512 KB.")
+    if (file.size > maxMCPServerIconBytes) {
+      setDialogError("MCP icons are limited to 2 MB.")
       if (iconInputRef.current) iconInputRef.current.value = ""
       return
     }
@@ -196,7 +200,9 @@ export function MCPView({
       "image/x-icon",
     ])
     if (!allowedTypes.has(file.type)) {
-      setNotice("Use a PNG, JPEG, GIF, WebP, or ICO image for the MCP logo.")
+      setDialogError(
+        "Use a PNG, JPEG, GIF, WebP, or ICO image for the MCP logo."
+      )
       if (iconInputRef.current) iconInputRef.current.value = ""
       return
     }
@@ -205,11 +211,12 @@ export function MCPView({
     setIconFile(file)
     setIconPreview(iconObjectURLRef.current)
     setIconRemoved(false)
-    setNotice("")
+    setDialogError("")
   }
 
   const openCreate = useCallback(() => {
     setEditingServer(null)
+    setDialogError("")
     resetIconSelection()
     setForm({
       ...emptyForm,
@@ -227,7 +234,8 @@ export function MCPView({
   useEffect(() => {
     return () => {
       actionAbortRef.current?.abort()
-      if (iconObjectURLRef.current) URL.revokeObjectURL(iconObjectURLRef.current)
+      if (iconObjectURLRef.current)
+        URL.revokeObjectURL(iconObjectURLRef.current)
     }
   }, [])
 
@@ -238,6 +246,7 @@ export function MCPView({
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setSaving(true)
+    setDialogError("")
     const allowedTools = form.allowedTools
       .split(",")
       .map((tool) => tool.trim())
@@ -274,13 +283,13 @@ export function MCPView({
       )
     } catch (caught) {
       if (caught instanceof APIError) {
-        setNotice(`Could not connect MCP server: ${caught.message}`)
+        setDialogError(`Could not save MCP server: ${caught.message}`)
         return
       }
-      setNotice(
+      setDialogError(
         caught instanceof Error
-          ? caught.message
-          : "Could not connect MCP server. Check the backend and endpoint."
+          ? `Could not save MCP server: ${caught.message}`
+          : "Could not save MCP server. Check the backend and endpoint."
       )
       return
     } finally {
@@ -294,6 +303,7 @@ export function MCPView({
 
   function edit(server: MCPServer) {
     setEditingServer(server)
+    setDialogError("")
     resetIconSelection(server.iconUrl ?? "")
     setForm({
       name: server.name,
@@ -783,6 +793,7 @@ export function MCPView({
           setOpen(value)
           if (!value) {
             setEditingServer(null)
+            setDialogError("")
             resetIconSelection()
             setForm(emptyForm)
           }
@@ -798,6 +809,19 @@ export function MCPView({
               stay outside this web service boundary.
             </DialogDescription>
           </DialogHeader>
+          {dialogError && (
+            <div
+              aria-live="assertive"
+              className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
+              role="alert"
+            >
+              <AlertTriangle
+                aria-hidden="true"
+                className="mt-0.5 size-4 shrink-0"
+              />
+              <span className="min-w-0 break-words">{dialogError}</span>
+            </div>
+          )}
           <form onSubmit={save}>
             <FieldGroup>
               <Field>
@@ -848,7 +872,8 @@ export function MCPView({
                           : "No logo selected")}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      PNG, JPEG, GIF, WebP, or ICO · Max 512 KB
+                      PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on
+                      upload
                     </p>
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Button
@@ -857,7 +882,10 @@ export function MCPView({
                         size="sm"
                         onClick={() => iconInputRef.current?.click()}
                       >
-                        <ImagePlus data-icon="inline-start" aria-hidden="true" />
+                        <ImagePlus
+                          data-icon="inline-start"
+                          aria-hidden="true"
+                        />
                         {iconPreview && !iconRemoved
                           ? "Replace logo"
                           : "Choose logo"}

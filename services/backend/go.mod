@@ -13,6 +13,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	golang.org/x/crypto v0.55.0
+	golang.org/x/image v0.30.0
 	golang.org/x/net v0.58.0
 	golang.org/x/oauth2 v0.36.0
 )
