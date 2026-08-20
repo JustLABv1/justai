@@ -681,7 +681,7 @@ export function Workspace() {
       const creation = api
         .post<{ conversation: Conversation }>("/api/v1/conversations", {
           assistantId: selectedAssistantId || undefined,
-          inheritRepositories,
+          inheritRepositories: inheritRepositories === true,
         })
         .then((result) => {
           activeConversationRef.current = result.conversation.id

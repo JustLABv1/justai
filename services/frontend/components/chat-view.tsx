@@ -3175,7 +3175,7 @@ export function ChatView({
       const creation = api
         .post<{ conversation: Conversation }>("/api/v1/conversations", {
           assistantId: assistantId || undefined,
-          inheritRepositories,
+          inheritRepositories: inheritRepositories === true,
         })
         .then((response) => {
           locallyCreatedConversationRef.current = response.conversation.id

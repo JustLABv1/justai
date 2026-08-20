@@ -1,7 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"regexp"
 	"testing"
 
@@ -37,6 +42,61 @@ func TestNormalizeMCPIconURL(t *testing.T) {
 				t.Fatalf("normalizeMCPIconURL() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeMCPServerIconOptimizesLargeJPEG(t *testing.T) {
+	source := image.NewRGBA(image.Rect(0, 0, 1200, 900))
+	for y := 0; y < source.Bounds().Dy(); y++ {
+		for x := 0; x < source.Bounds().Dx(); x++ {
+			value := uint8((x*37 + y*53 + x*y) % 256)
+			source.SetRGBA(x, y, color.RGBA{R: value, G: value ^ 0x55, B: value ^ 0xaa, A: 0xff})
+		}
+	}
+
+	var input bytes.Buffer
+	if err := jpeg.Encode(&input, source, &jpeg.Options{Quality: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if input.Len() <= maxMCPServerIconStoredBytes {
+		t.Fatalf("test JPEG should exceed the stored icon limit, got %d bytes", input.Len())
+	}
+
+	optimized, mimeType, err := normalizeMCPServerIcon(input.Bytes(), "image/jpeg")
+	if err != nil {
+		t.Fatalf("normalizeMCPServerIcon() error = %v", err)
+	}
+	if mimeType != "image/png" {
+		t.Fatalf("normalized MIME type = %q, want image/png", mimeType)
+	}
+	if len(optimized) > maxMCPServerIconStoredBytes {
+		t.Fatalf("normalized icon is %d bytes, want at most %d", len(optimized), maxMCPServerIconStoredBytes)
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(optimized))
+	if err != nil {
+		t.Fatalf("normalized icon is not a valid image: %v", err)
+	}
+	if config.Width > maxMCPServerIconDimension || config.Height > maxMCPServerIconDimension {
+		t.Fatalf("normalized dimensions = %dx%d, want at most %dpx", config.Width, config.Height, maxMCPServerIconDimension)
+	}
+}
+
+func TestNormalizeMCPServerIconPreservesSmallPNG(t *testing.T) {
+	source := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	var input bytes.Buffer
+	if err := png.Encode(&input, source); err != nil {
+		t.Fatal(err)
+	}
+
+	optimized, mimeType, err := normalizeMCPServerIcon(input.Bytes(), "image/png")
+	if err != nil {
+		t.Fatalf("normalizeMCPServerIcon() error = %v", err)
+	}
+	if mimeType != "image/png" {
+		t.Fatalf("MIME type = %q, want image/png", mimeType)
+	}
+	if !bytes.Equal(optimized, input.Bytes()) {
+		t.Fatal("small PNG should not be re-encoded")
 	}
 }
 

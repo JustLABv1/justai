@@ -889,7 +889,7 @@ export function WorkspaceContext({
 
       <div className="mt-auto flex items-center gap-2 border-t pt-4 text-[11px] text-muted-foreground">
         <CheckCircle2 className="size-4 shrink-0" />
-        Repositories stay indexed and available across new chats.
+        Repositories stay indexed and available to add across new chats.
       </div>
     </div>
   )

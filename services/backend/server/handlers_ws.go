@@ -341,7 +341,7 @@ func (a *App) attachedNotesPrompt(ctx context.Context, conversationID uuid.UUID)
 }
 
 func chatToolInstructions() string {
-	return "Use JustAI's built-in tools when they match the user's request: call web_search for current or external web information, browse_url for a specific URL, generate_image when the user asks to create an image, and edit_image when the user asks to change an attached image. Use connected MCP tools whenever they can provide relevant information. Re-evaluate the current question on every turn and make a fresh tool call when the answer may depend on external or connected sources; do not rely only on an earlier tool result. If a prior call failed or returned incomplete information, try the relevant tool again. Do not claim that you searched, browsed, generated, or edited anything unless you actually called the corresponding tool. Never emit action-shaped JSON such as dalle.text2im as plain assistant text; invoke the tool instead."
+	return "Use JustAI's built-in tools when they match the user's request: call web_search for current or external web information, browse_url for a specific URL, generate_image when the user asks to create an image, and edit_image when the user asks to change an attached image. If the current request needs live data from a connected MCP, call the relevant MCP tool in this same turn before giving a final answer; do not stop after saying that you will check it. After every successful MCP result, produce a user-facing answer in the same turn (after any required approval). Use the result instead of calling the same tool again just because the information is external or current. Retry a tool only when its result explicitly failed or is incomplete, or when the user asks for a different lookup. Do not repeat the same tool with the same arguments in one turn. Do not claim that you searched, browsed, generated, or edited anything unless you actually called the corresponding tool. Never emit action-shaped JSON such as dalle.text2im as plain assistant text; invoke the tool instead."
 }
 
 type storedChatMessage struct {
@@ -471,7 +471,13 @@ func buildConversationToolHistory(stored []storedChatMessage) []provider.ToolMes
 					arguments = string(encoded)
 				}
 			}
-			calls = append(calls, provider.ToolCall{ID: event.CallID, Name: event.ToolName, Arguments: arguments})
+			// The provider must see the same namespaced name that was present in
+			// the tool definitions. The raw MCP name is retained on the event for
+			// display and execution, but using it here makes an approval
+			// continuation look like an unrelated tool call to OpenAI-compatible
+			// gateways.
+			toolName := firstNonEmptyChatToolString(event.ProviderToolName, event.ToolName)
+			calls = append(calls, provider.ToolCall{ID: event.CallID, Name: toolName, Arguments: arguments})
 		}
 		history = append(history, provider.ToolMessage{Role: "assistant", ToolCalls: calls})
 		for _, event := range group {
@@ -660,7 +666,7 @@ func (a *App) conversationHasMCPServer(ctx context.Context, userID, organization
 	return attached, err
 }
 
-func (a *App) ensureConversation(ctx context.Context, userID, organizationID uuid.UUID, rawID, rawAssistantID string) (uuid.UUID, error) {
+func (a *App) ensureConversation(ctx context.Context, userID, organizationID uuid.UUID, rawID, rawAssistantID string, inheritRepositories bool) (uuid.UUID, error) {
 	if rawID != "" {
 		id, err := uuid.Parse(rawID)
 		if err != nil {
@@ -706,8 +712,10 @@ func (a *App) ensureConversation(ctx context.Context, userID, organizationID uui
 		RETURNING id`, userID, organizationID, assistantID, assistantVersionID).Scan(&id); err != nil {
 		return uuid.Nil, err
 	}
-	if err := attachUserRepositories(ctx, transaction, id, userID); err != nil {
-		return uuid.Nil, err
+	if inheritRepositories {
+		if err := attachUserRepositories(ctx, transaction, id, userID); err != nil {
+			return uuid.Nil, err
+		}
 	}
 	if err := transaction.Commit(); err != nil {
 		return uuid.Nil, err
