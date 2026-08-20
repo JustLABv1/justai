@@ -13,6 +13,7 @@ import { PlatformAdminShell } from "@/components/platform-admin-shell"
 import { SettingsShell } from "@/components/settings-shell"
 import { VideoTranscriptionView } from "@/components/video-transcription-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { AssistantsView } from "@/components/assistants-view"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,6 +37,7 @@ import type {
   AdminTab,
   TranscriptionSession,
   Note,
+  SavedAssistant,
 } from "@/lib/types"
 import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
 import { cn } from "@/lib/utils"
@@ -84,6 +86,8 @@ export function Workspace() {
   const [sources, setSources] = useState<KnowledgeSource[]>([])
   const [servers, setServers] = useState<MCPServer[]>([])
   const [notes, setNotes] = useState<Note[]>([])
+  const [savedAssistants, setSavedAssistants] = useState<SavedAssistant[]>([])
+  const [draftAssistantId, setDraftAssistantId] = useState<string | null>(null)
   const [actionError, setActionError] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [createTranscriptionRequested, setCreateTranscriptionRequested] =
@@ -255,6 +259,7 @@ export function Workspace() {
         setSources([])
         setServers([])
         setNotes([])
+        setSavedAssistants([])
 
         // The platform-admin shell is intentionally independent from the
         // active workspace. Avoid loading workspace resources (and emitting
@@ -284,6 +289,7 @@ export function Workspace() {
                 ),
                 api.get<{ servers: MCPServer[] }>("/api/v1/mcp/servers"),
                 api.get<{ notes: Note[] }>("/api/v1/notes"),
+                api.get<{ assistants: SavedAssistant[] }>("/api/v1/assistants"),
               ])
         if (cancelled) return
 
@@ -346,6 +352,10 @@ export function Workspace() {
         )
         const serverResult = valueAt<{ servers: MCPServer[] }>(6, "mcp")
         const notesResult = valueAt<{ notes: Note[] }>(7, "notes")
+        const assistantResult = valueAt<{ assistants: SavedAssistant[] }>(
+          8,
+          "assistants"
+        )
         if (conversationResult)
           setConversations(conversationResult.conversations)
         if (archivedConversationResult)
@@ -358,6 +368,7 @@ export function Workspace() {
         if (sourceResult) setSources(sourceResult.sources)
         if (serverResult) setServers(serverResult.servers)
         if (notesResult) setNotes(notesResult.notes)
+        if (assistantResult) setSavedAssistants(assistantResult.assistants)
         setFeatureErrors(errors)
         setDisabledFeatures(disabled)
         setStatus("ready")
@@ -410,6 +421,9 @@ export function Workspace() {
     conversationRouteTarget !== null
       ? conversationRouteTarget.id
       : (requestedConversationId ?? pendingConversationId)
+  const activeConversation = [...conversations, ...archivedConversations].find(
+    (conversation) => conversation.id === activeConversationId
+  )
 
   useEffect(() => {
     activeConversationRef.current = activeConversationId
@@ -558,6 +572,7 @@ export function Workspace() {
       const isInternalChatReplace =
         view === "chat" && replace && conversationId !== null
       if (view === "chat") {
+        if (conversationId === null) setDraftAssistantId(null)
         activeConversationRef.current = conversationId
         if (!isInternalChatReplace) {
           setConversationRouteTarget({ id: conversationId })
@@ -620,7 +635,12 @@ export function Workspace() {
   )
 
   const ensureConversationForContext = useCallback(
-    async ({ activate = true }: { activate?: boolean } = {}) => {
+    async ({
+      activate = true,
+      assistantId,
+    }: { activate?: boolean; assistantId?: string | null } = {}) => {
+      const selectedAssistantId =
+        assistantId !== undefined ? assistantId : draftAssistantId
       // A root chat can hold a server-side context draft without changing the
       // URL. The draft is promoted to a normal history item only when the
       // user sends the first message (or another action explicitly activates
@@ -643,7 +663,9 @@ export function Workspace() {
       }
 
       const creation = api
-        .post<{ conversation: Conversation }>("/api/v1/conversations")
+        .post<{ conversation: Conversation }>("/api/v1/conversations", {
+          assistantId: selectedAssistantId || undefined,
+        })
         .then((result) => {
           activeConversationRef.current = result.conversation.id
           pendingConversationIdRef.current = result.conversation.id
@@ -662,6 +684,7 @@ export function Workspace() {
     },
     [
       navigate,
+      draftAssistantId,
       pendingConversationId,
       promotePendingConversation,
       requestedConversationId,
@@ -1056,12 +1079,16 @@ export function Workspace() {
           >
             {activeView === "chat" && (
               <ChatView
+                assistants={savedAssistants}
                 conversationId={activeConversationId}
+                conversation={activeConversation}
                 endpoints={endpoints}
                 mcpServers={servers}
                 notes={notes}
+                onAssistantSelectionChange={setDraftAssistantId}
                 onEnsureConversation={ensureConversationForContext}
                 onConversationCreated={(conversation) => {
+                  setDraftAssistantId(conversation.assistantId ?? null)
                   setConversations((current) => {
                     if (current.some((item) => item.id === conversation.id)) {
                       return current
@@ -1151,6 +1178,13 @@ export function Workspace() {
               />
             )}
             {activeView === "memory" && <MemoryView />}
+            {activeView === "assistants" && (
+              <AssistantsView
+                assistants={savedAssistants}
+                endpoints={endpoints}
+                onChange={setSavedAssistants}
+              />
+            )}
             {activeView === "admin" && (
               <PlatformAdminShell
                 activeTab={route.adminTab}

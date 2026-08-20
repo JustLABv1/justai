@@ -53,7 +53,7 @@ func TestCreateConversationIsScopedToUserAndOrganization(t *testing.T) {
 	createdAt := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	mock.ExpectBegin()
 	mock.ExpectQuery("INSERT INTO conversations").
-		WithArgs(userID, organizationID).
+		WithArgs(userID, organizationID, nil, nil).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "endpoint_id", "created_at", "updated_at"}).
 			AddRow(conversationID, defaultConversationTitle, nil, createdAt, createdAt))
 	mock.ExpectExec("INSERT INTO conversation_repository_contexts").
@@ -100,8 +100,8 @@ func TestListConversationsReturnsCountsAndScopesRows(t *testing.T) {
 	updatedAt := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	mock.ExpectQuery("SELECT\\s+c\\.id").
 		WithArgs(userID, organizationID, 51).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "endpoint_id", "created_at", "updated_at", "archived_at", "message_count"}).
-			AddRow(conversationID, "Provider routing", "", updatedAt, updatedAt, nil, 4))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "endpoint_id", "assistant_id", "assistant_version_id", "created_at", "updated_at", "archived_at", "message_count"}).
+			AddRow(conversationID, "Provider routing", "", "", "", updatedAt, updatedAt, nil, 4))
 
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)

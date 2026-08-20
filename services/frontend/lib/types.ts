@@ -7,6 +7,7 @@ export type ViewId =
   | "mcp"
   | "notes"
   | "memory"
+  | "assistants"
   | "settings"
   | "admin"
   | "profile"
@@ -319,6 +320,8 @@ export type Conversation = {
   id: string
   title: string
   endpointId?: string | null
+  assistantId?: string | null
+  assistantVersionId?: string | null
   createdAt: string
   updatedAt: string
   archivedAt?: string | null
@@ -326,6 +329,23 @@ export type Conversation = {
   folderId?: string | null
   pinnedAt?: string | null
   tags?: ConversationTag[]
+}
+
+export type SavedAssistant = {
+  id: string
+  versionId: string
+  version: number
+  name: string
+  description: string
+  icon: string
+  visibility: "private" | "workspace" | string
+  instructions: string
+  endpointId?: string | null
+  model?: string
+  useMemory: boolean
+  deepContext: boolean
+  createdAt: string
+  updatedAt: string
 }
 
 export type Memory = {

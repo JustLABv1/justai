@@ -25,10 +25,11 @@ import (
 )
 
 // assistantUIRequest is intentionally provider-neutral. The browser sends
-// standard AI SDK UIMessage objects, while conversationId/endpointId/model are
-// host-owned routing fields added by AssistantChatTransport.
+// standard AI SDK UIMessage objects, while assistantId/conversationId/
+// endpointId/model are host-owned routing fields added by AssistantChatTransport.
 type assistantUIRequest struct {
 	Messages       []json.RawMessage `json:"messages"`
+	AssistantID    string            `json:"assistantId"`
 	ConversationID string            `json:"conversationId"`
 	EndpointID     string            `json:"endpointId"`
 	Model          string            `json:"model"`
@@ -206,10 +207,29 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("a non-empty user message is required"))
 		return
 	}
-	conversationID, err := a.ensureConversation(c, principal.UserID, organizationID, request.ConversationID)
+	conversationID, err := a.ensureConversation(c, principal.UserID, organizationID, request.ConversationID, request.AssistantID)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
+	}
+	savedAssistant, err := a.savedAssistantForConversation(c, conversationID, principal.UserID, organizationID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if savedAssistant != nil {
+		// The saved profile owns memory and deep-context defaults. Endpoint and
+		// model remain user-selectable when the client explicitly sends them.
+		request.UseMemory = savedAssistant.UseMemory
+		if savedAssistant.DeepContext {
+			request.DeepContext = true
+		}
+		if strings.TrimSpace(request.EndpointID) == "" && savedAssistant.EndpointID != nil {
+			request.EndpointID = savedAssistant.EndpointID.String()
+		}
+		if strings.TrimSpace(request.Model) == "" {
+			request.Model = savedAssistant.Model
+		}
 	}
 	endpointID, err := a.resolveEndpoint(c, principal.UserID, organizationID, request.EndpointID)
 	if err != nil {
@@ -554,6 +574,9 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			_ = writeChunk(map[string]any{"type": "error", "errorText": historyErr.Error()})
 			return
 		}
+		if assistantPrompt := savedAssistantInstructions(savedAssistant); assistantPrompt != "" {
+			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: assistantPrompt}}, toolHistory...)
+		}
 		if request.UseMemory {
 			memory, memoryErr := a.memoryPrompt(c, principal.UserID, organizationID)
 			if memoryErr != nil {
@@ -600,6 +623,9 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			persistError(historyErr)
 			_ = writeChunk(map[string]any{"type": "error", "errorText": historyErr.Error()})
 			return
+		}
+		if assistantPrompt := savedAssistantInstructions(savedAssistant); assistantPrompt != "" {
+			history = append([]provider.Message{{Role: "system", Content: assistantPrompt}}, history...)
 		}
 		if request.UseMemory {
 			memory, memoryErr := a.memoryPrompt(c, principal.UserID, organizationID)

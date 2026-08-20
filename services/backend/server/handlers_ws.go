@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -654,7 +655,7 @@ func (a *App) conversationHasMCPServer(ctx context.Context, userID, organization
 	return attached, err
 }
 
-func (a *App) ensureConversation(ctx context.Context, userID, organizationID uuid.UUID, rawID string) (uuid.UUID, error) {
+func (a *App) ensureConversation(ctx context.Context, userID, organizationID uuid.UUID, rawID, rawAssistantID string) (uuid.UUID, error) {
 	if rawID != "" {
 		id, err := uuid.Parse(rawID)
 		if err != nil {
@@ -674,8 +675,27 @@ func (a *App) ensureConversation(ctx context.Context, userID, organizationID uui
 		return uuid.Nil, err
 	}
 	defer transaction.Rollback()
+	var assistantID, assistantVersionID any
+	if rawAssistantID = strings.TrimSpace(rawAssistantID); rawAssistantID != "" {
+		parsedAssistantID, parseErr := uuid.Parse(rawAssistantID)
+		if parseErr != nil {
+			return uuid.Nil, fmt.Errorf("invalid assistant id")
+		}
+		assistant, assistantErr := loadSavedAssistant(ctx, transaction, parsedAssistantID, userID, organizationID)
+		if errors.Is(assistantErr, sql.ErrNoRows) {
+			return uuid.Nil, fmt.Errorf("assistant is not available")
+		}
+		if assistantErr != nil {
+			return uuid.Nil, assistantErr
+		}
+		assistantID = assistant.ID
+		assistantVersionID = assistant.VersionID
+	}
 	var id uuid.UUID
-	if err := transaction.QueryRowContext(ctx, `INSERT INTO conversations (user_id, organization_id) VALUES ($1, $2) RETURNING id`, userID, organizationID).Scan(&id); err != nil {
+	if err := transaction.QueryRowContext(ctx, `
+		INSERT INTO conversations (user_id, organization_id, assistant_id, assistant_version_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id`, userID, organizationID, assistantID, assistantVersionID).Scan(&id); err != nil {
 		return uuid.Nil, err
 	}
 	if err := attachUserRepositories(ctx, transaction, id, userID); err != nil {

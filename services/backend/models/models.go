@@ -28,18 +28,37 @@ type Organization struct {
 }
 
 type Conversation struct {
-	ID             uuid.UUID         `json:"id"`
-	UserID         uuid.UUID         `json:"-"`
-	OrganizationID uuid.UUID         `json:"-"`
-	Title          string            `json:"title"`
-	EndpointID     *uuid.UUID        `json:"endpointId,omitempty"`
-	CreatedAt      time.Time         `json:"createdAt"`
-	UpdatedAt      time.Time         `json:"updatedAt"`
-	ArchivedAt     *time.Time        `json:"archivedAt,omitempty"`
-	FolderID       *uuid.UUID        `json:"folderId,omitempty"`
-	PinnedAt       *time.Time        `json:"pinnedAt,omitempty"`
-	Tags           []ConversationTag `json:"tags,omitempty"`
-	MessageCount   int               `json:"messageCount"`
+	ID                 uuid.UUID         `json:"id"`
+	UserID             uuid.UUID         `json:"-"`
+	OrganizationID     uuid.UUID         `json:"-"`
+	Title              string            `json:"title"`
+	EndpointID         *uuid.UUID        `json:"endpointId,omitempty"`
+	AssistantID        *uuid.UUID        `json:"assistantId,omitempty"`
+	AssistantVersionID *uuid.UUID        `json:"assistantVersionId,omitempty"`
+	CreatedAt          time.Time         `json:"createdAt"`
+	UpdatedAt          time.Time         `json:"updatedAt"`
+	ArchivedAt         *time.Time        `json:"archivedAt,omitempty"`
+	FolderID           *uuid.UUID        `json:"folderId,omitempty"`
+	PinnedAt           *time.Time        `json:"pinnedAt,omitempty"`
+	Tags               []ConversationTag `json:"tags,omitempty"`
+	MessageCount       int               `json:"messageCount"`
+}
+
+type SavedAssistant struct {
+	ID           uuid.UUID  `json:"id"`
+	VersionID    uuid.UUID  `json:"versionId"`
+	Version      int        `json:"version"`
+	Name         string     `json:"name"`
+	Description  string     `json:"description"`
+	Icon         string     `json:"icon"`
+	Visibility   string     `json:"visibility"`
+	Instructions string     `json:"instructions"`
+	EndpointID   *uuid.UUID `json:"endpointId,omitempty"`
+	Model        string     `json:"model,omitempty"`
+	UseMemory    bool       `json:"useMemory"`
+	DeepContext  bool       `json:"deepContext"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
 }
 
 type ConversationFolder struct {

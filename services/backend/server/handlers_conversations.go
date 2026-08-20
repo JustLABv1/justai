@@ -32,6 +32,21 @@ func (a *App) createConversation(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("organization context is required"))
 		return
 	}
+	var request struct {
+		AssistantID string `json:"assistantId"`
+	}
+	if c.Request.ContentLength > 0 && !decodeJSON(c, &request) {
+		return
+	}
+	var requestedAssistantID *uuid.UUID
+	if rawAssistantID := strings.TrimSpace(request.AssistantID); rawAssistantID != "" {
+		parsed, parseErr := uuid.Parse(rawAssistantID)
+		if parseErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid assistant id"))
+			return
+		}
+		requestedAssistantID = &parsed
+	}
 
 	transaction, err := a.DB.BeginTx(c, nil)
 	if err != nil {
@@ -39,14 +54,27 @@ func (a *App) createConversation(c *gin.Context) {
 		return
 	}
 	defer transaction.Rollback()
+	var assistantVersionID *uuid.UUID
+	if requestedAssistantID != nil {
+		assistant, assistantErr := loadSavedAssistant(c, transaction, *requestedAssistantID, principal.UserID, organizationID)
+		if errors.Is(assistantErr, sql.ErrNoRows) {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("assistant is not available"))
+			return
+		}
+		if assistantErr != nil {
+			writeError(c, http.StatusInternalServerError, assistantErr)
+			return
+		}
+		assistantVersionID = &assistant.VersionID
+	}
 
 	var item models.Conversation
 	var rawEndpointID sql.NullString
 	err = transaction.QueryRowContext(c, `
-		INSERT INTO conversations (user_id, organization_id)
-		VALUES ($1, $2)
+		INSERT INTO conversations (user_id, organization_id, assistant_id, assistant_version_id)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id, title, endpoint_id::text, created_at, updated_at
-	`, principal.UserID, organizationID).Scan(
+	`, principal.UserID, organizationID, requestedAssistantID, assistantVersionID).Scan(
 		&item.ID,
 		&item.Title,
 		&rawEndpointID,
@@ -66,6 +94,8 @@ func (a *App) createConversation(c *gin.Context) {
 		return
 	}
 	item.EndpointID = parseOptionalUUID(rawEndpointID)
+	item.AssistantID = requestedAssistantID
+	item.AssistantVersionID = assistantVersionID
 	c.JSON(http.StatusCreated, gin.H{"conversation": item})
 }
 
@@ -147,11 +177,13 @@ func (a *App) listConversations(c *gin.Context) {
 	args = append(args, 51)
 	limitIndex := len(args)
 	query := `
-		SELECT
-			c.id,
-			c.title,
-			COALESCE(c.endpoint_id::text, ''),
-			c.created_at,
+			SELECT
+				c.id,
+				c.title,
+				COALESCE(c.endpoint_id::text, ''),
+				COALESCE(c.assistant_id::text, ''),
+				COALESCE(c.assistant_version_id::text, ''),
+				c.created_at,
 			c.updated_at,
 			c.archived_at,
 			(SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'assistant'))::int
@@ -170,11 +202,14 @@ func (a *App) listConversations(c *gin.Context) {
 	for rows.Next() {
 		var item models.Conversation
 		var rawEndpointID string
-		if err := rows.Scan(&item.ID, &item.Title, &rawEndpointID, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.MessageCount); err != nil {
+		var rawAssistantID, rawAssistantVersionID string
+		if err := rows.Scan(&item.ID, &item.Title, &rawEndpointID, &rawAssistantID, &rawAssistantVersionID, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.MessageCount); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
 		item.EndpointID = parseOptionalUUIDString(rawEndpointID)
+		item.AssistantID = parseOptionalUUIDString(rawAssistantID)
+		item.AssistantVersionID = parseOptionalUUIDString(rawAssistantVersionID)
 		result = append(result, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -239,9 +274,11 @@ func (a *App) getConversation(c *gin.Context) {
 
 	var item models.Conversation
 	var rawEndpointID sql.NullString
+	var rawAssistantID, rawAssistantVersionID sql.NullString
 	err = a.DB.QueryRowContext(c, `
-		SELECT c.id, c.title, COALESCE(c.endpoint_id::text, ''), c.created_at,
-		       c.updated_at, c.archived_at,
+		SELECT c.id, c.title, COALESCE(c.endpoint_id::text, ''),
+		       COALESCE(c.assistant_id::text, ''), COALESCE(c.assistant_version_id::text, ''),
+		       c.created_at, c.updated_at, c.archived_at,
 		       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'assistant'))::int
 		FROM conversations c
 		WHERE c.id = $1 AND c.user_id = $2 AND c.organization_id = $3
@@ -249,6 +286,8 @@ func (a *App) getConversation(c *gin.Context) {
 		&item.ID,
 		&item.Title,
 		&rawEndpointID,
+		&rawAssistantID,
+		&rawAssistantVersionID,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 		&item.ArchivedAt,
@@ -263,6 +302,8 @@ func (a *App) getConversation(c *gin.Context) {
 		return
 	}
 	item.EndpointID = parseOptionalUUID(rawEndpointID)
+	item.AssistantID = parseOptionalUUID(rawAssistantID)
+	item.AssistantVersionID = parseOptionalUUID(rawAssistantVersionID)
 	if err := a.hydrateConversationOrganization(c, &item); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
