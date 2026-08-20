@@ -16,6 +16,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  SkipForward,
   Sparkles,
   Upload,
   Users,
@@ -161,6 +162,8 @@ export function VideoTranscriptionView({
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoStarting, setVideoStarting] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
+  const [skipSpeakerOpen, setSkipSpeakerOpen] = useState(false)
+  const [skipSpeakerInFlight, setSkipSpeakerInFlight] = useState(false)
   const [speakerToRename, setSpeakerToRename] =
     useState<TranscriptionSpeaker | null>(null)
   const [speakerName, setSpeakerName] = useState("")
@@ -598,6 +601,36 @@ export function VideoTranscriptionView({
     }
   }
 
+  const skipSpeakerSeparation = async () => {
+    const uploadID = snapshot?.videoUpload?.id
+    if (!uploadID) return
+    setSkipSpeakerInFlight(true)
+    setError("")
+    try {
+      const result = await api.post<{ upload: TranscriptionVideoUpload }>(
+        `/api/v1/transcription/video-uploads/${uploadID}/skip?step=diarization`
+      )
+      setSnapshot((current) =>
+        current
+          ? {
+              ...current,
+              session: { ...current.session, status: "processing" },
+              videoUpload: result.upload,
+            }
+          : current
+      )
+      onSessionsChanged()
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Speaker separation could not be skipped."
+      )
+    } finally {
+      setSkipSpeakerInFlight(false)
+    }
+  }
+
   const refreshVideoPlayback = useCallback(async () => {
     const uploadID = snapshot?.videoUpload?.id
     if (!uploadID) return
@@ -947,6 +980,8 @@ export function VideoTranscriptionView({
               hasDiarizedSpeakers={snapshot.speakers.some((speaker) =>
                 /^speaker[_ -]?\d+$/i.test(speaker.label)
               )}
+              onRequestSkipSpeakerSeparation={() => setSkipSpeakerOpen(true)}
+              skipSpeakerInFlight={skipSpeakerInFlight}
               session={snapshot.session}
               upload={snapshot.videoUpload}
             />
@@ -1511,6 +1546,10 @@ export function VideoTranscriptionView({
             <Field>
               <FieldLabel>Transcription endpoint</FieldLabel>
               <Select
+                items={transcriptionEndpoints.map((endpoint) => ({
+                  value: endpoint.id,
+                  label: `${endpoint.name} · ${endpoint.providerType} · ${transcriptionModeLabel(endpoint)}`,
+                }))}
                 onValueChange={(value) => setSelectedEndpoint(value ?? "")}
                 value={effectiveSelectedEndpoint}
               >
@@ -1534,6 +1573,13 @@ export function VideoTranscriptionView({
               <FieldLabel>Speaker separation</FieldLabel>
               <Select
                 disabled={diarizationEndpoints.length === 0}
+                items={[
+                  { value: "none", label: "Keep one transcript stream" },
+                  ...diarizationEndpoints.map((endpoint) => ({
+                    value: endpoint.id,
+                    label: `${endpoint.name} · ${endpoint.providerType}`,
+                  })),
+                ]}
                 onValueChange={(value) =>
                   setSelectedDiarizationEndpoint(value ?? "none")
                 }
@@ -1564,6 +1610,13 @@ export function VideoTranscriptionView({
             <Field>
               <FieldLabel>Grammar polishing</FieldLabel>
               <Select
+                items={[
+                  { value: "none", label: "Keep verbatim transcript" },
+                  ...grammarEndpoints.map((endpoint) => ({
+                    value: endpoint.id,
+                    label: `${endpoint.name} · ${endpoint.providerType}`,
+                  })),
+                ]}
                 onValueChange={(value) => setGrammarChoice(value ?? "none")}
                 value={effectiveGrammarEndpoint || "none"}
               >
@@ -1696,6 +1749,45 @@ export function VideoTranscriptionView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!skipSpeakerInFlight) setSkipSpeakerOpen(open)
+        }}
+        open={skipSpeakerOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Skip speaker separation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The transcript and timestamps will be kept, but this video will
+              not receive automatic speaker labels.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={skipSpeakerInFlight}>
+              Keep speaker separation
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={skipSpeakerInFlight}
+              onClick={() => {
+                setSkipSpeakerOpen(false)
+                void skipSpeakerSeparation()
+              }}
+            >
+              {skipSpeakerInFlight ? (
+                <LoaderCircle
+                  className="animate-spin"
+                  data-icon="inline-start"
+                />
+              ) : (
+                <SkipForward data-icon="inline-start" />
+              )}
+              Skip separation
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -1751,10 +1843,14 @@ function LiveTranscriptPreview({
 
 function VideoPipeline({
   hasDiarizedSpeakers,
+  onRequestSkipSpeakerSeparation,
+  skipSpeakerInFlight,
   upload,
   session,
 }: {
   hasDiarizedSpeakers: boolean
+  onRequestSkipSpeakerSeparation: () => void
+  skipSpeakerInFlight: boolean
   upload: TranscriptionVideoUpload
   session: TranscriptionSession
 }) {
@@ -1809,6 +1905,7 @@ function VideoPipeline({
   const runTimeMs = getVideoPipelineRunTime(session, upload, now)
   const workerStatus = upload.workerStatus
   const workerCapacity = workerStatus?.capacity ?? 0
+  const skipSpeakerRequested = upload.stage === "skipping_diarization"
   const workersSaturated = Boolean(
     workerStatus && workerStatus.active >= workerStatus.capacity
   )
@@ -1822,13 +1919,15 @@ function VideoPipeline({
         : upload.status === "cancelled"
           ? "Processing cancelled"
           : activeStep
-            ? parallelProgress?.phase === "preparing"
-              ? "Preparing audio slices"
-              : parallelProgress?.phase === "fusing"
-                ? "Fusing transcript in progress"
-                : parallelProgress?.phase === "transcribing"
-                  ? "Transcribing slices in parallel"
-                  : `${videoPipelineStepLabel(activeStep.key)} in progress`
+            ? skipSpeakerRequested
+              ? "Skipping speaker separation"
+              : parallelProgress?.phase === "preparing"
+                ? "Preparing audio slices"
+                : parallelProgress?.phase === "fusing"
+                  ? "Fusing transcript in progress"
+                  : parallelProgress?.phase === "transcribing"
+                    ? "Transcribing slices in parallel"
+                    : `${videoPipelineStepLabel(activeStep.key)} in progress`
             : upload.status === "queued"
               ? workersSaturated
                 ? "Waiting for an available worker"
@@ -1996,6 +2095,29 @@ function VideoPipeline({
                         <p className="mt-2 line-clamp-2 text-[11px] text-destructive">
                           {step.error}
                         </p>
+                      ) : null}
+                      {step.key === "diarization" &&
+                      step.status === "active" ? (
+                        <Button
+                          className="mt-2 w-full justify-center"
+                          disabled={skipSpeakerInFlight || skipSpeakerRequested}
+                          onClick={onRequestSkipSpeakerSeparation}
+                          size="xs"
+                          type="button"
+                          variant="outline"
+                        >
+                          {skipSpeakerInFlight || skipSpeakerRequested ? (
+                            <LoaderCircle
+                              className="animate-spin"
+                              data-icon="inline-start"
+                            />
+                          ) : (
+                            <SkipForward data-icon="inline-start" />
+                          )}
+                          {skipSpeakerRequested
+                            ? "Skipping…"
+                            : "Skip speaker separation"}
+                        </Button>
                       ) : null}
                     </div>
                     {index < steps.length - 1 ? (
@@ -2771,6 +2893,11 @@ function fallbackVideoPipeline(
     setStatus("diarization", "active")
     return steps
   }
+  if (stage === "skipping_diarization") {
+    setStatus("transcription", "completed")
+    setStatus("diarization", "active")
+    return steps
+  }
   if (stage === "polishing") {
     setStatus("transcription", "completed")
     optionalStatus("diarization")
@@ -2846,7 +2973,7 @@ function videoPipelineStatusLabel(
     case "completed":
       return "Complete"
     case "skipped":
-      return "Not configured"
+      return "Skipped"
     case "failed":
       return "Failed"
     case "cancelled":

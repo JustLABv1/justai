@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,6 +32,9 @@ const (
 func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, sessionID uuid.UUID, storageKey string, endpointID uuid.UUID, language string, durationMs int64, storage *s3Storage) error {
 	if m.app == nil {
 		return fmt.Errorf("transcription manager is not attached to the app")
+	}
+	if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
+		return err
 	}
 	endpoint, err := m.app.providerEndpoint(ctx, endpointID)
 	if err != nil {
@@ -80,7 +84,11 @@ func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, 
 				}
 				if durationMs > 0 {
 					progress := 86 + int(minInt64(8, windowStartMs*8/durationMs))
-					_ = m.updateVideoProgress(ctx, uploadID, progress, "diarizing", "")
+					if err := m.updateVideoProgress(ctx, uploadID, progress, "diarizing", ""); err != nil {
+						_ = command.Process.Kill()
+						_ = command.Wait()
+						return err
+					}
 				}
 				audio = append([]byte(nil), audio[advanceBytes:]...)
 				windowStartMs += int64(advanceBytes) * 1000 / videoAudioBytesPerMs
@@ -114,6 +122,9 @@ func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, 
 		}
 		return fmt.Errorf("ffmpeg could not extract audio for diarization: %s", message)
 	}
+	if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -122,9 +133,17 @@ func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, 
 // complete file in one pipeline invocation so SPEAKER_00 remains the same
 // person from the beginning to the end of the recording.
 func (m *TranscriptionManager) diarizeVideoWithPyannote(ctx context.Context, uploadID, sessionID uuid.UUID, endpoint provider.Endpoint, language, videoURL string) error {
-	_ = m.updateVideoProgress(ctx, uploadID, 88, "diarizing", "")
+	if err := m.updateVideoProgress(ctx, uploadID, 88, "diarizing", ""); err != nil {
+		return err
+	}
 	turns, err := provider.DiarizeMediaURL(ctx, endpoint, videoURL, language)
 	if err != nil {
+		if skipErr := m.ensureVideoUploadActive(ctx, uploadID); errors.Is(skipErr, errVideoTranscriptionSkipDiarization) {
+			return skipErr
+		}
+		return err
+	}
+	if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
 		return err
 	}
 	segments, err := loadTranscriptionSegments(ctx, m.DB, sessionID)
@@ -504,12 +523,15 @@ func errorMessage(err error) string {
 }
 
 func (m *TranscriptionManager) ensureVideoUploadActive(ctx context.Context, uploadID uuid.UUID) error {
-	var status string
-	if err := m.DB.QueryRowContext(ctx, `SELECT status FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&status); err != nil {
+	var status, stage string
+	if err := m.DB.QueryRowContext(ctx, `SELECT status, stage FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&status, &stage); err != nil {
 		return err
 	}
 	if status == "cancelled" {
 		return errVideoTranscriptionCancelled
+	}
+	if stage == videoDiarizationSkipStage {
+		return errVideoTranscriptionSkipDiarization
 	}
 	return nil
 }

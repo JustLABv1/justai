@@ -257,6 +257,32 @@ func (a *App) retryVideoTranscription(c *gin.Context) {
 	c.JSON(http.StatusAccepted, videoUploadResponse{Upload: upload, JobID: &jobID})
 }
 
+func (a *App) skipVideoTranscription(c *gin.Context) {
+	uploadID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid video upload id"))
+		return
+	}
+	rawStep := strings.TrimSpace(c.Query("step"))
+	step := normalizeVideoRetryStep(rawStep)
+	if rawStep != "" && step != videoRetryStepDiarization {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("only speaker separation can currently be skipped"))
+		return
+	}
+	if _, err := a.authorizedVideoUpload(c, uploadID); err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	upload, err := a.Live.skipVideoDiarization(c, uploadID)
+	if err != nil {
+		writeError(c, http.StatusConflict, err)
+		return
+	}
+	_ = attachVideoWorkerStatus(c, a.DB, &upload, a.Config)
+	a.attachVideoPlaybackURL(c, &upload)
+	c.JSON(http.StatusAccepted, videoUploadResponse{Upload: upload})
+}
+
 func (a *App) cancelVideoTranscription(c *gin.Context) {
 	uploadID, err := uuid.Parse(c.Param("id"))
 	if err != nil {

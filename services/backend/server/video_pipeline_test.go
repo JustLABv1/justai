@@ -66,6 +66,25 @@ func TestVideoPipelinePreservesOptionalFailureOnCompletion(t *testing.T) {
 	}
 }
 
+func TestVideoPipelinePreservesSkippedDiarizationWhenContinuing(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	steps := initialVideoPipeline(started)
+	steps = applyVideoPipelineStage(steps, "diarizing", "", started.Add(time.Second))
+
+	if steps[2].Status != "active" {
+		t.Fatalf("diarization status = %q, want active", steps[2].Status)
+	}
+	skipVideoPipelineStep(&steps[2])
+
+	steps = applyVideoPipelineStage(steps, "polishing", "", started.Add(2*time.Second))
+	if steps[2].Status != "skipped" {
+		t.Fatalf("diarization status = %q, want skipped", steps[2].Status)
+	}
+	if steps[3].Status != "active" {
+		t.Fatalf("grammar status = %q, want active", steps[3].Status)
+	}
+}
+
 func TestVideoPipelineFailureKeepsExistingFailedStage(t *testing.T) {
 	started := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
 	steps := initialVideoPipeline(started)

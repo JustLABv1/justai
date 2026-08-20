@@ -172,7 +172,7 @@ func activateVideoPipelineAt(steps []models.TranscriptionVideoPipelineStep, key 
 	}
 	for index := 0; index < target; index++ {
 		step := &steps[index]
-		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" {
+		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" || step.Status == "skipped" {
 			continue
 		}
 		if isOptionalVideoPipelineStep(step.Key) && step.Status == "pending" {
@@ -199,7 +199,7 @@ func completeVideoPipeline(steps []models.TranscriptionVideoPipelineStep, now ti
 			completeVideoPipelineStep(step, now)
 			continue
 		}
-		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" {
+		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" || step.Status == "skipped" {
 			continue
 		}
 		if isOptionalVideoPipelineStep(step.Key) {
@@ -549,6 +549,15 @@ func (m *TranscriptionManager) retryVideoPipeline(ctx context.Context, uploadID 
 func (m *TranscriptionManager) retryVideoPipelineFrom(ctx context.Context, uploadID uuid.UUID, key, errorMessage string) error {
 	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) {
 		retryVideoPipelineStepFrom(steps, key, errorMessage)
+	})
+}
+
+func (m *TranscriptionManager) skipVideoPipelineStep(ctx context.Context, uploadID uuid.UUID, key string) error {
+	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) {
+		index := videoPipelineIndex(key)
+		if index >= 0 && index < len(steps) {
+			skipVideoPipelineStep(&steps[index])
+		}
 	})
 }
 
