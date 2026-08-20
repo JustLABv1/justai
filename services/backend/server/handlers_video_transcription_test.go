@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"justai-backend/config"
+	"justai-backend/models"
 )
 
 func TestNormalizeVideoUploadPartsRequiresEveryPartOnce(t *testing.T) {
@@ -58,6 +59,21 @@ func TestVideoUploadValidationAcceptsSupportedFormatsOnly(t *testing.T) {
 	}
 	if validVideoMimeType("recording.mp4", "audio/mpeg") {
 		t.Fatal("audio MIME types must not be accepted for video uploads")
+	}
+}
+
+func TestVideoUploadHasCompleteObject(t *testing.T) {
+	if !videoUploadHasCompleteObject(models.TranscriptionVideoUpload{ExpectedBytes: 10, Bytes: 10}) {
+		t.Fatal("expected an upload with all expected bytes to have a complete object")
+	}
+	for _, upload := range []models.TranscriptionVideoUpload{
+		{ExpectedBytes: 10, Bytes: 9},
+		{ExpectedBytes: 0, Bytes: 0},
+		{ExpectedBytes: 10, Bytes: 0},
+	} {
+		if videoUploadHasCompleteObject(upload) {
+			t.Fatalf("incomplete upload was treated as complete: %+v", upload)
+		}
 	}
 }
 

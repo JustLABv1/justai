@@ -211,15 +211,9 @@ func cancelVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now 
 		step.DurationMs = elapsedVideoPipelineStep(step, now)
 		return
 	}
-	for index := 1; index < len(steps); index++ {
-		if steps[index].Status != "pending" {
-			continue
-		}
-		step := &steps[index]
-		step.Status = "cancelled"
-		step.CompletedAt = timePointer(now)
-		return
-	}
+	// Cancellation can be persisted by both the request handler and the
+	// worker finishing the in-flight job. Once there is no active step left,
+	// leave the pending steps untouched so the second write is idempotent.
 }
 
 func retryVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now time.Time, errorMessage string) {
