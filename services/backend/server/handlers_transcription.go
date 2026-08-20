@@ -1386,6 +1386,9 @@ func (a *App) transcriptionSnapshot(ctx context.Context, sessionID uuid.UUID) (g
 	if err != nil {
 		return nil, err
 	}
+	if err := attachVideoWorkerStatus(ctx, a.DB, videoUpload, a.Config); err != nil {
+		return nil, err
+	}
 	a.attachVideoPlaybackURL(ctx, videoUpload)
 	return gin.H{"session": session, "sources": sources, "speakers": speakers, "segments": segments, "recordings": recordings, "videoUpload": videoUpload}, nil
 }

@@ -100,6 +100,7 @@ import type {
   TranscriptionVideoParallelProgress,
   TranscriptionVideoPipelineStep,
   TranscriptionVideoUpload,
+  TranscriptionVideoWorkerStatus,
   User,
 } from "@/lib/types"
 
@@ -632,7 +633,7 @@ export function VideoTranscriptionView({
   const displaySegments = useMemo(
     () =>
       (snapshot?.segments ?? []).map((segment) => {
-		const verbatim = segment.text.trim() || segment.rawText?.trim() || ""
+        const verbatim = segment.text.trim() || segment.rawText?.trim() || ""
         return {
           ...segment,
           text:
@@ -650,31 +651,30 @@ export function VideoTranscriptionView({
   const isVideoProcessing = ["uploading", "queued", "processing"].includes(
     snapshot?.videoUpload?.status ?? ""
   )
-  const livePreviewSegments = useMemo<TranscriptionVideoPreviewSegment[]>(
-    () => {
-      const parallelProgress = snapshot?.videoUpload?.pipeline?.find(
-        (step) => step.key === "transcription"
-      )?.parallel
-      const isPreviewActive =
-        isVideoProcessing &&
-        ["preparing", "transcribing", "fusing"].includes(
-          parallelProgress?.phase ?? ""
-        )
-      if (!isPreviewActive) {
-        return []
-      }
-      const preview = parallelProgress?.previewSegments ?? []
-      return [...preview]
-        .filter((segment) => segment.text.trim())
-        .sort((left, right) => {
-          if (left.startOffsetMs !== right.startOffsetMs) {
-            return left.startOffsetMs - right.startOffsetMs
-          }
-          return left.endOffsetMs - right.endOffsetMs
-        })
-    },
-    [isVideoProcessing, snapshot?.videoUpload?.pipeline]
-  )
+  const livePreviewSegments = useMemo<
+    TranscriptionVideoPreviewSegment[]
+  >(() => {
+    const parallelProgress = snapshot?.videoUpload?.pipeline?.find(
+      (step) => step.key === "transcription"
+    )?.parallel
+    const isPreviewActive =
+      isVideoProcessing &&
+      ["preparing", "transcribing", "fusing"].includes(
+        parallelProgress?.phase ?? ""
+      )
+    if (!isPreviewActive) {
+      return []
+    }
+    const preview = parallelProgress?.previewSegments ?? []
+    return [...preview]
+      .filter((segment) => segment.text.trim())
+      .sort((left, right) => {
+        if (left.startOffsetMs !== right.startOffsetMs) {
+          return left.startOffsetMs - right.startOffsetMs
+        }
+        return left.endOffsetMs - right.endOffsetMs
+      })
+  }, [isVideoProcessing, snapshot?.videoUpload?.pipeline])
   const speakerById = useMemo(
     () =>
       new Map(
@@ -1736,7 +1736,7 @@ function LiveTranscriptPreview({
             className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-3 py-2.5 text-sm"
             key={`${segment.startOffsetMs}-${segment.endOffsetMs}-${index}`}
           >
-            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+            <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
               {formatVideoTimestamp(segment.startOffsetMs)}
             </span>
             <span className="min-w-0 leading-6 text-foreground">
@@ -1807,6 +1807,11 @@ function VideoPipeline({
       )
   )
   const runTimeMs = getVideoPipelineRunTime(session, upload, now)
+  const workerStatus = upload.workerStatus
+  const workerCapacity = workerStatus?.capacity ?? 0
+  const workersSaturated = Boolean(
+    workerStatus && workerStatus.active >= workerStatus.capacity
+  )
   const overallLabel =
     upload.status === "completed"
       ? hasFailedStep
@@ -1825,7 +1830,9 @@ function VideoPipeline({
                   ? "Transcribing slices in parallel"
                   : `${videoPipelineStepLabel(activeStep.key)} in progress`
             : upload.status === "queued"
-              ? "Waiting to start"
+              ? workersSaturated
+                ? "Waiting for an available worker"
+                : "Queued for transcription"
               : "Preparing video"
 
   return (
@@ -1868,6 +1875,12 @@ function VideoPipeline({
                   {parallelProgress.workerCount ?? 1} parallel workers
                 </Badge>
               ) : null}
+              {workerStatus &&
+              (upload.status === "queued" || upload.status === "processing") ? (
+                <Badge className="h-5 px-2 text-[10px]" variant="outline">
+                  {workerStatus.active}/{workerCapacity} video workers
+                </Badge>
+              ) : null}
               <span className="whitespace-nowrap">
                 Run time · {formatPipelineStepDuration(runTimeMs)}
               </span>
@@ -1898,6 +1911,9 @@ function VideoPipeline({
         </CardHeader>
         <CollapsibleContent>
           <CardContent className="px-4 pb-4 sm:px-5">
+            {upload.status === "queued" && workerStatus ? (
+              <VideoWorkerQueue status={workerStatus} />
+            ) : null}
             {parallelProgress ? (
               <ParallelTranscriptionFlow
                 key={
@@ -1967,7 +1983,12 @@ function VideoPipeline({
                         <span className="font-medium text-foreground tabular-nums">
                           {step.durationEstimated ? "~" : ""}
                           {formatPipelineStepDuration(
-                            getVideoPipelineStepDuration(step, now, steps, index)
+                            getVideoPipelineStepDuration(
+                              step,
+                              now,
+                              steps,
+                              index
+                            )
                           )}
                         </span>
                       </div>
@@ -1995,6 +2016,151 @@ function VideoPipeline({
         </CollapsibleContent>
       </Card>
     </Collapsible>
+  )
+}
+
+function VideoWorkerQueue({
+  status,
+}: {
+  status: TranscriptionVideoWorkerStatus
+}) {
+  const capacity = Math.max(1, status.capacity)
+  const active = Math.min(capacity, Math.max(0, status.active))
+  const queued = Math.max(1, status.queued)
+  const position = Math.max(1, status.queuePosition ?? 1)
+  const saturated = active >= capacity
+  const visibleSlots = Math.min(capacity, 6)
+  const queuedBehind = Math.max(0, queued - position)
+  const visibleQueueItems = Math.min(queued, 5)
+  const yourQueueIndex = Math.min(position - 1, visibleQueueItems - 1)
+  const hiddenAhead = Math.max(0, position - visibleQueueItems)
+
+  return (
+    <div
+      aria-live="polite"
+      className="video-worker-queue mb-4 rounded-xl border border-primary/20 bg-primary/[0.035] p-3 sm:p-4"
+      role="status"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span className="video-worker-queue-icon flex size-9 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
+            <Clock3 aria-hidden="true" className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-foreground">
+              {saturated
+                ? "All transcription workers are busy"
+                : position === 1
+                  ? "Your transcription is next in line"
+                  : "Your transcription is queued"}
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {saturated
+                ? "Your video is safely queued and will start automatically as soon as a worker is free."
+                : position === 1
+                  ? "The worker pool is opening a slot for your video now."
+                  : "The videos ahead of you will be processed in order."}
+            </p>
+          </div>
+        </div>
+        <Badge className="shrink-0 text-[10px]" variant="secondary">
+          Queue position {position}
+        </Badge>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="video-worker-queue-lane rounded-lg border border-border/70 bg-background/65 p-2.5">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+            <span>Worker pool</span>
+            <span className="tabular-nums">
+              {active} of {capacity} busy
+            </span>
+          </div>
+          <div
+            className="mt-2 grid gap-1.5"
+            style={{
+              gridTemplateColumns: `repeat(${visibleSlots}, minmax(0, 1fr))`,
+            }}
+          >
+            {Array.from({ length: visibleSlots }, (_, index) => {
+              const busy = index < active
+              return (
+                <div
+                  className={cn(
+                    "flex min-w-0 items-center justify-center gap-1 rounded-md border px-1.5 py-2 text-[9px] text-muted-foreground",
+                    busy
+                      ? "video-worker-queue-worker border-primary/25 bg-primary/10 text-primary"
+                      : "border-border/60 bg-muted/20"
+                  )}
+                  key={index}
+                  title={
+                    busy
+                      ? "Worker is processing another video"
+                      : "Available worker"
+                  }
+                >
+                  <span className="size-1.5 shrink-0 rounded-full bg-current" />
+                  <span className="truncate">
+                    W{String(index + 1).padStart(2, "0")}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          {capacity > visibleSlots ? (
+            <p className="mt-1.5 text-[10px] text-muted-foreground">
+              +{capacity - visibleSlots} more configured worker
+              {capacity - visibleSlots === 1 ? "" : "s"}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="video-worker-queue-lane rounded-lg border border-border/70 bg-background/65 p-2.5">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+            <span>Queue flow</span>
+            <span className="tabular-nums">{queuedBehind} behind you</span>
+          </div>
+          <div className="relative mt-2 flex min-h-11 items-center gap-1.5 overflow-hidden rounded-md border border-border/60 bg-muted/20 px-2">
+            <span aria-hidden="true" className="video-worker-queue-flow" />
+            {Array.from({ length: visibleQueueItems }, (_, index) => {
+              const isYou = index === yourQueueIndex
+              return (
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "video-worker-queue-token relative z-1 flex size-6 shrink-0 items-center justify-center rounded-full border text-[9px] font-medium",
+                    isYou
+                      ? "border-primary/35 bg-primary/15 text-primary"
+                      : "border-border/70 bg-background text-muted-foreground"
+                  )}
+                  key={index}
+                >
+                  {isYou ? "You" : "•"}
+                </span>
+              )
+            })}
+            {hiddenAhead > 0 ? (
+              <span className="relative z-1 text-[10px] text-muted-foreground">
+                +{hiddenAhead} ahead
+              </span>
+            ) : queued > visibleQueueItems ? (
+              <span className="relative z-1 text-[10px] text-muted-foreground">
+                +{queued - visibleQueueItems}
+              </span>
+            ) : null}
+            <span className="relative z-1 ml-auto flex size-6 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary">
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-3 motion-safe:animate-spin motion-reduce:animate-none"
+              />
+            </span>
+          </div>
+          <p className="mt-1.5 text-[10px] text-muted-foreground">
+            No work is lost while you wait.
+          </p>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -2053,11 +2219,7 @@ function ParallelTranscriptionFlow({
   ]
 
   return (
-    <Collapsible
-      className="mb-4"
-      onOpenChange={setOpen}
-      open={open}
-    >
+    <Collapsible className="mb-4" onOpenChange={setOpen} open={open}>
       <div
         aria-label="Parallel transcription details"
         className="rounded-xl border border-primary/15 bg-primary/[0.025] p-3 sm:p-4"
@@ -2073,12 +2235,15 @@ function ParallelTranscriptionFlow({
         >
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-medium text-foreground">
-              <AudioLines aria-hidden="true" className="size-3.5 text-primary" />
+              <AudioLines
+                aria-hidden="true"
+                className="size-3.5 text-primary"
+              />
               Parallel transcription
             </div>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              The source is split into overlapping audio slices so long videos do
-              not wait on one continuous transcription stream.
+              The source is split into overlapping audio slices so long videos
+              do not wait on one continuous transcription stream.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -2120,13 +2285,16 @@ function ParallelTranscriptionFlow({
                         "-translate-y-0.5 border-primary/35 bg-primary/10",
                       failed &&
                         "border-destructive/30 bg-destructive/10 text-destructive",
-                      !complete && !active && "border-border/70 bg-background/50"
+                      !complete &&
+                        !active &&
+                        "border-border/70 bg-background/50"
                     )}
                   >
                     <span
                       className={cn(
                         "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground",
-                        complete && "border-primary/25 bg-primary/10 text-primary",
+                        complete &&
+                          "border-primary/25 bg-primary/10 text-primary",
                         active && !failed && "border-primary/40 text-primary",
                         failed &&
                           "border-destructive/30 bg-destructive/10 text-destructive"
@@ -2420,8 +2588,8 @@ function hydrateVideoPipelineTiming(
           step.durationMs && step.durationMs > 0 && startedAt !== null
             ? startedAt + step.durationMs
             : step.key === "upload"
-            ? uploadProcessingBoundary
-            : (nextKnownStart(index) ?? terminalEnd)
+              ? uploadProcessingBoundary
+              : (nextKnownStart(index) ?? terminalEnd)
         if (completedAt !== null && startedAt !== null) {
           completedAt = Math.max(startedAt, completedAt)
         }
@@ -2859,9 +3027,7 @@ function mergeVideoUploadSnapshot(
   const sourceStillExists =
     next.status !== "cancelled" || next.bytes >= next.expectedBytes
   const pipeline =
-    next.pipeline && next.pipeline.length > 0
-      ? next.pipeline
-      : current.pipeline
+    next.pipeline && next.pipeline.length > 0 ? next.pipeline : current.pipeline
   return {
     ...current,
     ...next,

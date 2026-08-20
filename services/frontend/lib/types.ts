@@ -78,10 +78,39 @@ export type AdminAnalyticsEndpoint = {
   averageLatencyMs: number
 }
 
+export type TranscriptionWorkerAnalyticsDay = {
+  date: string
+  total: number
+  completed: number
+  failed: number
+  cancelled: number
+}
+
+export type TranscriptionWorkerAnalytics = {
+  capacity: number
+  active: number
+  queued: number
+  utilizationPercent: number
+  sliceWorkersPerJob: number
+  activeSliceWorkers: number
+  totalJobs: number
+  completedJobs: number
+  failedJobs: number
+  cancelledJobs: number
+  audioHoursProcessed: number
+  averageQueueWaitMs: number
+  p95QueueWaitMs: number
+  averageProcessingMs: number
+  p95ProcessingMs: number
+  periodDays: number
+  timeSeries: TranscriptionWorkerAnalyticsDay[]
+}
+
 export type AdminAnalyticsResponse = {
   summary: AdminAnalyticsSummary
   byEndpoint: AdminAnalyticsEndpoint[]
   timeSeries: AdminAnalyticsDay[]
+  transcriptionWorkers: TranscriptionWorkerAnalytics
 }
 
 export type PlatformHealth = {
@@ -491,6 +520,15 @@ export type TranscriptionVideoPreviewSegment = {
   text: string
 }
 
+export type TranscriptionVideoWorkerStatus = {
+  capacity: number
+  active: number
+  queued: number
+  queuePosition?: number
+  utilizationPercent: number
+  sliceWorkersPerJob: number
+}
+
 export type TranscriptionVideoUpload = {
   id: string
   sessionId: string
@@ -518,6 +556,7 @@ export type TranscriptionVideoUpload = {
   completedAt?: string | null
   expiresAt?: string | null
   playbackUrl?: string
+  workerStatus?: TranscriptionVideoWorkerStatus
 }
 
 export type TranscriptionJoinRequest = {

@@ -107,16 +107,34 @@ func videoRetryStage(retryFrom string) string {
 }
 
 func (m *TranscriptionManager) startVideoWorker(ctx context.Context) {
+	capacity := configuredVideoTranscriptionWorkerCapacity(m.Config)
+	slots := make(chan struct{}, capacity)
+	dispatch := func() {
+		select {
+		case slots <- struct{}{}:
+			go func() {
+				defer func() { <-slots }()
+				if err := m.processVideoJob(ctx); err != nil && !errors.Is(err, errVideoTranscriptionCancelled) && ctx.Err() == nil {
+					slog.Warn("video transcription job failed", "error", err)
+				}
+			}()
+		default:
+			// Every configured slot is already working. The next scheduler tick
+			// will try again after one of them completes.
+		}
+	}
+
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
+		dispatch()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := m.processVideoJob(ctx); err != nil && !errors.Is(err, errVideoTranscriptionCancelled) && ctx.Err() == nil {
-					slog.Warn("video transcription job failed", "error", err)
+				for range capacity {
+					dispatch()
 				}
 			}
 		}
@@ -129,10 +147,20 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 		return err
 	}
 	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, videoTranscriptionWorkerLockName); err != nil {
+		return err
+	}
 	_, _ = transaction.ExecContext(ctx, `
 		UPDATE transcription_jobs
 		SET status = 'queued', lease_until = NULL, run_after = now(), updated_at = now()
 		WHERE job_type = $1 AND status = 'processing' AND (lease_until IS NULL OR lease_until < now())`, videoTranscriptionJobType)
+	var activeJobs int
+	if err := transaction.QueryRowContext(ctx, `SELECT COUNT(*)::int FROM transcription_jobs WHERE job_type = $1 AND status = 'processing'`, videoTranscriptionJobType).Scan(&activeJobs); err != nil {
+		return err
+	}
+	if activeJobs >= configuredVideoTranscriptionWorkerCapacity(m.Config) {
+		return nil
+	}
 
 	var jobID, sessionID uuid.UUID
 	var uploadIDValue string
@@ -143,7 +171,7 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 		       j.payload->>'uploadId'
 		FROM transcription_jobs j
 		WHERE j.job_type = $1 AND j.status = 'queued' AND j.run_after <= now()
-		ORDER BY j.created_at FOR UPDATE SKIP LOCKED LIMIT 1`, videoTranscriptionJobType).Scan(&jobID, &sessionID, &payload, &attempts, &maxAttempts, &uploadIDValue)
+		ORDER BY j.created_at, j.id FOR UPDATE SKIP LOCKED LIMIT 1`, videoTranscriptionJobType).Scan(&jobID, &sessionID, &payload, &attempts, &maxAttempts, &uploadIDValue)
 	if err == sql.ErrNoRows {
 		return nil
 	}
@@ -155,7 +183,7 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 	}
 	uploadID, parseErr := uuid.Parse(uploadIDValue)
 	if parseErr != nil {
-		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', error_message = 'invalid video transcription job upload id', updated_at = now() WHERE id = $1`, jobID)
+		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', completed_at = now(), error_message = 'invalid video transcription job upload id', updated_at = now() WHERE id = $1`, jobID)
 		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = $1 AND status = 'processing'`, sessionID)
 		if err := transaction.Commit(); err != nil {
 			return err
@@ -164,7 +192,7 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 		return nil
 	}
 	if attempts >= maxAttempts {
-		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', lease_until = NULL, error_message = 'maximum retry attempts exceeded', updated_at = now() WHERE id = $1`, jobID)
+		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', completed_at = now(), lease_until = NULL, error_message = 'maximum retry attempts exceeded', updated_at = now() WHERE id = $1`, jobID)
 		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'failed', stage = 'failed', error_message = 'maximum retry attempts exceeded', updated_at = now() WHERE id = $1`, uploadID)
 		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = $1 AND status = 'processing'`, sessionID)
 		if err := transaction.Commit(); err != nil {
@@ -182,11 +210,11 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 		return err
 	}
 	if uploadStatus == "cancelled" {
-		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', updated_at = now() WHERE id = $1`, jobID)
+		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), updated_at = now() WHERE id = $1`, jobID)
 		return transaction.Commit()
 	}
 	if uploadStatus == "completed" {
-		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'completed', updated_at = now() WHERE id = $1`, jobID)
+		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'completed', completed_at = now(), updated_at = now() WHERE id = $1`, jobID)
 		return transaction.Commit()
 	}
 	var parsed videoJobPayload
@@ -201,7 +229,7 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 	if payloadErr == nil && strings.TrimSpace(parsed.RetryFrom) != "" && retryFrom == "" {
 		payloadErr = fmt.Errorf("unsupported video retry step %q", parsed.RetryFrom)
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'processing', attempts = attempts + 1, lease_until = now() + $2 * interval '1 second', updated_at = now() WHERE id = $1`, jobID, int64(videoJobLeaseDuration/time.Second)); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'processing', attempts = attempts + 1, started_at = COALESCE(started_at, now()), completed_at = NULL, lease_until = now() + $2 * interval '1 second', updated_at = now() WHERE id = $1`, jobID, int64(videoJobLeaseDuration/time.Second)); err != nil {
 		return err
 	}
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'processing', stage = $2, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID, videoRetryStage(retryFrom)); err != nil {
@@ -227,11 +255,11 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 		if err := m.cancelVideoPipeline(ctx, uploadID); err != nil {
 			slog.Warn("could not persist cancelled video pipeline", "uploadId", uploadID, "error", err)
 		}
-		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 		return errVideoTranscriptionCancelled
 	}
 	if processingErr == nil {
-		_, err := m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'completed', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
+		_, err := m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'completed', completed_at = now(), lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 		if err != nil {
 			return err
 		}
@@ -242,7 +270,7 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 		if affected, err := result.RowsAffected(); err != nil {
 			return err
 		} else if affected != 1 {
-			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
+			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 			return errVideoTranscriptionCancelled
 		}
 		if err := m.completeVideoPipeline(ctx, uploadID); err != nil {
@@ -254,7 +282,7 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 		return nil
 	}
 	if errors.Is(processingErr, errVideoTranscriptionCancelled) {
-		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'cancelled', stage = 'cancelled', error_message = NULL, updated_at = now() WHERE id = $1`, uploadID)
 		if err := m.cancelVideoPipeline(ctx, uploadID); err != nil {
 			slog.Warn("could not persist cancelled video pipeline", "uploadId", uploadID, "error", err)
@@ -306,7 +334,7 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 		m.broadcastVideoProgress(uploadID, "queued", 0, "retrying", processingErr.Error())
 		return processingErr
 	}
-	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', lease_until = NULL, error_message = $2, updated_at = now() WHERE id = $1`, jobID, processingErr.Error())
+	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', completed_at = now(), lease_until = NULL, error_message = $2, updated_at = now() WHERE id = $1`, jobID, processingErr.Error())
 	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'failed', stage = 'failed', error_message = $2, updated_at = now() WHERE id = $1`, uploadID, processingErr.Error())
 	if err := m.failVideoPipeline(ctx, uploadID, processingErr.Error()); err != nil {
 		slog.Warn("could not persist failed video pipeline", "uploadId", uploadID, "error", err)
@@ -454,7 +482,7 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 	if _, err := transaction.ExecContext(ctx, `INSERT INTO transcription_jobs (id, session_id, job_type, payload) VALUES ($1, $2, $3, $4)`, jobID, sessionID, videoTranscriptionJobType, payload); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', progress = 0, stage = 'queued', duration_ms = CASE WHEN $2 = 'transcription' THEN 0 ELSE duration_ms END, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID, retryFrom); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', progress = 0, stage = 'queued', duration_ms = CASE WHEN $2 = 'transcription' THEN 0 ELSE duration_ms END, completed_at = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID, retryFrom); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', polish_status = CASE WHEN $2 = 'transcription' THEN CASE WHEN grammar_endpoint_id IS NULL THEN 'not_requested' ELSE 'queued' END WHEN $2 IN ('diarization', 'grammar') THEN CASE WHEN grammar_endpoint_id IS NULL THEN polish_status ELSE 'queued' END ELSE polish_status END, started_at = COALESCE(started_at, now()), ended_at = NULL, updated_at = now() WHERE id = $1`, sessionID, retryFrom); err != nil {
@@ -488,7 +516,7 @@ func (m *TranscriptionManager) cancelVideoJob(ctx context.Context, uploadID uuid
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'cancelled', stage = 'cancelled', error_message = NULL, updated_at = now() WHERE id = $1`, uploadID); err != nil {
 		return err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, updated_at = now() WHERE job_type = $1 AND payload->>'uploadId' = $2 AND status IN ('queued', 'processing')`, videoTranscriptionJobType, uploadID.String()); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, updated_at = now() WHERE job_type = $1 AND payload->>'uploadId' = $2 AND status IN ('queued', 'processing')`, videoTranscriptionJobType, uploadID.String()); err != nil {
 		return err
 	}
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = $1 AND status = 'processing'`, sessionID); err != nil {
@@ -1512,7 +1540,7 @@ func (m *TranscriptionManager) expireVideoUploads(ctx context.Context) {
 			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET expires_at = NULL, updated_at = now() WHERE id = $1`, item.id)
 			continue
 		}
-		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, updated_at = now() WHERE job_type = $1 AND payload->>'uploadId' = $2 AND status IN ('queued', 'processing')`, videoTranscriptionJobType, item.id)
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, updated_at = now() WHERE job_type = $1 AND payload->>'uploadId' = $2 AND status IN ('queued', 'processing')`, videoTranscriptionJobType, item.id)
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = (SELECT session_id FROM transcription_video_uploads WHERE id = $1) AND status = 'processing'`, item.id)
 		_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_video_uploads WHERE id = $1`, item.id)
 	}

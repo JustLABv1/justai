@@ -47,6 +47,8 @@ transcription:
   video_transcription_chunk_ms: 600000
   video_transcription_overlap_ms: 5000
   video_transcription_workers: 3
+  # Maximum number of video transcriptions that can run at the same time.
+  video_transcription_worker_capacity: 2
   max_session_hours: 8
   # Direct-to-S3 multipart video uploads and their processing bounds. Video
   # uploads require storage_driver: s3.

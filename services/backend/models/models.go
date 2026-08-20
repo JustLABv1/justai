@@ -235,6 +235,15 @@ type TranscriptionVideoPreviewSegment struct {
 	Text          string `json:"text"`
 }
 
+type TranscriptionVideoWorkerStatus struct {
+	Capacity           int     `json:"capacity"`
+	Active             int     `json:"active"`
+	Queued             int     `json:"queued"`
+	QueuePosition      int     `json:"queuePosition,omitempty"`
+	UtilizationPercent float64 `json:"utilizationPercent"`
+	SliceWorkersPerJob int     `json:"sliceWorkersPerJob"`
+}
+
 type TranscriptionVideoPipelineStep struct {
 	Key         string                              `json:"key"`
 	Status      string                              `json:"status"`
@@ -265,6 +274,7 @@ type TranscriptionVideoUpload struct {
 	CompletedAt   *time.Time                       `json:"completedAt,omitempty"`
 	ExpiresAt     *time.Time                       `json:"expiresAt,omitempty"`
 	PlaybackURL   string                           `json:"playbackUrl,omitempty"`
+	WorkerStatus  *TranscriptionVideoWorkerStatus  `json:"workerStatus,omitempty"`
 }
 
 type KnowledgeSource struct {

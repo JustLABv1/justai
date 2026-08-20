@@ -232,6 +232,7 @@ func (a *App) completeVideoTranscriptionUpload(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	_ = attachVideoWorkerStatus(c, a.DB, &updated, a.Config)
 	a.attachVideoPlaybackURL(c, &updated)
 	c.JSON(http.StatusAccepted, videoUploadResponse{Upload: updated, JobID: &jobID})
 }
@@ -251,6 +252,7 @@ func (a *App) retryVideoTranscription(c *gin.Context) {
 		writeError(c, http.StatusConflict, err)
 		return
 	}
+	_ = attachVideoWorkerStatus(c, a.DB, &upload, a.Config)
 	a.attachVideoPlaybackURL(c, &upload)
 	c.JSON(http.StatusAccepted, videoUploadResponse{Upload: upload, JobID: &jobID})
 }
@@ -284,6 +286,7 @@ func (a *App) cancelVideoTranscription(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	_ = attachVideoWorkerStatus(c, a.DB, &updated, a.Config)
 	a.attachVideoPlaybackURL(c, &updated)
 	c.JSON(http.StatusOK, gin.H{"upload": updated})
 }
@@ -298,6 +301,7 @@ func (a *App) authorizedVideoUpload(c *gin.Context, id uuid.UUID) (videoUploadRe
 	if err := a.authorizeTranscriptionSession(c, record.model.SessionID, principal.UserID, organizationID); err != nil {
 		return videoUploadRecord{}, err
 	}
+	_ = attachVideoWorkerStatus(c, a.DB, &record.model, a.Config)
 	return record, nil
 }
 

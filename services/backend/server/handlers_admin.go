@@ -343,9 +343,10 @@ type adminAnalyticsDay struct {
 }
 
 type adminAnalytics struct {
-	Summary    adminAnalyticsSummary    `json:"summary"`
-	ByEndpoint []adminAnalyticsEndpoint `json:"byEndpoint"`
-	TimeSeries []adminAnalyticsDay      `json:"timeSeries"`
+	Summary              adminAnalyticsSummary        `json:"summary"`
+	ByEndpoint           []adminAnalyticsEndpoint     `json:"byEndpoint"`
+	TimeSeries           []adminAnalyticsDay          `json:"timeSeries"`
+	TranscriptionWorkers transcriptionWorkerAnalytics `json:"transcriptionWorkers"`
 }
 
 func (a *App) writeAnalytics(c *gin.Context, organizationID *uuid.UUID) {
@@ -470,7 +471,16 @@ func (a *App) readAnalytics(c *gin.Context, organizationID *uuid.UUID) (adminAna
 	if err := timeRows.Err(); err != nil {
 		return adminAnalytics{}, err
 	}
-	return adminAnalytics{Summary: summary, ByEndpoint: byEndpoint, TimeSeries: timeSeries}, nil
+	transcriptionWorkers, err := a.readTranscriptionWorkerAnalytics(c, organizationID)
+	if err != nil {
+		return adminAnalytics{}, err
+	}
+	return adminAnalytics{
+		Summary:              summary,
+		ByEndpoint:           byEndpoint,
+		TimeSeries:           timeSeries,
+		TranscriptionWorkers: transcriptionWorkers,
+	}, nil
 }
 
 func analyticsRange(c *gin.Context) (time.Time, time.Time, error) {

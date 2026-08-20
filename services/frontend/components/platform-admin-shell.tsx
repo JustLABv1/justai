@@ -51,7 +51,11 @@ import type {
 import { cn } from "@/lib/utils"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
-import { AdminUsageCharts, compactNumber } from "@/components/admin-usage-charts"
+import {
+  AdminUsageCharts,
+  compactNumber,
+} from "@/components/admin-usage-charts"
+import { PlatformTranscriptionWorkers } from "@/components/platform-transcription-workers"
 import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAnnouncementsView } from "@/components/platform-announcements-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
@@ -204,8 +208,7 @@ export function PlatformAdminShell({
   const [mcpCreateRequest, setMcpCreateRequest] = useState(0)
   const [authenticationCreateRequest, setAuthenticationCreateRequest] =
     useState(0)
-  const [announcementCreateRequest, setAnnouncementCreateRequest] =
-    useState(0)
+  const [announcementCreateRequest, setAnnouncementCreateRequest] = useState(0)
 
   const load = useCallback(async () => {
     setError("")
@@ -280,27 +283,35 @@ export function PlatformAdminShell({
     return () => window.clearTimeout(timer)
   }, [load])
 
+  useEffect(() => {
+    if (activeTab !== "overview" && activeTab !== "analytics") return
+    const timer = window.setInterval(() => void load(), 10_000)
+    return () => window.clearInterval(timer)
+  }, [activeTab, load])
+
   async function saveMaintenanceMessage() {
     setSavingMaintenance(true)
     setError("")
     try {
-      const result = await api.put<PlatformSettings>(
-        "/api/v1/admin/settings",
-        { maintenanceMessage: settings.maintenanceMessage }
-      )
+      const result = await api.put<PlatformSettings>("/api/v1/admin/settings", {
+        maintenanceMessage: settings.maintenanceMessage,
+      })
       setSettings(result)
       notifySuccess("Maintenance message saved")
     } catch (caught) {
-      setError(notifyError("Maintenance message could not be saved", caught, "Platform settings could not be saved."))
+      setError(
+        notifyError(
+          "Maintenance message could not be saved",
+          caught,
+          "Platform settings could not be saved."
+        )
+      )
     } finally {
       setSavingMaintenance(false)
     }
   }
 
-  async function updateSetting(
-    key: PlatformControlKey,
-    value: boolean
-  ) {
+  async function updateSetting(key: PlatformControlKey, value: boolean) {
     const previousValue = settings[key]
     setSettings((current) => ({ ...current, [key]: value }))
     setSavingControl(key)
@@ -316,7 +327,13 @@ export function PlatformAdminShell({
       notifySuccess(`${settingLabel(key)} ${value ? "enabled" : "disabled"}`)
     } catch (caught) {
       setSettings((current) => ({ ...current, [key]: previousValue }))
-      setError(notifyError("Platform control could not be updated", caught, "The control could not be updated."))
+      setError(
+        notifyError(
+          "Platform control could not be updated",
+          caught,
+          "The control could not be updated."
+        )
+      )
     } finally {
       setSavingControl(null)
     }
@@ -329,7 +346,13 @@ export function PlatformAdminShell({
       notifySuccess("User updated")
       await load()
     } catch (caught) {
-      setError(notifyError("User could not be updated", caught, "User could not be updated."))
+      setError(
+        notifyError(
+          "User could not be updated",
+          caught,
+          "User could not be updated."
+        )
+      )
     }
   }
 
@@ -340,7 +363,13 @@ export function PlatformAdminShell({
       notifySuccess("Workspace updated")
       await load()
     } catch (caught) {
-      setError(notifyError("Workspace could not be updated", caught, "Workspace could not be updated."))
+      setError(
+        notifyError(
+          "Workspace could not be updated",
+          caught,
+          "Workspace could not be updated."
+        )
+      )
     }
   }
 
@@ -360,9 +389,7 @@ export function PlatformAdminShell({
       </Button>
     ) : activeTab === "authentication" ? (
       <Button
-        onClick={() =>
-          setAuthenticationCreateRequest((value) => value + 1)
-        }
+        onClick={() => setAuthenticationCreateRequest((value) => value + 1)}
       >
         <Plus data-icon="inline-start" aria-hidden="true" /> Add provider
       </Button>
@@ -422,7 +449,10 @@ export function PlatformAdminShell({
           className="flex gap-4 overflow-x-auto rounded-xl border bg-card p-2 lg:sticky lg:top-4 lg:flex-col lg:gap-5"
         >
           {tabGroups.map((group) => (
-            <div className="flex min-w-max flex-col gap-1 lg:min-w-0" key={group.label}>
+            <div
+              className="flex min-w-max flex-col gap-1 lg:min-w-0"
+              key={group.label}
+            >
               <p className="px-2 text-[0.65rem] font-medium tracking-[0.16em] text-muted-foreground uppercase">
                 {group.label}
               </p>
@@ -465,136 +495,149 @@ export function PlatformAdminShell({
             </Alert>
           )}
 
-      {activeTab === "overview" && (
-        <PlatformAdminDashboard dashboard={dashboard} onTabChange={onTabChange} />
-      )}
-      {activeTab === "controls" && (
-        <ControlsView
-          settings={settings}
-          savingMaintenance={savingMaintenance}
-          savingControl={savingControl}
-          onChange={setSettings}
-          onToggle={(key, value) => void updateSetting(key, value)}
-          onSave={() => void saveMaintenanceMessage()}
-        />
-      )}
-      {activeTab === "authentication" && (
-        <PlatformAuthenticationView createRequest={authenticationCreateRequest} />
-      )}
-      {activeTab === "announcements" && (
-        <PlatformAnnouncementsView createRequest={announcementCreateRequest} />
-      )}
-      {(activeTab === "users" || activeTab === "workspaces") && (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-full max-w-md">
-              <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="pl-8"
-                onChange={(event) => {
-                  setListPage(1)
-                  setQuery(event.target.value)
-                }}
-                placeholder={`Search ${activeTab}…`}
-                value={query}
+          {activeTab === "overview" && (
+            <PlatformAdminDashboard
+              dashboard={dashboard}
+              onTabChange={onTabChange}
+            />
+          )}
+          {activeTab === "controls" && (
+            <ControlsView
+              settings={settings}
+              savingMaintenance={savingMaintenance}
+              savingControl={savingControl}
+              onChange={setSettings}
+              onToggle={(key, value) => void updateSetting(key, value)}
+              onSave={() => void saveMaintenanceMessage()}
+            />
+          )}
+          {activeTab === "authentication" && (
+            <PlatformAuthenticationView
+              createRequest={authenticationCreateRequest}
+            />
+          )}
+          {activeTab === "announcements" && (
+            <PlatformAnnouncementsView
+              createRequest={announcementCreateRequest}
+            />
+          )}
+          {(activeTab === "users" || activeTab === "workspaces") && (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative w-full max-w-md">
+                  <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="pl-8"
+                    onChange={(event) => {
+                      setListPage(1)
+                      setQuery(event.target.value)
+                    }}
+                    placeholder={`Search ${activeTab}…`}
+                    value={query}
+                  />
+                </div>
+                <Select
+                  value={listStatus || "all"}
+                  onValueChange={(value) => {
+                    setListPage(1)
+                    const nextValue = value ?? "all"
+                    setListStatus(nextValue === "all" ? "" : nextValue)
+                  }}
+                >
+                  <SelectTrigger
+                    aria-label={`${activeTab} status`}
+                    className="h-9 w-48"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    <SelectGroup>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      {activeTab === "users" ? (
+                        <SelectItem value="suspended">Suspended</SelectItem>
+                      ) : (
+                        <>
+                          <SelectItem value="archived">Archived</SelectItem>
+                          <SelectItem value="suspended">Suspended</SelectItem>
+                        </>
+                      )}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+              {activeTab === "users" ? (
+                <UsersView
+                  users={users}
+                  onUpdate={updateUser}
+                  onReload={() => void load()}
+                  page={listPage}
+                  pageSize={25}
+                  total={listTotal}
+                  onPageChange={setListPage}
+                />
+              ) : (
+                <WorkspacesView
+                  workspaces={workspaces}
+                  onUpdate={updateWorkspace}
+                  onReload={() => void load()}
+                  page={listPage}
+                  pageSize={25}
+                  total={listTotal}
+                  onPageChange={setListPage}
+                />
+              )}
+            </div>
+          )}
+          {activeTab === "endpoints" && (
+            <EndpointsView
+              endpoints={endpoints}
+              onChange={setEndpoints}
+              platformAdmin
+              userId={user.id}
+              apiBasePath="/api/v1/admin/endpoints"
+              defaultScopeType="global"
+              createRequest={endpointCreateRequest}
+            />
+          )}
+          {activeTab === "mcp" && (
+            <InventoryView
+              title="Global and scoped MCP servers"
+              items={servers}
+              kind="mcp"
+              onRefresh={() => void load()}
+              createRequest={mcpCreateRequest}
+            />
+          )}
+          {activeTab === "health" && <HealthView health={health} />}
+          {activeTab === "analytics" && (
+            <div className="flex flex-col gap-4">
+              <AnalyticsView
+                analytics={analytics}
+                filters={analyticsFilters}
+                onFiltersChange={setAnalyticsFilters}
+                onRefresh={() => void load()}
+              />
+              <PlatformTranscriptionWorkers
+                analytics={analytics?.transcriptionWorkers}
+                detailed
               />
             </div>
-            <Select
-              value={listStatus || "all"}
-              onValueChange={(value) => {
+          )}
+          {activeTab === "audit" && (
+            <AuditView
+              events={audit}
+              page={listPage}
+              pageSize={25}
+              total={listTotal}
+              filters={auditFilters}
+              onFiltersChange={(next) => {
                 setListPage(1)
-                const nextValue = value ?? "all"
-                setListStatus(nextValue === "all" ? "" : nextValue)
+                setAuditFilters(next)
               }}
-            >
-              <SelectTrigger
-                aria-label={`${activeTab} status`}
-                className="h-9 w-48"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="start">
-                <SelectGroup>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  {activeTab === "users" ? (
-                    <SelectItem value="suspended">Suspended</SelectItem>
-                  ) : (
-                    <>
-                      <SelectItem value="archived">Archived</SelectItem>
-                      <SelectItem value="suspended">Suspended</SelectItem>
-                    </>
-                  )}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-          {activeTab === "users" ? (
-            <UsersView
-              users={users}
-              onUpdate={updateUser}
-              onReload={() => void load()}
-              page={listPage}
-              pageSize={25}
-              total={listTotal}
-              onPageChange={setListPage}
-            />
-          ) : (
-            <WorkspacesView
-              workspaces={workspaces}
-              onUpdate={updateWorkspace}
-              onReload={() => void load()}
-              page={listPage}
-              pageSize={25}
-              total={listTotal}
               onPageChange={setListPage}
             />
           )}
-        </div>
-      )}
-      {activeTab === "endpoints" && (
-        <EndpointsView
-          endpoints={endpoints}
-          onChange={setEndpoints}
-          platformAdmin
-          userId={user.id}
-          apiBasePath="/api/v1/admin/endpoints"
-          defaultScopeType="global"
-          createRequest={endpointCreateRequest}
-        />
-      )}
-      {activeTab === "mcp" && (
-        <InventoryView
-          title="Global and scoped MCP servers"
-          items={servers}
-          kind="mcp"
-          onRefresh={() => void load()}
-          createRequest={mcpCreateRequest}
-        />
-      )}
-      {activeTab === "health" && <HealthView health={health} />}
-      {activeTab === "analytics" && (
-        <AnalyticsView
-          analytics={analytics}
-          filters={analyticsFilters}
-          onFiltersChange={setAnalyticsFilters}
-          onRefresh={() => void load()}
-        />
-      )}
-      {activeTab === "audit" && (
-        <AuditView
-          events={audit}
-          page={listPage}
-          pageSize={25}
-          total={listTotal}
-          filters={auditFilters}
-          onFiltersChange={(next) => {
-            setListPage(1)
-            setAuditFilters(next)
-          }}
-          onPageChange={setListPage}
-        />
-      )}
         </div>
       </div>
     </div>
@@ -613,10 +656,7 @@ function ControlsView({
   savingMaintenance: boolean
   savingControl: PlatformControlKey | null
   onChange: (settings: PlatformSettings) => void
-  onToggle: (
-    key: PlatformControlKey,
-    value: boolean
-  ) => void
+  onToggle: (key: PlatformControlKey, value: boolean) => void
   onSave: () => void
 }) {
   const controls: Array<[PlatformControlKey, string, string]> = [
@@ -668,7 +708,9 @@ function ControlsView({
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {savingControl === key && (
-                  <span className="text-[11px] text-muted-foreground">Saving…</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    Saving…
+                  </span>
                 )}
                 <Switch
                   aria-label={label}
@@ -1478,7 +1520,9 @@ function InventoryView({
       "image/x-icon",
     ])
     if (!allowedTypes.has(file.type)) {
-      setCreateError("Use a PNG, JPEG, GIF, WebP, or ICO image for the MCP logo.")
+      setCreateError(
+        "Use a PNG, JPEG, GIF, WebP, or ICO image for the MCP logo."
+      )
       if (createIconInputRef.current) createIconInputRef.current.value = ""
       return
     }
@@ -1665,7 +1709,10 @@ function InventoryView({
         oauthScopes: "",
         scopeId: "",
       }))
-      notifySuccess(`${resourceLabel} created`, `${name} is now in the catalog.`)
+      notifySuccess(
+        `${resourceLabel} created`,
+        `${name} is now in the catalog.`
+      )
       onRefresh()
     } catch (caught) {
       setCreateError(
@@ -2084,10 +2131,13 @@ function InventoryView({
                     />
                     <p className="truncate text-sm font-medium">
                       {createIconFile?.name ??
-                        (createIconPreview ? "Logo selected" : "No logo selected")}
+                        (createIconPreview
+                          ? "Logo selected"
+                          : "No logo selected")}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on upload
+                      PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on
+                      upload
                     </p>
                     <div className="pt-1">
                       <Button
@@ -2096,7 +2146,10 @@ function InventoryView({
                         size="sm"
                         onClick={() => createIconInputRef.current?.click()}
                       >
-                        <ImagePlus data-icon="inline-start" aria-hidden="true" />
+                        <ImagePlus
+                          data-icon="inline-start"
+                          aria-hidden="true"
+                        />
                         {createIconPreview ? "Replace logo" : "Choose logo"}
                       </Button>
                       {createIconPreview && (
@@ -2729,7 +2782,12 @@ function AnalyticsView({
               : "—",
           ],
           ["Total tokens", compactNumber(summary?.totalTokens)],
-          ["Average TTFT", summary?.averageTtftMs ? `${Math.round(summary.averageTtftMs)} ms` : "—"],
+          [
+            "Average TTFT",
+            summary?.averageTtftMs
+              ? `${Math.round(summary.averageTtftMs)} ms`
+              : "—",
+          ],
           ["Tool calls", summary?.toolCalls],
         ].map(([label, value]) => (
           <Card key={String(label)}>
