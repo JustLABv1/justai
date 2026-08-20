@@ -4,10 +4,13 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react"
 import {
+  ChevronLeft,
+  ChevronRight,
   FileText,
   Globe2,
   LoaderCircle,
@@ -29,15 +32,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import {
-  Attachment,
-  AttachmentContent,
-  AttachmentDescription,
-  AttachmentGroup,
-  AttachmentMedia,
-  AttachmentTitle,
-} from "@/components/ui/attachment"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -81,36 +75,46 @@ import { cn } from "@/lib/utils"
 
 const sourceStatusStyles: Record<
   KnowledgeSource["status"],
-  { label: string; card: string; badge: string; media: string }
+  { label: string; text: string; dot: string }
 > = {
   ready: {
     label: "Ready",
-    card: "border-emerald-500/30 bg-emerald-500/5",
-    badge:
-      "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-    media:
-      "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    text: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-emerald-500",
   },
   queued: {
     label: "Queued",
-    card: "border-amber-500/30 bg-amber-500/5",
-    badge:
-      "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-    media:
-      "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    text: "text-amber-600 dark:text-amber-400",
+    dot: "bg-amber-500",
   },
   processing: {
     label: "Processing",
-    card: "border-primary/30 bg-primary/5",
-    badge: "border-primary/30 bg-primary/10 text-primary",
-    media: "border-primary/30 bg-primary/10 text-primary",
+    text: "text-primary",
+    dot: "bg-primary",
   },
   failed: {
     label: "Failed",
-    card: "border-destructive/30 bg-destructive/5",
-    badge: "border-destructive/30 bg-destructive/10 text-destructive",
-    media: "border-destructive/30 bg-destructive/10 text-destructive",
+    text: "text-destructive",
+    dot: "bg-destructive",
   },
+}
+
+const SOURCE_PAGE_SIZE = 12
+
+type SourceFilter = "all" | "ready" | "in-progress" | "failed"
+
+function getSourceParts(source: KnowledgeSource) {
+  const separatorIndex = source.title.indexOf(" · ")
+  if (separatorIndex === -1) {
+    return {
+      group: source.sourceType === "url" ? "URL source" : "Uploaded file",
+      path: source.title,
+    }
+  }
+  return {
+    group: source.title.slice(0, separatorIndex),
+    path: source.title.slice(separatorIndex + 3),
+  }
 }
 
 function formatStage(stage: string) {
@@ -152,6 +156,44 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
       null
     )
     const [busyId, setBusyId] = useState("")
+    const [searchQuery, setSearchQuery] = useState("")
+    const [statusFilter, setStatusFilter] = useState<SourceFilter>("all")
+    const [page, setPage] = useState(1)
+
+    const filteredSources = useMemo(() => {
+      const query = searchQuery.trim().toLowerCase()
+      return sources.filter((source) => {
+        const sourceParts = getSourceParts(source)
+        const matchesQuery =
+          !query ||
+          [source.title, source.sourceUrl, source.mimeType, sourceParts.group]
+            .filter(Boolean)
+            .some((value) => value!.toLowerCase().includes(query))
+        const matchesStatus =
+          statusFilter === "all" ||
+          (statusFilter === "in-progress"
+            ? source.status === "queued" || source.status === "processing"
+            : source.status === statusFilter)
+        return matchesQuery && matchesStatus
+      })
+    }, [searchQuery, sources, statusFilter])
+
+    const pageCount = Math.max(
+      1,
+      Math.ceil(filteredSources.length / SOURCE_PAGE_SIZE)
+    )
+    const currentPage = Math.min(page, pageCount)
+    const visibleSources = filteredSources.slice(
+      (currentPage - 1) * SOURCE_PAGE_SIZE,
+      currentPage * SOURCE_PAGE_SIZE
+    )
+    const rangeStart = filteredSources.length
+      ? (currentPage - 1) * SOURCE_PAGE_SIZE + 1
+      : 0
+    const rangeEnd = Math.min(
+      currentPage * SOURCE_PAGE_SIZE,
+      filteredSources.length
+    )
 
     useImperativeHandle(
       ref,
@@ -403,117 +445,240 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
             </EmptyContent>
           </Empty>
         ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Sources</CardTitle>
-              <CardDescription>
-                Each ready source is chunked for lexical retrieval, with
-                optional semantic retrieval when an embedding endpoint is
-                configured.
-              </CardDescription>
+          <Card className="overflow-hidden">
+            <CardHeader className="gap-4 border-b bg-muted/10">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <div className="min-w-0">
+                  <CardTitle className="text-base">Sources</CardTitle>
+                  <CardDescription className="mt-1">
+                    Search and manage the files available for retrieval. Ready
+                    sources are indexed automatically.
+                  </CardDescription>
+                </div>
+                <p className="shrink-0 text-xs text-muted-foreground">
+                  {sources.length} total
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative min-w-0 flex-1">
+                  <Search
+                    className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <Input
+                    value={searchQuery}
+                    onChange={(event) => {
+                      setSearchQuery(event.target.value)
+                      setPage(1)
+                    }}
+                    placeholder="Search files or paths"
+                    aria-label="Search knowledge sources"
+                    className="h-8 pl-8"
+                  />
+                </div>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    setStatusFilter((value as SourceFilter) || "all")
+                    setPage(1)
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-full sm:w-40">
+                    <SelectValue>
+                      {statusFilter === "all"
+                        ? "All statuses"
+                        : statusFilter === "in-progress"
+                          ? "In progress"
+                          : statusFilter === "ready"
+                            ? "Ready"
+                            : "Failed"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="ready">Ready</SelectItem>
+                    <SelectItem value="in-progress">In progress</SelectItem>
+                    <SelectItem value="failed">Failed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </CardHeader>
-            <CardContent>
-              <AttachmentGroup className="flex flex-wrap items-stretch justify-start gap-2 overflow-visible">
-                {sources.map((source) => {
-                  const manageable = canManageSource(source)
-                  const statusStyle = sourceStatusStyles[source.status]
-                  const showStage = Boolean(
-                    source.stage && source.stage !== source.status
-                  )
-                  return (
-                    <Attachment
-                      key={source.id}
-                      state={
-                        source.status === "failed"
-                          ? "error"
-                          : source.status === "processing"
-                            ? "processing"
-                            : source.status === "queued"
-                              ? "uploading"
-                              : "done"
-                      }
-                      orientation="horizontal"
-                      size="sm"
-                      className={cn(
-                        "w-full min-w-0 self-stretch sm:max-w-[22rem]",
-                        statusStyle.card
-                      )}
-                    >
-                      <AttachmentMedia
-                        className={cn(
-                          "size-9 rounded-lg border",
-                          statusStyle.media
-                        )}
-                        variant="icon"
-                      >
-                        {source.sourceType === "url" ? (
-                          <Globe2 aria-hidden="true" />
-                        ) : (
-                          <FileText aria-hidden="true" />
-                        )}
-                      </AttachmentMedia>
-                      <AttachmentContent className="p-2">
-                        <AttachmentTitle>{source.title}</AttachmentTitle>
-                        <AttachmentDescription>
-                          {source.sourceType === "url"
-                            ? source.sourceUrl
-                            : source.mimeType || "Text source"}
-                        </AttachmentDescription>
-                        <div className="mt-3 flex items-center gap-2">
-                          <Badge
-                            className={cn("text-[10px]", statusStyle.badge)}
-                            variant="outline"
-                          >
-                            {statusStyle.label}
-                          </Badge>
-                          {manageable && (
-                            <div className="ml-auto flex gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                disabled={busyId === source.id}
-                                onClick={() => void reindex(source)}
-                                aria-label={`Reindex ${source.title}`}
-                              >
-                                <RefreshCw aria-hidden="true" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                disabled={busyId === source.id}
-                                onClick={() => setRemoveTarget(source)}
-                                aria-label={`Remove ${source.title}`}
-                              >
-                                <Trash2 aria-hidden="true" />
-                              </Button>
+
+            <CardContent className="p-0">
+              {filteredSources.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
+                  <Search
+                    className="size-5 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <p className="text-sm font-medium">No sources found</p>
+                  <p className="max-w-sm text-xs text-muted-foreground">
+                    Try a different file name, path, or status filter.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setSearchQuery("")
+                      setStatusFilter("all")
+                      setPage(1)
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <div className="hidden grid-cols-[minmax(0,1fr)_8rem_5rem] gap-3 border-b bg-muted/20 px-4 py-2 text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase sm:grid sm:px-5">
+                    <span>Source</span>
+                    <span>Status</span>
+                    <span className="text-right">Actions</span>
+                  </div>
+                  <div className="divide-y">
+                    {visibleSources.map((source) => {
+                      const manageable = canManageSource(source)
+                      const statusStyle = sourceStatusStyles[source.status]
+                      const sourceParts = getSourceParts(source)
+                      const showStage = Boolean(
+                        source.stage && source.stage !== source.status
+                      )
+                      const isPending =
+                        source.status === "processing" ||
+                        source.status === "queued"
+
+                      return (
+                        <div
+                          key={source.id}
+                          className="group grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-3 transition-colors hover:bg-muted/20 sm:grid-cols-[minmax(0,1fr)_8rem_5rem] sm:items-center sm:px-5"
+                        >
+                          <div className="flex min-w-0 items-start gap-3">
+                            <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/50 text-muted-foreground">
+                              {source.sourceType === "url" ? (
+                                <Globe2 aria-hidden="true" />
+                              ) : (
+                                <FileText aria-hidden="true" />
+                              )}
                             </div>
-                          )}
-                        </div>
-                        {(source.status === "processing" ||
-                          source.status === "queued") && (
-                          <Progress
-                            value={Math.max(
-                              0,
-                              Math.min(100, source.progress ?? 0)
+                            <div className="min-w-0 flex-1">
+                              <p
+                                className="truncate text-sm font-medium"
+                                title={sourceParts.path}
+                              >
+                                {sourceParts.path}
+                              </p>
+                              <p
+                                className="mt-0.5 truncate text-xs text-muted-foreground"
+                                title={sourceParts.group}
+                              >
+                                {sourceParts.group}
+                                <span className="px-1.5 text-border">·</span>
+                                {source.sourceType === "url"
+                                  ? "URL"
+                                  : source.mimeType || "Text source"}
+                              </p>
+                              {isPending && (
+                                <Progress
+                                  value={Math.max(
+                                    0,
+                                    Math.min(100, source.progress ?? 0)
+                                  )}
+                                  className="mt-2 h-1 max-w-xs"
+                                />
+                              )}
+                              {showStage && (
+                                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                                  {formatStage(source.stage ?? "")}
+                                </p>
+                              )}
+                              {source.error && (
+                                <p className="mt-1.5 text-[11px] text-destructive">
+                                  {source.error}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-end sm:justify-start">
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1.5 text-xs",
+                                statusStyle.text
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "size-1.5 rounded-full",
+                                  statusStyle.dot
+                                )}
+                                aria-hidden="true"
+                              />
+                              {statusStyle.label}
+                            </span>
+                          </div>
+
+                          <div className="col-span-2 flex justify-end gap-1 opacity-100 transition-opacity sm:col-span-1 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
+                            {manageable && (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  disabled={busyId === source.id}
+                                  onClick={() => void reindex(source)}
+                                  aria-label={`Reindex ${source.title}`}
+                                >
+                                  <RefreshCw aria-hidden="true" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  disabled={busyId === source.id}
+                                  onClick={() => setRemoveTarget(source)}
+                                  aria-label={`Remove ${source.title}`}
+                                >
+                                  <Trash2 aria-hidden="true" />
+                                </Button>
+                              </>
                             )}
-                            className="mt-3"
-                          />
-                        )}
-                        {showStage && (
-                          <p className="mt-2 text-[11px] text-muted-foreground">
-                            {formatStage(source.stage ?? "")}
-                          </p>
-                        )}
-                        {source.error && (
-                          <p className="mt-2 text-[11px] text-destructive">
-                            {source.error}
-                          </p>
-                        )}
-                      </AttachmentContent>
-                    </Attachment>
-                  )
-                })}
-              </AttachmentGroup>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <p className="text-xs text-muted-foreground">
+                      Showing {rangeStart}–{rangeEnd} of{" "}
+                      {filteredSources.length} sources
+                    </p>
+                    {pageCount > 1 && (
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          disabled={currentPage === 1}
+                          onClick={() => setPage(currentPage - 1)}
+                          aria-label="Previous page"
+                        >
+                          <ChevronLeft aria-hidden="true" />
+                        </Button>
+                        <span className="min-w-16 text-center text-xs text-muted-foreground">
+                          Page {currentPage} of {pageCount}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          disabled={currentPage === pageCount}
+                          onClick={() => setPage(currentPage + 1)}
+                          aria-label="Next page"
+                        >
+                          <ChevronRight aria-hidden="true" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         )}
