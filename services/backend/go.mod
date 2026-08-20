@@ -5,6 +5,7 @@ go 1.26.6
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/coreos/go-oidc/v3 v3.20.0
+	github.com/gabriel-vasile/mimetype v1.4.12
 	github.com/gin-gonic/gin v1.12.0
 	github.com/goccy/go-yaml v1.19.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -13,7 +14,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	golang.org/x/crypto v0.55.0
-	golang.org/x/image v0.30.0
+	golang.org/x/image v0.41.0
 	golang.org/x/net v0.58.0
 	golang.org/x/oauth2 v0.36.0
 )
@@ -23,7 +24,6 @@ require (
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
