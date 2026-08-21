@@ -1165,18 +1165,19 @@ func safeTranscriptExportName(value string) string {
 func buildTranscriptDOCX(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights) []byte {
 	var document strings.Builder
 	document.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>`)
-	document.WriteString(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>` + html.EscapeString(title) + `</w:t></w:r></w:p>`)
+	document.WriteString(`<w:p><w:pPr><w:shd w:fill="F7EFE8"/><w:spacing w:after="180"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/><w:sz w:val="26"/></w:rPr><w:t>JustAI</w:t></w:r><w:r><w:rPr><w:color w:val="6B4F42"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">  Transcript</w:t></w:r></w:p>`)
+	document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="292321"/><w:sz w:val="30"/></w:rPr><w:t>` + html.EscapeString(title) + `</w:t></w:r></w:p>`)
+	document.WriteString(`<w:p><w:r><w:rPr><w:color w:val="807873"/><w:sz w:val="17"/></w:rPr><w:t>Transcript exported from JustAI</w:t></w:r></w:p>`)
 	for _, row := range rows {
-		text := fmt.Sprintf("[%s]", formatTranscriptTimestamp(row.StartOffsetMs))
+		text := " " + row.Text
 		if row.Speaker != "" {
-			text += " " + row.Speaker + ":"
+			text = " " + row.Speaker + ":" + text
 		}
-		text += " " + row.Text
-		document.WriteString(`<w:p><w:r><w:t xml:space="preserve">` + html.EscapeString(text) + `</w:t></w:r></w:p>`)
+		document.WriteString(`<w:p><w:pPr><w:spacing w:after="100"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>[` + html.EscapeString(formatTranscriptTimestamp(row.StartOffsetMs)) + `]</w:t></w:r><w:r><w:t xml:space="preserve">` + html.EscapeString(text) + `</w:t></w:r></w:p>`)
 	}
 	if insights != nil {
-		document.WriteString(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>AI insights</w:t></w:r></w:p>`)
-		document.WriteString(`<w:p><w:r><w:t xml:space="preserve">Language: ` + html.EscapeString(transcriptionInsightLanguageLabel(insights.Language)) + `</w:t></w:r></w:p>`)
+		document.WriteString(`<w:p><w:pPr><w:shd w:fill="F7EFE8"/><w:spacing w:before="240" w:after="120"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/><w:sz w:val="22"/></w:rPr><w:t>AI insights</w:t></w:r></w:p>`)
+		document.WriteString(`<w:p><w:r><w:rPr><w:color w:val="807873"/><w:sz w:val="17"/></w:rPr><w:t xml:space="preserve">Language: ` + html.EscapeString(transcriptionInsightLanguageLabel(insights.Language)) + `</w:t></w:r></w:p>`)
 		if insights.Status != "completed" {
 			document.WriteString(`<w:p><w:r><w:t xml:space="preserve">Status: ` + html.EscapeString(insights.Status) + `</w:t></w:r></w:p>`)
 			if strings.TrimSpace(insights.Error) != "" {
@@ -1184,11 +1185,11 @@ func buildTranscriptDOCX(title string, rows []transcriptionExportRow, insights *
 			}
 		} else {
 			if strings.TrimSpace(insights.Summary) != "" {
-				document.WriteString(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Summary</w:t></w:r></w:p>`)
+				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>Summary</w:t></w:r></w:p>`)
 				document.WriteString(`<w:p><w:r><w:t xml:space="preserve">` + html.EscapeString(strings.TrimSpace(insights.Summary)) + `</w:t></w:r></w:p>`)
 			}
 			if len(insights.Chapters) > 0 {
-				document.WriteString(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Chapters</w:t></w:r></w:p>`)
+				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>Chapters</w:t></w:r></w:p>`)
 				for _, chapter := range insights.Chapters {
 					text := fmt.Sprintf("[%s] %s", formatTranscriptTimestamp(chapter.StartOffsetMs), strings.TrimSpace(chapter.Title))
 					if strings.TrimSpace(chapter.Summary) != "" {
@@ -1198,13 +1199,13 @@ func buildTranscriptDOCX(title string, rows []transcriptionExportRow, insights *
 				}
 			}
 			if len(insights.Topics) > 0 {
-				document.WriteString(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Topics</w:t></w:r></w:p>`)
+				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>Topics</w:t></w:r></w:p>`)
 				for _, topic := range insights.Topics {
 					document.WriteString(`<w:p><w:r><w:t xml:space="preserve">- ` + html.EscapeString(strings.TrimSpace(topic)) + `</w:t></w:r></w:p>`)
 				}
 			}
 			if len(insights.ActionItems) > 0 {
-				document.WriteString(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Action items</w:t></w:r></w:p>`)
+				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>Action items</w:t></w:r></w:p>`)
 				for _, item := range insights.ActionItems {
 					document.WriteString(`<w:p><w:r><w:t xml:space="preserve">- ` + html.EscapeString(strings.TrimSpace(item)) + `</w:t></w:r></w:p>`)
 				}
@@ -1253,24 +1254,37 @@ type transcriptPDFPage struct {
 }
 
 const (
-	transcriptPDFPageWidth       = 612.0
-	transcriptPDFPageHeight      = 792.0
-	transcriptPDFLeftMargin      = 54.0
-	transcriptPDFRightMargin     = 558.0
-	transcriptPDFTextX           = 118.0
-	transcriptPDFBodyTopY        = 684.0
-	transcriptPDFBodyBottomY     = 54.0
-	transcriptPDFBodyFontSize    = 10.5
-	transcriptPDFBodyLineHeight  = 15.0
-	transcriptPDFParagraphGap    = 9.0
-	transcriptPDFBodyLineCharMax = 84
-	transcriptPDFBlockCharMax    = 720
+	transcriptPDFPageWidth         = 612.0
+	transcriptPDFPageHeight        = 792.0
+	transcriptPDFLeftMargin        = 54.0
+	transcriptPDFRightMargin       = 558.0
+	transcriptPDFTextX             = 118.0
+	transcriptPDFFirstPageBodyTopY = 630.0
+	transcriptPDFBodyTopY          = 688.0
+	transcriptPDFBodyBottomY       = 54.0
+	transcriptPDFBodyFontSize      = 10.5
+	transcriptPDFBodyLineHeight    = 15.0
+	transcriptPDFParagraphGap      = 9.0
+	transcriptPDFBodyLineCharMax   = 84
+	transcriptPDFBlockCharMax      = 720
+	transcriptPDFBrandColor        = "0.39 0.29 0.24"
+	transcriptPDFBrandDark         = "0.16 0.14 0.13"
+	transcriptPDFBrandMuted        = "0.42 0.40 0.39"
+	transcriptPDFBrandSoft         = "0.97 0.94 0.90"
+	transcriptPDFBrandLine         = "0.84 0.78 0.72"
 )
+
+func transcriptPDFBodyTopYForPage(pageNumber int) float64 {
+	if pageNumber == 0 {
+		return transcriptPDFFirstPageBodyTopY
+	}
+	return transcriptPDFBodyTopY
+}
 
 func buildTranscriptPDF(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights) []byte {
 	blocks := transcriptionPDFBlocks(rows)
 	pages := []transcriptPDFPage{{Lines: make([]transcriptPDFTextLine, 0)}}
-	currentY := transcriptPDFBodyTopY
+	currentY := transcriptPDFBodyTopYForPage(0)
 
 	for _, block := range blocks {
 		wrapped := wrapTranscriptPDFLine(block.Text, transcriptPDFBodyLineCharMax)
@@ -1281,26 +1295,26 @@ func buildTranscriptPDF(title string, rows []transcriptionExportRow, insights *m
 		requiredHeight := float64(lineCount)*transcriptPDFBodyLineHeight + transcriptPDFParagraphGap
 		if currentY-requiredHeight < transcriptPDFBodyBottomY && len(pages[len(pages)-1].Lines) > 0 {
 			pages = append(pages, transcriptPDFPage{Lines: make([]transcriptPDFTextLine, 0)})
-			currentY = transcriptPDFBodyTopY
+			currentY = transcriptPDFBodyTopYForPage(len(pages) - 1)
 		}
 
 		page := &pages[len(pages)-1]
 		if block.Speaker != "" {
 			page.Lines = append(page.Lines,
-				transcriptPDFTextLine{Text: formatTranscriptTimestamp(block.StartOffsetMs), X: transcriptPDFLeftMargin, Y: currentY, Font: "F2", Size: 8.5, Color: "0.39 0.29 0.24"},
-				transcriptPDFTextLine{Text: block.Speaker, X: transcriptPDFTextX, Y: currentY, Font: "F2", Size: transcriptPDFBodyFontSize, Color: "0.16 0.14 0.13"},
+				transcriptPDFTextLine{Text: formatTranscriptTimestamp(block.StartOffsetMs), X: transcriptPDFLeftMargin, Y: currentY, Font: "F2", Size: 8.5, Color: transcriptPDFBrandColor},
+				transcriptPDFTextLine{Text: block.Speaker, X: transcriptPDFTextX, Y: currentY, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandDark},
 			)
 			currentY -= transcriptPDFBodyLineHeight
 			for _, line := range wrapped {
-				page.Lines = append(page.Lines, transcriptPDFTextLine{Text: line, X: transcriptPDFTextX, Y: currentY, Font: "F1", Size: transcriptPDFBodyFontSize, Color: "0.16 0.14 0.13"})
+				page.Lines = append(page.Lines, transcriptPDFTextLine{Text: line, X: transcriptPDFTextX, Y: currentY, Font: "F1", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandDark})
 				currentY -= transcriptPDFBodyLineHeight
 			}
 		} else {
 			for index, line := range wrapped {
 				if index == 0 {
-					page.Lines = append(page.Lines, transcriptPDFTextLine{Text: formatTranscriptTimestamp(block.StartOffsetMs), X: transcriptPDFLeftMargin, Y: currentY, Font: "F2", Size: 8.5, Color: "0.39 0.29 0.24"})
+					page.Lines = append(page.Lines, transcriptPDFTextLine{Text: formatTranscriptTimestamp(block.StartOffsetMs), X: transcriptPDFLeftMargin, Y: currentY, Font: "F2", Size: 8.5, Color: transcriptPDFBrandColor})
 				}
-				page.Lines = append(page.Lines, transcriptPDFTextLine{Text: line, X: transcriptPDFTextX, Y: currentY, Font: "F1", Size: transcriptPDFBodyFontSize, Color: "0.16 0.14 0.13"})
+				page.Lines = append(page.Lines, transcriptPDFTextLine{Text: line, X: transcriptPDFTextX, Y: currentY, Font: "F1", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandDark})
 				currentY -= transcriptPDFBodyLineHeight
 			}
 		}
@@ -1309,7 +1323,7 @@ func buildTranscriptPDF(title string, rows []transcriptionExportRow, insights *m
 	appendTranscriptPDFInsights(&pages, &currentY, insights)
 
 	if len(blocks) == 0 {
-		pages[0].Lines = append(pages[0].Lines, transcriptPDFTextLine{Text: "No transcript text available.", X: transcriptPDFTextX, Y: transcriptPDFBodyTopY, Font: "F1", Size: transcriptPDFBodyFontSize, Color: "0.42 0.40 0.39"})
+		pages[0].Lines = append(pages[0].Lines, transcriptPDFTextLine{Text: "No transcript text available.", X: transcriptPDFTextX, Y: transcriptPDFFirstPageBodyTopY, Font: "F1", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandMuted})
 	}
 
 	return renderTranscriptPDF(title, pages)
@@ -1319,40 +1333,40 @@ func appendTranscriptPDFInsights(pages *[]transcriptPDFPage, currentY *float64, 
 	if insights == nil {
 		return
 	}
-	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "AI insights", X: transcriptPDFLeftMargin, Font: "F2", Size: 15, Color: "0.12 0.11 0.10"}, 21)
-	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Language: " + transcriptionInsightLanguageLabel(insights.Language), X: transcriptPDFLeftMargin, Font: "F1", Size: 8.5, Color: "0.42 0.40 0.39"}, 16)
+	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "AI insights", X: transcriptPDFLeftMargin, Font: "F2", Size: 15, Color: transcriptPDFBrandColor}, 21)
+	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Language: " + transcriptionInsightLanguageLabel(insights.Language), X: transcriptPDFLeftMargin, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted}, 16)
 	if insights.Status != "completed" {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Status: " + insights.Status, X: transcriptPDFLeftMargin, Font: "F1", Size: transcriptPDFBodyFontSize, Color: "0.16 0.14 0.13"}, transcriptPDFBodyLineHeight)
+		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Status: " + insights.Status, X: transcriptPDFLeftMargin, Font: "F1", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandDark}, transcriptPDFBodyLineHeight)
 		if strings.TrimSpace(insights.Error) != "" {
-			appendTranscriptPDFWrappedFlow(pages, currentY, strings.TrimSpace(insights.Error), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, "0.16 0.14 0.13")
+			appendTranscriptPDFWrappedFlow(pages, currentY, strings.TrimSpace(insights.Error), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		}
 		return
 	}
 	if strings.TrimSpace(insights.Summary) != "" {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Summary", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: "0.20 0.18 0.17"}, 17)
-		appendTranscriptPDFWrappedFlow(pages, currentY, strings.TrimSpace(insights.Summary), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, "0.16 0.14 0.13")
+		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Summary", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFWrappedFlow(pages, currentY, strings.TrimSpace(insights.Summary), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		*currentY -= 5
 	}
 	if len(insights.Chapters) > 0 {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Chapters", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: "0.20 0.18 0.17"}, 17)
+		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Chapters", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
 		for _, chapter := range insights.Chapters {
 			text := fmt.Sprintf("[%s] %s", formatTranscriptTimestamp(chapter.StartOffsetMs), strings.TrimSpace(chapter.Title))
 			if strings.TrimSpace(chapter.Summary) != "" {
 				text += " - " + strings.TrimSpace(chapter.Summary)
 			}
-			appendTranscriptPDFWrappedFlow(pages, currentY, text, transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, "0.16 0.14 0.13")
+			appendTranscriptPDFWrappedFlow(pages, currentY, text, transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		}
 		*currentY -= 5
 	}
 	if len(insights.Topics) > 0 {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Topics", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: "0.20 0.18 0.17"}, 17)
-		appendTranscriptPDFWrappedFlow(pages, currentY, strings.Join(insights.Topics, ", "), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, "0.16 0.14 0.13")
+		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Topics", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFWrappedFlow(pages, currentY, strings.Join(insights.Topics, ", "), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		*currentY -= 5
 	}
 	if len(insights.ActionItems) > 0 {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Action items", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: "0.20 0.18 0.17"}, 17)
+		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Action items", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
 		for _, item := range insights.ActionItems {
-			appendTranscriptPDFWrappedFlow(pages, currentY, "- "+strings.TrimSpace(item), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, "0.16 0.14 0.13")
+			appendTranscriptPDFWrappedFlow(pages, currentY, "- "+strings.TrimSpace(item), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		}
 	}
 }
@@ -1366,7 +1380,7 @@ func appendTranscriptPDFWrappedFlow(pages *[]transcriptPDFPage, currentY *float6
 func appendTranscriptPDFFlowLine(pages *[]transcriptPDFPage, currentY *float64, line transcriptPDFTextLine, lineHeight float64) {
 	if *currentY-lineHeight < transcriptPDFBodyBottomY && len((*pages)[len(*pages)-1].Lines) > 0 {
 		*pages = append(*pages, transcriptPDFPage{Lines: make([]transcriptPDFTextLine, 0)})
-		*currentY = transcriptPDFBodyTopY
+		*currentY = transcriptPDFBodyTopYForPage(len(*pages) - 1)
 	}
 	line.Y = *currentY
 	page := &(*pages)[len(*pages)-1]
@@ -1429,20 +1443,29 @@ func renderTranscriptPDF(title string, pages []transcriptPDFPage) []byte {
 	pageRefs := make([]int, 0, len(pages))
 	for pageNumber, page := range pages {
 		var content strings.Builder
-		content.WriteString("0.86 0.86 0.86 RG\n0.6 w\n54 712 m 558 712 l S\n")
+		appendTranscriptPDFRectangle(&content, 0, 710, transcriptPDFPageWidth, 82, transcriptPDFBrandSoft)
+		appendTranscriptPDFRectangle(&content, 0, 710, transcriptPDFPageWidth, 3, transcriptPDFBrandColor)
 		if pageNumber == 0 {
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: title, X: transcriptPDFLeftMargin, Y: 752, Font: "F2", Size: 18, Color: "0.12 0.11 0.10"})
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "Transcript", X: transcriptPDFLeftMargin, Y: 733, Font: "F1", Size: 9, Color: "0.42 0.40 0.39"})
+			appendTranscriptPDFBrandMark(&content, transcriptPDFLeftMargin, 738, 22)
+			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "JustAI", X: 84, Y: 758, Font: "F2", Size: 14, Color: transcriptPDFBrandColor})
+			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "Transcript workspace", X: 84, Y: 743, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted})
+			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: title, X: transcriptPDFLeftMargin, Y: 689, Font: "F2", Size: 22, Color: transcriptPDFBrandDark})
+			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "Transcript exported from JustAI", X: transcriptPDFLeftMargin, Y: 670, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted})
+			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "TRANSCRIPT", X: transcriptPDFLeftMargin, Y: 649, Font: "F2", Size: 8, Color: transcriptPDFBrandColor})
+			content.WriteString(transcriptPDFBrandColor + " RG\n0.8 w\n54 640 m 558 640 l S\n")
 		} else {
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: title, X: transcriptPDFLeftMargin, Y: 750, Font: "F2", Size: 11, Color: "0.20 0.18 0.17"})
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "Transcript", X: transcriptPDFRightMargin - 54, Y: 750, Font: "F1", Size: 8.5, Color: "0.48 0.46 0.45"})
+			appendTranscriptPDFBrandMark(&content, transcriptPDFLeftMargin, 741, 15)
+			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "JustAI", X: 76, Y: 752, Font: "F2", Size: 10.5, Color: transcriptPDFBrandColor})
+			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: title, X: 146, Y: 752, Font: "F1", Size: 9, Color: transcriptPDFBrandDark})
+			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "Transcript", X: transcriptPDFRightMargin - 54, Y: 752, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted})
+			content.WriteString("0.84 0.78 0.72 RG\n0.6 w\n54 728 m 558 728 l S\n")
 		}
 		for _, line := range page.Lines {
 			appendTranscriptPDFText(&content, line)
 		}
-		content.WriteString("0.88 0.88 0.88 RG\n0.5 w\n54 43 m 558 43 l S\n")
-		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: title + " · Transcript", X: transcriptPDFLeftMargin, Y: 28, Font: "F1", Size: 8, Color: "0.48 0.46 0.45"})
-		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: fmt.Sprintf("Page %d of %d", pageNumber+1, len(pages)), X: 486, Y: 28, Font: "F1", Size: 8, Color: "0.48 0.46 0.45"})
+		content.WriteString(transcriptPDFBrandLine + " RG\n0.5 w\n54 43 m 558 43 l S\n")
+		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "JustAI - Transcript", X: transcriptPDFLeftMargin, Y: 28, Font: "F1", Size: 8, Color: transcriptPDFBrandMuted})
+		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: fmt.Sprintf("Page %d of %d", pageNumber+1, len(pages)), X: 486, Y: 28, Font: "F1", Size: 8, Color: transcriptPDFBrandMuted})
 
 		contentObject := fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", len(content.String()), content.String())
 		objects = append(objects, contentObject)
@@ -1470,6 +1493,26 @@ func renderTranscriptPDF(title string, pages []transcriptPDFPage) []byte {
 	}
 	fmt.Fprintf(&output, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xrefOffset)
 	return output.Bytes()
+}
+
+func appendTranscriptPDFRectangle(content *strings.Builder, x, y, width, height float64, color string) {
+	fmt.Fprintf(content, "q\n%s rg\n%.2f %.2f %.2f %.2f re\nf\nQ\n", color, x, y, width, height)
+}
+
+func appendTranscriptPDFBrandMark(content *strings.Builder, x, y, size float64) {
+	scale := size / 64
+	strokeWidth := 6 * scale
+	fmt.Fprintf(content, "q\n%s RG\n%.2f w\n1 J\n", transcriptPDFBrandColor, strokeWidth)
+	// This is the compact vector form of the JustAI mark used in the web app.
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l %.2f %.2f %.2f %.2f %.2f %.2f c S\n", x+10*scale, y+size-12*scale, x+10*scale, y+size-18*scale, x+10*scale, y+size-25*scale, x+16*scale, y+size-30*scale, x+25*scale, y+size-30*scale)
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l %.2f %.2f %.2f %.2f %.2f %.2f c S\n", x+54*scale, y+size-12*scale, x+54*scale, y+size-18*scale, x+54*scale, y+size-25*scale, x+48*scale, y+size-30*scale, x+39*scale, y+size-30*scale)
+	fmt.Fprintf(content, "%.2f %.2f m %.2f %.2f l %.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c S\n", x+32*scale, y+size-20*scale, x+32*scale, y+size-39*scale, x+32*scale, y+size-48*scale, x+27*scale, y+size-53*scale, x+19*scale, y+size-53*scale, x+13*scale, y+size-53*scale, x+9*scale, y+size-50*scale, x+6*scale, y+size-46*scale)
+
+	cx := x + 32*scale
+	cy := y + size - 9*scale
+	radius := 4.5 * scale
+	kappa := radius * 0.5522848
+	fmt.Fprintf(content, "%s rg\n%.2f %.2f m %.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c %.2f %.2f %.2f %.2f %.2f %.2f c f\nQ\n", transcriptPDFBrandColor, cx+radius, cy, cx+radius, cy+kappa, cx+kappa, cy+radius, cx, cy+radius, cx-kappa, cy+radius, cx-radius, cy+kappa, cx-radius, cy, cx-radius, cy-kappa, cx-kappa, cy-radius, cx, cy-radius, cx+kappa, cy-radius, cx+radius, cy-kappa, cx+radius, cy)
 }
 
 func appendTranscriptPDFText(content *strings.Builder, line transcriptPDFTextLine) {

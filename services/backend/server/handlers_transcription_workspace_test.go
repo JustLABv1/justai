@@ -27,6 +27,9 @@ func TestTranscriptWorkspaceExportArtifacts(t *testing.T) {
 	if !bytes.HasPrefix(pdf, []byte("%PDF-1.4")) {
 		t.Fatalf("PDF does not start with a PDF header")
 	}
+	if !bytes.Contains(pdf, []byte("JustAI")) || !bytes.Contains(pdf, []byte(transcriptPDFBrandSoft)) {
+		t.Fatalf("PDF is missing JustAI branding: %s", pdf)
+	}
 	if path := os.Getenv("JUSTAI_TRANSCRIPT_PDF_VERIFY_PATH"); path != "" {
 		if err := os.WriteFile(path, pdf, 0o600); err != nil {
 			t.Fatalf("write PDF verification artifact: %v", err)
@@ -53,6 +56,9 @@ func TestTranscriptWorkspaceExportArtifacts(t *testing.T) {
 		_ = reader.Close()
 		if !strings.Contains(buffer.String(), "Anna Müller") {
 			t.Fatalf("DOCX document does not contain the transcript speaker")
+		}
+		if !strings.Contains(buffer.String(), "JustAI") || !strings.Contains(buffer.String(), "w:color w:val=\"6B4F42\"") {
+			t.Fatalf("DOCX document is missing JustAI branding: %s", buffer.String())
 		}
 	}
 	if !seenDocument {
