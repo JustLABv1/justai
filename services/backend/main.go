@@ -51,6 +51,7 @@ func main() {
 	defer cancel()
 	application.RAG.Start(workerContext)
 	application.StartRepositoryWorker(workerContext)
+	application.StartLifecycleWorker(workerContext)
 	application.Live.Start(workerContext)
 	server := &http.Server{
 		Addr:              cfg.Address(),

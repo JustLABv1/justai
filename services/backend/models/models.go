@@ -31,7 +31,11 @@ type Conversation struct {
 	ID                 uuid.UUID         `json:"id"`
 	UserID             uuid.UUID         `json:"-"`
 	OrganizationID     uuid.UUID         `json:"-"`
+	OwnerID            uuid.UUID         `json:"ownerId,omitempty"`
 	Title              string            `json:"title"`
+	Visibility         string            `json:"visibility,omitempty"`
+	CanManage          bool              `json:"canManage"`
+	ProjectID          *uuid.UUID        `json:"projectId,omitempty"`
 	EndpointID         *uuid.UUID        `json:"endpointId,omitempty"`
 	AssistantID        *uuid.UUID        `json:"assistantId,omitempty"`
 	AssistantVersionID *uuid.UUID        `json:"assistantVersionId,omitempty"`
@@ -91,12 +95,34 @@ type Memory struct {
 
 type Note struct {
 	ID                   uuid.UUID  `json:"id"`
+	OwnerID              uuid.UUID  `json:"ownerId,omitempty"`
+	Visibility           string     `json:"visibility,omitempty"`
+	CanManage            bool       `json:"canManage"`
 	Title                string     `json:"title"`
 	Content              string     `json:"content"`
 	SourceConversationID *uuid.UUID `json:"sourceConversationId,omitempty"`
 	PinnedAt             *time.Time `json:"pinnedAt,omitempty"`
 	CreatedAt            time.Time  `json:"createdAt"`
 	UpdatedAt            time.Time  `json:"updatedAt"`
+}
+
+type WorkspaceProject struct {
+	ID             uuid.UUID `json:"id"`
+	OwnerID        uuid.UUID `json:"ownerId,omitempty"`
+	OrganizationID uuid.UUID `json:"-"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description"`
+	Visibility     string    `json:"visibility"`
+	CanManage      bool      `json:"canManage"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type PrivacySettings struct {
+	ArchivedConversationRetentionDays int        `json:"archivedConversationRetentionDays"`
+	KnowledgeRetentionDays            int        `json:"knowledgeRetentionDays"`
+	TranscriptionRetentionDays        int        `json:"transcriptionRetentionDays"`
+	UpdatedAt                         *time.Time `json:"updatedAt,omitempty"`
 }
 
 type GeneratedImage struct {
@@ -395,6 +421,7 @@ type ConversationContext struct {
 	MCPServers            []MCPServer            `json:"mcpServers"`
 	TranscriptionSessions []TranscriptionSession `json:"transcriptionSessions"`
 	Notes                 []Note                 `json:"notes,omitempty"`
+	Project               *WorkspaceProject      `json:"project,omitempty"`
 }
 
 type SocketEnvelope struct {

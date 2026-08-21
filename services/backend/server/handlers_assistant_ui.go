@@ -349,6 +349,12 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, notesErr)
 		return
 	}
+	projectContext, projectErr := a.projectPrompt(c, conversationID)
+	if projectErr != nil {
+		runStatus = "error"
+		writeError(c, http.StatusInternalServerError, projectErr)
+		return
+	}
 	streamID := uuid.New()
 	if err := a.createChatStream(context.Background(), streamID, conversationID, principal.UserID, organizationID, runID); err != nil {
 		runStatus = "error"
@@ -605,6 +611,9 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		if strings.TrimSpace(attachedNotes) != "" {
 			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: attachedNotes}}, toolHistory...)
 		}
+		if strings.TrimSpace(projectContext) != "" {
+			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: projectContext}}, toolHistory...)
+		}
 		toolHistory = append([]provider.ToolMessage{{Role: "system", Content: chatToolInstructions()}}, toolHistory...)
 		if len(citations) > 0 {
 			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: citationPromptForMode(citations, request.DeepContext)}}, toolHistory...)
@@ -654,6 +663,9 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		}
 		if strings.TrimSpace(attachedNotes) != "" {
 			history = append([]provider.Message{{Role: "system", Content: attachedNotes}}, history...)
+		}
+		if strings.TrimSpace(projectContext) != "" {
+			history = append([]provider.Message{{Role: "system", Content: projectContext}}, history...)
 		}
 		if !provider.SupportsToolCalling(endpoint) {
 			history = append([]provider.Message{{Role: "system", Content: chatBuiltInFallbackInstructions()}}, history...)
@@ -1750,7 +1762,7 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 		return
 	}
 	var exists bool
-	if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, conversationID, principal.UserID, organizationID).Scan(&exists); err != nil {
+	if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace'))`, conversationID, principal.UserID, organizationID).Scan(&exists); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -2365,7 +2377,7 @@ func (a *App) upsertAssistantMessage(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("message id is required"))
 		return
 	}
-	if !a.conversationOwnedBy(c, conversationID, principal.UserID, organizationID) {
+	if !a.conversationAccessibleBy(c, conversationID, principal.UserID, organizationID) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
@@ -2511,7 +2523,7 @@ func (a *App) updateAssistantMessage(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("message id is required"))
 		return
 	}
-	if !a.conversationOwnedBy(c, conversationID, principal.UserID, organizationID) {
+	if !a.conversationAccessibleBy(c, conversationID, principal.UserID, organizationID) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}

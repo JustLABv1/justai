@@ -6,11 +6,13 @@ import {
   ChevronDown,
   Folder,
   FolderPlus,
+  LockKeyhole,
   MoreHorizontal,
   Pin,
   PinOff,
   Pencil,
   Settings2,
+  Share2,
   Tag,
   Trash2,
 } from "lucide-react"
@@ -68,6 +70,10 @@ type AssistantThreadListProps = {
   onArchive: (conversationId: string, archived: boolean) => void | Promise<void>
   onDelete: (conversation: Conversation) => void
   onRename: (conversationId: string, title: string) => void | Promise<void>
+  onShare: (
+    conversationId: string,
+    visibility: "private" | "workspace"
+  ) => void | Promise<void>
   onSelect: (conversationId: string) => void
   onConversationRefresh?: () => void | Promise<void>
 }
@@ -91,6 +97,10 @@ function metadata(conversation: Conversation, status: "regular" | "archived") {
       folderId: conversation.folderId,
       pinnedAt: conversation.pinnedAt,
       tags: conversation.tags,
+      visibility: conversation.visibility,
+      canManage: conversation.canManage,
+      ownerId: conversation.ownerId,
+      projectId: conversation.projectId,
     },
   } as const
 }
@@ -110,6 +120,19 @@ function conversationForThread(thread: {
     createdAt: "",
     updatedAt: "",
     messageCount,
+    ownerId:
+      typeof thread.custom?.ownerId === "string"
+        ? thread.custom.ownerId
+        : undefined,
+    visibility:
+      typeof thread.custom?.visibility === "string"
+        ? thread.custom.visibility
+        : "private",
+    canManage: thread.custom?.canManage === true,
+    projectId:
+      typeof thread.custom?.projectId === "string"
+        ? thread.custom.projectId
+        : null,
     folderId:
       typeof thread.custom?.folderId === "string"
         ? thread.custom.folderId
@@ -189,6 +212,7 @@ function AssistantThreadItem({
   onArchive,
   onDelete,
   onRequestRename,
+  onShare,
   onTogglePinned,
   onMoveFolder,
   onToggleTag,
@@ -202,6 +226,10 @@ function AssistantThreadItem({
   onArchive: (threadId: string) => void
   onDelete: (threadId: string) => void
   onRequestRename: (threadId: string, title: string) => void
+  onShare: (
+    threadId: string,
+    visibility: "private" | "workspace"
+  ) => void | Promise<void>
   onTogglePinned: (threadId: string, pinned: boolean) => void | Promise<void>
   onMoveFolder: (
     threadId: string,
@@ -227,6 +255,9 @@ function AssistantThreadItem({
   const threadTags = Array.isArray(thread.custom?.tags)
     ? (thread.custom.tags as ConversationTag[])
     : []
+  const visibility =
+    thread.custom?.visibility === "workspace" ? "workspace" : "private"
+  const canManage = thread.custom?.canManage === true
 
   const threadId = useAuiState((state) => state.threadListItem.id)
   const threadIds = useAuiState((state) =>
@@ -315,6 +346,17 @@ function AssistantThreadItem({
                 <span>
                   {count} message{count === 1 ? "" : "s"}
                 </span>
+                {visibility === "workspace" ? (
+                  <Share2
+                    aria-label="Shared with workspace"
+                    className="size-3"
+                  />
+                ) : (
+                  <LockKeyhole
+                    aria-label="Private conversation"
+                    className="size-3"
+                  />
+                )}
                 {threadTags.map((tag) => (
                   <Badge
                     className="h-4 max-w-28 px-1.5 text-[10px] font-normal"
@@ -401,27 +443,52 @@ function AssistantThreadItem({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => onRequestRename(thread.id, thread.title || "")}
-              >
-                <Pencil data-icon="inline-start" />
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onArchive(thread.id)}>
-                {archived ? (
-                  <ArchiveRestore data-icon="inline-start" />
-                ) : (
-                  <Archive data-icon="inline-start" />
-                )}
-                {archived ? "Restore" : "Archive"}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => onDelete(thread.id)}
-                variant="destructive"
-              >
-                <Trash2 data-icon="inline-start" />
-                Delete
-              </DropdownMenuItem>
+              {canManage && (
+                <DropdownMenuItem
+                  onClick={() =>
+                    void onShare(
+                      thread.id,
+                      visibility === "workspace" ? "private" : "workspace"
+                    )
+                  }
+                >
+                  {visibility === "workspace" ? (
+                    <LockKeyhole data-icon="inline-start" />
+                  ) : (
+                    <Share2 data-icon="inline-start" />
+                  )}
+                  {visibility === "workspace"
+                    ? "Make private"
+                    : "Share with workspace"}
+                </DropdownMenuItem>
+              )}
+              {canManage && (
+                <>
+                  <DropdownMenuItem
+                    onClick={() =>
+                      onRequestRename(thread.id, thread.title || "")
+                    }
+                  >
+                    <Pencil data-icon="inline-start" />
+                    Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onArchive(thread.id)}>
+                    {archived ? (
+                      <ArchiveRestore data-icon="inline-start" />
+                    ) : (
+                      <Archive data-icon="inline-start" />
+                    )}
+                    {archived ? "Restore" : "Archive"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => onDelete(thread.id)}
+                    variant="destructive"
+                  >
+                    <Trash2 data-icon="inline-start" />
+                    Delete
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </ThreadListItemPrimitive.Root>
@@ -440,6 +507,7 @@ export function AssistantThreadList({
   onArchive,
   onDelete,
   onRename,
+  onShare,
   onSelect,
   onConversationRefresh,
 }: AssistantThreadListProps) {
@@ -937,6 +1005,7 @@ export function AssistantThreadList({
                   )
                 }}
                 onRequestRename={requestRename}
+                onShare={onShare}
                 onTogglePinned={togglePinned}
                 onMoveFolder={moveFolder}
                 onToggleTag={toggleTag}
@@ -987,6 +1056,7 @@ export function AssistantThreadList({
                           )
                         }}
                         onRequestRename={requestRename}
+                        onShare={onShare}
                         onTogglePinned={togglePinned}
                         onMoveFolder={moveFolder}
                         onToggleTag={toggleTag}

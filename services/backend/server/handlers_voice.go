@@ -121,7 +121,7 @@ func (a *App) consumeVoiceTicket(ctx context.Context, value string, userID uuid.
 	}
 	ticket.ConversationID = conversationID.UUID
 	var allowed bool
-	if err := transaction.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, ticket.ConversationID, userID, ticket.OrganizationID).Scan(&allowed); err != nil || !allowed {
+	if err := transaction.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace'))`, ticket.ConversationID, userID, ticket.OrganizationID).Scan(&allowed); err != nil || !allowed {
 		return voiceTicket{}, fmt.Errorf("conversation is not available")
 	}
 	if _, err := transaction.ExecContext(ctx, `UPDATE ws_tickets SET used_at = now() WHERE token_hash = $1`, hashToken(value)); err != nil {

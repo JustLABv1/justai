@@ -95,7 +95,7 @@ func (a *App) createWSTicket(c *gin.Context) {
 			return
 		}
 		var allowed bool
-		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, parsedConversation, principal.UserID, organizationID).Scan(&allowed); err != nil {
+		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace'))`, parsedConversation, principal.UserID, organizationID).Scan(&allowed); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
@@ -659,7 +659,8 @@ func (a *App) conversationHasMCPServer(ctx context.Context, userID, organization
 			JOIN conversations c ON c.id = cms.conversation_id
 			JOIN mcp_servers ms ON ms.id = cms.server_id
 			WHERE cms.conversation_id = $1 AND cms.server_id = $2
-			  AND c.user_id = $3 AND c.organization_id = $4
+			  AND c.organization_id = $4
+			  AND (c.user_id = $3 OR c.visibility = 'workspace')
 			  AND ms.enabled = TRUE
 			  AND (ms.scope_type = 'global' OR (ms.scope_type = 'organization' AND ms.scope_id = $4) OR (ms.scope_type = 'user' AND ms.scope_id = $3))
 		)`, conversationID, serverID, userID, organizationID).Scan(&attached)
@@ -673,7 +674,7 @@ func (a *App) ensureConversation(ctx context.Context, userID, organizationID uui
 			return uuid.Nil, fmt.Errorf("invalid conversation id")
 		}
 		var exists bool
-		if err := a.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, id, userID, organizationID).Scan(&exists); err != nil {
+		if err := a.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace'))`, id, userID, organizationID).Scan(&exists); err != nil {
 			return uuid.Nil, err
 		}
 		if !exists {

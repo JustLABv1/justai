@@ -7,6 +7,7 @@ import {
   Link2,
   Plug,
   Plus,
+  ShieldCheck,
   Settings2,
   UploadCloud,
   UserPlus,
@@ -20,6 +21,7 @@ import {
   type KnowledgeViewHandle,
 } from "@/components/knowledge-view"
 import { MCPView } from "@/components/mcp-view"
+import { PrivacyView } from "@/components/privacy-view"
 import { SettingsView } from "@/components/settings-view"
 import { Button } from "@/components/ui/button"
 import type {
@@ -55,6 +57,7 @@ const tabs: Array<{ id: SettingsTab; label: string; icon: typeof Settings2 }> =
     { id: "knowledge", label: "Knowledge", icon: BookOpen },
     { id: "mcp", label: "MCP", icon: Plug },
     { id: "members", label: "Members", icon: Users },
+    { id: "privacy", label: "Privacy", icon: ShieldCheck },
   ]
 
 export function SettingsShell({
@@ -107,6 +110,12 @@ export function SettingsShell({
       title: "Members",
       description: "Invite people and manage access for the active workspace.",
     },
+    privacy: {
+      eyebrow: "Privacy",
+      title: "Privacy & lifecycle",
+      description:
+        "Control retention, export your data, and decide when completed workspace data is removed.",
+    },
     admin: {
       eyebrow: "Operations",
       title: "Workspace operations",
@@ -126,9 +135,7 @@ export function SettingsShell({
 
   const pageAction =
     activeTab === "workspace" ? (
-      <Button
-        onClick={() => setWorkspaceCreateRequest((value) => value + 1)}
-      >
+      <Button onClick={() => setWorkspaceCreateRequest((value) => value + 1)}>
         <Plus data-icon="inline-start" aria-hidden="true" /> New workspace
       </Button>
     ) : activeTab === "members" &&
@@ -240,6 +247,7 @@ export function SettingsShell({
             createRequest={mcpCreateRequest}
           />
         ) : null}
+        {activeTab === "privacy" ? <PrivacyView /> : null}
         {activeTab === "admin" ? (
           <AdminView
             endpoints={endpoints}

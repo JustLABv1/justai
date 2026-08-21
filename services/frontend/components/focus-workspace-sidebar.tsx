@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Plus,
   RotateCcw,
+  Search,
   Settings2,
   ShieldCheck,
   Trash2,
@@ -26,6 +27,7 @@ import type { LucideIcon } from "lucide-react"
 
 import { BrandMark } from "@/components/brand-mark"
 import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
+import { GlobalSearchDialog } from "@/components/global-search-dialog"
 import { ThemeSwitcher } from "@/components/theme-switcher"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -135,6 +137,10 @@ type FocusWorkspaceSidebarProps = {
     conversationId: string,
     title: string
   ) => void | Promise<void>
+  onShareConversation: (
+    conversationId: string,
+    visibility: "private" | "workspace"
+  ) => void | Promise<void>
   onConversationRefresh?: () => void | Promise<void>
   onArchiveSession: (sessionId: string, archived: boolean) => void
   onDeleteSession: (session: TranscriptionSession) => void
@@ -169,6 +175,7 @@ export function FocusWorkspaceSidebar({
   onArchiveConversation,
   onDeleteConversation,
   onRenameConversation,
+  onShareConversation,
   onConversationRefresh,
   onArchiveSession,
   onDeleteSession,
@@ -178,6 +185,7 @@ export function FocusWorkspaceSidebar({
   disabledFeatures,
 }: FocusWorkspaceSidebarProps) {
   const [historyQuery, setHistoryQuery] = useState("")
+  const [searchOpen, setSearchOpen] = useState(false)
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
   const [railExpanded, setRailExpanded] = useState(false)
   const [railPreferenceLoaded, setRailPreferenceLoaded] = useState(false)
@@ -411,6 +419,29 @@ export function FocusWorkspaceSidebar({
           <Plus data-icon="inline-start" />
           {railExpanded && <span>New chat</span>}
         </Button>
+        <Button
+          aria-label="Search workspace"
+          aria-keyshortcuts="Meta+K Control+K"
+          className={cn(
+            "rounded-xl text-muted-foreground",
+            railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
+          )}
+          onClick={() => setSearchOpen(true)}
+          size="icon"
+          title="Search workspace (⌘K / Ctrl K)"
+          variant="ghost"
+        >
+          <Search data-icon="inline-start" />
+          {railExpanded && <span>Search workspace</span>}
+          {railExpanded && (
+            <kbd
+              aria-hidden="true"
+              className="ml-auto hidden rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-flex"
+            >
+              ⌘K
+            </kbd>
+          )}
+        </Button>
 
         <nav
           aria-label="Workspace navigation"
@@ -563,6 +594,14 @@ export function FocusWorkspaceSidebar({
         </DropdownMenu>
       </div>
 
+      <GlobalSearchDialog
+        disabledFeatures={disabledFeatures}
+        onNavigate={onNavigate}
+        onOpenChange={setSearchOpen}
+        open={searchOpen}
+        platformAdmin={user.platformAdmin}
+      />
+
       <div
         className={cn(
           "min-w-0 flex-col gap-3 overflow-hidden p-4",
@@ -650,6 +689,7 @@ export function FocusWorkspaceSidebar({
               onDelete={onDeleteConversation}
               onHistoryQueryChange={setHistoryQuery}
               onRename={onRenameConversation}
+              onShare={onShareConversation}
               onConversationRefresh={onConversationRefresh}
               onSelect={(id) => onNavigate("chat", id)}
             />

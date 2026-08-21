@@ -26,13 +26,21 @@ func (a *App) authorizeConversation(c *gin.Context, rawID string) (uuid.UUID, er
 		return uuid.Nil, fmt.Errorf("organization context is required")
 	}
 	var exists bool
-	if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, id, principal.UserID, organizationID).Scan(&exists); err != nil {
+	if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace'))`, id, principal.UserID, organizationID).Scan(&exists); err != nil {
 		return uuid.Nil, err
 	}
 	if !exists {
 		return uuid.Nil, fmt.Errorf("conversation not found")
 	}
 	return id, nil
+}
+
+func (a *App) conversationAccessibleBy(ctx context.Context, conversationID, userID, organizationID uuid.UUID) bool {
+	var exists bool
+	if err := a.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace'))`, conversationID, userID, organizationID).Scan(&exists); err != nil {
+		return false
+	}
+	return exists
 }
 
 func (a *App) getConversationContext(c *gin.Context) {
@@ -68,6 +76,14 @@ func (a *App) getConversationContext(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	principal, _ := middleware.GetPrincipal(c)
+	organizationID, _ := middleware.GetOrganizationID(c)
+	project, projectErr := a.loadConversationProject(c, conversationID, principal.UserID, organizationID)
+	if projectErr != nil {
+		writeError(c, http.StatusInternalServerError, projectErr)
+		return
+	}
+	contextValue.Project = project
 	c.JSON(http.StatusOK, contextValue)
 }
 
@@ -279,7 +295,7 @@ func (a *App) attachConversationNote(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
 	var available bool
-	if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM notes WHERE id = $1 AND user_id = $2 AND organization_id = $3)`, noteID, principal.UserID, organizationID).Scan(&available); err != nil {
+	if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM notes WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace'))`, noteID, principal.UserID, organizationID).Scan(&available); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
