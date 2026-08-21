@@ -744,7 +744,8 @@ export function VideoTranscriptWorkspace({
     try {
       const result = await api.post<{ insights: TranscriptionInsights }>(
         `/api/v1/transcription/sessions/${snapshot.session.id}/insights`,
-        { language: insightLanguage }
+        { language: insightLanguage },
+        { timeoutMs: 15 * 60 * 1000 }
       )
       updateSnapshot((current) => ({ ...current, insights: result.insights }))
       onError("")

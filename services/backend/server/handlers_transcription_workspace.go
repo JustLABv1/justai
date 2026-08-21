@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -60,6 +61,26 @@ type transcriptionInsightResponse struct {
 
 type transcriptionInsightRequest struct {
 	Language string `json:"language"`
+}
+
+const (
+	// Keep each map request comfortably below the context limits of the
+	// configured chat endpoint. The complete transcript is sent across all
+	// windows; this is a per-window limit, not a transcript limit.
+	transcriptionInsightChunkMaxBytes      = 18000
+	transcriptionInsightChunkMaxDurationMs = int64(15 * 60 * 1000)
+	transcriptionInsightCallTimeout        = 2 * time.Minute
+)
+
+type transcriptionInsightChunk struct {
+	StartOffsetMs int64
+	EndOffsetMs   int64
+	Rows          []transcriptionExportRow
+}
+
+type transcriptionInsightChunkAnalysis struct {
+	Chunk    transcriptionInsightChunk
+	Response transcriptionInsightResponse
 }
 
 var transcriptionInsightLanguageLabels = map[string]string{
@@ -421,7 +442,204 @@ func transcriptionInsightSystemPrompt(requestedLanguage, transcriptLanguage stri
 	} else if normalizedTranscriptLanguage, ok := normalizeTranscriptionInsightLanguage(transcriptLanguage); ok && normalizedTranscriptLanguage != "auto" {
 		languageInstruction = fmt.Sprintf("Write every natural-language field in %s, matching the transcript language. Do not write the insights in English unless the transcript is English.", transcriptionInsightLanguageLabel(normalizedTranscriptLanguage))
 	}
-	return "You are an experienced meeting and video transcript analyst. " + languageInstruction + " Return only valid JSON with this exact shape: {\"summary\":\"string\",\"chapters\":[{\"title\":\"string\",\"summary\":\"string\",\"startOffsetMs\":0}],\"topics\":[\"string\"],\"actionItems\":[\"string\"]}. Create concise, factual chapters ordered by startOffsetMs. Use only information present in the transcript. If no action items are stated, return an empty array. Keep startOffsetMs numeric and do not translate the transcript text itself. Do not use markdown fences or commentary."
+	return "You are an experienced meeting and video transcript analyst. " + languageInstruction + " Return only valid JSON with this exact shape: {\"summary\":\"string\",\"chapters\":[{\"title\":\"string\",\"summary\":\"string\",\"startOffsetMs\":0}],\"topics\":[\"string\"],\"actionItems\":[\"string\"]}. Create concise, factual chapters ordered by startOffsetMs. Use only information present in the transcript. Chapter startOffsetMs values must be the absolute offsets from the transcript timestamps, never offsets relative to a window. If no action items are stated, return an empty array. Keep startOffsetMs numeric and do not translate the transcript text itself. Do not use markdown fences or commentary."
+}
+
+func transcriptionInsightChunkSystemPrompt(requestedLanguage, transcriptLanguage string, chunkIndex, chunkCount int) string {
+	return transcriptionInsightSystemPrompt(requestedLanguage, transcriptLanguage) + fmt.Sprintf(" This is transcript window %d of %d. Analyze only this window and return one to four useful chapters that cover its main subject changes. Keep the chapter timestamps within this window and preserve their absolute values.", chunkIndex, chunkCount)
+}
+
+func transcriptionInsightReduceSystemPrompt(requestedLanguage, transcriptLanguage string) string {
+	languageInstruction := "Write every natural-language field in the same language used by the transcript."
+	if requestedLanguage != "auto" {
+		languageInstruction = fmt.Sprintf("Write every natural-language field in %s.", transcriptionInsightLanguageLabel(requestedLanguage))
+	} else if normalizedTranscriptLanguage, ok := normalizeTranscriptionInsightLanguage(transcriptLanguage); ok && normalizedTranscriptLanguage != "auto" {
+		languageInstruction = fmt.Sprintf("Write every natural-language field in %s.", transcriptionInsightLanguageLabel(normalizedTranscriptLanguage))
+	}
+	return "You are consolidating analyses of every time window from a complete meeting or video transcript. " + languageInstruction + " Return only valid JSON with this exact shape: {\"summary\":\"string\",\"chapters\":[],\"topics\":[\"string\"],\"actionItems\":[\"string\"]}. Write one concise, factual global summary and consolidate the topics and action items without inventing information. The chapters field must remain an empty array because the application preserves the timestamped chapter candidates from every window. Do not use markdown fences or commentary."
+}
+
+func transcriptionInsightTranscriptLine(row transcriptionExportRow) string {
+	return fmt.Sprintf("[%s] %s\n", formatTranscriptTimestamp(row.StartOffsetMs), row.Text)
+}
+
+func splitTranscriptionInsightRows(rows []transcriptionExportRow) []transcriptionInsightChunk {
+	if len(rows) == 0 {
+		return nil
+	}
+	chunks := make([]transcriptionInsightChunk, 0, (len(rows)/32)+1)
+	current := transcriptionInsightChunk{Rows: make([]transcriptionExportRow, 0, 32)}
+	currentBytes := 0
+	for _, row := range rows {
+		lineBytes := len(transcriptionInsightTranscriptLine(row))
+		windowTooLong := len(current.Rows) > 0 && row.StartOffsetMs-current.StartOffsetMs >= transcriptionInsightChunkMaxDurationMs
+		sizeTooLarge := len(current.Rows) > 0 && currentBytes+lineBytes > transcriptionInsightChunkMaxBytes
+		if windowTooLong || sizeTooLarge {
+			chunks = append(chunks, current)
+			current = transcriptionInsightChunk{Rows: make([]transcriptionExportRow, 0, 32)}
+			currentBytes = 0
+		}
+		if len(current.Rows) == 0 {
+			current.StartOffsetMs = row.StartOffsetMs
+		}
+		current.Rows = append(current.Rows, row)
+		currentBytes += lineBytes
+		if row.EndOffsetMs > current.EndOffsetMs {
+			current.EndOffsetMs = row.EndOffsetMs
+		}
+		if row.StartOffsetMs > current.EndOffsetMs {
+			current.EndOffsetMs = row.StartOffsetMs
+		}
+	}
+	if len(current.Rows) > 0 {
+		chunks = append(chunks, current)
+	}
+	return chunks
+}
+
+func buildTranscriptionInsightChunkInput(title, language string, chunk transcriptionInsightChunk, chunkIndex, chunkCount int) string {
+	var input strings.Builder
+	fmt.Fprintf(&input, "Title: %s\nLanguage: %s\nWindow: %d of %d (%s–%s)\nTranscript window (timestamps are absolute):\n", title, language, chunkIndex, chunkCount, formatTranscriptTimestamp(chunk.StartOffsetMs), formatTranscriptTimestamp(chunk.EndOffsetMs))
+	for _, row := range chunk.Rows {
+		input.WriteString(transcriptionInsightTranscriptLine(row))
+	}
+	return input.String()
+}
+
+func truncateTranscriptionInsightText(value string, maxRunes int) string {
+	value = strings.TrimSpace(value)
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	if maxRunes == 1 {
+		return string(runes[:1])
+	}
+	return string(runes[:maxRunes-1]) + "…"
+}
+
+func buildTranscriptionInsightReduceInput(title, language string, analyses []transcriptionInsightChunkAnalysis) string {
+	var input strings.Builder
+	fmt.Fprintf(&input, "Title: %s\nLanguage: %s\nAnalyses from every transcript window:\n", title, language)
+	for index, analysis := range analyses {
+		response := analysis.Response
+		fmt.Fprintf(&input, "\nWindow %d (%s–%s)\nSummary: %s\n", index+1, formatTranscriptTimestamp(analysis.Chunk.StartOffsetMs), formatTranscriptTimestamp(analysis.Chunk.EndOffsetMs), truncateTranscriptionInsightText(response.Summary, 1200))
+		if len(response.Topics) > 0 {
+			topics := make([]string, 0, 8)
+			for _, topic := range response.Topics {
+				if value := truncateTranscriptionInsightText(topic, 180); value != "" {
+					topics = append(topics, value)
+				}
+				if len(topics) == 8 {
+					break
+				}
+			}
+			if len(topics) > 0 {
+				fmt.Fprintf(&input, "Topics: %s\n", strings.Join(topics, "; "))
+			}
+		}
+		if len(response.ActionItems) > 0 {
+			actionItems := make([]string, 0, 8)
+			for _, actionItem := range response.ActionItems {
+				if value := truncateTranscriptionInsightText(actionItem, 220); value != "" {
+					actionItems = append(actionItems, value)
+				}
+				if len(actionItems) == 8 {
+					break
+				}
+			}
+			if len(actionItems) > 0 {
+				fmt.Fprintf(&input, "Action items: %s\n", strings.Join(actionItems, "; "))
+			}
+		}
+	}
+	return input.String()
+}
+
+func mergeTranscriptionInsightChapters(analyses []transcriptionInsightChunkAnalysis) []models.TranscriptionInsightChapter {
+	chapters := make([]models.TranscriptionInsightChapter, 0)
+	for _, analysis := range analyses {
+		for _, chapter := range analysis.Response.Chapters {
+			chapter.Title = strings.TrimSpace(chapter.Title)
+			chapter.Summary = strings.TrimSpace(chapter.Summary)
+			if chapter.Title == "" {
+				continue
+			}
+			duplicate := false
+			for _, existing := range chapters {
+				delta := existing.StartOffsetMs - chapter.StartOffsetMs
+				if delta < 0 {
+					delta = -delta
+				}
+				if delta <= 10000 && strings.EqualFold(strings.Join(strings.Fields(existing.Title), " "), strings.Join(strings.Fields(chapter.Title), " ")) {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				chapters = append(chapters, chapter)
+			}
+		}
+	}
+	sort.SliceStable(chapters, func(left, right int) bool {
+		return chapters[left].StartOffsetMs < chapters[right].StartOffsetMs
+	})
+	return chapters
+}
+
+func mergeTranscriptionInsightStrings(values ...[]string) []string {
+	result := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, group := range values {
+		for _, value := range group {
+			value = strings.TrimSpace(value)
+			key := strings.ToLower(strings.Join(strings.Fields(value), " "))
+			if key == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func fallbackTranscriptionInsightSummary(analyses []transcriptionInsightChunkAnalysis) string {
+	var summaries []string
+	for _, analysis := range analyses {
+		if summary := strings.TrimSpace(analysis.Response.Summary); summary != "" {
+			summaries = append(summaries, fmt.Sprintf("%s–%s: %s", formatTranscriptTimestamp(analysis.Chunk.StartOffsetMs), formatTranscriptTimestamp(analysis.Chunk.EndOffsetMs), summary))
+		} else {
+			summaries = append(summaries, fmt.Sprintf("%s–%s: Window analyzed.", formatTranscriptTimestamp(analysis.Chunk.StartOffsetMs), formatTranscriptTimestamp(analysis.Chunk.EndOffsetMs)))
+		}
+	}
+	return strings.Join(summaries, "\n\n")
+}
+
+func requestTranscriptionInsight(ctx context.Context, endpoint provider.Endpoint, systemPrompt, userInput string) (transcriptionInsightResponse, error) {
+	insightContext, cancel := context.WithTimeout(ctx, transcriptionInsightCallTimeout)
+	defer cancel()
+	var output strings.Builder
+	err := provider.StreamChat(insightContext, endpoint, provider.ChatOptions{
+		Model: endpoint.ChatModel,
+		Messages: []provider.Message{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userInput},
+		},
+	}, func(delta string) error {
+		output.WriteString(delta)
+		return nil
+	})
+	if err != nil {
+		return transcriptionInsightResponse{}, err
+	}
+	return decodeTranscriptionInsightOutput(output.String())
 }
 
 func transcriptionExportFormatSupportsInsights(format string) bool {
@@ -487,47 +705,60 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 		return
 	}
 	rows := transcriptionExportRows(segments, nil)
-	input := strings.Builder{}
-	input.WriteString("Title: ")
-	input.WriteString(title)
-	input.WriteString("\nLanguage: ")
-	input.WriteString(language)
-	input.WriteString("\nTranscript:\n")
-	for _, row := range rows {
-		fmt.Fprintf(&input, "[%s] %s\n", formatTranscriptTimestamp(row.StartOffsetMs), row.Text)
-		if input.Len() > 60000 {
-			input.WriteString("\n[Transcript truncated after 60,000 characters.]\n")
-			break
-		}
+	chunks := splitTranscriptionInsightRows(rows)
+	if len(chunks) == 0 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("generate insights after transcript output is available"))
+		return
 	}
 	if _, err := a.DB.ExecContext(c, `INSERT INTO transcription_insights (session_id, language, status, error_message, updated_at) VALUES ($1, $2, 'processing', NULL, now()) ON CONFLICT (session_id) DO UPDATE SET language = $2, status = 'processing', error_message = NULL, updated_at = now()`, sessionID, requestedLanguage); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	insightContext, cancel := context.WithTimeout(c, 2*time.Minute)
-	defer cancel()
-	var output strings.Builder
-	systemPrompt := transcriptionInsightSystemPrompt(requestedLanguage, language)
-	err = provider.StreamChat(insightContext, endpoint, provider.ChatOptions{
-		Model: endpoint.ChatModel,
-		Messages: []provider.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: input.String()},
-		},
-	}, func(delta string) error {
-		output.WriteString(delta)
-		return nil
-	})
-	if err != nil {
-		_, _ = a.DB.ExecContext(c, `UPDATE transcription_insights SET status = 'failed', error_message = $2, updated_at = now() WHERE session_id = $1`, sessionID, err.Error())
-		writeError(c, http.StatusBadGateway, fmt.Errorf("insight generation failed: %w", err))
-		return
+	analyses := make([]transcriptionInsightChunkAnalysis, 0, len(chunks))
+	for index, chunk := range chunks {
+		response, chunkErr := requestTranscriptionInsight(
+			c,
+			endpoint,
+			transcriptionInsightChunkSystemPrompt(requestedLanguage, language, index+1, len(chunks)),
+			buildTranscriptionInsightChunkInput(title, language, chunk, index+1, len(chunks)),
+		)
+		if chunkErr != nil {
+			generationErr := fmt.Errorf("insight generation failed for transcript window %d/%d: %w", index+1, len(chunks), chunkErr)
+			_, _ = a.DB.ExecContext(c, `UPDATE transcription_insights SET status = 'failed', error_message = $2, updated_at = now() WHERE session_id = $1`, sessionID, generationErr.Error())
+			writeError(c, http.StatusBadGateway, generationErr)
+			return
+		}
+		analyses = append(analyses, transcriptionInsightChunkAnalysis{Chunk: chunk, Response: response})
 	}
-	decoded, err := decodeTranscriptionInsightOutput(output.String())
-	if err != nil {
-		_, _ = a.DB.ExecContext(c, `UPDATE transcription_insights SET status = 'failed', error_message = $2, updated_at = now() WHERE session_id = $1`, sessionID, err.Error())
-		writeError(c, http.StatusBadGateway, err)
-		return
+
+	decoded := transcriptionInsightResponse{}
+	if len(analyses) == 1 {
+		decoded = analyses[0].Response
+	} else {
+		decoded.Summary = fallbackTranscriptionInsightSummary(analyses)
+		reduced, reduceErr := requestTranscriptionInsight(
+			c,
+			endpoint,
+			transcriptionInsightReduceSystemPrompt(requestedLanguage, language),
+			buildTranscriptionInsightReduceInput(title, language, analyses),
+		)
+		if reduceErr == nil {
+			decoded.Summary = strings.TrimSpace(reduced.Summary)
+			decoded.Topics = reduced.Topics
+			decoded.ActionItems = reduced.ActionItems
+		}
+	}
+	chunkTopics := make([][]string, 0, len(analyses))
+	chunkActionItems := make([][]string, 0, len(analyses))
+	for _, analysis := range analyses {
+		chunkTopics = append(chunkTopics, analysis.Response.Topics)
+		chunkActionItems = append(chunkActionItems, analysis.Response.ActionItems)
+	}
+	decoded.Chapters = mergeTranscriptionInsightChapters(analyses)
+	decoded.Topics = mergeTranscriptionInsightStrings(append(chunkTopics, decoded.Topics)...)
+	decoded.ActionItems = mergeTranscriptionInsightStrings(append(chunkActionItems, decoded.ActionItems)...)
+	if strings.TrimSpace(decoded.Summary) == "" {
+		decoded.Summary = fallbackTranscriptionInsightSummary(analyses)
 	}
 	generatedAt := time.Now().UTC()
 	chaptersJSON, _ := json.Marshal(decoded.Chapters)

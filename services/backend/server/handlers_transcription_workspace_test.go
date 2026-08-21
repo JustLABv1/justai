@@ -3,6 +3,7 @@ package server
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -112,6 +113,70 @@ func TestTranscriptionInsightLanguagePrompt(t *testing.T) {
 	autoPrompt := transcriptionInsightSystemPrompt("auto", "de")
 	if !strings.Contains(autoPrompt, "German") {
 		t.Fatalf("auto language prompt did not follow the transcript language: %s", autoPrompt)
+	}
+	if !strings.Contains(prompt, "absolute offsets") {
+		t.Fatalf("insight prompt does not require absolute timestamps: %s", prompt)
+	}
+}
+
+func TestTranscriptionInsightChunkingPreservesFullTranscript(t *testing.T) {
+	rows := make([]transcriptionExportRow, 0, 400)
+	for index := 0; index < 400; index++ {
+		rows = append(rows, transcriptionExportRow{
+			SegmentID:     uuid.New(),
+			Text:          fmt.Sprintf("utterance-%03d %s", index, strings.Repeat("text ", 40)),
+			StartOffsetMs: int64(index * 20000),
+			EndOffsetMs:   int64(index*20000 + 15000),
+		})
+	}
+
+	chunks := splitTranscriptionInsightRows(rows)
+	if len(chunks) < 2 {
+		t.Fatalf("expected the transcript to be split into multiple windows, got %d", len(chunks))
+	}
+	seen := make([]transcriptionExportRow, 0, len(rows))
+	for index, chunk := range chunks {
+		if len(chunk.Rows) == 0 {
+			t.Fatalf("chunk %d is empty", index)
+		}
+		seen = append(seen, chunk.Rows...)
+		input := buildTranscriptionInsightChunkInput("Long video", "de", chunk, index+1, len(chunks))
+		if !strings.Contains(input, chunk.Rows[0].Text) || !strings.Contains(input, chunk.Rows[len(chunk.Rows)-1].Text) {
+			t.Fatalf("chunk %d input dropped a boundary transcript row", index)
+		}
+	}
+	if len(seen) != len(rows) {
+		t.Fatalf("chunking changed the number of transcript rows: got %d, want %d", len(seen), len(rows))
+	}
+	for index := range rows {
+		if seen[index].SegmentID != rows[index].SegmentID || seen[index].Text != rows[index].Text {
+			t.Fatalf("chunking changed transcript row %d", index)
+		}
+	}
+}
+
+func TestTranscriptionInsightChapterMergeKeepsTimeline(t *testing.T) {
+	analyses := []transcriptionInsightChunkAnalysis{
+		{
+			Response: transcriptionInsightResponse{Chapters: []models.TranscriptionInsightChapter{
+				{Title: "Opening", Summary: "Start", StartOffsetMs: 0},
+				{Title: "Budget", Summary: "Numbers", StartOffsetMs: 900000},
+			}},
+		},
+		{
+			Response: transcriptionInsightResponse{Chapters: []models.TranscriptionInsightChapter{
+				{Title: "Budget", Summary: "Duplicate boundary", StartOffsetMs: 905000},
+				{Title: "Closing", Summary: "End", StartOffsetMs: 7200000},
+			}},
+		},
+	}
+
+	chapters := mergeTranscriptionInsightChapters(analyses)
+	if len(chapters) != 3 {
+		t.Fatalf("expected duplicate boundary chapters to merge, got %d: %+v", len(chapters), chapters)
+	}
+	if chapters[0].StartOffsetMs != 0 || chapters[1].StartOffsetMs != 900000 || chapters[2].StartOffsetMs != 7200000 {
+		t.Fatalf("chapters are not ordered by absolute timestamp: %+v", chapters)
 	}
 }
 
