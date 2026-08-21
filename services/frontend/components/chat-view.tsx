@@ -161,6 +161,7 @@ type CachedConversation = LoadedConversation & {
 
 const CONVERSATION_CACHE_TTL_MS = 30_000
 const CONVERSATION_CACHE_LIMIT = 20
+const CONTEXT_HINT_DISMISSED_STORAGE_KEY = "justai.chat.context-hint-dismissed"
 const conversationCache = new Map<string, CachedConversation>()
 
 function readCachedConversation(id: string): LoadedConversation | null {
@@ -2292,7 +2293,7 @@ function Composer({
                 className={cn(
                   "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
                   compact &&
-                    "order-1 basis-full min-h-10 min-w-0 flex-none px-2 py-2 leading-6"
+                    "order-1 min-h-10 min-w-0 flex-none basis-full px-2 py-2 leading-6"
                 )}
                 placeholder={
                   compact
@@ -2337,7 +2338,7 @@ function Composer({
                   className={cn(
                     "order-3 flex shrink-0 items-center gap-1",
                     compact &&
-                      "ml-auto min-w-0 max-w-full flex-wrap justify-end"
+                      "ml-auto max-w-full min-w-0 flex-wrap justify-end"
                   )}
                 >
                   <AssistantPicker
@@ -2963,6 +2964,8 @@ export function ChatView({
   const [conversationContext, setConversationContext] =
     useState<ConversationContext>(EMPTY_CONTEXT)
   const [contextHintDismissed, setContextHintDismissed] = useState(contextOpen)
+  const [contextHintPreferenceLoaded, setContextHintPreferenceLoaded] =
+    useState(false)
   const locallyCreatedConversationRef = useRef<string | null>(null)
   const pendingConversationRef = useRef(false)
   const conversationCreationRef = useRef<Promise<string> | null>(null)
@@ -2975,6 +2978,30 @@ export function ChatView({
   const selectedAssistantIdRef = useRef<string | null>(
     conversation?.assistantId ?? null
   )
+  const dismissContextHint = useCallback(() => {
+    setContextHintDismissed(true)
+    try {
+      window.localStorage.setItem(CONTEXT_HINT_DISMISSED_STORAGE_KEY, "true")
+    } catch {
+      // Storage can be disabled; the current surface can still dismiss the tip.
+    }
+  }, [])
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      let dismissed = false
+      try {
+        dismissed =
+          window.localStorage.getItem(CONTEXT_HINT_DISMISSED_STORAGE_KEY) ===
+          "true"
+      } catch {
+        // Storage can be disabled; default to showing the onboarding tip.
+      }
+      setContextHintDismissed((current) => current || dismissed)
+      setContextHintPreferenceLoaded(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [])
+
   const handleAssistantSelectionChange = useCallback(
     (assistantId: string | null) => {
       selectedAssistantIdRef.current = assistantId
@@ -3384,12 +3411,13 @@ export function ChatView({
     Boolean(onOpenContext) &&
     !contextOpen &&
     !contextHintDismissed &&
+    contextHintPreferenceLoaded &&
     surfaceReady &&
     !conversationLoading &&
     (conversationContext.repositories ?? []).length === 0
   const hasKnowledgeSources = conversationContext.knowledgeSources.length > 0
   const handleOpenContext = () => {
-    setContextHintDismissed(true)
+    dismissContextHint()
     onOpenContext?.()
   }
   // A locally created surface owns the live runtime while the URL and the
@@ -3446,7 +3474,7 @@ export function ChatView({
             <button
               aria-label="Dismiss context tip"
               className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={() => setContextHintDismissed(true)}
+              onClick={dismissContextHint}
               type="button"
             >
               <X className="size-3.5" />
