@@ -3,6 +3,8 @@ import test from "node:test"
 
 import type { TranscriptionSegment, TranscriptionSource } from "../lib/types.ts"
 import {
+  activeTranscriptionMessageId,
+  activeTranscriptionSegmentId,
   groupTranscriptionSegments,
   joinTranscriptText,
   mergeTranscriptionSegments,
@@ -101,6 +103,29 @@ test("reconciles snapshot and event segments without dropping either", () => {
 test("joins punctuation without inserting an unwanted space", () => {
   assert.equal(joinTranscriptText("hello", ", world"), "hello, world")
   assert.equal(joinTranscriptText("hello", " world"), "hello world")
+})
+
+test("keeps the last transcript line active during a short playback gap", () => {
+  const messages = groupTranscriptionSegments([
+    segment("one", "first", 0, 1000),
+    segment("two", "second", 6000, 7000),
+  ])
+
+  assert.equal(activeTranscriptionMessageId(messages, 500), "one")
+  assert.equal(activeTranscriptionMessageId(messages, 3000), "one")
+  assert.equal(activeTranscriptionMessageId(messages, 6500), "two")
+  assert.equal(activeTranscriptionMessageId(messages, -1), null)
+})
+
+test("selects the latest timestamped segment at playback boundaries", () => {
+  const segments = [
+    segment("one", "first", 0, 1000),
+    segment("two", "second", 6000, 7000),
+  ]
+
+  assert.equal(activeTranscriptionSegmentId(segments, 3000), "one")
+  assert.equal(activeTranscriptionSegmentId(segments, 6000), "two")
+  assert.equal(activeTranscriptionSegmentId(segments, -1), null)
 })
 
 test("clears a source signal when a participant pauses or disconnects", () => {

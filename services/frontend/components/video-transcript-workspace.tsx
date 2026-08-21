@@ -75,7 +75,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
-import { groupTranscriptionSegments } from "@/lib/transcription"
+import {
+  activeTranscriptionMessageId,
+  activeTranscriptionSegmentId,
+  groupTranscriptionSegments,
+  joinTranscriptText,
+} from "@/lib/transcription"
 import { cn } from "@/lib/utils"
 import type {
   TranscriptionAnnotation,
@@ -230,6 +235,37 @@ function highlightText(value: string, query: string) {
   )
 }
 
+function highlightActiveTranscriptSegment(
+  messageText: string,
+  segments: TranscriptionSegment[],
+  activeSegmentId: string | null,
+  query: string
+) {
+  const activeIndex = segments.findIndex(
+    (segment) => segment.id === activeSegmentId
+  )
+  const activeText = segments[activeIndex]?.text.trim()
+  if (!activeText) return highlightText(messageText, query)
+
+  let prefix = ""
+  for (let index = 0; index < activeIndex; index += 1) {
+    prefix = joinTranscriptText(prefix, segments[index]?.text ?? "")
+  }
+  const start = messageText.indexOf(activeText, prefix.length)
+  if (start < 0) return highlightText(messageText, query)
+
+  const end = start + activeText.length
+  return (
+    <>
+      {highlightText(messageText.slice(0, start), query)}
+      <span className="rounded bg-primary/20 px-0.5 ring-1 ring-primary/25">
+        {highlightText(messageText.slice(start, end), query)}
+      </span>
+      {highlightText(messageText.slice(end), query)}
+    </>
+  )
+}
+
 function transcriptMatches(
   segment: TranscriptionSegment,
   query: string,
@@ -310,6 +346,7 @@ export function VideoTranscriptWorkspace({
   const [mergeSourceId, setMergeSourceId] = useState("")
   const [mergeTargetId, setMergeTargetId] = useState("")
   const [mergeSaving, setMergeSaving] = useState(false)
+  const [videoPlaying, setVideoPlaying] = useState(false)
   const [insightsGenerating, setInsightsGenerating] = useState(false)
   const [insightLanguage, setInsightLanguage] = useState(
     () => snapshot.insights?.language ?? "auto"
@@ -414,16 +451,12 @@ export function VideoTranscriptWorkspace({
     [displaySegments, qualityOnly, speakerById, speakerFilter, transcriptQuery]
   )
   const activeMessageId = useMemo(
-    () =>
-      transcript.find((message) => {
-        if (currentTimeMs < message.startOffsetMs) return false
-        const endOffset =
-          message.endOffsetMs > message.startOffsetMs
-            ? message.endOffsetMs
-            : message.startOffsetMs + 4000
-        return currentTimeMs <= endOffset
-      })?.id ?? null,
+    () => activeTranscriptionMessageId(transcript, currentTimeMs),
     [currentTimeMs, transcript]
+  )
+  const activeSegmentId = useMemo(
+    () => activeTranscriptionSegmentId(displaySegments, currentTimeMs),
+    [currentTimeMs, displaySegments]
   )
   const displayDurationMs =
     videoDurationMs || snapshot.videoUpload?.durationMs || 0
@@ -508,6 +541,34 @@ export function VideoTranscriptWorkspace({
       block: "nearest",
     })
   }, [filteredTranscript, matchIndex])
+
+  useEffect(() => {
+    if (
+      !videoPlaying ||
+      workspaceView !== "review" ||
+      editorOpen ||
+      hasActiveFilter ||
+      !activeMessageId
+    ) {
+      return
+    }
+    const message = messageRefs.current.get(activeMessageId)
+    if (!message) return
+    const frame = window.requestAnimationFrame(() => {
+      message.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "nearest",
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    activeMessageId,
+    editorOpen,
+    hasActiveFilter,
+    videoPlaying,
+    workspaceView,
+  ])
 
   useEffect(() => {
     const raw = new URLSearchParams(window.location.search).get("t")
@@ -875,6 +936,15 @@ export function VideoTranscriptWorkspace({
                     ? ` · ${filteredTranscript.length} matches`
                     : ""}
                 </CardDescription>
+                {videoPlaying && !hasActiveFilter ? (
+                  <span className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-primary">
+                    <span
+                      aria-hidden="true"
+                      className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse motion-reduce:animate-none"
+                    />
+                    Following playback
+                  </span>
+                ) : null}
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <Tabs
@@ -1322,6 +1392,11 @@ export function VideoTranscriptWorkspace({
                   const firstSegment = displaySegmentById.get(
                     message.segmentIds[0]
                   )
+                  const messageSegments = message.segmentIds
+                    .map((segmentId) => displaySegmentById.get(segmentId))
+                    .filter((segment): segment is TranscriptionSegment =>
+                      Boolean(segment)
+                    )
                   return (
                     <div
                       className={cn(
@@ -1432,7 +1507,14 @@ export function VideoTranscriptWorkspace({
                           onClick={() => seekTo(message.startOffsetMs)}
                           type="button"
                         >
-                          {highlightText(message.text, transcriptQuery)}
+                          {highlightActiveTranscriptSegment(
+                            message.text,
+                            messageSegments,
+                            activeMessageId === message.id
+                              ? activeSegmentId
+                              : null,
+                            transcriptQuery
+                          )}
                         </button>
                       </div>
                     </div>
@@ -1859,6 +1941,7 @@ export function VideoTranscriptWorkspace({
                     className="block aspect-video w-full bg-muted object-contain"
                     controls
                     onError={() => {
+                      setVideoPlaying(false)
                       setSpeakerSample(null)
                       onVideoPlaybackError(
                         "The video link expired or the stored video is unavailable."
@@ -1870,7 +1953,12 @@ export function VideoTranscriptWorkspace({
                           Math.round(event.currentTarget.duration * 1000)
                         )
                     }}
-                    onEnded={() => setSpeakerSample(null)}
+                    onEnded={() => {
+                      setVideoPlaying(false)
+                      setSpeakerSample(null)
+                    }}
+                    onPause={() => setVideoPlaying(false)}
+                    onPlay={() => setVideoPlaying(true)}
                     onTimeUpdate={(event) => {
                       const current = Math.round(
                         event.currentTarget.currentTime * 1000
