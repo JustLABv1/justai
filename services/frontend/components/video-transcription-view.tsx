@@ -172,11 +172,15 @@ export function VideoTranscriptionView({
     speakerId: string
     endOffsetMs: number
   } | null>(null)
+  const [transcriptRailHeight, setTranscriptRailHeight] = useState<
+    number | null
+  >(null)
   const requestRef = useRef(0)
   const videoUploadAbortRef = useRef<AbortController | null>(null)
   const videoUploadInFlightRef = useRef(false)
   const videoUploadRef = useRef<TranscriptionVideoUpload | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const transcriptRailRef = useRef<HTMLElement | null>(null)
 
   const transcriptionEndpoints = useMemo(
     () =>
@@ -788,6 +792,37 @@ export function VideoTranscriptionView({
     })
   }, [displayDurationMs, displaySegments, snapshot?.speakers])
 
+  useEffect(() => {
+    const rail = transcriptRailRef.current
+    if (!rail) return
+
+    const updateHeight = () => {
+      if (!window.matchMedia("(min-width: 1024px)").matches) {
+        setTranscriptRailHeight(null)
+        return
+      }
+      const height = Math.ceil(rail.scrollHeight)
+      setTranscriptRailHeight(height > 0 ? height : null)
+    }
+
+    updateHeight()
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(updateHeight)
+    observer?.observe(rail)
+    window.addEventListener("resize", updateHeight)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener("resize", updateHeight)
+    }
+  }, [
+    snapshot?.session.polishStatus,
+    snapshot?.videoUpload?.playbackUrl,
+    snapshot?.videoUpload?.status,
+    speakerSummaries.length,
+  ])
+
   const playSpeakerSample = useCallback(
     (summary: VideoSpeakerSummary) => {
       const video = videoRef.current
@@ -987,8 +1022,18 @@ export function VideoTranscriptionView({
             />
           ) : null}
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)]">
-            <Card className="flex max-h-[min(70vh,42rem)] min-h-[28rem] flex-col overflow-hidden shadow-none">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)] lg:items-start">
+            <Card
+              className="flex max-h-[min(70vh,42rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none"
+              style={
+                transcriptRailHeight
+                  ? {
+                      height: transcriptRailHeight,
+                      maxHeight: transcriptRailHeight,
+                    }
+                  : undefined
+              }
+            >
               <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -1161,7 +1206,10 @@ export function VideoTranscriptionView({
               </CardContent>
             </Card>
 
-            <aside className="flex flex-col gap-4">
+            <aside
+              className="flex min-h-0 flex-col gap-4"
+              ref={transcriptRailRef}
+            >
               {speakerSummaries.length > 0 ? (
                 <Card
                   aria-label="Speaker summary"
