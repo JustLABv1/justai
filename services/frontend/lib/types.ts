@@ -421,6 +421,9 @@ export type TranscriptionSession = {
   transcriptionEndpointId?: string | null
   diarizationEndpointId?: string | null
   grammarEndpointId?: string | null
+  transcriptionModel?: string
+  diarizationModel?: string
+  grammarModel?: string
   language: string
   recordAudio: boolean
   polishStatus?:

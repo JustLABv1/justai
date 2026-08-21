@@ -715,8 +715,9 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 	}
 	var sessionEndpoint uuid.UUID
 	var diarizationEndpoint, grammarEndpoint uuid.NullUUID
+	var transcriptionModel, diarizationModel, grammarModel string
 	var language string
-	if err := m.DB.QueryRowContext(jobCtx, `SELECT transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, language FROM transcription_sessions WHERE id = $1`, record.model.SessionID).Scan(&sessionEndpoint, &diarizationEndpoint, &grammarEndpoint, &language); err != nil {
+	if err := m.DB.QueryRowContext(jobCtx, `SELECT transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(grammar_model, ''), language FROM transcription_sessions WHERE id = $1`, record.model.SessionID).Scan(&sessionEndpoint, &diarizationEndpoint, &grammarEndpoint, &transcriptionModel, &diarizationModel, &grammarModel, &language); err != nil {
 		return err
 	}
 	shouldTranscribe := retryFrom == videoRetryStepTranscription
@@ -734,6 +735,7 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 		if err != nil {
 			return err
 		}
+		endpoint.TranscriptionModel = firstNonEmptyString(transcriptionModel, endpoint.TranscriptionModel)
 		mode = transcriptionMode(endpoint)
 		if mode == "" {
 			return fmt.Errorf("%w: provider %s does not support a compatible transcription transport", errVideoTranscriptionPermanent, endpoint.ProviderType)
@@ -805,7 +807,7 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 			}
 		}
 		if !skipHandled {
-			if err := m.diarizeVideoAudio(diarizationCtx, uploadID, record.model.SessionID, record.storageKey, diarizationEndpoint.UUID, language, durationMs, storage); err != nil {
+			if err := m.diarizeVideoAudio(diarizationCtx, uploadID, record.model.SessionID, record.storageKey, diarizationEndpoint.UUID, diarizationModel, language, durationMs, storage); err != nil {
 				skipRequested := errors.Is(err, errVideoTranscriptionSkipDiarization)
 				// The skip endpoint cancels only the child context used by
 				// diarization. The job context remains alive, so inspect the
@@ -862,7 +864,7 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 				return err
 			}
 		}
-		if err := m.polishVideoTranscript(jobCtx, uploadID, record.model.SessionID, grammarEndpoint.UUID); err != nil {
+		if err := m.polishVideoTranscript(jobCtx, uploadID, record.model.SessionID, grammarEndpoint.UUID, grammarModel); err != nil {
 			if errors.Is(err, errVideoTranscriptionCancelled) || jobCtx.Err() != nil {
 				return err
 			}

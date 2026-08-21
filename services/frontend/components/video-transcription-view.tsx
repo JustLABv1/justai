@@ -131,6 +131,23 @@ type VideoSpeakerSummary = {
   sampleText: string
 }
 
+type VideoModelCapability = "chat" | "transcription" | "diarization"
+
+type DiscoveredVideoModel = {
+  id: string
+  name?: string
+  ownedBy?: string
+}
+
+type VideoModelDiscovery = {
+  models: DiscoveredVideoModel[]
+  configuredModel: string
+}
+
+function videoModelKey(endpointId: string, capability: VideoModelCapability) {
+  return `${endpointId}:${capability}`
+}
+
 export function VideoTranscriptionView({
   sessionId,
   endpoints,
@@ -162,6 +179,12 @@ export function VideoTranscriptionView({
   const [selectedDiarizationEndpoint, setSelectedDiarizationEndpoint] =
     useState("none")
   const [grammarChoice, setGrammarChoice] = useState("auto")
+  const [modelSelections, setModelSelections] = useState<
+    Record<string, string>
+  >({})
+  const [modelDiscovery, setModelDiscovery] = useState<
+    Record<string, VideoModelDiscovery>
+  >({})
   const [transcriptMode, setTranscriptMode] = useState<"verbatim" | "polished">(
     "verbatim"
   )
@@ -191,6 +214,7 @@ export function VideoTranscriptionView({
   const videoUploadRef = useRef<TranscriptionVideoUpload | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const transcriptRailRef = useRef<HTMLElement | null>(null)
+  const modelDiscoveryInFlightRef = useRef(new Set<string>())
 
   const transcriptionEndpoints = useMemo(
     () =>
@@ -232,6 +256,153 @@ export function VideoTranscriptionView({
           grammarEndpoints[0]?.id ||
           ""
         : grammarChoice
+
+  const selectedTranscriptionEndpoint = transcriptionEndpoints.find(
+    (endpoint) => endpoint.id === effectiveSelectedEndpoint
+  )
+  const selectedDiarizationEndpointItem = diarizationEndpoints.find(
+    (endpoint) => endpoint.id === effectiveDiarizationEndpoint
+  )
+  const selectedGrammarEndpoint = grammarEndpoints.find(
+    (endpoint) => endpoint.id === effectiveGrammarEndpoint
+  )
+  const modelRequests = useMemo(
+    () =>
+      [
+        {
+          endpoint: selectedTranscriptionEndpoint,
+          capability: "transcription" as const,
+          fallback: selectedTranscriptionEndpoint?.transcriptionModel ?? "",
+        },
+        {
+          endpoint: selectedDiarizationEndpointItem,
+          capability: "diarization" as const,
+          fallback: selectedDiarizationEndpointItem?.diarizationModel ?? "",
+        },
+        {
+          endpoint: selectedGrammarEndpoint,
+          capability: "chat" as const,
+          fallback: selectedGrammarEndpoint?.chatModel ?? "",
+        },
+      ].filter((request) => Boolean(request.endpoint)),
+    [
+      selectedDiarizationEndpointItem,
+      selectedGrammarEndpoint,
+      selectedTranscriptionEndpoint,
+    ]
+  )
+
+  useEffect(() => {
+    if (!createOpen) return
+    let cancelled = false
+    for (const request of modelRequests) {
+      const endpoint = request.endpoint
+      if (!endpoint) continue
+      const key = videoModelKey(endpoint.id, request.capability)
+      if (modelDiscovery[key] || modelDiscoveryInFlightRef.current.has(key)) {
+        continue
+      }
+      modelDiscoveryInFlightRef.current.add(key)
+      void api
+        .get<{
+          models?: DiscoveredVideoModel[]
+          configuredModel?: string
+        }>(
+          `/api/v1/endpoints/${endpoint.id}/models?capability=${request.capability}`
+        )
+        .then((result) => {
+          if (cancelled) return
+          const models = (result.models ?? []).filter((model) =>
+            Boolean(model.id?.trim())
+          )
+          setModelDiscovery((current) => ({
+            ...current,
+            [key]: {
+              models,
+              configuredModel: result.configuredModel?.trim() ?? "",
+            },
+          }))
+        })
+        .catch(() => {
+          if (cancelled) return
+          setModelDiscovery((current) => ({
+            ...current,
+            [key]: {
+              models: request.fallback ? [{ id: request.fallback }] : [],
+              configuredModel: request.fallback,
+            },
+          }))
+        })
+        .finally(() => {
+          modelDiscoveryInFlightRef.current.delete(key)
+        })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [createOpen, modelDiscovery, modelRequests])
+
+  const modelValueFor = useCallback(
+    (endpoint: Endpoint | undefined, capability: VideoModelCapability) => {
+      if (!endpoint) return ""
+      const key = videoModelKey(endpoint.id, capability)
+      const discovered = modelDiscovery[key]
+      return (
+        modelSelections[key]?.trim() ||
+        discovered?.configuredModel?.trim() ||
+        (capability === "transcription"
+          ? endpoint.transcriptionModel
+          : capability === "diarization"
+            ? endpoint.diarizationModel
+            : endpoint.chatModel) ||
+        discovered?.models[0]?.id ||
+        ""
+      )
+    },
+    [modelDiscovery, modelSelections]
+  )
+
+  const modelOptionsFor = useCallback(
+    (endpoint: Endpoint | undefined, capability: VideoModelCapability) => {
+      if (!endpoint) return []
+      const key = videoModelKey(endpoint.id, capability)
+      const discovered = modelDiscovery[key]
+      const selected = modelValueFor(endpoint, capability)
+      const values = new Map<string, DiscoveredVideoModel>()
+      for (const model of discovered?.models ?? []) {
+        if (model.id?.trim()) values.set(model.id, model)
+      }
+      if (selected && !values.has(selected))
+        values.set(selected, { id: selected })
+      return [...values.values()]
+    },
+    [modelDiscovery, modelValueFor]
+  )
+
+  const setModelValue = useCallback(
+    (
+      endpoint: Endpoint | undefined,
+      capability: VideoModelCapability,
+      value: string
+    ) => {
+      if (!endpoint) return
+      setModelSelections((current) => ({
+        ...current,
+        [videoModelKey(endpoint.id, capability)]: value,
+      }))
+    },
+    []
+  )
+
+  const transcriptionModel = modelValueFor(
+    selectedTranscriptionEndpoint,
+    "transcription"
+  )
+  const diarizationModel = modelValueFor(
+    selectedDiarizationEndpointItem,
+    "diarization"
+  )
+  const grammarModel = modelValueFor(selectedGrammarEndpoint, "chat")
 
   const loadSession = useCallback(async (id: string) => {
     const requestId = ++requestRef.current
@@ -436,8 +607,15 @@ export function VideoTranscriptionView({
         language,
         recordAudio: false,
         transcriptionEndpointId: effectiveSelectedEndpoint,
+        transcriptionModel: transcriptionModel || undefined,
         diarizationEndpointId: effectiveDiarizationEndpoint || undefined,
+        diarizationModel:
+          effectiveDiarizationEndpoint && diarizationModel
+            ? diarizationModel
+            : undefined,
         grammarEndpointId: effectiveGrammarEndpoint || undefined,
+        grammarModel:
+          effectiveGrammarEndpoint && grammarModel ? grammarModel : undefined,
       })
       const createdSession: TranscriptionSession = {
         ...result.session,
@@ -1592,7 +1770,7 @@ export function VideoTranscriptionView({
           if (!open && !videoUploadInFlightRef.current) setVideoFile(null)
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>New video transcription</DialogTitle>
             <DialogDescription>
@@ -1661,6 +1839,32 @@ export function VideoTranscriptionView({
                 </SelectContent>
               </Select>
             </Field>
+            <VideoModelField
+              description="Choose the ASR model used for the timestamped transcript."
+              endpoint={selectedTranscriptionEndpoint}
+              label="Transcription model"
+              loading={
+                Boolean(selectedTranscriptionEndpoint) &&
+                !modelDiscovery[
+                  videoModelKey(
+                    selectedTranscriptionEndpoint?.id ?? "",
+                    "transcription"
+                  )
+                ]
+              }
+              models={modelOptionsFor(
+                selectedTranscriptionEndpoint,
+                "transcription"
+              )}
+              onValueChange={(value) =>
+                setModelValue(
+                  selectedTranscriptionEndpoint,
+                  "transcription",
+                  value
+                )
+              }
+              value={transcriptionModel}
+            />
             <Field>
               <FieldLabel>Speaker separation</FieldLabel>
               <Select
@@ -1699,6 +1903,34 @@ export function VideoTranscriptionView({
                 is available.
               </FieldDescription>
             </Field>
+            {effectiveDiarizationEndpoint ? (
+              <VideoModelField
+                description="Choose the diarization model used to identify speakers."
+                endpoint={selectedDiarizationEndpointItem}
+                label="Speaker separation model"
+                loading={
+                  Boolean(selectedDiarizationEndpointItem) &&
+                  !modelDiscovery[
+                    videoModelKey(
+                      selectedDiarizationEndpointItem?.id ?? "",
+                      "diarization"
+                    )
+                  ]
+                }
+                models={modelOptionsFor(
+                  selectedDiarizationEndpointItem,
+                  "diarization"
+                )}
+                onValueChange={(value) =>
+                  setModelValue(
+                    selectedDiarizationEndpointItem,
+                    "diarization",
+                    value
+                  )
+                }
+                value={diarizationModel}
+              />
+            ) : null}
             <Field>
               <FieldLabel>Grammar polishing</FieldLabel>
               <Select
@@ -1733,6 +1965,24 @@ export function VideoTranscriptionView({
                 The original ASR output stays available under Verbatim.
               </FieldDescription>
             </Field>
+            {effectiveGrammarEndpoint ? (
+              <VideoModelField
+                description="Choose the chat model used to polish the transcript."
+                endpoint={selectedGrammarEndpoint}
+                label="Grammar model"
+                loading={
+                  Boolean(selectedGrammarEndpoint) &&
+                  !modelDiscovery[
+                    videoModelKey(selectedGrammarEndpoint?.id ?? "", "chat")
+                  ]
+                }
+                models={modelOptionsFor(selectedGrammarEndpoint, "chat")}
+                onValueChange={(value) =>
+                  setModelValue(selectedGrammarEndpoint, "chat", value)
+                }
+                value={grammarModel}
+              />
+            ) : null}
           </FieldGroup>
           <DialogFooter>
             <Button onClick={() => setCreateOpen(false)} variant="outline">
@@ -1931,6 +2181,65 @@ function LiveTranscriptPreview({
       </div>
     </div>
   )
+}
+
+function VideoModelField({
+  description,
+  endpoint,
+  label,
+  loading,
+  models,
+  onValueChange,
+  value,
+}: {
+  description: string
+  endpoint?: Endpoint
+  label?: string
+  loading: boolean
+  models: DiscoveredVideoModel[]
+  onValueChange: (value: string) => void
+  value: string
+}) {
+  const fieldLabel = label ?? "Model"
+  return (
+    <Field>
+      <FieldLabel>{fieldLabel}</FieldLabel>
+      <Select
+        disabled={!endpoint || loading || models.length === 0}
+        items={models.map((model) => ({
+          value: model.id,
+          label: videoModelLabel(model),
+        }))}
+        onValueChange={(nextValue) => onValueChange(nextValue ?? "")}
+        value={value}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue
+            placeholder={
+              loading ? "Loading available models…" : "Endpoint default"
+            }
+          />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectLabel>{fieldLabel}</SelectLabel>
+            {models.map((model) => (
+              <SelectItem key={model.id} value={model.id}>
+                {videoModelLabel(model)}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <FieldDescription>{description}</FieldDescription>
+    </Field>
+  )
+}
+
+function videoModelLabel(model: DiscoveredVideoModel) {
+  const name = model.name?.trim()
+  const id = model.id.trim()
+  return name && name !== id ? `${name} · ${id}` : id
 }
 
 function VideoPipeline({

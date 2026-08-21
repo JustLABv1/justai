@@ -34,6 +34,9 @@ type transcriptionSessionRequest struct {
 	TranscriptionEndpoint string `json:"transcriptionEndpointId"`
 	DiarizationEndpoint   string `json:"diarizationEndpointId"`
 	GrammarEndpoint       string `json:"grammarEndpointId"`
+	TranscriptionModel    string `json:"transcriptionModel"`
+	DiarizationModel      string `json:"diarizationModel"`
+	GrammarModel          string `json:"grammarModel"`
 	Language              string `json:"language"`
 	RecordAudio           bool   `json:"recordAudio"`
 }
@@ -82,7 +85,8 @@ func (a *App) listTranscriptionSessions(c *gin.Context) {
 	}
 	rows, err := a.DB.QueryContext(c, `
 		SELECT s.id, s.user_id, s.organization_id, s.title, s.status,
-		       s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id, s.language,
+		       s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id,
+		       COALESCE(s.transcription_model, ''), COALESCE(s.diarization_model, ''), COALESCE(s.grammar_model, ''), s.language,
 		       s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at,
 		       (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id),
 		       (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE),
@@ -150,6 +154,41 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 			return
 		}
 	}
+	transcriptionEndpointMetadata, err := a.getEndpoint(c, transcriptionEndpoint)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("transcription endpoint not found"))
+		return
+	}
+	request.TranscriptionModel = firstNonEmptyString(
+		strings.TrimSpace(request.TranscriptionModel),
+		transcriptionEndpointMetadata.TranscriptionModel,
+	)
+	if diarizationEndpoint != uuid.Nil {
+		diarizationEndpointMetadata, endpointErr := a.getEndpoint(c, diarizationEndpoint)
+		if endpointErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("diarization endpoint not found"))
+			return
+		}
+		request.DiarizationModel = firstNonEmptyString(
+			strings.TrimSpace(request.DiarizationModel),
+			diarizationEndpointMetadata.DiarizationModel,
+		)
+	} else {
+		request.DiarizationModel = ""
+	}
+	if grammarEndpoint != uuid.Nil {
+		grammarEndpointMetadata, endpointErr := a.getEndpoint(c, grammarEndpoint)
+		if endpointErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("grammar endpoint not found"))
+			return
+		}
+		request.GrammarModel = firstNonEmptyString(
+			strings.TrimSpace(request.GrammarModel),
+			grammarEndpointMetadata.ChatModel,
+		)
+	} else {
+		request.GrammarModel = ""
+	}
 	if request.Language == "" {
 		request.Language = "auto"
 	}
@@ -164,11 +203,12 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 	expiresAt := time.Now().Add(10 * time.Minute)
 	var item models.TranscriptionSession
 	var transcriptionEndpointID, diarizationEndpointID, grammarEndpointID uuid.NullUUID
+	var transcriptionModel, diarizationModel, grammarModel string
 	var polishStatus string
 	err = a.DB.QueryRowContext(c, `
-		INSERT INTO transcription_sessions (user_id, organization_id, title, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, language, record_audio, polish_status, join_code_hash, join_code_expires_at)
-		VALUES ($1, $2, $3, $4, NULLIF($5, '00000000-0000-0000-0000-000000000000'::uuid), NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid), $7, $8, CASE WHEN NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid) IS NULL THEN 'not_requested' ELSE 'queued' END, $9, $10)
-		RETURNING id, user_id, organization_id, title, status, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, language, record_audio, polish_status, started_at, ended_at, created_at, updated_at`, principal.UserID, organizationID, request.Title, transcriptionEndpoint, diarizationEndpoint, grammarEndpoint, request.Language, request.RecordAudio, codeHash, expiresAt).Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpointID, &diarizationEndpointID, &grammarEndpointID, &item.Language, &item.RecordAudio, &polishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt)
+		INSERT INTO transcription_sessions (user_id, organization_id, title, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, transcription_model, diarization_model, grammar_model, language, record_audio, polish_status, join_code_hash, join_code_expires_at)
+		VALUES ($1, $2, $3, $4, NULLIF($5, '00000000-0000-0000-0000-000000000000'::uuid), NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), $10, $11, CASE WHEN NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid) IS NULL THEN 'not_requested' ELSE 'queued' END, $12, $13)
+		RETURNING id, user_id, organization_id, title, status, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(grammar_model, ''), language, record_audio, polish_status, started_at, ended_at, created_at, updated_at`, principal.UserID, organizationID, request.Title, transcriptionEndpoint, diarizationEndpoint, grammarEndpoint, request.TranscriptionModel, request.DiarizationModel, request.GrammarModel, request.Language, request.RecordAudio, codeHash, expiresAt).Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpointID, &diarizationEndpointID, &grammarEndpointID, &transcriptionModel, &diarizationModel, &grammarModel, &item.Language, &item.RecordAudio, &polishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -182,6 +222,9 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 	if grammarEndpointID.Valid {
 		item.GrammarEndpoint = &grammarEndpointID.UUID
 	}
+	item.TranscriptionModel = transcriptionModel
+	item.DiarizationModel = diarizationModel
+	item.GrammarModel = grammarModel
 	item.PolishStatus = polishStatus
 	item.Kind = "live"
 	item.JoinCode = code
@@ -931,8 +974,9 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 	}
 
 	var sessionEndpoint uuid.UUID
+	var sessionTranscriptionModel string
 	var language, sessionStatus string
-	if err := a.DB.QueryRowContext(ctx, `SELECT transcription_endpoint_id, language, status FROM transcription_sessions WHERE id = $1`, info.SessionID).Scan(&sessionEndpoint, &language, &sessionStatus); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT transcription_endpoint_id, COALESCE(transcription_model, ''), language, status FROM transcription_sessions WHERE id = $1`, info.SessionID).Scan(&sessionEndpoint, &sessionTranscriptionModel, &language, &sessionStatus); err != nil {
 		_ = a.Live.send(client, "error", ginData{"message": "transcription session is not configured"})
 		return
 	}
@@ -945,6 +989,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 		_ = a.Live.send(client, "error", ginData{"message": "transcription endpoint could not be loaded: " + err.Error()})
 		return
 	}
+	endpoint.TranscriptionModel = firstNonEmptyString(sessionTranscriptionModel, endpoint.TranscriptionModel)
 	mode := transcriptionMode(endpoint)
 	if mode == "" {
 		_ = a.Live.send(client, "error", ginData{"message": fmt.Sprintf("provider %s does not support a compatible transcription transport", endpoint.ProviderType)})
@@ -1718,7 +1763,7 @@ func transcriptionMode(endpoint provider.Endpoint) string {
 }
 
 func loadTranscriptionSession(ctx context.Context, db *sql.DB, sessionID uuid.UUID) (models.TranscriptionSession, error) {
-	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id, s.language, s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE), EXISTS (SELECT 1 FROM transcription_video_uploads video WHERE video.session_id = s.id) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
+	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id, COALESCE(s.transcription_model, ''), COALESCE(s.diarization_model, ''), COALESCE(s.grammar_model, ''), s.language, s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE), EXISTS (SELECT 1 FROM transcription_video_uploads video WHERE video.session_id = s.id) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
 	return scanTranscriptionSession(row)
 }
 
@@ -1726,7 +1771,7 @@ func scanTranscriptionSession(scanner interface{ Scan(dest ...any) error }) (mod
 	var item models.TranscriptionSession
 	var transcriptionEndpoint, diarizationEndpoint, grammarEndpoint uuid.NullUUID
 	var hasVideoUpload bool
-	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &grammarEndpoint, &item.Language, &item.RecordAudio, &item.PolishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.SourceCount, &item.SegmentCount, &hasVideoUpload); err != nil {
+	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &grammarEndpoint, &item.TranscriptionModel, &item.DiarizationModel, &item.GrammarModel, &item.Language, &item.RecordAudio, &item.PolishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.SourceCount, &item.SegmentCount, &hasVideoUpload); err != nil {
 		return item, err
 	}
 	if transcriptionEndpoint.Valid {

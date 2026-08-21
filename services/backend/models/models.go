@@ -156,6 +156,9 @@ type TranscriptionSession struct {
 	TranscriptionEndpoint *uuid.UUID `json:"transcriptionEndpointId,omitempty"`
 	DiarizationEndpoint   *uuid.UUID `json:"diarizationEndpointId,omitempty"`
 	GrammarEndpoint       *uuid.UUID `json:"grammarEndpointId,omitempty"`
+	TranscriptionModel    string     `json:"transcriptionModel,omitempty"`
+	DiarizationModel      string     `json:"diarizationModel,omitempty"`
+	GrammarModel          string     `json:"grammarModel,omitempty"`
 	Language              string     `json:"language"`
 	RecordAudio           bool       `json:"recordAudio"`
 	PolishStatus          string     `json:"polishStatus"`

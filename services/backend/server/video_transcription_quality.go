@@ -29,7 +29,7 @@ const (
 // diarizeVideoAudio runs a second, bounded audio pass. Keeping diarization
 // separate from ASR means a long video never has to be held in memory and the
 // existing streaming transcription transport remains unchanged.
-func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, sessionID uuid.UUID, storageKey string, endpointID uuid.UUID, language string, durationMs int64, storage *s3Storage) error {
+func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, sessionID uuid.UUID, storageKey string, endpointID uuid.UUID, model, language string, durationMs int64, storage *s3Storage) error {
 	if m.app == nil {
 		return fmt.Errorf("transcription manager is not attached to the app")
 	}
@@ -40,6 +40,7 @@ func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, 
 	if err != nil {
 		return err
 	}
+	endpoint.DiarizationModel = firstNonEmptyString(model, endpoint.DiarizationModel)
 	if !endpointSupports(endpoint, "diarization") {
 		return fmt.Errorf("endpoint does not support diarization")
 	}
@@ -293,7 +294,7 @@ type videoPolishSegment struct {
 	Text string `json:"text"`
 }
 
-func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, uploadID, sessionID, endpointID uuid.UUID) error {
+func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, uploadID, sessionID, endpointID uuid.UUID, model string) error {
 	if m.app == nil {
 		return fmt.Errorf("transcription manager is not attached to the app")
 	}
@@ -301,6 +302,7 @@ func (m *TranscriptionManager) polishVideoTranscript(ctx context.Context, upload
 	if err != nil {
 		return m.finishVideoPolish(ctx, uploadID, sessionID, fmt.Errorf("grammar endpoint could not be loaded: %w", err))
 	}
+	endpoint.ChatModel = firstNonEmptyString(model, endpoint.ChatModel)
 	if !endpointSupports(endpoint, "chat") {
 		return m.finishVideoPolish(ctx, uploadID, sessionID, fmt.Errorf("grammar endpoint does not support chat"))
 	}

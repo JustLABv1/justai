@@ -37,17 +37,41 @@ func (a *App) discoverEndpointModels(c *gin.Context) {
 		writeError(c, http.StatusConflict, fmt.Errorf("endpoint is disabled or unavailable: %w", err))
 		return
 	}
-	models, err := provider.DiscoverChatModels(c, endpoint)
+	capability := strings.TrimSpace(c.Query("capability"))
+	if capability == "" {
+		capability = "chat"
+	}
+	configuredModel := ""
+	switch capability {
+	case "chat", "grammar":
+		configuredModel = strings.TrimSpace(metadata.ChatModel)
+	case "transcription":
+		configuredModel = strings.TrimSpace(metadata.TranscriptionModel)
+	case "diarization":
+		configuredModel = strings.TrimSpace(metadata.DiarizationModel)
+	default:
+		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported model capability %q", capability))
+		return
+	}
+	// DiscoverChatModels is the provider-neutral catalog route used by all
+	// current adapters. Override its fallback model with the capability the
+	// caller is configuring so a transcription picker never silently receives
+	// the endpoint's chat default.
+	endpoint.ChatModel = configuredModel
+	var models []provider.ChatModel
+	if endpoint.ProviderType != "pyannote" {
+		models, err = provider.DiscoverChatModels(c, endpoint)
+	}
 	if err != nil {
 		writeError(c, http.StatusBadGateway, fmt.Errorf("model discovery failed: %w", err))
 		return
 	}
-	configuredModel := strings.TrimSpace(metadata.ChatModel)
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{
 		"models":          models,
 		"configuredModel": configuredModel,
 		"providerType":    metadata.ProviderType,
+		"capability":      capability,
 	})
 }
 
