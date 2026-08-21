@@ -134,6 +134,44 @@ export function groupTranscriptionSegments(
   return groups
 }
 
+export function activeTranscriptionMessageId(
+  messages: TranscriptionMessage[],
+  currentTimeMs: number
+) {
+  const exactMatch = messages.find((message) => {
+    if (currentTimeMs < message.startOffsetMs) return false
+    const endOffset =
+      message.endOffsetMs > message.startOffsetMs
+        ? message.endOffsetMs
+        : message.startOffsetMs + 4000
+    return currentTimeMs <= endOffset
+  })
+  if (exactMatch) return exactMatch.id
+
+  // Keep the last spoken line active during a short silence so playback never
+  // appears to lose its place between two transcript messages.
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message && currentTimeMs >= message.startOffsetMs) return message.id
+  }
+  return null
+}
+
+export function activeTranscriptionSegmentId(
+  segments: Pick<TranscriptionSegment, "id" | "startOffsetMs">[],
+  currentTimeMs: number
+) {
+  // Walk backwards so a segment that starts exactly when the previous one
+  // ends becomes active immediately at the boundary.
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const segment = segments[index]
+    if (segment && currentTimeMs >= segment.startOffsetMs) {
+      return segment.id
+    }
+  }
+  return null
+}
+
 function hasUsableTiming(
   value: Pick<TranscriptionMessage, "startOffsetMs" | "endOffsetMs">
 ) {

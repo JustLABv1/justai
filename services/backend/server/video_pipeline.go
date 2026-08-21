@@ -66,7 +66,7 @@ func encodeVideoPipeline(steps []models.TranscriptionVideoPipelineStep) ([]byte,
 
 func videoPipelineKeyForStage(stage string) string {
 	switch stage {
-	case "starting", "extracting", "transcribing", "processing":
+	case "starting", "extracting", "transcribing", "fusing", "processing":
 		return "transcription"
 	case "diarizing":
 		return "diarization"
@@ -77,6 +77,56 @@ func videoPipelineKeyForStage(stage string) string {
 	default:
 		return ""
 	}
+}
+
+func videoRetryStepForPipelineKey(key string) string {
+	switch key {
+	case "upload", "transcription":
+		return videoRetryStepTranscription
+	case "diarization":
+		return videoRetryStepDiarization
+	case "grammar":
+		return videoRetryStepGrammar
+	case "finalization":
+		return videoRetryStepFinalization
+	default:
+		return ""
+	}
+}
+
+// The upload stage is the authoritative state of the worker. pipeline_steps is
+// a UI projection and can lag briefly while progress is being persisted.
+func videoRetryStepForUploadStage(stage string) string {
+	if stage == videoDiarizationSkipStage {
+		return videoRetryStepDiarization
+	}
+	return videoRetryStepForPipelineKey(videoPipelineKeyForStage(stage))
+}
+
+func videoRetryStepForPipeline(steps []models.TranscriptionVideoPipelineStep) string {
+	// Prefer the latest active step because progress updates can briefly leave
+	// more than one stage active while a worker and a status write race.
+	for index := len(steps) - 1; index >= 0; index-- {
+		step := steps[index]
+		if step.Status != "active" && step.Status != "retrying" && step.Status != "failed" {
+			continue
+		}
+		if retryStep := videoRetryStepForPipelineKey(step.Key); retryStep != "" {
+			return retryStep
+		}
+	}
+	// A failure can happen between a database write and the corresponding
+	// pipeline update. In that case the next pending stage is the safest place
+	// to resume without discarding already completed work.
+	for _, step := range steps {
+		if step.Status != "pending" {
+			continue
+		}
+		if retryStep := videoRetryStepForPipelineKey(step.Key); retryStep != "" {
+			return retryStep
+		}
+	}
+	return videoRetryStepTranscription
 }
 
 func applyVideoPipelineStage(steps []models.TranscriptionVideoPipelineStep, stage, errorMessage string, now time.Time) []models.TranscriptionVideoPipelineStep {
@@ -131,7 +181,7 @@ func activateVideoPipelineAt(steps []models.TranscriptionVideoPipelineStep, key 
 	}
 	for index := 0; index < target; index++ {
 		step := &steps[index]
-		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" {
+		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" || step.Status == "skipped" {
 			continue
 		}
 		if isOptionalVideoPipelineStep(step.Key) && step.Status == "pending" {
@@ -158,7 +208,7 @@ func completeVideoPipeline(steps []models.TranscriptionVideoPipelineStep, now ti
 			completeVideoPipelineStep(step, now)
 			continue
 		}
-		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" {
+		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" || step.Status == "skipped" {
 			continue
 		}
 		if isOptionalVideoPipelineStep(step.Key) {
@@ -174,6 +224,14 @@ func failVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now ti
 	for current := range steps {
 		if steps[current].Status == "active" || steps[current].Status == "retrying" {
 			index = current
+		}
+	}
+	if index < 0 {
+		for current := len(steps) - 1; current >= 0; current-- {
+			if steps[current].Status == "failed" {
+				index = current
+				break
+			}
 		}
 	}
 	if index < 0 {
@@ -198,22 +256,85 @@ func failVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now ti
 }
 
 func cancelVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now time.Time) {
-	for index := range steps {
-		if steps[index].Status != "active" && steps[index].Status != "retrying" {
+	index := -1
+	for current := range steps {
+		if steps[current].Key == "transcription" &&
+			steps[current].Status != "completed" &&
+			steps[current].Status != "failed" &&
+			steps[current].Status != "cancelled" &&
+			steps[current].Parallel != nil {
+			// Parallel progress is written before every coarse stage update. If
+			// the latter loses a read/modify/write race, it is stronger evidence
+			// of the active work than a stale upload status.
+			index = current
+			break
+		}
+	}
+	if index >= 0 {
+		cancelVideoPipelineStepAt(steps, index, now)
+		return
+	}
+	for current := range steps {
+		if steps[current].Status != "active" && steps[current].Status != "retrying" {
 			continue
 		}
-		step := &steps[index]
-		if step.StartedAt == nil {
-			step.StartedAt = timePointer(now)
-		}
-		step.Status = "cancelled"
-		step.CompletedAt = timePointer(now)
-		step.DurationMs = elapsedVideoPipelineStep(step, now)
-		return
+		// A stale pipeline can briefly expose more than one active step while
+		// the worker and the cancel request race. The latest active step is the
+		// one that should receive the cancellation.
+		index = current
 	}
 	// Cancellation can be persisted by both the request handler and the
 	// worker finishing the in-flight job. Once there is no active step left,
 	// leave the pending steps untouched so the second write is idempotent.
+	if index < 0 {
+		return
+	}
+	cancelVideoPipelineStepAt(steps, index, now)
+}
+
+func cancelVideoPipelineStepForKey(steps []models.TranscriptionVideoPipelineStep, key string, now time.Time) bool {
+	index := videoPipelineIndex(key)
+	if index < 0 {
+		return false
+	}
+	step := &steps[index]
+	if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" {
+		return false
+	}
+	cancelVideoPipelineStepAt(steps, index, now)
+	return true
+}
+
+func cancelVideoPipelineStepAt(steps []models.TranscriptionVideoPipelineStep, index int, now time.Time) {
+	for previous := 0; previous < index; previous++ {
+		step := &steps[previous]
+		if step.Status == "completed" || step.Status == "failed" || step.Status == "cancelled" {
+			continue
+		}
+		if isOptionalVideoPipelineStep(step.Key) {
+			skipVideoPipelineStep(step)
+			continue
+		}
+		completeVideoPipelineStepAt(step, now)
+	}
+	step := &steps[index]
+	if step.StartedAt == nil {
+		step.StartedAt = timePointer(now)
+	}
+	step.Status = "cancelled"
+	step.CompletedAt = timePointer(now)
+	step.DurationMs = elapsedVideoPipelineStep(step, now)
+}
+
+func videoPipelineCancellationKey(stage string) string {
+	switch stage {
+	case "uploading":
+		return "upload"
+	case "uploaded", "queued", "retrying", "starting", "extracting", "transcribing", "fusing", "processing":
+		return "transcription"
+	default:
+		return ""
+	}
 }
 
 func retryVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now time.Time, errorMessage string) {
@@ -231,8 +352,29 @@ func retryVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, now t
 	step.StartedAt = nil
 	step.CompletedAt = nil
 	step.DurationMs = 0
+	step.Parallel = nil
 	if errorMessage != "" {
 		step.Error = errorMessage
+	}
+}
+
+func retryVideoPipelineStepFrom(steps []models.TranscriptionVideoPipelineStep, key, errorMessage string) {
+	index := videoPipelineIndex(key)
+	if index < 0 {
+		return
+	}
+	for current := index; current < len(steps); current++ {
+		step := &steps[current]
+		step.Status = "pending"
+		step.StartedAt = nil
+		step.CompletedAt = nil
+		step.DurationMs = 0
+		step.Error = ""
+		if current == index {
+			step.Status = "retrying"
+			step.Error = errorMessage
+		}
+		step.Parallel = nil
 	}
 }
 
@@ -269,6 +411,46 @@ func skipVideoPipelineStep(step *models.TranscriptionVideoPipelineStep) {
 	step.CompletedAt = nil
 	step.DurationMs = 0
 	step.Error = ""
+}
+
+// applyVideoPipelineDiarizationSkip enforces the stage boundary represented by
+// a speaker-separation skip. Reaching diarization proves that both the source
+// upload and transcription succeeded, even when an older or stale pipeline
+// projection still shows their initial states.
+func applyVideoPipelineDiarizationSkip(steps []models.TranscriptionVideoPipelineStep, processingStartedAt *time.Time, now time.Time) []models.TranscriptionVideoPipelineStep {
+	steps = normalizeVideoPipeline(steps, now)
+	uploadIndex := videoPipelineIndex("upload")
+	transcriptionIndex := videoPipelineIndex("transcription")
+	diarizationIndex := videoPipelineIndex("diarization")
+	if uploadIndex < 0 || transcriptionIndex < 0 || diarizationIndex < 0 {
+		return steps
+	}
+
+	uploadCompletedAt := now
+	if processingStartedAt != nil {
+		uploadCompletedAt = *processingStartedAt
+	}
+	uploadStep := &steps[uploadIndex]
+	if uploadStep.StartedAt != nil && uploadCompletedAt.Before(*uploadStep.StartedAt) {
+		uploadCompletedAt = *uploadStep.StartedAt
+	}
+	completeVideoPipelineStepAt(uploadStep, uploadCompletedAt)
+
+	transcriptionStep := &steps[transcriptionIndex]
+	if transcriptionStep.Status != "completed" {
+		if transcriptionStep.StartedAt == nil {
+			transcriptionStartedAt := uploadCompletedAt
+			transcriptionStep.StartedAt = timePointer(transcriptionStartedAt)
+		}
+		transcriptionCompletedAt := now
+		if transcriptionCompletedAt.Before(*transcriptionStep.StartedAt) {
+			transcriptionCompletedAt = *transcriptionStep.StartedAt
+		}
+		completeVideoPipelineStepAt(transcriptionStep, transcriptionCompletedAt)
+	}
+
+	skipVideoPipelineStep(&steps[diarizationIndex])
+	return steps
 }
 
 func markVideoPipelineStep(steps []models.TranscriptionVideoPipelineStep, key, status, errorMessage string, now time.Time) {
@@ -335,9 +517,15 @@ func timePointer(value time.Time) *time.Time {
 	return &copy
 }
 
-func (m *TranscriptionManager) updateStoredVideoPipeline(ctx context.Context, uploadID uuid.UUID, allowTerminal bool, mutate func([]models.TranscriptionVideoPipelineStep)) error {
+func (m *TranscriptionManager) updateStoredVideoPipeline(ctx context.Context, uploadID uuid.UUID, allowTerminal bool, mutate func([]models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep) error {
+	transaction, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+
 	var raw []byte
-	if err := m.DB.QueryRowContext(ctx, `SELECT pipeline_steps FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&raw); err != nil {
+	if err := transaction.QueryRowContext(ctx, `SELECT pipeline_steps FROM transcription_video_uploads WHERE id = $1 FOR UPDATE`, uploadID).Scan(&raw); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -345,7 +533,7 @@ func (m *TranscriptionManager) updateStoredVideoPipeline(ctx context.Context, up
 	if len(steps) == 0 {
 		steps = initialVideoPipeline(now)
 	}
-	mutate(steps)
+	steps = mutate(steps)
 	pipeline, err := encodeVideoPipeline(steps)
 	if err != nil {
 		return err
@@ -354,50 +542,91 @@ func (m *TranscriptionManager) updateStoredVideoPipeline(ctx context.Context, up
 	if !allowTerminal {
 		query += ` AND status NOT IN ('cancelled', 'completed')`
 	}
-	if _, err := m.DB.ExecContext(ctx, query, uploadID, pipeline); err != nil {
+	if _, err := transaction.ExecContext(ctx, query, uploadID, pipeline); err != nil {
 		return err
 	}
-	return nil
+	return transaction.Commit()
 }
 
 func (m *TranscriptionManager) advanceVideoPipeline(ctx context.Context, uploadID uuid.UUID, stage, errorMessage string) error {
 	now := time.Now().UTC()
-	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) {
-		applyVideoPipelineStage(steps, stage, errorMessage, now)
+	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
+		return applyVideoPipelineStage(steps, stage, errorMessage, now)
+	})
+}
+
+func (m *TranscriptionManager) updateVideoParallelProgress(ctx context.Context, uploadID uuid.UUID, progress models.TranscriptionVideoParallelProgress) error {
+	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
+		index := videoPipelineIndex("transcription")
+		if index < 0 {
+			return steps
+		}
+		value := progress
+		steps[index].Parallel = &value
+		return steps
 	})
 }
 
 func (m *TranscriptionManager) completeVideoPipeline(ctx context.Context, uploadID uuid.UUID) error {
 	now := time.Now().UTC()
-	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) {
+	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
 		completeVideoPipeline(steps, now)
+		return steps
 	})
 }
 
 func (m *TranscriptionManager) failVideoPipeline(ctx context.Context, uploadID uuid.UUID, errorMessage string) error {
 	now := time.Now().UTC()
-	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) {
+	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
 		failVideoPipelineStep(steps, now, errorMessage)
+		return steps
 	})
 }
 
 func (m *TranscriptionManager) cancelVideoPipeline(ctx context.Context, uploadID uuid.UUID) error {
+	return m.cancelVideoPipelineAtStage(ctx, uploadID, "")
+}
+
+func (m *TranscriptionManager) cancelVideoPipelineAtStage(ctx context.Context, uploadID uuid.UUID, stage string) error {
 	now := time.Now().UTC()
-	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) {
+	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
+		if key := videoPipelineCancellationKey(stage); key != "" && cancelVideoPipelineStepForKey(steps, key, now) {
+			return steps
+		}
 		cancelVideoPipelineStep(steps, now)
+		return steps
 	})
 }
 
 func (m *TranscriptionManager) retryVideoPipeline(ctx context.Context, uploadID uuid.UUID, errorMessage string) error {
 	now := time.Now().UTC()
-	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) {
+	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
 		retryVideoPipelineStep(steps, now, errorMessage)
+		return steps
+	})
+}
+
+func (m *TranscriptionManager) retryVideoPipelineFrom(ctx context.Context, uploadID uuid.UUID, key, errorMessage string) error {
+	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
+		retryVideoPipelineStepFrom(steps, key, errorMessage)
+		return steps
+	})
+}
+
+func (m *TranscriptionManager) skipVideoPipelineStep(ctx context.Context, uploadID uuid.UUID, key string) error {
+	return m.updateStoredVideoPipeline(ctx, uploadID, false, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
+		index := videoPipelineIndex(key)
+		if index >= 0 && index < len(steps) {
+			skipVideoPipelineStep(&steps[index])
+		}
+		return steps
 	})
 }
 
 func (m *TranscriptionManager) finishVideoPipelineStep(ctx context.Context, uploadID uuid.UUID, key, status, errorMessage string) error {
 	now := time.Now().UTC()
-	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) {
+	return m.updateStoredVideoPipeline(ctx, uploadID, true, func(steps []models.TranscriptionVideoPipelineStep) []models.TranscriptionVideoPipelineStep {
 		markVideoPipelineStep(steps, key, status, errorMessage, now)
+		return steps
 	})
 }

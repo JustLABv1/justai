@@ -15,6 +15,7 @@ export function resolveAPIURL(path: string) {
   return `${API_URL.replace(/\/$/, "")}${path}`
 }
 const REQUEST_TIMEOUT_MS = 30_000
+type APIRequestInit = RequestInit & { timeoutMs?: number }
 
 let selectedOrganizationId = ""
 let hasLoadedOrganizationId = false
@@ -48,9 +49,10 @@ export class APIError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers)
-  if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
+async function request<T>(path: string, init?: APIRequestInit): Promise<T> {
+  const { timeoutMs, ...fetchInit } = init ?? {}
+  const headers = new Headers(fetchInit.headers)
+  if (!(fetchInit.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json")
   }
   const organizationId = organizationIdForRequest()
@@ -60,28 +62,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController()
   const timeout = globalThis.setTimeout(
     () => controller.abort(),
-    REQUEST_TIMEOUT_MS
+    timeoutMs ?? REQUEST_TIMEOUT_MS
   )
-  if (init?.signal) {
-    if (init.signal.aborted) controller.abort()
+  if (fetchInit.signal) {
+    if (fetchInit.signal.aborted) controller.abort()
     else
-      init.signal.addEventListener("abort", () => controller.abort(), {
+      fetchInit.signal.addEventListener("abort", () => controller.abort(), {
         once: true,
       })
   }
   let response: Response
   try {
     response = await fetch(`${API_URL}${path}`, {
-      ...init,
+      ...fetchInit,
       credentials: "include",
       headers,
-      cache: init?.cache ?? "no-store",
+      cache: fetchInit.cache ?? "no-store",
       signal: controller.signal,
     })
   } catch (caught) {
     globalThis.clearTimeout(timeout)
     if (caught instanceof DOMException && caught.name === "AbortError") {
-      if (init?.signal?.aborted) {
+      if (fetchInit.signal?.aborted) {
         throw new APIError("The request was cancelled.", 499, {
           code: "request_aborted",
         })
@@ -229,7 +231,7 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
 
 export const api = {
   get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
-  post: <T>(path: string, body?: unknown, init?: RequestInit) =>
+  post: <T>(path: string, body?: unknown, init?: APIRequestInit) =>
     request<T>(path, {
       ...init,
       method: "POST",

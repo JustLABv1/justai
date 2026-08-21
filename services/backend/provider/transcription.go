@@ -21,6 +21,7 @@ import (
 type RealtimeEvent struct {
 	Kind          string
 	Text          string
+	RawText       string
 	Err           error
 	StartOffsetMs int64
 	EndOffsetMs   int64

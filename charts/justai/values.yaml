@@ -62,6 +62,10 @@ config:
     streamingChunkMs: 2500
     streamingOverlapMs: 500
     streamingPromptChars: 160
+    videoTranscriptionChunkMs: 600000
+    videoTranscriptionOverlapMs: 5000
+    videoTranscriptionWorkers: 3
+    videoTranscriptionWorkerCapacity: 2
     audioRetentionDays: 30
     diarizationWindowSeconds: 30
     diarizationOverlapSeconds: 5

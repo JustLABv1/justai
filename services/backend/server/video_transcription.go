@@ -10,9 +10,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -33,6 +36,51 @@ const (
 
 var errVideoTranscriptionCancelled = errors.New("video transcription was cancelled")
 var errVideoTranscriptionPermanent = errors.New("permanent video transcription error")
+var errVideoTranscriptionSkipDiarization = errors.New("video speaker separation was skipped")
+
+const videoDiarizationSkipStage = "skipping_diarization"
+
+type videoDiarizationCancellation struct {
+	cancel context.CancelFunc
+	token  uint64
+}
+
+// registerVideoDiarizationCancel gives the skip endpoint a way to interrupt
+// the provider request that is currently holding the diarization stage open.
+// The cleanup function is token-aware so a stale worker cannot unregister a
+// newer attempt for the same upload.
+func (m *TranscriptionManager) registerVideoDiarizationCancel(uploadID uuid.UUID, cancel context.CancelFunc) func() {
+	m.videoDiarizationMu.Lock()
+	defer m.videoDiarizationMu.Unlock()
+	m.videoDiarizationToken++
+	registration := videoDiarizationCancellation{
+		cancel: cancel,
+		token:  m.videoDiarizationToken,
+	}
+	if m.videoDiarizationCancels == nil {
+		m.videoDiarizationCancels = make(map[uuid.UUID]videoDiarizationCancellation)
+	}
+	m.videoDiarizationCancels[uploadID] = registration
+	return func() {
+		m.videoDiarizationMu.Lock()
+		defer m.videoDiarizationMu.Unlock()
+		current, ok := m.videoDiarizationCancels[uploadID]
+		if ok && current.token == registration.token {
+			delete(m.videoDiarizationCancels, uploadID)
+		}
+	}
+}
+
+func (m *TranscriptionManager) cancelVideoDiarization(uploadID uuid.UUID) bool {
+	m.videoDiarizationMu.Lock()
+	registration, ok := m.videoDiarizationCancels[uploadID]
+	m.videoDiarizationMu.Unlock()
+	if !ok || registration.cancel == nil {
+		return false
+	}
+	registration.cancel()
+	return true
+}
 
 type videoUploadRecord struct {
 	model         models.TranscriptionVideoUpload
@@ -41,21 +89,108 @@ type videoUploadRecord struct {
 	multipartID   string
 }
 
+type videoAudioChunk struct {
+	index         int
+	offsetBytes   int64
+	lengthBytes   int64
+	startOffsetMs int64
+	endOffsetMs   int64
+}
+
+type videoTranscriptionEvent struct {
+	chunkIndex    int
+	sequence      int
+	startOffsetMs int64
+	endOffsetMs   int64
+	text          string
+	rawText       string
+}
+
+type videoChunkStreamResult struct {
+	events []videoTranscriptionEvent
+	err    error
+}
+
 type videoJobPayload struct {
-	UploadID string `json:"uploadId"`
+	UploadID  string `json:"uploadId"`
+	RetryFrom string `json:"retryFrom,omitempty"`
+}
+
+const (
+	videoRetryStepTranscription = "transcription"
+	videoRetryStepDiarization   = "diarization"
+	videoRetryStepGrammar       = "grammar"
+	videoRetryStepFinalization  = "finalization"
+)
+
+func normalizeVideoRetryStep(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case videoRetryStepTranscription:
+		return videoRetryStepTranscription
+	case videoRetryStepDiarization:
+		return videoRetryStepDiarization
+	case videoRetryStepGrammar:
+		return videoRetryStepGrammar
+	case videoRetryStepFinalization:
+		return videoRetryStepFinalization
+	default:
+		return ""
+	}
+}
+
+func videoRetryStage(retryFrom string) string {
+	switch normalizeVideoRetryStep(retryFrom) {
+	case videoRetryStepDiarization:
+		return "diarizing"
+	case videoRetryStepGrammar:
+		return "polishing"
+	case videoRetryStepFinalization:
+		return "finalizing"
+	default:
+		return "starting"
+	}
+}
+
+func videoResumeStep(retryFrom, uploadStage string) string {
+	if normalized := normalizeVideoRetryStep(retryFrom); normalized != "" {
+		return normalized
+	}
+	return videoRetryStepForUploadStage(uploadStage)
+}
+
+func videoDiarizationStageIsActive(stage string) bool {
+	return stage == "diarizing" || stage == videoDiarizationSkipStage
 }
 
 func (m *TranscriptionManager) startVideoWorker(ctx context.Context) {
+	capacity := configuredVideoTranscriptionWorkerCapacity(m.Config)
+	slots := make(chan struct{}, capacity)
+	dispatch := func() {
+		select {
+		case slots <- struct{}{}:
+			go func() {
+				defer func() { <-slots }()
+				if err := m.processVideoJob(ctx); err != nil && !errors.Is(err, errVideoTranscriptionCancelled) && ctx.Err() == nil {
+					slog.Warn("video transcription job failed", "error", err)
+				}
+			}()
+		default:
+			// Every configured slot is already working. The next scheduler tick
+			// will try again after one of them completes.
+		}
+	}
+
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
+		dispatch()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := m.processVideoJob(ctx); err != nil && !errors.Is(err, errVideoTranscriptionCancelled) && ctx.Err() == nil {
-					slog.Warn("video transcription job failed", "error", err)
+				for range capacity {
+					dispatch()
 				}
 			}
 		}
@@ -68,10 +203,20 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 		return err
 	}
 	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, videoTranscriptionWorkerLockName); err != nil {
+		return err
+	}
 	_, _ = transaction.ExecContext(ctx, `
 		UPDATE transcription_jobs
 		SET status = 'queued', lease_until = NULL, run_after = now(), updated_at = now()
 		WHERE job_type = $1 AND status = 'processing' AND (lease_until IS NULL OR lease_until < now())`, videoTranscriptionJobType)
+	var activeJobs int
+	if err := transaction.QueryRowContext(ctx, `SELECT COUNT(*)::int FROM transcription_jobs WHERE job_type = $1 AND status = 'processing'`, videoTranscriptionJobType).Scan(&activeJobs); err != nil {
+		return err
+	}
+	if activeJobs >= configuredVideoTranscriptionWorkerCapacity(m.Config) {
+		return nil
+	}
 
 	var jobID, sessionID uuid.UUID
 	var uploadIDValue string
@@ -82,7 +227,7 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 		       j.payload->>'uploadId'
 		FROM transcription_jobs j
 		WHERE j.job_type = $1 AND j.status = 'queued' AND j.run_after <= now()
-		ORDER BY j.created_at FOR UPDATE SKIP LOCKED LIMIT 1`, videoTranscriptionJobType).Scan(&jobID, &sessionID, &payload, &attempts, &maxAttempts, &uploadIDValue)
+		ORDER BY j.created_at, j.id FOR UPDATE SKIP LOCKED LIMIT 1`, videoTranscriptionJobType).Scan(&jobID, &sessionID, &payload, &attempts, &maxAttempts, &uploadIDValue)
 	if err == sql.ErrNoRows {
 		return nil
 	}
@@ -94,7 +239,7 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 	}
 	uploadID, parseErr := uuid.Parse(uploadIDValue)
 	if parseErr != nil {
-		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', error_message = 'invalid video transcription job upload id', updated_at = now() WHERE id = $1`, jobID)
+		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', completed_at = now(), error_message = 'invalid video transcription job upload id', updated_at = now() WHERE id = $1`, jobID)
 		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = $1 AND status = 'processing'`, sessionID)
 		if err := transaction.Commit(); err != nil {
 			return err
@@ -103,7 +248,7 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 		return nil
 	}
 	if attempts >= maxAttempts {
-		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', lease_until = NULL, error_message = 'maximum retry attempts exceeded', updated_at = now() WHERE id = $1`, jobID)
+		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', completed_at = now(), lease_until = NULL, error_message = 'maximum retry attempts exceeded', updated_at = now() WHERE id = $1`, jobID)
 		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'failed', stage = 'failed', error_message = 'maximum retry attempts exceeded', updated_at = now() WHERE id = $1`, uploadID)
 		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = $1 AND status = 'processing'`, sessionID)
 		if err := transaction.Commit(); err != nil {
@@ -116,54 +261,74 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 		m.broadcastVideoProgress(uploadID, "failed", 0, "failed", "maximum retry attempts exceeded")
 		return nil
 	}
-	var uploadStatus string
-	if err := transaction.QueryRowContext(ctx, `SELECT status FROM transcription_video_uploads WHERE id = $1 FOR UPDATE`, uploadID).Scan(&uploadStatus); err != nil {
+	var uploadStatus, uploadStage string
+	if err := transaction.QueryRowContext(ctx, `SELECT status, stage FROM transcription_video_uploads WHERE id = $1 FOR UPDATE`, uploadID).Scan(&uploadStatus, &uploadStage); err != nil {
 		return err
 	}
 	if uploadStatus == "cancelled" {
-		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', updated_at = now() WHERE id = $1`, jobID)
+		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), updated_at = now() WHERE id = $1`, jobID)
 		return transaction.Commit()
 	}
 	if uploadStatus == "completed" {
-		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'completed', updated_at = now() WHERE id = $1`, jobID)
+		_, _ = transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'completed', completed_at = now(), updated_at = now() WHERE id = $1`, jobID)
 		return transaction.Commit()
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'processing', attempts = attempts + 1, lease_until = now() + $2 * interval '1 second', updated_at = now() WHERE id = $1`, jobID, int64(videoJobLeaseDuration/time.Second)); err != nil {
+	var parsed videoJobPayload
+	payloadErr := json.Unmarshal(payload, &parsed)
+	retryFrom := normalizeVideoRetryStep(parsed.RetryFrom)
+	if payloadErr == nil && parsed.UploadID == "" {
+		payloadErr = fmt.Errorf("invalid video transcription job payload")
+	}
+	if payloadErr == nil && parsed.UploadID != uploadID.String() {
+		payloadErr = fmt.Errorf("video transcription job payload does not match upload")
+	}
+	if payloadErr == nil && strings.TrimSpace(parsed.RetryFrom) != "" && retryFrom == "" {
+		payloadErr = fmt.Errorf("unsupported video retry step %q", parsed.RetryFrom)
+	}
+	if payloadErr == nil && retryFrom == "" {
+		// The first attempt has no explicit retry boundary in its payload. If its
+		// worker is reclaimed, resume from the authoritative upload stage so a
+		// restart during diarization, polishing, or finalization never reruns ASR.
+		retryFrom = videoResumeStep(retryFrom, uploadStage)
+	}
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'processing', attempts = attempts + 1, started_at = COALESCE(started_at, now()), completed_at = NULL, lease_until = now() + $2 * interval '1 second', updated_at = now() WHERE id = $1`, jobID, int64(videoJobLeaseDuration/time.Second)); err != nil {
 		return err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'processing', stage = 'starting', error_message = NULL, updated_at = now() WHERE id = $1`, uploadID); err != nil {
+	jobStage := videoRetryStage(retryFrom)
+	if uploadStage == videoDiarizationSkipStage && retryFrom == videoRetryStepDiarization {
+		jobStage = videoDiarizationSkipStage
+	}
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'processing', stage = $2, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID, jobStage); err != nil {
 		return err
 	}
 	if err := transaction.Commit(); err != nil {
 		return err
 	}
-	if err := m.advanceVideoPipeline(ctx, uploadID, "starting", ""); err != nil {
-		slog.Warn("could not persist video pipeline start", "uploadId", uploadID, "error", err)
+	if jobStage != videoDiarizationSkipStage {
+		if err := m.advanceVideoPipeline(ctx, uploadID, jobStage, ""); err != nil {
+			slog.Warn("could not persist video pipeline start", "uploadId", uploadID, "stage", jobStage, "error", err)
+		}
 	}
-
-	var parsed videoJobPayload
-	if err := json.Unmarshal(payload, &parsed); err != nil || parsed.UploadID == "" {
-		return m.finishVideoJob(ctx, jobID, uploadID, fmt.Errorf("%w: invalid video transcription job payload", errVideoTranscriptionPermanent))
+	if payloadErr != nil {
+		return m.finishVideoJob(ctx, jobID, uploadID, fmt.Errorf("%w: %v", errVideoTranscriptionPermanent, payloadErr))
 	}
-	if parsed.UploadID != uploadID.String() {
-		return m.finishVideoJob(ctx, jobID, uploadID, fmt.Errorf("%w: video transcription job payload does not match upload", errVideoTranscriptionPermanent))
-	}
-	processingErr := m.transcribeVideo(ctx, jobID, uploadID)
+	processingErr := m.transcribeVideo(ctx, jobID, uploadID, retryFrom)
 	return m.finishVideoJob(ctx, jobID, uploadID, processingErr)
 }
 
 func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, uploadID uuid.UUID, processingErr error) error {
 	var uploadStatus string
+	var uploadStage string
 	var sessionID uuid.UUID
-	if err := m.DB.QueryRowContext(ctx, `SELECT status, session_id FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&uploadStatus, &sessionID); err == nil && uploadStatus == "cancelled" {
+	if err := m.DB.QueryRowContext(ctx, `SELECT status, session_id, stage FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&uploadStatus, &sessionID, &uploadStage); err == nil && uploadStatus == "cancelled" {
 		if err := m.cancelVideoPipeline(ctx, uploadID); err != nil {
 			slog.Warn("could not persist cancelled video pipeline", "uploadId", uploadID, "error", err)
 		}
-		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 		return errVideoTranscriptionCancelled
 	}
 	if processingErr == nil {
-		_, err := m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'completed', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
+		_, err := m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'completed', completed_at = now(), lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 		if err != nil {
 			return err
 		}
@@ -174,7 +339,7 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 		if affected, err := result.RowsAffected(); err != nil {
 			return err
 		} else if affected != 1 {
-			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
+			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 			return errVideoTranscriptionCancelled
 		}
 		if err := m.completeVideoPipeline(ctx, uploadID); err != nil {
@@ -186,7 +351,7 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 		return nil
 	}
 	if errors.Is(processingErr, errVideoTranscriptionCancelled) {
-		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, jobID)
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'cancelled', stage = 'cancelled', error_message = NULL, updated_at = now() WHERE id = $1`, uploadID)
 		if err := m.cancelVideoPipeline(ctx, uploadID); err != nil {
 			slog.Warn("could not persist cancelled video pipeline", "uploadId", uploadID, "error", err)
@@ -210,18 +375,38 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 	}
 	if attempts < maxAttempts {
 		delay := time.Duration(attempts*10) * time.Second
-		_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL`, sessionID)
-		_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
-		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'queued', lease_until = NULL, run_after = now() + $2 * interval '1 second', error_message = $3, updated_at = now() WHERE id = $1`, jobID, int64(delay/time.Second), processingErr.Error())
+		retryFrom := videoRetryStepForUploadStage(uploadStage)
+		if retryFrom == "" {
+			retryFrom = m.videoRetryStepFromStoredPipeline(ctx, uploadID)
+		}
+		switch retryFrom {
+		case videoRetryStepTranscription:
+			// A transcription attempt can have left partial or overlapping rows.
+			// Rebuild that stage, but leave later-stage data untouched until the
+			// stage is reached again.
+			_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL`, sessionID)
+			_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
+		case videoRetryStepDiarization:
+			// The transcript is already valid; only speaker assignments need to be
+			// recomputed.
+			_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
+		case videoRetryStepGrammar:
+			// Keep the verbatim transcript and speakers, but do not reuse a partial
+			// polished result from the failed attempt.
+			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID)
+		}
+		retryPayload, _ := json.Marshal(videoJobPayload{UploadID: uploadID.String(), RetryFrom: retryFrom})
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET payload = $2, status = 'queued', lease_until = NULL, run_after = now() + $3 * interval '1 second', error_message = $4, updated_at = now() WHERE id = $1`, jobID, retryPayload, int64(delay/time.Second), processingErr.Error())
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', stage = 'retrying', error_message = $2, updated_at = now() WHERE id = $1`, uploadID, processingErr.Error())
-		if err := m.retryVideoPipeline(ctx, uploadID, processingErr.Error()); err != nil {
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', polish_status = CASE WHEN $2 = 'transcription' THEN CASE WHEN grammar_endpoint_id IS NULL THEN 'not_requested' ELSE 'queued' END WHEN $2 = 'grammar' THEN 'queued' ELSE polish_status END, ended_at = NULL, updated_at = now() WHERE id = $1`, sessionID, retryFrom)
+		if err := m.retryVideoPipelineFrom(ctx, uploadID, retryFrom, processingErr.Error()); err != nil {
 			slog.Warn("could not persist retrying video pipeline", "uploadId", uploadID, "error", err)
 		}
 		m.broadcast(sessionID, "transcription.session", ginData{"status": "processing"})
 		m.broadcastVideoProgress(uploadID, "queued", 0, "retrying", processingErr.Error())
 		return processingErr
 	}
-	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', lease_until = NULL, error_message = $2, updated_at = now() WHERE id = $1`, jobID, processingErr.Error())
+	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'failed', completed_at = now(), lease_until = NULL, error_message = $2, updated_at = now() WHERE id = $1`, jobID, processingErr.Error())
 	_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'failed', stage = 'failed', error_message = $2, updated_at = now() WHERE id = $1`, uploadID, processingErr.Error())
 	if err := m.failVideoPipeline(ctx, uploadID, processingErr.Error()); err != nil {
 		slog.Warn("could not persist failed video pipeline", "uploadId", uploadID, "error", err)
@@ -230,6 +415,14 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 	m.broadcast(sessionID, "transcription.session", ginData{"status": "failed"})
 	m.broadcastVideoProgress(uploadID, "failed", 0, "failed", processingErr.Error())
 	return processingErr
+}
+
+func (m *TranscriptionManager) videoRetryStepFromStoredPipeline(ctx context.Context, uploadID uuid.UUID) string {
+	var raw []byte
+	if err := m.DB.QueryRowContext(ctx, `SELECT pipeline_steps FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&raw); err != nil {
+		return videoRetryStepTranscription
+	}
+	return videoRetryStepForPipeline(decodeVideoPipeline(raw))
 }
 
 func (m *TranscriptionManager) queueVideoTranscription(ctx context.Context, uploadID uuid.UUID) (uuid.UUID, models.TranscriptionVideoUpload, error) {
@@ -277,7 +470,19 @@ func (m *TranscriptionManager) queueVideoTranscription(ctx context.Context, uplo
 	return jobID, upload, err
 }
 
-func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.UUID) (uuid.UUID, models.TranscriptionVideoUpload, error) {
+func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.UUID, requestedStep string) (uuid.UUID, models.TranscriptionVideoUpload, error) {
+	explicitStep := strings.TrimSpace(requestedStep) != ""
+	retryFrom := normalizeVideoRetryStep(requestedStep)
+	if explicitStep && retryFrom == "" {
+		return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("unsupported video retry step %q", requestedStep)
+	}
+	if retryFrom == "" {
+		retryFrom = m.videoRetryStepFromStoredPipeline(ctx, uploadID)
+		if retryFrom == "" {
+			retryFrom = videoRetryStepTranscription
+		}
+	}
+
 	transaction, err := m.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
@@ -289,26 +494,76 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 	if err := transaction.QueryRowContext(ctx, `SELECT session_id, status, expected_bytes, bytes FROM transcription_video_uploads WHERE id = $1 FOR UPDATE`, uploadID).Scan(&sessionID, &status, &expectedBytes, &bytesUploaded); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
-	if status != "failed" && !(status == "cancelled" && bytesUploaded >= expectedBytes && expectedBytes > 0) {
-		return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("only failed video uploads or completed cancelled uploads can be retried")
+	var diarizationEndpoint, grammarEndpoint uuid.NullUUID
+	var transcriptCount int64
+	if err := transaction.QueryRowContext(ctx, `
+		SELECT diarization_endpoint_id, grammar_endpoint_id,
+		       (SELECT COUNT(*) FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL AND canonical = TRUE)
+		FROM transcription_sessions WHERE id = $1`, sessionID).Scan(&diarizationEndpoint, &grammarEndpoint, &transcriptCount); err != nil {
+		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
-	_, _ = transaction.ExecContext(ctx, `DELETE FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL`, sessionID)
-	_, _ = transaction.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
-	payload, _ := json.Marshal(videoJobPayload{UploadID: uploadID.String()})
+	sourceReady := expectedBytes > 0 && bytesUploaded >= expectedBytes
+	if retryFrom == videoRetryStepTranscription {
+		if explicitStep && !sourceReady {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("transcription can only be retried after the video upload has finished")
+		}
+		if status != "failed" && !(status == "cancelled" && sourceReady) {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("only failed video uploads or completed cancelled uploads can be retried")
+		}
+	} else {
+		if !sourceReady {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("processing steps can only be retried after the video upload has finished")
+		}
+		if status != "failed" && status != "cancelled" && status != "completed" {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("video processing is currently %s", status)
+		}
+		if retryFrom == videoRetryStepDiarization && !diarizationEndpoint.Valid {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation is not configured for this video")
+		}
+		if retryFrom == videoRetryStepGrammar && !grammarEndpoint.Valid {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("grammar polish is not configured for this video")
+		}
+		if transcriptCount == 0 {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("%s cannot be retried before a transcript exists", retryFrom)
+		}
+	}
+
+	switch retryFrom {
+	case videoRetryStepTranscription:
+		if _, err := transaction.ExecContext(ctx, `DELETE FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, err
+		}
+		if _, err := transaction.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID); err != nil {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, err
+		}
+	case videoRetryStepDiarization:
+		if _, err := transaction.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID); err != nil {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, err
+		}
+		if _, err := transaction.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, err
+		}
+	case videoRetryStepGrammar:
+		if _, err := transaction.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, err
+		}
+	}
+
+	payload, _ := json.Marshal(videoJobPayload{UploadID: uploadID.String(), RetryFrom: retryFrom})
 	jobID := uuid.New()
 	if _, err := transaction.ExecContext(ctx, `INSERT INTO transcription_jobs (id, session_id, job_type, payload) VALUES ($1, $2, $3, $4)`, jobID, sessionID, videoTranscriptionJobType, payload); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', progress = 0, stage = 'queued', duration_ms = 0, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'queued', progress = 0, stage = 'queued', duration_ms = CASE WHEN $2 = 'transcription' THEN 0 ELSE duration_ms END, completed_at = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID, retryFrom); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', polish_status = CASE WHEN grammar_endpoint_id IS NULL THEN 'not_requested' ELSE 'queued' END, started_at = COALESCE(started_at, now()), ended_at = NULL, updated_at = now() WHERE id = $1`, sessionID); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', polish_status = CASE WHEN $2 = 'transcription' THEN CASE WHEN grammar_endpoint_id IS NULL THEN 'not_requested' ELSE 'queued' END WHEN $2 IN ('diarization', 'grammar') THEN CASE WHEN grammar_endpoint_id IS NULL THEN polish_status ELSE 'queued' END ELSE polish_status END, started_at = COALESCE(started_at, now()), ended_at = NULL, updated_at = now() WHERE id = $1`, sessionID, retryFrom); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
 	if err := transaction.Commit(); err != nil {
 		return uuid.Nil, models.TranscriptionVideoUpload{}, err
 	}
-	if err := m.retryVideoPipeline(ctx, uploadID, ""); err != nil {
+	if err := m.retryVideoPipelineFrom(ctx, uploadID, retryFrom, ""); err != nil {
 		slog.Warn("could not persist manually retried video pipeline", "uploadId", uploadID, "error", err)
 	}
 	m.broadcast(sessionID, "transcription.session", ginData{"status": "processing"})
@@ -323,8 +578,8 @@ func (m *TranscriptionManager) cancelVideoJob(ctx context.Context, uploadID uuid
 	}
 	defer transaction.Rollback()
 	var sessionID uuid.UUID
-	var status string
-	if err := transaction.QueryRowContext(ctx, `SELECT session_id, status FROM transcription_video_uploads WHERE id = $1 FOR UPDATE`, uploadID).Scan(&sessionID, &status); err != nil {
+	var status, stage string
+	if err := transaction.QueryRowContext(ctx, `SELECT session_id, status, stage FROM transcription_video_uploads WHERE id = $1 FOR UPDATE`, uploadID).Scan(&sessionID, &status, &stage); err != nil {
 		return err
 	}
 	if status == "completed" || status == "cancelled" {
@@ -333,7 +588,7 @@ func (m *TranscriptionManager) cancelVideoJob(ctx context.Context, uploadID uuid
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = 'cancelled', stage = 'cancelled', error_message = NULL, updated_at = now() WHERE id = $1`, uploadID); err != nil {
 		return err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, updated_at = now() WHERE job_type = $1 AND payload->>'uploadId' = $2 AND status IN ('queued', 'processing')`, videoTranscriptionJobType, uploadID.String()); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, updated_at = now() WHERE job_type = $1 AND payload->>'uploadId' = $2 AND status IN ('queued', 'processing')`, videoTranscriptionJobType, uploadID.String()); err != nil {
 		return err
 	}
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = $1 AND status = 'processing'`, sessionID); err != nil {
@@ -342,7 +597,7 @@ func (m *TranscriptionManager) cancelVideoJob(ctx context.Context, uploadID uuid
 	if err := transaction.Commit(); err != nil {
 		return err
 	}
-	if err := m.cancelVideoPipeline(ctx, uploadID); err != nil {
+	if err := m.cancelVideoPipelineAtStage(ctx, uploadID, stage); err != nil {
 		slog.Warn("could not persist cancelled video pipeline", "uploadId", uploadID, "error", err)
 	}
 	m.broadcast(sessionID, "transcription.session", ginData{"status": "failed"})
@@ -350,9 +605,107 @@ func (m *TranscriptionManager) cancelVideoJob(ctx context.Context, uploadID uuid
 	return nil
 }
 
-func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploadID uuid.UUID) error {
+func (m *TranscriptionManager) skipVideoDiarization(ctx context.Context, uploadID uuid.UUID) (models.TranscriptionVideoUpload, error) {
+	transaction, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	defer transaction.Rollback()
+
+	var sessionID uuid.UUID
+	var status, stage string
+	if err := transaction.QueryRowContext(ctx, `
+		SELECT session_id, status, stage
+		FROM transcription_video_uploads
+		WHERE id = $1
+		FOR UPDATE`, uploadID).Scan(&sessionID, &status, &stage); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	if status != "processing" {
+		return models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation can only be skipped while processing (video is %s)", status)
+	}
+	if !videoDiarizationStageIsActive(stage) {
+		return models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation is not currently running")
+	}
+	if stage == "diarizing" {
+		if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET stage = $2, updated_at = now() WHERE id = $1`, uploadID, videoDiarizationSkipStage); err != nil {
+			return models.TranscriptionVideoUpload{}, err
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	// The diarization provider may be handling the entire video in one HTTP
+	// request. Cancel that request immediately after the stage transition so
+	// skipping does not have to wait for the provider's own timeout.
+	m.cancelVideoDiarization(uploadID)
+	m.broadcast(sessionID, "transcription.diarization", ginData{"status": "skipping"})
+	m.broadcastVideoProgress(uploadID, "processing", 86, videoDiarizationSkipStage, "")
+	return loadVideoUpload(ctx, m.DB, uploadID)
+}
+
+func (m *TranscriptionManager) videoDiarizationSkipRequested(ctx context.Context, uploadID uuid.UUID) (bool, error) {
+	var stage string
+	if err := m.DB.QueryRowContext(ctx, `SELECT stage FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&stage); err != nil {
+		return false, err
+	}
+	return stage == videoDiarizationSkipStage, nil
+}
+
+func (m *TranscriptionManager) finishSkippedVideoDiarization(ctx context.Context, uploadID, sessionID uuid.UUID) error {
+	transaction, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+
+	var pipelineRaw []byte
+	var processingStartedAt sql.NullTime
+	if err := transaction.QueryRowContext(ctx, `
+		SELECT upload.pipeline_steps, session.started_at
+		FROM transcription_video_uploads upload
+		JOIN transcription_sessions session ON session.id = upload.session_id
+		WHERE upload.id = $1 AND upload.session_id = $2
+		FOR UPDATE OF upload`, uploadID, sessionID).Scan(&pipelineRaw, &processingStartedAt); err != nil {
+		return err
+	}
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_segments SET speaker_id = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+		return err
+	}
+	if _, err := transaction.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID); err != nil {
+		return err
+	}
+
+	var startedAt *time.Time
+	if processingStartedAt.Valid {
+		value := processingStartedAt.Time.UTC()
+		startedAt = &value
+	}
+	steps := applyVideoPipelineDiarizationSkip(decodeVideoPipeline(pipelineRaw), startedAt, time.Now().UTC())
+	pipeline, err := encodeVideoPipeline(steps)
+	if err != nil {
+		return err
+	}
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET pipeline_steps = $2, updated_at = now() WHERE id = $1`, uploadID, pipeline); err != nil {
+		return err
+	}
+	if err := transaction.Commit(); err != nil {
+		return err
+	}
+	m.broadcast(sessionID, "transcription.diarization", ginData{"status": "skipped"})
+	return nil
+}
+
+func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploadID uuid.UUID, retryFrom string) error {
 	jobCtx, cancelJob := m.videoJobContext(ctx, jobID)
 	defer cancelJob()
+	retryFrom = normalizeVideoRetryStep(retryFrom)
+	if retryFrom == "" {
+		retryFrom = videoRetryStepTranscription
+	}
+	if retryFrom == videoRetryStepFinalization {
+		return m.updateVideoProgress(jobCtx, uploadID, 99, "finalizing", "")
+	}
 	record, err := loadVideoUploadRecord(jobCtx, m.DB, uploadID)
 	if err != nil {
 		return err
@@ -362,46 +715,186 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 	}
 	var sessionEndpoint uuid.UUID
 	var diarizationEndpoint, grammarEndpoint uuid.NullUUID
+	var transcriptionModel, diarizationModel, grammarModel string
 	var language string
-	if err := m.DB.QueryRowContext(jobCtx, `SELECT transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, language FROM transcription_sessions WHERE id = $1`, record.model.SessionID).Scan(&sessionEndpoint, &diarizationEndpoint, &grammarEndpoint, &language); err != nil {
+	if err := m.DB.QueryRowContext(jobCtx, `SELECT transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(grammar_model, ''), language FROM transcription_sessions WHERE id = $1`, record.model.SessionID).Scan(&sessionEndpoint, &diarizationEndpoint, &grammarEndpoint, &transcriptionModel, &diarizationModel, &grammarModel, &language); err != nil {
 		return err
 	}
-	if m.app == nil {
+	shouldTranscribe := retryFrom == videoRetryStepTranscription
+	shouldDiarize := diarizationEndpoint.Valid &&
+		(retryFrom == videoRetryStepTranscription || retryFrom == videoRetryStepDiarization)
+	shouldPolish := grammarEndpoint.Valid &&
+		(retryFrom == videoRetryStepTranscription || retryFrom == videoRetryStepDiarization || retryFrom == videoRetryStepGrammar)
+	if m.app == nil && (shouldTranscribe || shouldDiarize || shouldPolish) {
 		return fmt.Errorf("%w: transcription manager is not attached to the app", errVideoTranscriptionPermanent)
 	}
-	endpoint, err := m.app.providerEndpoint(jobCtx, sessionEndpoint)
-	if err != nil {
+	var endpoint provider.Endpoint
+	var mode string
+	if shouldTranscribe {
+		endpoint, err = m.app.providerEndpoint(jobCtx, sessionEndpoint)
+		if err != nil {
+			return err
+		}
+		endpoint.TranscriptionModel = firstNonEmptyString(transcriptionModel, endpoint.TranscriptionModel)
+		mode = transcriptionMode(endpoint)
+		if mode == "" {
+			return fmt.Errorf("%w: provider %s does not support a compatible transcription transport", errVideoTranscriptionPermanent, endpoint.ProviderType)
+		}
+	}
+	var storage *s3Storage
+	needsMedia := shouldTranscribe || retryFrom == videoRetryStepDiarization
+	if needsMedia {
+		storage, err = newS3Storage(m.Config)
+		if err != nil {
+			return err
+		}
+	}
+	var durationMs int64 = record.model.DurationMs
+	var videoURL string
+	if needsMedia {
+		// Keep the media seekable. Piping a large MP4 through one S3 response can
+		// make ffmpeg lose the input when it needs to seek or when realtime
+		// transcription applies backpressure to the decoder.
+		videoURL = storage.presignURL(http.MethodGet, record.storageKey, nil, videoProcessingURLLifetime)
+		duration, probeErr := probeVideoDuration(jobCtx, videoURL)
+		if probeErr != nil {
+			return probeErr
+		}
+		maxDuration := time.Duration(m.Config.Transcription.VideoMaxDurationHours) * time.Hour
+		if maxDuration > 0 && time.Duration(duration*float64(time.Second)) > maxDuration {
+			return fmt.Errorf("%w: video duration exceeds the %d-hour limit", errVideoTranscriptionPermanent, m.Config.Transcription.VideoMaxDurationHours)
+		}
+		durationMs = int64(duration * 1000)
+		if _, err := m.DB.ExecContext(jobCtx, `UPDATE transcription_video_uploads SET duration_ms = $2, updated_at = now() WHERE id = $1`, uploadID, durationMs); err != nil {
+			return err
+		}
+	}
+	if shouldTranscribe {
+		if err := m.updateVideoProgress(jobCtx, uploadID, 1, "extracting", ""); err != nil {
+			return err
+		}
+		if err := m.transcribeVideoAudio(jobCtx, uploadID, record.model.SessionID, endpoint, mode, language, videoURL, durationMs); err != nil {
+			return err
+		}
+	}
+	if shouldDiarize {
+		diarizationCtx, cancelDiarization := context.WithCancel(jobCtx)
+		unregisterDiarizationCancel := m.registerVideoDiarizationCancel(uploadID, cancelDiarization)
+		defer func() {
+			unregisterDiarizationCancel()
+			cancelDiarization()
+		}()
+		skipHandled := false
+		if err := m.updateVideoProgress(jobCtx, uploadID, 86, "diarizing", ""); err != nil {
+			if !errors.Is(err, errVideoTranscriptionSkipDiarization) {
+				return err
+			}
+			if err := m.finishSkippedVideoDiarization(jobCtx, uploadID, record.model.SessionID); err != nil {
+				return err
+			}
+			skipHandled = true
+		}
+		if !skipHandled {
+			requested, err := m.videoDiarizationSkipRequested(jobCtx, uploadID)
+			if err != nil {
+				return err
+			}
+			if requested {
+				if err := m.finishSkippedVideoDiarization(jobCtx, uploadID, record.model.SessionID); err != nil {
+					return err
+				}
+				skipHandled = true
+			}
+		}
+		if !skipHandled {
+			if err := m.diarizeVideoAudio(diarizationCtx, uploadID, record.model.SessionID, record.storageKey, diarizationEndpoint.UUID, diarizationModel, language, durationMs, storage); err != nil {
+				skipRequested := errors.Is(err, errVideoTranscriptionSkipDiarization)
+				// The skip endpoint cancels only the child context used by
+				// diarization. The job context remains alive, so inspect the
+				// authoritative upload stage after the provider returns. This
+				// also covers providers that wrap context cancellation in their
+				// own transport error.
+				if !skipRequested && jobCtx.Err() == nil {
+					requested, checkErr := m.videoDiarizationSkipRequested(jobCtx, uploadID)
+					if checkErr != nil {
+						return checkErr
+					}
+					skipRequested = requested
+				}
+				if skipRequested {
+					if err := m.finishSkippedVideoDiarization(jobCtx, uploadID, record.model.SessionID); err != nil {
+						return err
+					}
+					skipHandled = true
+				} else {
+					if errors.Is(err, errVideoTranscriptionCancelled) || jobCtx.Err() != nil {
+						return err
+					}
+					message := fmt.Errorf("speaker diarization failed: %w", err)
+					m.broadcast(record.model.SessionID, "transcription.diarization-error", ginData{
+						"message": message.Error(),
+						"fatal":   true,
+					})
+					return message
+				}
+			}
+		}
+		if !skipHandled {
+			requested, err := m.videoDiarizationSkipRequested(jobCtx, uploadID)
+			if err != nil {
+				return err
+			}
+			if requested {
+				if err := m.finishSkippedVideoDiarization(jobCtx, uploadID, record.model.SessionID); err != nil {
+					return err
+				}
+				skipHandled = true
+			}
+		}
+	}
+	if shouldPolish {
+		if err := m.updateVideoProgress(jobCtx, uploadID, 95, "polishing", ""); err != nil {
+			if !errors.Is(err, errVideoTranscriptionSkipDiarization) {
+				return err
+			}
+			if err := m.finishSkippedVideoDiarization(jobCtx, uploadID, record.model.SessionID); err != nil {
+				return err
+			}
+			if err := m.updateVideoProgress(jobCtx, uploadID, 95, "polishing", ""); err != nil {
+				return err
+			}
+		}
+		if err := m.polishVideoTranscript(jobCtx, uploadID, record.model.SessionID, grammarEndpoint.UUID, grammarModel); err != nil {
+			if errors.Is(err, errVideoTranscriptionCancelled) || jobCtx.Err() != nil {
+				return err
+			}
+			m.broadcast(record.model.SessionID, "transcription.polish-error", ginData{"message": err.Error()})
+			return err
+		}
+	}
+	if err := m.updateVideoProgress(jobCtx, uploadID, 99, "finalizing", ""); err != nil {
 		return err
 	}
-	mode := transcriptionMode(endpoint)
-	if mode == "" {
-		return fmt.Errorf("%w: provider %s does not support a compatible transcription transport", errVideoTranscriptionPermanent, endpoint.ProviderType)
-	}
-	storage, err := newS3Storage(m.Config)
-	if err != nil {
-		return err
-	}
-	// Keep the media seekable. Piping a large MP4 through one S3 response can
-	// make ffmpeg lose the input when it needs to seek or when realtime
-	// transcription applies backpressure to the decoder.
-	videoURL := storage.presignURL(http.MethodGet, record.storageKey, nil, videoProcessingURLLifetime)
-	duration, err := probeVideoDuration(jobCtx, videoURL)
-	if err != nil {
-		return err
-	}
-	maxDuration := time.Duration(m.Config.Transcription.VideoMaxDurationHours) * time.Hour
-	if maxDuration > 0 && time.Duration(duration*float64(time.Second)) > maxDuration {
-		return fmt.Errorf("%w: video duration exceeds the %d-hour limit", errVideoTranscriptionPermanent, m.Config.Transcription.VideoMaxDurationHours)
-	}
-	durationMs := int64(duration * 1000)
-	if _, err := m.DB.ExecContext(jobCtx, `UPDATE transcription_video_uploads SET duration_ms = $2, updated_at = now() WHERE id = $1`, uploadID, durationMs); err != nil {
-		return err
-	}
-	if err := m.updateVideoProgress(jobCtx, uploadID, 1, "extracting", ""); err != nil {
-		return err
-	}
+	return nil
+}
 
-	processCtx, cancel := context.WithCancel(jobCtx)
+func (m *TranscriptionManager) transcribeVideoAudio(ctx context.Context, uploadID, sessionID uuid.UUID, endpoint provider.Endpoint, mode, language, videoURL string, durationMs int64) error {
+	chunkMs := m.Config.Transcription.VideoTranscriptionChunkMs
+	workers := m.Config.Transcription.VideoTranscriptionWorkers
+	if chunkMs <= 0 {
+		chunkMs = 10 * 60 * 1000
+	}
+	if workers <= 0 {
+		workers = 3
+	}
+	if durationMs > int64(chunkMs) && workers > 1 {
+		return m.transcribeVideoAudioParallel(ctx, uploadID, sessionID, endpoint, mode, language, videoURL, durationMs, chunkMs, m.Config.Transcription.VideoTranscriptionOverlapMs, workers)
+	}
+	return m.transcribeVideoAudioSequential(ctx, uploadID, sessionID, endpoint, mode, language, videoURL, durationMs)
+}
+
+func (m *TranscriptionManager) transcribeVideoAudioSequential(ctx context.Context, uploadID, sessionID uuid.UUID, endpoint provider.Endpoint, mode, language, videoURL string, durationMs int64) error {
+	processCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := m.openVideoTranscriptionStream(processCtx, endpoint, mode, language)
 	if err != nil {
@@ -409,7 +902,7 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 	}
 
 	var processedPCM atomic.Int64
-	providerEvents := m.consumeVideoTranscriptionEvents(processCtx, stream, record.model.SessionID, &processedPCM, cancel)
+	providerEvents := m.consumeVideoTranscriptionEvents(processCtx, stream, sessionID, &processedPCM, cancel)
 	defer func() {
 		if stream == nil || providerEvents == nil {
 			return
@@ -469,7 +962,7 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 				if err != nil {
 					return err
 				}
-				providerEvents = m.consumeVideoTranscriptionEvents(processCtx, stream, record.model.SessionID, &processedPCM, cancel)
+				providerEvents = m.consumeVideoTranscriptionEvents(processCtx, stream, sessionID, &processedPCM, cancel)
 				nextRealtimeSessionAt += int64(videoRealtimeSessionDuration / time.Millisecond)
 			}
 			if time.Since(lastProgress) >= time.Second {
@@ -524,37 +1017,531 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 	}
 	stream = nil
 	providerEvents = nil
-	if diarizationEndpoint.Valid {
-		if err := m.updateVideoProgress(jobCtx, uploadID, 86, "diarizing", ""); err != nil {
-			return err
-		}
-		if err := m.diarizeVideoAudio(jobCtx, uploadID, record.model.SessionID, record.storageKey, diarizationEndpoint.UUID, language, durationMs, storage); err != nil {
-			if errors.Is(err, errVideoTranscriptionCancelled) || jobCtx.Err() != nil {
-				return err
-			}
-			message := fmt.Errorf("speaker diarization failed: %w", err)
-			m.broadcast(record.model.SessionID, "transcription.diarization-error", ginData{
-				"message": message.Error(),
-				"fatal":   true,
-			})
-			return message
-		}
-	}
-	if grammarEndpoint.Valid {
-		if err := m.updateVideoProgress(jobCtx, uploadID, 95, "polishing", ""); err != nil {
-			return err
-		}
-		if err := m.polishVideoTranscript(jobCtx, uploadID, record.model.SessionID, grammarEndpoint.UUID); err != nil {
-			if errors.Is(err, errVideoTranscriptionCancelled) || jobCtx.Err() != nil {
-				return err
-			}
-			m.broadcast(record.model.SessionID, "transcription.polish-error", ginData{"message": err.Error()})
-		}
-	}
-	if err := m.updateVideoProgress(jobCtx, uploadID, 99, "finalizing", ""); err != nil {
+	return nil
+}
+
+func (m *TranscriptionManager) transcribeVideoAudioParallel(ctx context.Context, uploadID, sessionID uuid.UUID, endpoint provider.Endpoint, mode, language, videoURL string, durationMs int64, chunkMs, overlapMs, workerCount int) error {
+	if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
 		return err
 	}
+	if chunkMs <= 0 {
+		chunkMs = 10 * 60 * 1000
+	}
+	if overlapMs <= 0 || overlapMs >= chunkMs {
+		overlapMs = 5 * 1000
+	}
+	if workerCount <= 0 {
+		workerCount = 3
+	}
+	parallelProgress := models.TranscriptionVideoParallelProgress{
+		Strategy:        "parallel",
+		Phase:           "preparing",
+		ChunkDurationMs: int64(chunkMs),
+		OverlapMs:       int64(overlapMs),
+		WorkerCount:     workerCount,
+	}
+	_ = m.updateVideoParallelProgress(ctx, uploadID, parallelProgress)
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
+	statusCtx, cancelStatus := context.WithCancel(ctx)
+	defer cancelStatus()
+	statusErrors := make(chan error, 1)
+	go m.watchVideoUploadStatus(statusCtx, uploadID, cancelWorkers, statusErrors)
+
+	audioFile, audioBytes, err := extractVideoAudioPCM(workerCtx, videoURL)
+	if err != nil {
+		return selectVideoTranscriptionError(ctx, statusErrors, err)
+	}
+	defer func() {
+		name := audioFile.Name()
+		_ = audioFile.Close()
+		_ = os.Remove(name)
+	}()
+	chunks := buildVideoAudioChunks(audioBytes, chunkMs, overlapMs)
+	if len(chunks) == 0 {
+		return selectVideoTranscriptionError(ctx, statusErrors, nil)
+	}
+	parallelProgress.SliceCount = len(chunks)
+	if workerCount > len(chunks) {
+		workerCount = len(chunks)
+	}
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	parallelProgress.WorkerCount = workerCount
+	parallelProgress.Phase = "transcribing"
+	_ = m.updateVideoParallelProgress(ctx, uploadID, parallelProgress)
+
+	jobs := make(chan videoAudioChunk, len(chunks))
+	results := make(chan videoChunkStreamResult, len(chunks))
+	previewEvents := make(chan videoTranscriptionEvent)
+	for _, chunk := range chunks {
+		jobs <- chunk
+	}
+	close(jobs)
+
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for index := 0; index < workerCount; index++ {
+		go func() {
+			defer workers.Done()
+			for chunk := range jobs {
+				var result videoChunkStreamResult
+				if workerCtx.Err() != nil {
+					result.err = workerCtx.Err()
+				} else if statusErr := m.ensureVideoUploadActive(ctx, uploadID); statusErr != nil {
+					result.err = statusErr
+					cancelWorkers()
+				} else {
+					result.events, result.err = m.transcribeVideoChunk(workerCtx, audioFile, chunk, endpoint, mode, language, previewEvents)
+					if result.err != nil && !errors.Is(result.err, context.Canceled) {
+						cancelWorkers()
+					}
+				}
+				results <- result
+			}
+		}()
+	}
+
+	allEvents := make([]videoTranscriptionEvent, 0)
+	var firstErr, firstNonCancellationErr error
+	completed := 0
+	finished := 0
+	lastPreviewPersist := time.Time{}
+	previewDirty := false
+	for finished < len(chunks) {
+		select {
+		case previewEvent := <-previewEvents:
+			appendVideoPreviewSegments(&parallelProgress, []videoTranscriptionEvent{previewEvent})
+			previewDirty = true
+			if lastPreviewPersist.IsZero() || time.Since(lastPreviewPersist) >= time.Second {
+				if err := m.updateVideoParallelProgress(ctx, uploadID, parallelProgress); err == nil {
+					lastPreviewPersist = time.Now()
+					previewDirty = false
+				}
+			}
+		case result := <-results:
+			if result.err != nil {
+				if firstErr == nil {
+					firstErr = result.err
+				}
+				if !errors.Is(result.err, context.Canceled) && firstNonCancellationErr == nil {
+					firstNonCancellationErr = result.err
+				}
+			} else {
+				allEvents = append(allEvents, result.events...)
+				completed++
+			}
+			finished++
+			parallelProgress.CompletedSlices = completed
+			if err := m.updateVideoParallelProgress(ctx, uploadID, parallelProgress); err == nil {
+				lastPreviewPersist = time.Now()
+				previewDirty = false
+			}
+			progress := 5 + int(int64(finished)*80/int64(len(chunks)))
+			_ = m.updateVideoProgress(ctx, uploadID, progress, "transcribing", "")
+		}
+	}
+	if previewDirty {
+		_ = m.updateVideoParallelProgress(ctx, uploadID, parallelProgress)
+	}
+	workers.Wait()
+	if err := selectVideoTranscriptionError(ctx, statusErrors, nil); err != nil {
+		return err
+	}
+	if firstNonCancellationErr != nil {
+		return firstNonCancellationErr
+	}
+	if firstErr != nil {
+		return firstErr
+	}
+	if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
+		return err
+	}
+
+	parallelProgress.CompletedSlices = len(chunks)
+	parallelProgress.Phase = "fusing"
+	_ = m.updateVideoParallelProgress(ctx, uploadID, parallelProgress)
+	_ = m.updateVideoProgress(ctx, uploadID, 85, "fusing", "")
+	lastStatusCheck := time.Now()
+	for _, event := range mergeVideoTranscriptionEvents(allEvents) {
+		if time.Since(lastStatusCheck) >= time.Second {
+			if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
+				return err
+			}
+			lastStatusCheck = time.Now()
+		}
+		segment, persistErr := m.app.persistTranscriptionSegmentWithRaw(ctx, sessionID, uuid.Nil, event.text, event.rawText, event.startOffsetMs, event.endOffsetMs)
+		if persistErr != nil {
+			return persistErr
+		}
+		m.broadcast(sessionID, "transcription.final", ginData{"sourceId": uuid.Nil, "segment": segment})
+	}
+	parallelProgress.Phase = "complete"
+	parallelProgress.PreviewSegments = nil
+	_ = m.updateVideoParallelProgress(ctx, uploadID, parallelProgress)
 	return nil
+}
+
+func extractVideoAudioPCM(ctx context.Context, videoURL string) (*os.File, int64, error) {
+	audioFile, err := os.CreateTemp("", "justai-video-transcription-*.pcm")
+	if err != nil {
+		return nil, 0, fmt.Errorf("create temporary audio file: %w", err)
+	}
+	keepFile := false
+	defer func() {
+		if keepFile {
+			return
+		}
+		_ = audioFile.Close()
+		_ = os.Remove(audioFile.Name())
+	}()
+
+	command := exec.CommandContext(ctx, "ffmpeg", ffmpegVideoAudioArgs(videoURL)...)
+	var stderr bytes.Buffer
+	command.Stdout = audioFile
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return nil, 0, fmt.Errorf("ffmpeg could not extract audio: %s", message)
+	}
+	info, err := audioFile.Stat()
+	if err != nil {
+		return nil, 0, fmt.Errorf("inspect extracted audio: %w", err)
+	}
+	audioBytes := info.Size()
+	if audioBytes%2 != 0 {
+		audioBytes--
+		if err := audioFile.Truncate(audioBytes); err != nil {
+			return nil, 0, fmt.Errorf("align extracted audio: %w", err)
+		}
+	}
+	keepFile = true
+	return audioFile, audioBytes, nil
+}
+
+func buildVideoAudioChunks(audioBytes int64, chunkMs, overlapMs int) []videoAudioChunk {
+	if audioBytes <= 0 {
+		return nil
+	}
+	if chunkMs <= 0 {
+		chunkMs = 10 * 60 * 1000
+	}
+	if overlapMs <= 0 || overlapMs >= chunkMs {
+		overlapMs = 5 * 1000
+	}
+	chunkBytes := int64(chunkMs) * videoAudioBytesPerMs
+	overlapBytes := int64(overlapMs) * videoAudioBytesPerMs
+	advanceBytes := chunkBytes - overlapBytes
+	if chunkBytes < 2 || advanceBytes < 2 {
+		return nil
+	}
+	if audioBytes%2 != 0 {
+		audioBytes--
+	}
+
+	chunks := make([]videoAudioChunk, 0, int((audioBytes+advanceBytes-1)/advanceBytes))
+	for offset, index := int64(0), 0; offset < audioBytes; index++ {
+		length := minInt64(chunkBytes, audioBytes-offset)
+		// The preceding chunk already contains its overlap. Avoid creating a
+		// nearly empty final request when it is fully covered by that overlap.
+		if len(chunks) > 0 && length <= overlapBytes {
+			break
+		}
+		chunks = append(chunks, videoAudioChunk{
+			index:         index,
+			offsetBytes:   offset,
+			lengthBytes:   length,
+			startOffsetMs: offset / videoAudioBytesPerMs,
+			endOffsetMs:   (offset + length) / videoAudioBytesPerMs,
+		})
+		if offset+length >= audioBytes {
+			break
+		}
+		offset += advanceBytes
+	}
+	return chunks
+}
+
+func (m *TranscriptionManager) watchVideoUploadStatus(ctx context.Context, uploadID uuid.UUID, cancel context.CancelFunc, result chan<- error) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := m.ensureVideoUploadActive(ctx, uploadID); err != nil {
+				select {
+				case result <- err:
+				default:
+				}
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+func selectVideoTranscriptionError(ctx context.Context, statusErrors <-chan error, fallback error) error {
+	select {
+	case err := <-statusErrors:
+		if err != nil {
+			return err
+		}
+	default:
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return fallback
+}
+
+func (m *TranscriptionManager) transcribeVideoChunk(ctx context.Context, audioFile *os.File, chunk videoAudioChunk, endpoint provider.Endpoint, mode, language string, previewEvents chan<- videoTranscriptionEvent) ([]videoTranscriptionEvent, error) {
+	audio := make([]byte, int(chunk.lengthBytes))
+	read, err := audioFile.ReadAt(audio, chunk.offsetBytes)
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("read audio slice %d: %w", chunk.index, err)
+	}
+	if read != len(audio) {
+		return nil, fmt.Errorf("read audio slice %d: got %d bytes, want %d", chunk.index, read, len(audio))
+	}
+
+	processCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := m.openVideoTranscriptionStream(processCtx, endpoint, mode, language)
+	if err != nil {
+		return nil, err
+	}
+	var processedPCM atomic.Int64
+	providerEvents := collectVideoChunkEvents(stream, &processedPCM, cancel, func(event videoTranscriptionEvent) {
+		normalizedEvent, ok := normalizeVideoChunkEvent(event, chunk)
+		if !ok || previewEvents == nil {
+			return
+		}
+		select {
+		case previewEvents <- normalizedEvent:
+		case <-processCtx.Done():
+		}
+	})
+	audioStartedAt := time.Now()
+	for offset := 0; offset < len(audio); {
+		end := offset + 64*1024
+		if end > len(audio) {
+			end = len(audio)
+		}
+		piece := audio[offset:end]
+		if err := stream.SendPCM(processCtx, piece, 16000); err != nil {
+			cancel()
+			stream.Close()
+			result := <-providerEvents
+			if result.err != nil && !errors.Is(result.err, context.Canceled) {
+				return nil, result.err
+			}
+			return nil, err
+		}
+		processedPCM.Add(int64(len(piece)) / videoAudioBytesPerMs)
+		offset = end
+		if mode == "realtime" {
+			target := audioStartedAt.Add(time.Duration(processedPCM.Load()) * time.Millisecond)
+			if delay := time.Until(target); delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-processCtx.Done():
+					cancel()
+					stream.Close()
+					result := <-providerEvents
+					if result.err != nil && !errors.Is(result.err, context.Canceled) {
+						return nil, result.err
+					}
+					return nil, processCtx.Err()
+				}
+			}
+		}
+	}
+
+	result := waitForVideoTranscriptionChunkStream(processCtx, stream, providerEvents, mode == "realtime")
+	if result.err != nil {
+		return nil, result.err
+	}
+	normalizedEvents := make([]videoTranscriptionEvent, 0, len(result.events))
+	for index, event := range result.events {
+		event.chunkIndex = chunk.index
+		event.sequence = index
+		normalizedEvent, ok := normalizeVideoChunkEvent(event, chunk)
+		if !ok {
+			continue
+		}
+		event.startOffsetMs = normalizedEvent.startOffsetMs
+		event.endOffsetMs = normalizedEvent.endOffsetMs
+		normalizedEvents = append(normalizedEvents, event)
+	}
+	return normalizedEvents, nil
+}
+
+func normalizeVideoChunkEvent(event videoTranscriptionEvent, chunk videoAudioChunk) (videoTranscriptionEvent, bool) {
+	localStart := maxInt64(0, event.startOffsetMs)
+	localEnd := maxInt64(localStart+250, event.endOffsetMs)
+	chunkDurationMs := chunk.endOffsetMs - chunk.startOffsetMs
+	if chunkDurationMs > 0 && localEnd > chunkDurationMs {
+		localEnd = chunkDurationMs
+	}
+	if localEnd <= localStart {
+		return videoTranscriptionEvent{}, false
+	}
+	event.startOffsetMs = chunk.startOffsetMs + localStart
+	event.endOffsetMs = chunk.startOffsetMs + localEnd
+	return event, true
+}
+
+func collectVideoChunkEvents(stream provider.TranscriptionStream, processedPCM *atomic.Int64, cancel context.CancelFunc, onEvent func(videoTranscriptionEvent)) <-chan videoChunkStreamResult {
+	result := make(chan videoChunkStreamResult, 1)
+	go func() {
+		var eventResult videoChunkStreamResult
+		for event := range stream.Events() {
+			if event.Err != nil {
+				if eventResult.err == nil {
+					eventResult.err = event.Err
+				}
+				cancel()
+				continue
+			}
+			rawTextValue := event.RawText
+			if strings.TrimSpace(rawTextValue) == "" {
+				rawTextValue = event.Text
+			}
+			rawTextValue = provider.CleanTranscriptText(rawTextValue)
+			textValue := provider.CleanTranscriptText(event.Text)
+			textValue = provider.SanitizeTranscriptRepetition(textValue)
+			if textValue == "" || isTranscriptionProtocolPayload(textValue) || event.Kind != "final" {
+				continue
+			}
+			endOffset := processedPCM.Load()
+			startOffset := maxInt64(0, endOffset-3000)
+			if event.EndOffsetMs > 0 {
+				startOffset = maxInt64(0, event.StartOffsetMs)
+				endOffset = event.EndOffsetMs
+			}
+			if endOffset <= startOffset {
+				endOffset = startOffset + 250
+			}
+			transcriptionEvent := videoTranscriptionEvent{
+				startOffsetMs: startOffset,
+				endOffsetMs:   endOffset,
+				text:          textValue,
+				rawText:       rawTextValue,
+			}
+			if onEvent != nil {
+				onEvent(transcriptionEvent)
+			}
+			eventResult.events = append(eventResult.events, transcriptionEvent)
+		}
+		result <- eventResult
+	}()
+	return result
+}
+
+func waitForVideoTranscriptionChunkStream(ctx context.Context, stream provider.TranscriptionStream, events <-chan videoChunkStreamResult, realtime bool) videoChunkStreamResult {
+	if err := stream.Commit(); err != nil {
+		stream.Close()
+		result := <-events
+		if result.err == nil || errors.Is(result.err, context.Canceled) {
+			result.err = err
+		}
+		return result
+	}
+	if realtime {
+		select {
+		case <-time.After(3 * time.Second):
+		case <-ctx.Done():
+		}
+	}
+	stream.Close()
+	return <-events
+}
+
+const videoParallelPreviewLimit = 12
+
+func appendVideoPreviewSegments(progress *models.TranscriptionVideoParallelProgress, events []videoTranscriptionEvent) {
+	if progress == nil || len(events) == 0 {
+		return
+	}
+	preview := append([]models.TranscriptionVideoPreviewSegment(nil), progress.PreviewSegments...)
+	for _, event := range events {
+		text := strings.TrimSpace(event.text)
+		if text == "" {
+			continue
+		}
+		preview = append(preview, models.TranscriptionVideoPreviewSegment{
+			StartOffsetMs: event.startOffsetMs,
+			EndOffsetMs:   event.endOffsetMs,
+			Text:          text,
+		})
+	}
+	sort.SliceStable(preview, func(left, right int) bool {
+		if preview[left].StartOffsetMs != preview[right].StartOffsetMs {
+			return preview[left].StartOffsetMs < preview[right].StartOffsetMs
+		}
+		return preview[left].EndOffsetMs < preview[right].EndOffsetMs
+	})
+	if len(preview) > videoParallelPreviewLimit {
+		preview = preview[len(preview)-videoParallelPreviewLimit:]
+	}
+	progress.PreviewSegments = preview
+}
+
+func mergeVideoTranscriptionEvents(events []videoTranscriptionEvent) []videoTranscriptionEvent {
+	sort.SliceStable(events, func(left, right int) bool {
+		if events[left].startOffsetMs != events[right].startOffsetMs {
+			return events[left].startOffsetMs < events[right].startOffsetMs
+		}
+		if events[left].endOffsetMs != events[right].endOffsetMs {
+			return events[left].endOffsetMs < events[right].endOffsetMs
+		}
+		if events[left].chunkIndex != events[right].chunkIndex {
+			return events[left].chunkIndex < events[right].chunkIndex
+		}
+		return events[left].sequence < events[right].sequence
+	})
+	merged := make([]videoTranscriptionEvent, 0, len(events))
+	for _, event := range events {
+		event.text = strings.TrimSpace(event.text)
+		if event.text == "" {
+			continue
+		}
+		if strings.TrimSpace(event.rawText) == "" {
+			event.rawText = event.text
+		}
+		if len(merged) > 0 {
+			discard := false
+			for index := len(merged) - 1; index >= 0; index-- {
+				previous := &merged[index]
+				if event.startOffsetMs > previous.endOffsetMs+1500 {
+					continue
+				}
+				if transcriptionTextsMatch(previous.text, event.text) {
+					discard = true
+					break
+				}
+				novel := strings.TrimSpace(provider.RemoveTranscriptOverlap(previous.text, event.text))
+				if novel != event.text {
+					event.text = novel
+					if event.text == "" || transcriptionTextsMatch(previous.text, event.text) {
+						discard = true
+					}
+					break
+				}
+			}
+			if discard {
+				continue
+			}
+		}
+		merged = append(merged, event)
+	}
+	return merged
 }
 
 func (m *TranscriptionManager) openVideoTranscriptionStream(ctx context.Context, endpoint provider.Endpoint, mode, language string) (provider.TranscriptionStream, error) {
@@ -563,6 +1550,7 @@ func (m *TranscriptionManager) openVideoTranscriptionStream(ctx context.Context,
 			Window:         time.Duration(m.Config.Transcription.StreamingChunkMs) * time.Millisecond,
 			Overlap:        time.Duration(m.Config.Transcription.StreamingOverlapMs) * time.Millisecond,
 			PromptMaxChars: m.Config.Transcription.StreamingPromptChars,
+			DisablePrompt:  true,
 		})
 	}
 	return provider.OpenRealtime(ctx, endpoint, endpoint.TranscriptionModel, language)
@@ -580,7 +1568,13 @@ func (m *TranscriptionManager) consumeVideoTranscriptionEvents(ctx context.Conte
 				cancel()
 				continue
 			}
+			rawTextValue := event.RawText
+			if strings.TrimSpace(rawTextValue) == "" {
+				rawTextValue = event.Text
+			}
+			rawTextValue = provider.CleanTranscriptText(rawTextValue)
 			textValue := provider.CleanTranscriptText(event.Text)
+			textValue = provider.SanitizeTranscriptRepetition(textValue)
 			if textValue == "" || isTranscriptionProtocolPayload(textValue) || event.Kind != "final" {
 				continue
 			}
@@ -590,7 +1584,7 @@ func (m *TranscriptionManager) consumeVideoTranscriptionEvents(ctx context.Conte
 				startOffset = maxInt64(0, event.StartOffsetMs)
 				endOffset = event.EndOffsetMs
 			}
-			segment, persistErr := m.app.persistTranscriptionSegment(ctx, sessionID, uuid.Nil, textValue, startOffset, endOffset)
+			segment, persistErr := m.app.persistTranscriptionSegmentWithRaw(ctx, sessionID, uuid.Nil, textValue, rawTextValue, startOffset, endOffset)
 			if persistErr != nil {
 				if eventErr == nil {
 					eventErr = persistErr
@@ -699,14 +1693,38 @@ func ffmpegVideoAudioArgs(videoURL string) []string {
 
 func (m *TranscriptionManager) updateVideoProgress(ctx context.Context, uploadID uuid.UUID, progress int, stage, errorMessage string) error {
 	progress = int(minInt64(99, maxInt64(0, int64(progress))))
+	if stage == "diarizing" {
+		var currentStage string
+		if err := m.DB.QueryRowContext(ctx, `SELECT stage FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&currentStage); err != nil {
+			return err
+		}
+		if currentStage == videoDiarizationSkipStage {
+			return errVideoTranscriptionSkipDiarization
+		}
+	}
+	result, err := m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET progress = $2, stage = $3, error_message = NULLIF($4, ''), updated_at = now() WHERE id = $1 AND status NOT IN ('cancelled', 'completed') AND (stage <> $5 OR $3 <> 'diarizing')`, uploadID, progress, stage, errorMessage, videoDiarizationSkipStage)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		var currentStatus, currentStage string
+		if err := m.DB.QueryRowContext(ctx, `SELECT status, stage FROM transcription_video_uploads WHERE id = $1`, uploadID).Scan(&currentStatus, &currentStage); err != nil {
+			return err
+		}
+		if currentStage == videoDiarizationSkipStage {
+			return errVideoTranscriptionSkipDiarization
+		}
+		return nil
+	}
 	if err := m.advanceVideoPipeline(ctx, uploadID, stage, errorMessage); err != nil {
 		slog.Warn("could not persist video pipeline progress", "uploadId", uploadID, "stage", stage, "error", err)
 	}
-	_, err := m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET progress = $2, stage = $3, error_message = NULLIF($4, ''), updated_at = now() WHERE id = $1 AND status NOT IN ('cancelled', 'completed')`, uploadID, progress, stage, errorMessage)
-	if err == nil {
-		m.broadcastVideoProgress(uploadID, "processing", progress, stage, errorMessage)
-	}
-	return err
+	m.broadcastVideoProgress(uploadID, "processing", progress, stage, errorMessage)
+	return nil
 }
 
 func (m *TranscriptionManager) broadcastVideoProgress(uploadID uuid.UUID, status string, progress int, stage, errorMessage string) {
@@ -778,7 +1796,7 @@ func (m *TranscriptionManager) expireVideoUploads(ctx context.Context) {
 			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET expires_at = NULL, updated_at = now() WHERE id = $1`, item.id)
 			continue
 		}
-		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', lease_until = NULL, updated_at = now() WHERE job_type = $1 AND payload->>'uploadId' = $2 AND status IN ('queued', 'processing')`, videoTranscriptionJobType, item.id)
+		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, updated_at = now() WHERE job_type = $1 AND payload->>'uploadId' = $2 AND status IN ('queued', 'processing')`, videoTranscriptionJobType, item.id)
 		_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = (SELECT session_id FROM transcription_video_uploads WHERE id = $1) AND status = 'processing'`, item.id)
 		_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_video_uploads WHERE id = $1`, item.id)
 	}

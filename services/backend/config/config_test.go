@@ -58,6 +58,9 @@ dev_seed: false
 	if loaded.Transcription.StreamingChunkMs != 2500 || loaded.Transcription.StreamingOverlapMs != 500 || loaded.Transcription.StreamingPromptChars != 160 {
 		t.Fatalf("unexpected streaming transcription defaults: %+v", loaded.Transcription)
 	}
+	if loaded.Transcription.VideoTranscriptionChunkMs != 600000 || loaded.Transcription.VideoTranscriptionOverlapMs != 5000 || loaded.Transcription.VideoTranscriptionWorkers != 3 || loaded.Transcription.VideoTranscriptionWorkerCapacity != 2 {
+		t.Fatalf("unexpected parallel video transcription defaults: %+v", loaded.Transcription)
+	}
 	if loaded.Transcription.VideoUploadMaxBytes != 5*1024*1024*1024 || loaded.Transcription.VideoUploadPartBytes != 16*1024*1024 || loaded.Transcription.VideoMaxDurationHours != 4 {
 		t.Fatalf("unexpected video transcription defaults: %+v", loaded.Transcription)
 	}
@@ -73,6 +76,7 @@ func TestEnvironmentOverridesYAML(t *testing.T) {
 	t.Setenv("JUSTAI_DATABASE_URL", "postgres://from-env")
 	t.Setenv("JUSTAI_DEV_SEED", "false")
 	t.Setenv("JUSTAI_TRANSCRIPTION_S3_PROCESSING_ENDPOINT", "http://host.containers.internal:9000")
+	t.Setenv("JUSTAI_TRANSCRIPTION_VIDEO_WORKER_CAPACITY", "5")
 	t.Setenv("JUSTAI_REPOSITORY_MAX_FILES", "1000")
 
 	loaded, err := Load(configPath)
@@ -87,6 +91,9 @@ func TestEnvironmentOverridesYAML(t *testing.T) {
 	}
 	if loaded.Transcription.S3ProcessingEndpoint != "http://host.containers.internal:9000" {
 		t.Fatalf("S3 processing endpoint did not load from the environment: %q", loaded.Transcription.S3ProcessingEndpoint)
+	}
+	if loaded.Transcription.VideoTranscriptionWorkerCapacity != 5 {
+		t.Fatalf("video worker capacity did not load from the environment: %d", loaded.Transcription.VideoTranscriptionWorkerCapacity)
 	}
 }
 
@@ -131,6 +138,7 @@ func clearConfigEnv(t *testing.T) {
 		"JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_MAX_BYTES",
 		"JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_PART_BYTES",
 		"JUSTAI_TRANSCRIPTION_VIDEO_MAX_DURATION_HOURS",
+		"JUSTAI_TRANSCRIPTION_VIDEO_WORKER_CAPACITY",
 		"JUSTAI_TRANSCRIPTION_S3_PROCESSING_ENDPOINT",
 	} {
 		t.Setenv(key, "")

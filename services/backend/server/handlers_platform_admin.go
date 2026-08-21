@@ -231,7 +231,7 @@ func (a *App) getPlatformDashboard(c *gin.Context) {
 		"settings":       settings,
 		"health":         health,
 		"usage":          analytics,
-		"attention":      platformAttentionItems(counts, settings, health),
+		"attention":      platformAttentionItems(counts, settings, health, analytics.TranscriptionWorkers),
 		"recentActivity": activity,
 	})
 }
@@ -1036,7 +1036,7 @@ func (a *App) readRecentPlatformActivity(c *gin.Context) ([]platformActivityItem
 	return activity, rows.Err()
 }
 
-func platformAttentionItems(counts map[string]int, settings platformSettings, health platformHealthSnapshot) []platformAttentionItem {
+func platformAttentionItems(counts map[string]int, settings platformSettings, health platformHealthSnapshot, workers transcriptionWorkerAnalytics) []platformAttentionItem {
 	items := []platformAttentionItem{}
 	add := func(id, severity, title, description, tab string, metric any) {
 		items = append(items, platformAttentionItem{ID: id, Severity: severity, Title: title, Description: description, Tab: tab, Metric: metric})
@@ -1049,6 +1049,9 @@ func platformAttentionItems(counts map[string]int, settings platformSettings, he
 	}
 	if !health.Workers.Transcription {
 		add("transcription-worker-offline", "warning", "Transcription worker is offline", "Live and video transcription processing may be unavailable.", "health", nil)
+	}
+	if workers.Queued > 0 && workers.Active >= workers.Capacity {
+		add("transcription-capacity-saturated", "warning", "Transcription capacity is saturated", "All video worker slots are occupied; new videos are waiting in the queue.", "analytics", workers.Queued)
 	}
 	if health.Providers.Enabled == 0 {
 		add("no-enabled-endpoints", "critical", "No enabled model endpoints", "New AI requests have no enabled provider available for routing.", "endpoints", counts["endpoints"])

@@ -42,6 +42,10 @@ data:
       streaming_chunk_ms: {{ .Values.config.transcription.streamingChunkMs }}
       streaming_overlap_ms: {{ .Values.config.transcription.streamingOverlapMs }}
       streaming_prompt_chars: {{ .Values.config.transcription.streamingPromptChars }}
+      video_transcription_chunk_ms: {{ .Values.config.transcription.videoTranscriptionChunkMs }}
+      video_transcription_overlap_ms: {{ .Values.config.transcription.videoTranscriptionOverlapMs }}
+      video_transcription_workers: {{ .Values.config.transcription.videoTranscriptionWorkers }}
+      video_transcription_worker_capacity: {{ .Values.config.transcription.videoTranscriptionWorkerCapacity }}
       max_session_hours: {{ .Values.config.transcription.maxSessionHours }}
       video_upload_max_bytes: {{ int64 .Values.config.transcription.videoUploadMaxBytes }}
       video_upload_part_bytes: {{ int64 .Values.config.transcription.videoUploadPartBytes }}

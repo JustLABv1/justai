@@ -156,6 +156,9 @@ type TranscriptionSession struct {
 	TranscriptionEndpoint *uuid.UUID `json:"transcriptionEndpointId,omitempty"`
 	DiarizationEndpoint   *uuid.UUID `json:"diarizationEndpointId,omitempty"`
 	GrammarEndpoint       *uuid.UUID `json:"grammarEndpointId,omitempty"`
+	TranscriptionModel    string     `json:"transcriptionModel,omitempty"`
+	DiarizationModel      string     `json:"diarizationModel,omitempty"`
+	GrammarModel          string     `json:"grammarModel,omitempty"`
 	Language              string     `json:"language"`
 	RecordAudio           bool       `json:"recordAudio"`
 	PolishStatus          string     `json:"polishStatus"`
@@ -198,6 +201,7 @@ type TranscriptionSegment struct {
 	Text             string      `json:"text"`
 	RawText          string      `json:"rawText,omitempty"`
 	PolishedText     *string     `json:"polishedText,omitempty"`
+	EditedText       *string     `json:"editedText,omitempty"`
 	StartOffsetMs    int64       `json:"startOffsetMs"`
 	EndOffsetMs      int64       `json:"endOffsetMs"`
 	Confidence       *float64    `json:"confidence,omitempty"`
@@ -206,6 +210,39 @@ type TranscriptionSegment struct {
 	HeardBySourceIDs []uuid.UUID `json:"heardBySourceIds,omitempty"`
 	CreatedAt        time.Time   `json:"createdAt"`
 	UpdatedAt        time.Time   `json:"updatedAt"`
+}
+
+type TranscriptionAnnotation struct {
+	ID            uuid.UUID  `json:"id"`
+	SessionID     uuid.UUID  `json:"sessionId"`
+	UserID        uuid.UUID  `json:"-"`
+	SegmentID     *uuid.UUID `json:"segmentId,omitempty"`
+	Kind          string     `json:"kind"`
+	Note          string     `json:"note,omitempty"`
+	StartOffsetMs int64      `json:"startOffsetMs"`
+	EndOffsetMs   int64      `json:"endOffsetMs"`
+	Resolved      bool       `json:"resolved"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}
+
+type TranscriptionInsightChapter struct {
+	Title         string `json:"title"`
+	Summary       string `json:"summary,omitempty"`
+	StartOffsetMs int64  `json:"startOffsetMs"`
+}
+
+type TranscriptionInsights struct {
+	SessionID   uuid.UUID                     `json:"sessionId"`
+	Status      string                        `json:"status"`
+	Language    string                        `json:"language"`
+	Summary     string                        `json:"summary,omitempty"`
+	Chapters    []TranscriptionInsightChapter `json:"chapters,omitempty"`
+	Topics      []string                      `json:"topics,omitempty"`
+	ActionItems []string                      `json:"actionItems,omitempty"`
+	Error       string                        `json:"error,omitempty"`
+	GeneratedAt *time.Time                    `json:"generatedAt,omitempty"`
+	UpdatedAt   time.Time                     `json:"updatedAt"`
 }
 
 type TranscriptionRecording struct {
@@ -218,13 +255,40 @@ type TranscriptionRecording struct {
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 }
 
+type TranscriptionVideoParallelProgress struct {
+	Strategy        string                             `json:"strategy,omitempty"`
+	Phase           string                             `json:"phase,omitempty"`
+	ChunkDurationMs int64                              `json:"chunkDurationMs,omitempty"`
+	OverlapMs       int64                              `json:"overlapMs,omitempty"`
+	WorkerCount     int                                `json:"workerCount,omitempty"`
+	SliceCount      int                                `json:"sliceCount,omitempty"`
+	CompletedSlices int                                `json:"completedSlices,omitempty"`
+	PreviewSegments []TranscriptionVideoPreviewSegment `json:"previewSegments,omitempty"`
+}
+
+type TranscriptionVideoPreviewSegment struct {
+	StartOffsetMs int64  `json:"startOffsetMs"`
+	EndOffsetMs   int64  `json:"endOffsetMs"`
+	Text          string `json:"text"`
+}
+
+type TranscriptionVideoWorkerStatus struct {
+	Capacity           int     `json:"capacity"`
+	Active             int     `json:"active"`
+	Queued             int     `json:"queued"`
+	QueuePosition      int     `json:"queuePosition,omitempty"`
+	UtilizationPercent float64 `json:"utilizationPercent"`
+	SliceWorkersPerJob int     `json:"sliceWorkersPerJob"`
+}
+
 type TranscriptionVideoPipelineStep struct {
-	Key         string     `json:"key"`
-	Status      string     `json:"status"`
-	StartedAt   *time.Time `json:"startedAt,omitempty"`
-	CompletedAt *time.Time `json:"completedAt,omitempty"`
-	DurationMs  int64      `json:"durationMs,omitempty"`
-	Error       string     `json:"error,omitempty"`
+	Key         string                              `json:"key"`
+	Status      string                              `json:"status"`
+	StartedAt   *time.Time                          `json:"startedAt,omitempty"`
+	CompletedAt *time.Time                          `json:"completedAt,omitempty"`
+	DurationMs  int64                               `json:"durationMs,omitempty"`
+	Error       string                              `json:"error,omitempty"`
+	Parallel    *TranscriptionVideoParallelProgress `json:"parallel,omitempty"`
 }
 
 type TranscriptionVideoUpload struct {
@@ -247,6 +311,7 @@ type TranscriptionVideoUpload struct {
 	CompletedAt   *time.Time                       `json:"completedAt,omitempty"`
 	ExpiresAt     *time.Time                       `json:"expiresAt,omitempty"`
 	PlaybackURL   string                           `json:"playbackUrl,omitempty"`
+	WorkerStatus  *TranscriptionVideoWorkerStatus  `json:"workerStatus,omitempty"`
 }
 
 type KnowledgeSource struct {

@@ -43,6 +43,7 @@ type ChunkedOptions struct {
 	Overlap        time.Duration
 	Minimum        time.Duration
 	PromptMaxChars int
+	DisablePrompt  bool
 }
 
 func DefaultChunkedOptions() ChunkedOptions {
@@ -92,6 +93,7 @@ type ChunkedStream struct {
 	overlapBytes   int
 	minimumBytes   int
 	promptMaxChars int
+	disablePrompt  bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -133,6 +135,7 @@ func OpenChunked(ctx context.Context, endpoint Endpoint, model, language string,
 		overlapBytes:   durationBytes(options.Overlap),
 		minimumBytes:   durationBytes(options.Minimum),
 		promptMaxChars: options.PromptMaxChars,
+		disablePrompt:  options.DisablePrompt,
 		ctx:            streamContext,
 		cancel:         cancel,
 		jobs:           make(chan chunkedAudio, 4),
@@ -326,7 +329,7 @@ func (s *ChunkedStream) transcribe(job chunkedAudio) error {
 		s.previousText = ""
 	}
 	prompt := ""
-	if !s.promptDisabled {
+	if !s.disablePrompt && !s.promptDisabled {
 		prompt = trimTranscriptPrompt(s.previousText, s.promptMaxChars)
 	}
 	response, err := s.postTranscription(job, prompt)
@@ -367,7 +370,13 @@ func (s *ChunkedStream) transcribe(job chunkedAudio) error {
 	if strings.TrimSpace(novel) == "" {
 		return nil
 	}
-	event := RealtimeEvent{Kind: "final", Text: strings.TrimSpace(novel), StartOffsetMs: job.startOffsetMs, EndOffsetMs: job.endOffsetMs}
+	event := RealtimeEvent{
+		Kind:          "final",
+		Text:          strings.TrimSpace(novel),
+		RawText:       textValue,
+		StartOffsetMs: job.startOffsetMs,
+		EndOffsetMs:   job.endOffsetMs,
+	}
 	s.emit(event)
 	return nil
 }
@@ -602,6 +611,13 @@ func removeTranscriptOverlap(previous, current string) string {
 		}
 	}
 	return current
+}
+
+// RemoveTranscriptOverlap removes a repeated suffix of the previous
+// transcript from the beginning of the current transcript. Video slice
+// transcription uses the same boundary de-duplication as rolling chunks.
+func RemoveTranscriptOverlap(previous, current string) string {
+	return removeTranscriptOverlap(previous, current)
 }
 
 func normalizeTranscriptWord(value string) string {

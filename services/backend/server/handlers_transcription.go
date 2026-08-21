@@ -34,6 +34,9 @@ type transcriptionSessionRequest struct {
 	TranscriptionEndpoint string `json:"transcriptionEndpointId"`
 	DiarizationEndpoint   string `json:"diarizationEndpointId"`
 	GrammarEndpoint       string `json:"grammarEndpointId"`
+	TranscriptionModel    string `json:"transcriptionModel"`
+	DiarizationModel      string `json:"diarizationModel"`
+	GrammarModel          string `json:"grammarModel"`
 	Language              string `json:"language"`
 	RecordAudio           bool   `json:"recordAudio"`
 }
@@ -82,7 +85,8 @@ func (a *App) listTranscriptionSessions(c *gin.Context) {
 	}
 	rows, err := a.DB.QueryContext(c, `
 		SELECT s.id, s.user_id, s.organization_id, s.title, s.status,
-		       s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id, s.language,
+		       s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id,
+		       COALESCE(s.transcription_model, ''), COALESCE(s.diarization_model, ''), COALESCE(s.grammar_model, ''), s.language,
 		       s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at,
 		       (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id),
 		       (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE),
@@ -150,6 +154,41 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 			return
 		}
 	}
+	transcriptionEndpointMetadata, err := a.getEndpoint(c, transcriptionEndpoint)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("transcription endpoint not found"))
+		return
+	}
+	request.TranscriptionModel = firstNonEmptyString(
+		strings.TrimSpace(request.TranscriptionModel),
+		transcriptionEndpointMetadata.TranscriptionModel,
+	)
+	if diarizationEndpoint != uuid.Nil {
+		diarizationEndpointMetadata, endpointErr := a.getEndpoint(c, diarizationEndpoint)
+		if endpointErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("diarization endpoint not found"))
+			return
+		}
+		request.DiarizationModel = firstNonEmptyString(
+			strings.TrimSpace(request.DiarizationModel),
+			diarizationEndpointMetadata.DiarizationModel,
+		)
+	} else {
+		request.DiarizationModel = ""
+	}
+	if grammarEndpoint != uuid.Nil {
+		grammarEndpointMetadata, endpointErr := a.getEndpoint(c, grammarEndpoint)
+		if endpointErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("grammar endpoint not found"))
+			return
+		}
+		request.GrammarModel = firstNonEmptyString(
+			strings.TrimSpace(request.GrammarModel),
+			grammarEndpointMetadata.ChatModel,
+		)
+	} else {
+		request.GrammarModel = ""
+	}
 	if request.Language == "" {
 		request.Language = "auto"
 	}
@@ -164,11 +203,12 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 	expiresAt := time.Now().Add(10 * time.Minute)
 	var item models.TranscriptionSession
 	var transcriptionEndpointID, diarizationEndpointID, grammarEndpointID uuid.NullUUID
+	var transcriptionModel, diarizationModel, grammarModel string
 	var polishStatus string
 	err = a.DB.QueryRowContext(c, `
-		INSERT INTO transcription_sessions (user_id, organization_id, title, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, language, record_audio, polish_status, join_code_hash, join_code_expires_at)
-		VALUES ($1, $2, $3, $4, NULLIF($5, '00000000-0000-0000-0000-000000000000'::uuid), NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid), $7, $8, CASE WHEN NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid) IS NULL THEN 'not_requested' ELSE 'queued' END, $9, $10)
-		RETURNING id, user_id, organization_id, title, status, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, language, record_audio, polish_status, started_at, ended_at, created_at, updated_at`, principal.UserID, organizationID, request.Title, transcriptionEndpoint, diarizationEndpoint, grammarEndpoint, request.Language, request.RecordAudio, codeHash, expiresAt).Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpointID, &diarizationEndpointID, &grammarEndpointID, &item.Language, &item.RecordAudio, &polishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt)
+		INSERT INTO transcription_sessions (user_id, organization_id, title, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, transcription_model, diarization_model, grammar_model, language, record_audio, polish_status, join_code_hash, join_code_expires_at)
+		VALUES ($1, $2, $3, $4, NULLIF($5, '00000000-0000-0000-0000-000000000000'::uuid), NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), $10, $11, CASE WHEN NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid) IS NULL THEN 'not_requested' ELSE 'queued' END, $12, $13)
+		RETURNING id, user_id, organization_id, title, status, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(grammar_model, ''), language, record_audio, polish_status, started_at, ended_at, created_at, updated_at`, principal.UserID, organizationID, request.Title, transcriptionEndpoint, diarizationEndpoint, grammarEndpoint, request.TranscriptionModel, request.DiarizationModel, request.GrammarModel, request.Language, request.RecordAudio, codeHash, expiresAt).Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpointID, &diarizationEndpointID, &grammarEndpointID, &transcriptionModel, &diarizationModel, &grammarModel, &item.Language, &item.RecordAudio, &polishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -182,6 +222,9 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 	if grammarEndpointID.Valid {
 		item.GrammarEndpoint = &grammarEndpointID.UUID
 	}
+	item.TranscriptionModel = transcriptionModel
+	item.DiarizationModel = diarizationModel
+	item.GrammarModel = grammarModel
 	item.PolishStatus = polishStatus
 	item.Kind = "live"
 	item.JoinCode = code
@@ -931,8 +974,9 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 	}
 
 	var sessionEndpoint uuid.UUID
+	var sessionTranscriptionModel string
 	var language, sessionStatus string
-	if err := a.DB.QueryRowContext(ctx, `SELECT transcription_endpoint_id, language, status FROM transcription_sessions WHERE id = $1`, info.SessionID).Scan(&sessionEndpoint, &language, &sessionStatus); err != nil {
+	if err := a.DB.QueryRowContext(ctx, `SELECT transcription_endpoint_id, COALESCE(transcription_model, ''), language, status FROM transcription_sessions WHERE id = $1`, info.SessionID).Scan(&sessionEndpoint, &sessionTranscriptionModel, &language, &sessionStatus); err != nil {
 		_ = a.Live.send(client, "error", ginData{"message": "transcription session is not configured"})
 		return
 	}
@@ -945,6 +989,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 		_ = a.Live.send(client, "error", ginData{"message": "transcription endpoint could not be loaded: " + err.Error()})
 		return
 	}
+	endpoint.TranscriptionModel = firstNonEmptyString(sessionTranscriptionModel, endpoint.TranscriptionModel)
 	mode := transcriptionMode(endpoint)
 	if mode == "" {
 		_ = a.Live.send(client, "error", ginData{"message": fmt.Sprintf("provider %s does not support a compatible transcription transport", endpoint.ProviderType)})
@@ -1146,13 +1191,25 @@ func (a *App) processDiarizationWindow(sessionID, sourceID uuid.UUID, startOffse
 }
 
 func (a *App) persistTranscriptionSegment(ctx context.Context, sessionID, sourceID uuid.UUID, text string, start, end int64) (models.TranscriptionSegment, error) {
-	return a.persistTranscriptionSegmentWithSpeaker(ctx, sessionID, sourceID, uuid.Nil, text, start, end)
+	return a.persistTranscriptionSegmentWithRaw(ctx, sessionID, sourceID, text, text, start, end)
 }
 
 func (a *App) persistTranscriptionSegmentWithSpeaker(ctx context.Context, sessionID, sourceID, speakerID uuid.UUID, text string, start, end int64) (models.TranscriptionSegment, error) {
+	return a.persistTranscriptionSegmentWithRawAndSpeaker(ctx, sessionID, sourceID, speakerID, text, text, start, end)
+}
+
+func (a *App) persistTranscriptionSegmentWithRaw(ctx context.Context, sessionID, sourceID uuid.UUID, text, rawText string, start, end int64) (models.TranscriptionSegment, error) {
+	return a.persistTranscriptionSegmentWithRawAndSpeaker(ctx, sessionID, sourceID, uuid.Nil, text, rawText, start, end)
+}
+
+func (a *App) persistTranscriptionSegmentWithRawAndSpeaker(ctx context.Context, sessionID, sourceID, speakerID uuid.UUID, text, rawText string, start, end int64) (models.TranscriptionSegment, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return models.TranscriptionSegment{}, fmt.Errorf("transcript segment is empty")
+	}
+	rawText = strings.TrimSpace(rawText)
+	if rawText == "" {
+		rawText = text
 	}
 	if existing, merged, err := a.mergeTranscriptionSegment(ctx, sessionID, sourceID, speakerID, text, start, end); err != nil {
 		return models.TranscriptionSegment{}, err
@@ -1175,9 +1232,9 @@ func (a *App) persistTranscriptionSegmentWithSpeaker(ctx context.Context, sessio
 	}
 	heardJSON, _ := json.Marshal(heardBy)
 	var heard []byte
-	var rawText sql.NullString
+	var rawTextValue sql.NullString
 	var polishedText sql.NullString
-	err := a.DB.QueryRowContext(ctx, `INSERT INTO transcription_segments (session_id, source_id, speaker_id, text, raw_text, start_offset_ms, end_offset_ms, canonical, heard_by_source_ids) VALUES ($1, $2, $3, $4, $4, $5, $6, TRUE, $7) RETURNING id, session_id, source_id, speaker_id, text, raw_text, polished_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at`, sessionID, nullableUUIDValue(sourceValue), nullableUUIDValue(speakerValue), text, start, end, heardJSON).Scan(&segment.ID, &segment.SessionID, &sourceValue, &speakerValue, &segment.Text, &rawText, &polishedText, &segment.StartOffsetMs, &segment.EndOffsetMs, &segment.Confidence, &segment.SignalQuality, &segment.Canonical, &heard, &segment.CreatedAt, &segment.UpdatedAt)
+	err := a.DB.QueryRowContext(ctx, `INSERT INTO transcription_segments (session_id, source_id, speaker_id, text, raw_text, start_offset_ms, end_offset_ms, canonical, heard_by_source_ids) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8) RETURNING id, session_id, source_id, speaker_id, text, raw_text, polished_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at`, sessionID, nullableUUIDValue(sourceValue), nullableUUIDValue(speakerValue), text, rawText, start, end, heardJSON).Scan(&segment.ID, &segment.SessionID, &sourceValue, &speakerValue, &segment.Text, &rawTextValue, &polishedText, &segment.StartOffsetMs, &segment.EndOffsetMs, &segment.Confidence, &segment.SignalQuality, &segment.Canonical, &heard, &segment.CreatedAt, &segment.UpdatedAt)
 	if err != nil {
 		return segment, err
 	}
@@ -1191,7 +1248,7 @@ func (a *App) persistTranscriptionSegmentWithSpeaker(ctx context.Context, sessio
 	if speakerValue.Valid {
 		segment.SpeakerID = &speakerValue.UUID
 	}
-	segment.RawText = rawText.String
+	segment.RawText = rawTextValue.String
 	if segment.RawText == "" {
 		segment.RawText = segment.Text
 	}
@@ -1203,7 +1260,7 @@ func (a *App) persistTranscriptionSegmentWithSpeaker(ctx context.Context, sessio
 }
 
 func (a *App) mergeTranscriptionSegment(ctx context.Context, sessionID, sourceID, speakerID uuid.UUID, text string, start, end int64) (models.TranscriptionSegment, bool, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT id, session_id, source_id, speaker_id, text, raw_text, polished_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at FROM transcription_segments WHERE session_id = $1 AND canonical = TRUE AND start_offset_ms <= $2 AND end_offset_ms >= $3 ORDER BY ABS(start_offset_ms - $4) LIMIT 24`, sessionID, end+1500, start-1500, start)
+	rows, err := a.DB.QueryContext(ctx, `SELECT id, session_id, source_id, speaker_id, text, raw_text, polished_text, edited_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at FROM transcription_segments WHERE session_id = $1 AND canonical = TRUE AND start_offset_ms <= $2 AND end_offset_ms >= $3 ORDER BY ABS(start_offset_ms - $4) LIMIT 24`, sessionID, end+1500, start-1500, start)
 	if err != nil {
 		return models.TranscriptionSegment{}, false, err
 	}
@@ -1211,9 +1268,9 @@ func (a *App) mergeTranscriptionSegment(ctx context.Context, sessionID, sourceID
 	for rows.Next() {
 		var item models.TranscriptionSegment
 		var sourceValue, speakerValue uuid.NullUUID
-		var rawText, polishedText sql.NullString
+		var rawText, polishedText, editedText sql.NullString
 		var heard []byte
-		if err := rows.Scan(&item.ID, &item.SessionID, &sourceValue, &speakerValue, &item.Text, &rawText, &polishedText, &item.StartOffsetMs, &item.EndOffsetMs, &item.Confidence, &item.SignalQuality, &item.Canonical, &heard, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &sourceValue, &speakerValue, &item.Text, &rawText, &polishedText, &editedText, &item.StartOffsetMs, &item.EndOffsetMs, &item.Confidence, &item.SignalQuality, &item.Canonical, &heard, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return models.TranscriptionSegment{}, false, err
 		}
 		item.RawText = rawText.String
@@ -1222,6 +1279,9 @@ func (a *App) mergeTranscriptionSegment(ctx context.Context, sessionID, sourceID
 		}
 		if polishedText.Valid {
 			item.PolishedText = &polishedText.String
+		}
+		if editedText.Valid {
+			item.EditedText = &editedText.String
 		}
 		if !transcriptionTextsMatch(item.Text, text) {
 			continue
@@ -1370,12 +1430,23 @@ func (a *App) transcriptionSnapshot(ctx context.Context, sessionID uuid.UUID) (g
 	if err != nil {
 		return nil, err
 	}
+	annotations, err := loadTranscriptionAnnotations(ctx, a.DB, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	insights, err := loadTranscriptionInsights(ctx, a.DB, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	videoUpload, err := loadLatestVideoUpload(ctx, a.DB, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	if err := attachVideoWorkerStatus(ctx, a.DB, videoUpload, a.Config); err != nil {
+		return nil, err
+	}
 	a.attachVideoPlaybackURL(ctx, videoUpload)
-	return gin.H{"session": session, "sources": sources, "speakers": speakers, "segments": segments, "recordings": recordings, "videoUpload": videoUpload}, nil
+	return gin.H{"session": session, "sources": sources, "speakers": speakers, "segments": segments, "recordings": recordings, "annotations": annotations, "insights": insights, "videoUpload": videoUpload}, nil
 }
 
 func (a *App) listTranscriptionRecordings(c *gin.Context) {
@@ -1692,7 +1763,7 @@ func transcriptionMode(endpoint provider.Endpoint) string {
 }
 
 func loadTranscriptionSession(ctx context.Context, db *sql.DB, sessionID uuid.UUID) (models.TranscriptionSession, error) {
-	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id, s.language, s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE), EXISTS (SELECT 1 FROM transcription_video_uploads video WHERE video.session_id = s.id) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
+	row := db.QueryRowContext(ctx, `SELECT s.id, s.user_id, s.organization_id, s.title, s.status, s.transcription_endpoint_id, s.diarization_endpoint_id, s.grammar_endpoint_id, COALESCE(s.transcription_model, ''), COALESCE(s.diarization_model, ''), COALESCE(s.grammar_model, ''), s.language, s.record_audio, s.polish_status, s.started_at, s.ended_at, s.created_at, s.updated_at, s.archived_at, (SELECT COUNT(*) FROM transcription_sources src WHERE src.session_id = s.id), (SELECT COUNT(*) FROM transcription_segments seg WHERE seg.session_id = s.id AND seg.canonical = TRUE), EXISTS (SELECT 1 FROM transcription_video_uploads video WHERE video.session_id = s.id) FROM transcription_sessions s WHERE s.id = $1`, sessionID)
 	return scanTranscriptionSession(row)
 }
 
@@ -1700,7 +1771,7 @@ func scanTranscriptionSession(scanner interface{ Scan(dest ...any) error }) (mod
 	var item models.TranscriptionSession
 	var transcriptionEndpoint, diarizationEndpoint, grammarEndpoint uuid.NullUUID
 	var hasVideoUpload bool
-	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &grammarEndpoint, &item.Language, &item.RecordAudio, &item.PolishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.SourceCount, &item.SegmentCount, &hasVideoUpload); err != nil {
+	if err := scanner.Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpoint, &diarizationEndpoint, &grammarEndpoint, &item.TranscriptionModel, &item.DiarizationModel, &item.GrammarModel, &item.Language, &item.RecordAudio, &item.PolishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.SourceCount, &item.SegmentCount, &hasVideoUpload); err != nil {
 		return item, err
 	}
 	if transcriptionEndpoint.Valid {
@@ -1757,7 +1828,7 @@ func loadTranscriptionSpeakers(ctx context.Context, db *sql.DB, sessionID uuid.U
 }
 
 func loadTranscriptionSegments(ctx context.Context, db *sql.DB, sessionID uuid.UUID) ([]models.TranscriptionSegment, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, session_id, source_id, speaker_id, text, raw_text, polished_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at FROM transcription_segments WHERE session_id = $1 AND canonical = TRUE ORDER BY start_offset_ms, created_at`, sessionID)
+	rows, err := db.QueryContext(ctx, `SELECT id, session_id, source_id, speaker_id, text, raw_text, polished_text, edited_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at FROM transcription_segments WHERE session_id = $1 AND canonical = TRUE ORDER BY start_offset_ms, created_at`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1766,9 +1837,9 @@ func loadTranscriptionSegments(ctx context.Context, db *sql.DB, sessionID uuid.U
 	for rows.Next() {
 		var item models.TranscriptionSegment
 		var sourceID, speakerID uuid.NullUUID
-		var rawText, polishedText sql.NullString
+		var rawText, polishedText, editedText sql.NullString
 		var heard []byte
-		if err := rows.Scan(&item.ID, &item.SessionID, &sourceID, &speakerID, &item.Text, &rawText, &polishedText, &item.StartOffsetMs, &item.EndOffsetMs, &item.Confidence, &item.SignalQuality, &item.Canonical, &heard, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &sourceID, &speakerID, &item.Text, &rawText, &polishedText, &editedText, &item.StartOffsetMs, &item.EndOffsetMs, &item.Confidence, &item.SignalQuality, &item.Canonical, &heard, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		item.RawText = rawText.String
@@ -1777,6 +1848,9 @@ func loadTranscriptionSegments(ctx context.Context, db *sql.DB, sessionID uuid.U
 		}
 		if polishedText.Valid {
 			item.PolishedText = &polishedText.String
+		}
+		if editedText.Valid {
+			item.EditedText = &editedText.String
 		}
 		if sourceID.Valid {
 			item.SourceID = &sourceID.UUID

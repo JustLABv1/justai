@@ -78,10 +78,39 @@ export type AdminAnalyticsEndpoint = {
   averageLatencyMs: number
 }
 
+export type TranscriptionWorkerAnalyticsDay = {
+  date: string
+  total: number
+  completed: number
+  failed: number
+  cancelled: number
+}
+
+export type TranscriptionWorkerAnalytics = {
+  capacity: number
+  active: number
+  queued: number
+  utilizationPercent: number
+  sliceWorkersPerJob: number
+  activeSliceWorkers: number
+  totalJobs: number
+  completedJobs: number
+  failedJobs: number
+  cancelledJobs: number
+  audioHoursProcessed: number
+  averageQueueWaitMs: number
+  p95QueueWaitMs: number
+  averageProcessingMs: number
+  p95ProcessingMs: number
+  periodDays: number
+  timeSeries: TranscriptionWorkerAnalyticsDay[]
+}
+
 export type AdminAnalyticsResponse = {
   summary: AdminAnalyticsSummary
   byEndpoint: AdminAnalyticsEndpoint[]
   timeSeries: AdminAnalyticsDay[]
+  transcriptionWorkers: TranscriptionWorkerAnalytics
 }
 
 export type PlatformHealth = {
@@ -392,6 +421,9 @@ export type TranscriptionSession = {
   transcriptionEndpointId?: string | null
   diarizationEndpointId?: string | null
   grammarEndpointId?: string | null
+  transcriptionModel?: string
+  diarizationModel?: string
+  grammarModel?: string
   language: string
   recordAudio: boolean
   polishStatus?:
@@ -436,6 +468,7 @@ export type TranscriptionSegment = {
   text: string
   rawText?: string
   polishedText?: string | null
+  editedText?: string | null
   startOffsetMs: number
   endOffsetMs: number
   confidence?: number | null
@@ -443,6 +476,38 @@ export type TranscriptionSegment = {
   canonical: boolean
   heardBySourceIds?: string[]
   createdAt: string
+  updatedAt: string
+}
+
+export type TranscriptionAnnotation = {
+  id: string
+  sessionId: string
+  segmentId?: string | null
+  kind: "bookmark" | "comment"
+  note?: string
+  startOffsetMs: number
+  endOffsetMs: number
+  resolved: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type TranscriptionInsightChapter = {
+  title: string
+  summary?: string
+  startOffsetMs: number
+}
+
+export type TranscriptionInsights = {
+  sessionId: string
+  status: "idle" | "processing" | "completed" | "failed"
+  language: string
+  summary?: string
+  chapters?: TranscriptionInsightChapter[]
+  topics?: string[]
+  actionItems?: string[]
+  error?: string
+  generatedAt?: string | null
   updatedAt: string
 }
 
@@ -471,6 +536,33 @@ export type TranscriptionVideoPipelineStep = {
   durationMs?: number
   durationEstimated?: boolean
   error?: string
+  parallel?: TranscriptionVideoParallelProgress
+}
+
+export type TranscriptionVideoParallelProgress = {
+  strategy?: string
+  phase?: "preparing" | "transcribing" | "fusing" | "complete" | string
+  chunkDurationMs?: number
+  overlapMs?: number
+  workerCount?: number
+  sliceCount?: number
+  completedSlices?: number
+  previewSegments?: TranscriptionVideoPreviewSegment[]
+}
+
+export type TranscriptionVideoPreviewSegment = {
+  startOffsetMs: number
+  endOffsetMs: number
+  text: string
+}
+
+export type TranscriptionVideoWorkerStatus = {
+  capacity: number
+  active: number
+  queued: number
+  queuePosition?: number
+  utilizationPercent: number
+  sliceWorkersPerJob: number
 }
 
 export type TranscriptionVideoUpload = {
@@ -500,6 +592,7 @@ export type TranscriptionVideoUpload = {
   completedAt?: string | null
   expiresAt?: string | null
   playbackUrl?: string
+  workerStatus?: TranscriptionVideoWorkerStatus
 }
 
 export type TranscriptionJoinRequest = {

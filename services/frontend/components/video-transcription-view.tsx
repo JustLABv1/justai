@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  AudioLines,
   Check,
   ChevronDown,
   Clock3,
@@ -8,12 +9,14 @@ import {
   CircleDashed,
   FileText,
   FileVideo,
+  GitMerge,
   LoaderCircle,
   Pause,
   Pencil,
   Play,
   RefreshCw,
   Search,
+  SkipForward,
   Sparkles,
   Upload,
   Users,
@@ -89,13 +92,19 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api } from "@/lib/api"
 import { groupTranscriptionSegments } from "@/lib/transcription"
 import { cn } from "@/lib/utils"
+import { VideoTranscriptWorkspace } from "@/components/video-transcript-workspace"
 import type {
   Endpoint,
+  TranscriptionAnnotation,
+  TranscriptionInsights,
   TranscriptionSegment,
   TranscriptionSpeaker,
   TranscriptionSession,
+  TranscriptionVideoPreviewSegment,
+  TranscriptionVideoParallelProgress,
   TranscriptionVideoPipelineStep,
   TranscriptionVideoUpload,
+  TranscriptionVideoWorkerStatus,
   User,
 } from "@/lib/types"
 
@@ -103,6 +112,8 @@ type VideoSnapshot = {
   session: TranscriptionSession
   segments: TranscriptionSegment[]
   speakers: TranscriptionSpeaker[]
+  annotations?: TranscriptionAnnotation[]
+  insights?: TranscriptionInsights
   videoUpload?: TranscriptionVideoUpload | null
 }
 
@@ -118,6 +129,23 @@ type VideoSpeakerSummary = {
   sampleStartMs: number | null
   sampleEndMs: number | null
   sampleText: string
+}
+
+type VideoModelCapability = "chat" | "transcription" | "diarization"
+
+type DiscoveredVideoModel = {
+  id: string
+  name?: string
+  ownedBy?: string
+}
+
+type VideoModelDiscovery = {
+  models: DiscoveredVideoModel[]
+  configuredModel: string
+}
+
+function videoModelKey(endpointId: string, capability: VideoModelCapability) {
+  return `${endpointId}:${capability}`
 }
 
 export function VideoTranscriptionView({
@@ -137,7 +165,12 @@ export function VideoTranscriptionView({
   createSessionRequested?: boolean
   onCreateSessionRequestHandled?: () => void
 }) {
-  const [snapshot, setSnapshot] = useState<VideoSnapshot | null>(null)
+  const [snapshotState, setSnapshot] = useState<VideoSnapshot | null>(null)
+  // The rendered workspace is guarded below; this non-null view keeps the
+  // legacy branch type-safe while it is retained as a migration reference.
+  const snapshot = snapshotState as VideoSnapshot & {
+    videoUpload: TranscriptionVideoUpload
+  }
   const [error, setError] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [title, setTitle] = useState("Video transcript")
@@ -146,6 +179,12 @@ export function VideoTranscriptionView({
   const [selectedDiarizationEndpoint, setSelectedDiarizationEndpoint] =
     useState("none")
   const [grammarChoice, setGrammarChoice] = useState("auto")
+  const [modelSelections, setModelSelections] = useState<
+    Record<string, string>
+  >({})
+  const [modelDiscovery, setModelDiscovery] = useState<
+    Record<string, VideoModelDiscovery>
+  >({})
   const [transcriptMode, setTranscriptMode] = useState<"verbatim" | "polished">(
     "verbatim"
   )
@@ -156,6 +195,8 @@ export function VideoTranscriptionView({
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoStarting, setVideoStarting] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
+  const [skipSpeakerOpen, setSkipSpeakerOpen] = useState(false)
+  const [skipSpeakerInFlight, setSkipSpeakerInFlight] = useState(false)
   const [speakerToRename, setSpeakerToRename] =
     useState<TranscriptionSpeaker | null>(null)
   const [speakerName, setSpeakerName] = useState("")
@@ -164,11 +205,16 @@ export function VideoTranscriptionView({
     speakerId: string
     endOffsetMs: number
   } | null>(null)
+  const [transcriptRailHeight, setTranscriptRailHeight] = useState<
+    number | null
+  >(null)
   const requestRef = useRef(0)
   const videoUploadAbortRef = useRef<AbortController | null>(null)
   const videoUploadInFlightRef = useRef(false)
   const videoUploadRef = useRef<TranscriptionVideoUpload | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const transcriptRailRef = useRef<HTMLElement | null>(null)
+  const modelDiscoveryInFlightRef = useRef(new Set<string>())
 
   const transcriptionEndpoints = useMemo(
     () =>
@@ -211,6 +257,153 @@ export function VideoTranscriptionView({
           ""
         : grammarChoice
 
+  const selectedTranscriptionEndpoint = transcriptionEndpoints.find(
+    (endpoint) => endpoint.id === effectiveSelectedEndpoint
+  )
+  const selectedDiarizationEndpointItem = diarizationEndpoints.find(
+    (endpoint) => endpoint.id === effectiveDiarizationEndpoint
+  )
+  const selectedGrammarEndpoint = grammarEndpoints.find(
+    (endpoint) => endpoint.id === effectiveGrammarEndpoint
+  )
+  const modelRequests = useMemo(
+    () =>
+      [
+        {
+          endpoint: selectedTranscriptionEndpoint,
+          capability: "transcription" as const,
+          fallback: selectedTranscriptionEndpoint?.transcriptionModel ?? "",
+        },
+        {
+          endpoint: selectedDiarizationEndpointItem,
+          capability: "diarization" as const,
+          fallback: selectedDiarizationEndpointItem?.diarizationModel ?? "",
+        },
+        {
+          endpoint: selectedGrammarEndpoint,
+          capability: "chat" as const,
+          fallback: selectedGrammarEndpoint?.chatModel ?? "",
+        },
+      ].filter((request) => Boolean(request.endpoint)),
+    [
+      selectedDiarizationEndpointItem,
+      selectedGrammarEndpoint,
+      selectedTranscriptionEndpoint,
+    ]
+  )
+
+  useEffect(() => {
+    if (!createOpen) return
+    let cancelled = false
+    for (const request of modelRequests) {
+      const endpoint = request.endpoint
+      if (!endpoint) continue
+      const key = videoModelKey(endpoint.id, request.capability)
+      if (modelDiscovery[key] || modelDiscoveryInFlightRef.current.has(key)) {
+        continue
+      }
+      modelDiscoveryInFlightRef.current.add(key)
+      void api
+        .get<{
+          models?: DiscoveredVideoModel[]
+          configuredModel?: string
+        }>(
+          `/api/v1/endpoints/${endpoint.id}/models?capability=${request.capability}`
+        )
+        .then((result) => {
+          if (cancelled) return
+          const models = (result.models ?? []).filter((model) =>
+            Boolean(model.id?.trim())
+          )
+          setModelDiscovery((current) => ({
+            ...current,
+            [key]: {
+              models,
+              configuredModel: result.configuredModel?.trim() ?? "",
+            },
+          }))
+        })
+        .catch(() => {
+          if (cancelled) return
+          setModelDiscovery((current) => ({
+            ...current,
+            [key]: {
+              models: request.fallback ? [{ id: request.fallback }] : [],
+              configuredModel: request.fallback,
+            },
+          }))
+        })
+        .finally(() => {
+          modelDiscoveryInFlightRef.current.delete(key)
+        })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [createOpen, modelDiscovery, modelRequests])
+
+  const modelValueFor = useCallback(
+    (endpoint: Endpoint | undefined, capability: VideoModelCapability) => {
+      if (!endpoint) return ""
+      const key = videoModelKey(endpoint.id, capability)
+      const discovered = modelDiscovery[key]
+      return (
+        modelSelections[key]?.trim() ||
+        discovered?.configuredModel?.trim() ||
+        (capability === "transcription"
+          ? endpoint.transcriptionModel
+          : capability === "diarization"
+            ? endpoint.diarizationModel
+            : endpoint.chatModel) ||
+        discovered?.models[0]?.id ||
+        ""
+      )
+    },
+    [modelDiscovery, modelSelections]
+  )
+
+  const modelOptionsFor = useCallback(
+    (endpoint: Endpoint | undefined, capability: VideoModelCapability) => {
+      if (!endpoint) return []
+      const key = videoModelKey(endpoint.id, capability)
+      const discovered = modelDiscovery[key]
+      const selected = modelValueFor(endpoint, capability)
+      const values = new Map<string, DiscoveredVideoModel>()
+      for (const model of discovered?.models ?? []) {
+        if (model.id?.trim()) values.set(model.id, model)
+      }
+      if (selected && !values.has(selected))
+        values.set(selected, { id: selected })
+      return [...values.values()]
+    },
+    [modelDiscovery, modelValueFor]
+  )
+
+  const setModelValue = useCallback(
+    (
+      endpoint: Endpoint | undefined,
+      capability: VideoModelCapability,
+      value: string
+    ) => {
+      if (!endpoint) return
+      setModelSelections((current) => ({
+        ...current,
+        [videoModelKey(endpoint.id, capability)]: value,
+      }))
+    },
+    []
+  )
+
+  const transcriptionModel = modelValueFor(
+    selectedTranscriptionEndpoint,
+    "transcription"
+  )
+  const diarizationModel = modelValueFor(
+    selectedDiarizationEndpointItem,
+    "diarization"
+  )
+  const grammarModel = modelValueFor(selectedGrammarEndpoint, "chat")
+
   const loadSession = useCallback(async (id: string) => {
     const requestId = ++requestRef.current
     try {
@@ -222,6 +415,8 @@ export function VideoTranscriptionView({
         session: { ...result.session, kind: "video" },
         segments: result.segments ?? [],
         speakers: result.speakers ?? [],
+        annotations: result.annotations ?? [],
+        insights: result.insights,
         videoUpload: result.videoUpload ?? null,
       })
       setError("")
@@ -277,6 +472,8 @@ export function VideoTranscriptionView({
           session: { ...result.session, kind: "video" },
           segments: result.segments ?? [],
           speakers: result.speakers ?? [],
+          annotations: result.annotations ?? current?.annotations ?? [],
+          insights: result.insights ?? current?.insights,
           videoUpload: mergeVideoUploadSnapshot(
             current?.videoUpload ?? upload,
             result.videoUpload
@@ -410,8 +607,15 @@ export function VideoTranscriptionView({
         language,
         recordAudio: false,
         transcriptionEndpointId: effectiveSelectedEndpoint,
+        transcriptionModel: transcriptionModel || undefined,
         diarizationEndpointId: effectiveDiarizationEndpoint || undefined,
+        diarizationModel:
+          effectiveDiarizationEndpoint && diarizationModel
+            ? diarizationModel
+            : undefined,
         grammarEndpointId: effectiveGrammarEndpoint || undefined,
+        grammarModel:
+          effectiveGrammarEndpoint && grammarModel ? grammarModel : undefined,
       })
       const createdSession: TranscriptionSession = {
         ...result.session,
@@ -593,6 +797,36 @@ export function VideoTranscriptionView({
     }
   }
 
+  const skipSpeakerSeparation = async () => {
+    const uploadID = snapshot?.videoUpload?.id
+    if (!uploadID) return
+    setSkipSpeakerInFlight(true)
+    setError("")
+    try {
+      const result = await api.post<{ upload: TranscriptionVideoUpload }>(
+        `/api/v1/transcription/video-uploads/${uploadID}/skip?step=diarization`
+      )
+      setSnapshot((current) =>
+        current
+          ? {
+              ...current,
+              session: { ...current.session, status: "processing" },
+              videoUpload: result.upload,
+            }
+          : current
+      )
+      onSessionsChanged()
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Speaker separation could not be skipped."
+      )
+    } finally {
+      setSkipSpeakerInFlight(false)
+    }
+  }
+
   const refreshVideoPlayback = useCallback(async () => {
     const uploadID = snapshot?.videoUpload?.id
     if (!uploadID) return
@@ -628,7 +862,7 @@ export function VideoTranscriptionView({
   const displaySegments = useMemo(
     () =>
       (snapshot?.segments ?? []).map((segment) => {
-        const verbatim = segment.rawText?.trim() || segment.text.trim()
+        const verbatim = segment.text.trim() || segment.rawText?.trim() || ""
         return {
           ...segment,
           text:
@@ -643,6 +877,33 @@ export function VideoTranscriptionView({
     () => groupTranscriptionSegments(displaySegments),
     [displaySegments]
   )
+  const isVideoProcessing = ["uploading", "queued", "processing"].includes(
+    snapshot?.videoUpload?.status ?? ""
+  )
+  const livePreviewSegments = useMemo<
+    TranscriptionVideoPreviewSegment[]
+  >(() => {
+    const parallelProgress = snapshot?.videoUpload?.pipeline?.find(
+      (step) => step.key === "transcription"
+    )?.parallel
+    const isPreviewActive =
+      isVideoProcessing &&
+      ["preparing", "transcribing", "fusing"].includes(
+        parallelProgress?.phase ?? ""
+      )
+    if (!isPreviewActive) {
+      return []
+    }
+    const preview = parallelProgress?.previewSegments ?? []
+    return [...preview]
+      .filter((segment) => segment.text.trim())
+      .sort((left, right) => {
+        if (left.startOffsetMs !== right.startOffsetMs) {
+          return left.startOffsetMs - right.startOffsetMs
+        }
+        return left.endOffsetMs - right.endOffsetMs
+      })
+  }, [isVideoProcessing, snapshot?.videoUpload?.pipeline])
   const speakerById = useMemo(
     () =>
       new Map(
@@ -722,6 +983,37 @@ export function VideoTranscriptionView({
       }
     })
   }, [displayDurationMs, displaySegments, snapshot?.speakers])
+
+  useEffect(() => {
+    const rail = transcriptRailRef.current
+    if (!rail) return
+
+    const updateHeight = () => {
+      if (!window.matchMedia("(min-width: 1024px)").matches) {
+        setTranscriptRailHeight(null)
+        return
+      }
+      const height = Math.ceil(rail.scrollHeight)
+      setTranscriptRailHeight(height > 0 ? height : null)
+    }
+
+    updateHeight()
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(updateHeight)
+    observer?.observe(rail)
+    window.addEventListener("resize", updateHeight)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener("resize", updateHeight)
+    }
+  }, [
+    snapshot?.session.polishStatus,
+    snapshot?.videoUpload?.playbackUrl,
+    snapshot?.videoUpload?.status,
+    speakerSummaries.length,
+  ])
 
   const playSpeakerSample = useCallback(
     (summary: VideoSpeakerSummary) => {
@@ -811,7 +1103,7 @@ export function VideoTranscriptionView({
       : "Cancel transcription"
 
   return (
-    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6">
+    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
       {error && (
         <Alert className="shrink-0" variant="destructive">
           <AlertTitle>Video transcription needs attention</AlertTitle>
@@ -915,499 +1207,559 @@ export function VideoTranscriptionView({
               hasDiarizedSpeakers={snapshot.speakers.some((speaker) =>
                 /^speaker[_ -]?\d+$/i.test(speaker.label)
               )}
+              onRequestSkipSpeakerSeparation={() => setSkipSpeakerOpen(true)}
+              skipSpeakerInFlight={skipSpeakerInFlight}
               session={snapshot.session}
               upload={snapshot.videoUpload}
             />
           ) : null}
 
-          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)] lg:overflow-hidden">
-            <Card className="min-h-[28rem] overflow-hidden shadow-none lg:min-h-0">
-              <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="flex items-center gap-2 text-sm">
-                      <FileText
-                        aria-hidden="true"
-                        className="size-4 shrink-0"
-                      />
-                      Transcript
-                    </CardTitle>
-                    <CardDescription>
-                      {transcript.length} messages · {snapshot.segments.length}{" "}
-                      segments
-                      {transcriptQuery
-                        ? ` · ${filteredTranscript.length} matches`
-                        : ""}
-                    </CardDescription>
-                  </div>
-                  <Tabs
-                    aria-label="Transcript display mode"
-                    onValueChange={(value) => {
-                      if (value === "verbatim" || value === "polished") {
-                        setTranscriptMode(value)
+          {false ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)] lg:items-start">
+              <Card
+                className="flex max-h-[min(70vh,42rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none"
+                style={
+                  transcriptRailHeight
+                    ? {
+                        height: transcriptRailHeight ?? undefined,
+                        maxHeight: transcriptRailHeight ?? undefined,
                       }
-                    }}
-                    value={transcriptMode}
-                  >
-                    <TabsList>
-                      <TabsTrigger value="verbatim">Verbatim</TabsTrigger>
-                      <TabsTrigger
-                        disabled={!polishedAvailable}
-                        value="polished"
-                      >
-                        Polished
-                      </TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                </div>
-                <div className="relative max-w-md">
-                  <Search
-                    aria-hidden="true"
-                    className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <Input
-                    aria-label="Search transcript"
-                    className="h-9 pl-9"
-                    onChange={(event) => setTranscriptQuery(event.target.value)}
-                    placeholder="Search transcript"
-                    value={transcriptQuery}
-                  />
-                </div>
-              </CardHeader>
-              <CardContent className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4">
-                {filteredTranscript.length > 0 ? (
-                  <div className="flex flex-col gap-1">
-                    {filteredTranscript.map((message) => {
-                      const active = message.id === activeMessageId
-                      const speaker = speakerById.get(message.speakerKey)
-                      return (
-                        <div
-                          className={cn(
-                            "grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2.5 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-                            active
-                              ? "bg-primary/10 ring-1 ring-primary/30"
-                              : "hover:bg-muted/50"
-                          )}
-                          key={message.id}
-                          onClick={(event) => {
-                            if (
-                              event.target instanceof Element &&
-                              event.target.closest("button")
-                            ) {
-                              return
-                            }
-                            seekToMessage(message.startOffsetMs)
-                          }}
-                          role="group"
-                        >
-                          <button
-                            aria-current={active ? "true" : undefined}
-                            aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
-                            className={cn(
-                              "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-                              active ? "text-primary" : "text-muted-foreground"
-                            )}
-                            onClick={() => seekToMessage(message.startOffsetMs)}
-                            type="button"
-                          >
-                            {active ? (
-                              <Play
-                                aria-hidden="true"
-                                className="mt-0.5 size-3 fill-current"
-                              />
-                            ) : null}
-                            {formatVideoTimestamp(message.startOffsetMs)}
-                          </button>
-                          <span className="min-w-0">
-                            {speaker ? (
-                              <Button
-                                aria-label={`Rename ${speaker.displayName || speaker.label}`}
-                                className="group/speaker-name mb-1 h-auto max-w-full justify-start p-0 hover:bg-transparent"
-                                onClick={() => openSpeakerRename(speaker)}
-                                size="sm"
-                                title="Rename speaker"
-                                variant="ghost"
-                              >
-                                <Badge
-                                  className="max-w-full truncate"
-                                  variant="outline"
-                                >
-                                  {speaker.displayName || speaker.label}
-                                </Badge>
-                                <Pencil
-                                  aria-hidden="true"
-                                  className="text-muted-foreground transition-colors group-hover/speaker-name:text-foreground group-focus-visible/speaker-name:text-foreground"
-                                  data-icon="inline-end"
-                                />
-                              </Button>
-                            ) : null}
-                            <span className="block min-w-0 text-sm leading-6 text-foreground">
-                              {message.text}
-                            </span>
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : transcript.length > 0 && transcriptQuery ? (
-                  <Empty className="min-h-48 border-0 p-4">
-                    <EmptyHeader>
-                      <EmptyTitle>No matching lines</EmptyTitle>
-                      <EmptyDescription>
-                        Try another word or clear the transcript search.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                    <Button
-                      onClick={() => setTranscriptQuery("")}
-                      size="sm"
-                      variant="outline"
+                    : undefined
+                }
+              >
+                <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <FileText
+                          aria-hidden="true"
+                          className="size-4 shrink-0"
+                        />
+                        Transcript
+                      </CardTitle>
+                      <CardDescription>
+                        {transcript.length} messages ·{" "}
+                        {snapshot.segments.length} segments
+                        {livePreviewSegments.length > 0
+                          ? ` · ${livePreviewSegments.length} live preview lines`
+                          : ""}
+                        {transcriptQuery
+                          ? ` · ${filteredTranscript.length} matches`
+                          : ""}
+                      </CardDescription>
+                    </div>
+                    <Tabs
+                      aria-label="Transcript display mode"
+                      onValueChange={(value) => {
+                        if (value === "verbatim" || value === "polished") {
+                          setTranscriptMode(value)
+                        }
+                      }}
+                      value={transcriptMode}
                     >
-                      Clear search
-                    </Button>
-                  </Empty>
-                ) : (
-                  <Empty className="min-h-48 border-0 p-4">
-                    <EmptyHeader>
-                      <EmptyTitle>No transcript yet</EmptyTitle>
-                      <EmptyDescription>
-                        The transcript will appear here after video processing
-                        starts.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                )}
-              </CardContent>
-            </Card>
-
-            <aside className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto overscroll-contain">
-              {speakerSummaries.length > 0 ? (
-                <Card
-                  aria-label="Speaker summary"
-                  className="shrink-0 shadow-none"
-                >
-                  <CardHeader className="gap-1 px-4 py-4">
-                    <CardTitle className="flex items-center gap-2 text-sm">
-                      <Users
-                        aria-hidden="true"
-                        className="size-4 shrink-0 text-primary"
-                      />
-                      Speaker summary
-                    </CardTitle>
-                    <CardDescription>
-                      Name each speaker and play a short sample from their first
-                      detected line.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-2 px-4 pb-4">
-                    <div className="max-h-72 min-h-0 space-y-2 overflow-y-auto pr-1">
-                      {speakerSummaries.map((summary) => {
-                        const speakerName =
-                          summary.speaker.displayName || summary.speaker.label
-                        const isPlaying =
-                          speakerSample?.speakerId === summary.speaker.id
-                        const canPlaySample =
-                          Boolean(snapshot.videoUpload?.playbackUrl) &&
-                          summary.sampleStartMs !== null &&
-                          summary.sampleEndMs !== null
+                      <TabsList>
+                        <TabsTrigger value="verbatim">Verbatim</TabsTrigger>
+                        <TabsTrigger
+                          disabled={!polishedAvailable}
+                          value="polished"
+                        >
+                          Polished
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                  <div className="relative max-w-md">
+                    <Search
+                      aria-hidden="true"
+                      className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
+                    />
+                    <Input
+                      aria-label="Search transcript"
+                      className="h-9 pl-9"
+                      onChange={(event) =>
+                        setTranscriptQuery(event.target.value)
+                      }
+                      placeholder="Search transcript"
+                      value={transcriptQuery}
+                    />
+                  </div>
+                </CardHeader>
+                <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
+                  {filteredTranscript.length > 0 ? (
+                    <div className="flex flex-col gap-1">
+                      {filteredTranscript.map((message) => {
+                        const active = message.id === activeMessageId
+                        const speaker = speakerById.get(message.speakerKey)
                         return (
                           <div
-                            className="rounded-xl border border-border/80 bg-muted/20 p-3"
-                            key={summary.speaker.id}
+                            className={cn(
+                              "grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2.5 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+                              active
+                                ? "bg-primary/10 ring-1 ring-primary/30"
+                                : "hover:bg-muted/50"
+                            )}
+                            key={message.id}
+                            onClick={(event) => {
+                              if (
+                                event.target instanceof Element &&
+                                event.target.closest("button")
+                              ) {
+                                return
+                              }
+                              seekToMessage(message.startOffsetMs)
+                            }}
+                            role="group"
                           >
-                            <div className="flex min-w-0 items-start gap-2.5">
-                              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                                {speakerInitials(speakerName)}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex min-w-0 items-center gap-2">
-                                  <span className="min-w-0 truncate text-xs font-medium text-foreground">
-                                    {speakerName}
-                                  </span>
-                                  <Badge
-                                    className="shrink-0 text-[9px]"
-                                    variant="outline"
-                                  >
-                                    {summary.speaker.label}
-                                  </Badge>
-                                </div>
-                                <p className="mt-1 text-[11px] text-muted-foreground">
-                                  {summary.segmentCount}{" "}
-                                  {summary.segmentCount === 1
-                                    ? "segment"
-                                    : "segments"}{" "}
-                                  ·{" "}
-                                  {formatSpeakerSummaryDuration(
-                                    summary.speakingMs
-                                  )}
-                                </p>
-                                {summary.sampleText ? (
-                                  <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
-                                    “{summary.sampleText}”
-                                  </p>
-                                ) : null}
-                              </div>
-                              <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              aria-current={active ? "true" : undefined}
+                              aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
+                              className={cn(
+                                "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+                                active
+                                  ? "text-primary"
+                                  : "text-muted-foreground"
+                              )}
+                              onClick={() =>
+                                seekToMessage(message.startOffsetMs)
+                              }
+                              type="button"
+                            >
+                              {active ? (
+                                <Play
+                                  aria-hidden="true"
+                                  className="mt-0.5 size-3 fill-current"
+                                />
+                              ) : null}
+                              {formatVideoTimestamp(message.startOffsetMs)}
+                            </button>
+                            <span className="min-w-0">
+                              {speaker ? (
                                 <Button
-                                  aria-label={
-                                    isPlaying
-                                      ? `Stop sample for ${speakerName}`
-                                      : `Play sample for ${speakerName}`
-                                  }
-                                  className="shrink-0"
-                                  disabled={!canPlaySample}
-                                  onClick={() => playSpeakerSample(summary)}
-                                  size="icon-sm"
-                                  title={
-                                    isPlaying
-                                      ? "Stop sample"
-                                      : "Play speaker sample"
-                                  }
-                                  variant={isPlaying ? "default" : "outline"}
-                                >
-                                  {isPlaying ? <Pause /> : <Play />}
-                                </Button>
-                                <Button
-                                  aria-label={`Rename ${speakerName}`}
-                                  className="shrink-0"
-                                  onClick={() =>
-                                    openSpeakerRename(summary.speaker)
-                                  }
-                                  size="icon-sm"
-                                  title={`Rename ${speakerName}`}
+                                  aria-label={`Rename ${speaker.displayName || speaker.label}`}
+                                  className="group/speaker-name mb-1 h-auto max-w-full justify-start p-0 hover:bg-transparent"
+                                  onClick={() => openSpeakerRename(speaker)}
+                                  size="sm"
+                                  title="Rename speaker"
                                   variant="ghost"
                                 >
-                                  <Pencil />
+                                  <Badge
+                                    className="max-w-full truncate"
+                                    variant="outline"
+                                  >
+                                    {speaker.displayName || speaker.label}
+                                  </Badge>
+                                  <Pencil
+                                    aria-hidden="true"
+                                    className="text-muted-foreground transition-colors group-hover/speaker-name:text-foreground group-focus-visible/speaker-name:text-foreground"
+                                    data-icon="inline-end"
+                                  />
                                 </Button>
-                              </div>
-                            </div>
+                              ) : null}
+                              <span className="block min-w-0 text-sm leading-6 text-foreground">
+                                {message.text}
+                              </span>
+                            </span>
                           </div>
                         )
                       })}
                     </div>
-                    <p
-                      aria-live="polite"
-                      className="text-[11px] text-muted-foreground"
-                    >
-                      {snapshot.videoUpload?.playbackUrl
-                        ? "Samples play for up to 8 seconds in the source video."
-                        : "Samples become available when source video playback is ready."}
-                    </p>
+                  ) : transcript.length > 0 && transcriptQuery ? (
+                    <Empty className="min-h-48 border-0 p-4">
+                      <EmptyHeader>
+                        <EmptyTitle>No matching lines</EmptyTitle>
+                        <EmptyDescription>
+                          Try another word or clear the transcript search.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                      <Button
+                        onClick={() => setTranscriptQuery("")}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Clear search
+                      </Button>
+                    </Empty>
+                  ) : livePreviewSegments.length > 0 ? (
+                    <LiveTranscriptPreview segments={livePreviewSegments} />
+                  ) : isVideoProcessing ? (
+                    <Empty className="min-h-48 border-0 p-4">
+                      <EmptyHeader>
+                        <EmptyTitle>Waiting for the first slice</EmptyTitle>
+                        <EmptyDescription>
+                          Workers are transcribing in parallel. Preview lines
+                          will appear as output arrives.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : (
+                    <Empty className="min-h-48 border-0 p-4">
+                      <EmptyHeader>
+                        <EmptyTitle>No transcript yet</EmptyTitle>
+                        <EmptyDescription>
+                          The transcript will appear here after video processing
+                          starts.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  )}
+                </CardContent>
+              </Card>
+
+              <aside
+                className="flex min-h-0 flex-col gap-4"
+                ref={transcriptRailRef}
+              >
+                {speakerSummaries.length > 0 ? (
+                  <Card
+                    aria-label="Speaker summary"
+                    className="shrink-0 shadow-none"
+                  >
+                    <CardHeader className="gap-1 px-4 py-4">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <Users
+                          aria-hidden="true"
+                          className="size-4 shrink-0 text-primary"
+                        />
+                        Speaker summary
+                      </CardTitle>
+                      <CardDescription>
+                        Name each speaker and play a short sample from their
+                        first detected line.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-2 px-4 pb-4">
+                      <div className="max-h-72 min-h-0 space-y-2 overflow-y-auto pr-1">
+                        {speakerSummaries.map((summary) => {
+                          const speakerName =
+                            summary.speaker.displayName || summary.speaker.label
+                          const isPlaying =
+                            speakerSample?.speakerId === summary.speaker.id
+                          const canPlaySample =
+                            Boolean(snapshot.videoUpload?.playbackUrl) &&
+                            summary.sampleStartMs !== null &&
+                            summary.sampleEndMs !== null
+                          return (
+                            <div
+                              className="rounded-xl border border-border/80 bg-muted/20 p-3"
+                              key={summary.speaker.id}
+                            >
+                              <div className="flex min-w-0 items-start gap-2.5">
+                                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
+                                  {speakerInitials(speakerName)}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                                      {speakerName}
+                                    </span>
+                                    <Badge
+                                      className="shrink-0 text-[9px]"
+                                      variant="outline"
+                                    >
+                                      {summary.speaker.label}
+                                    </Badge>
+                                  </div>
+                                  <p className="mt-1 text-[11px] text-muted-foreground">
+                                    {summary.segmentCount}{" "}
+                                    {summary.segmentCount === 1
+                                      ? "segment"
+                                      : "segments"}{" "}
+                                    ·{" "}
+                                    {formatSpeakerSummaryDuration(
+                                      summary.speakingMs
+                                    )}
+                                  </p>
+                                  {summary.sampleText ? (
+                                    <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
+                                      “{summary.sampleText}”
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <div className="flex shrink-0 items-center gap-1">
+                                  <Button
+                                    aria-label={
+                                      isPlaying
+                                        ? `Stop sample for ${speakerName}`
+                                        : `Play sample for ${speakerName}`
+                                    }
+                                    className="shrink-0"
+                                    disabled={!canPlaySample}
+                                    onClick={() => playSpeakerSample(summary)}
+                                    size="icon-sm"
+                                    title={
+                                      isPlaying
+                                        ? "Stop sample"
+                                        : "Play speaker sample"
+                                    }
+                                    variant={isPlaying ? "default" : "outline"}
+                                  >
+                                    {isPlaying ? <Pause /> : <Play />}
+                                  </Button>
+                                  <Button
+                                    aria-label={`Rename ${speakerName}`}
+                                    className="shrink-0"
+                                    onClick={() =>
+                                      openSpeakerRename(summary.speaker)
+                                    }
+                                    size="icon-sm"
+                                    title={`Rename ${speakerName}`}
+                                    variant="ghost"
+                                  >
+                                    <Pencil />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <p
+                        aria-live="polite"
+                        className="text-[11px] text-muted-foreground"
+                      >
+                        {snapshot.videoUpload?.playbackUrl
+                          ? "Samples play for up to 8 seconds in the source video."
+                          : "Samples become available when source video playback is ready."}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : null}
+                <Card className="shrink-0 shadow-none">
+                  <CardHeader className="gap-2 px-4 py-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
+                        <FileVideo
+                          aria-hidden="true"
+                          className="size-4 shrink-0"
+                        />
+                        <span className="truncate">Source video</span>
+                      </CardTitle>
+                    </div>
+                    <CardDescription className="truncate">
+                      {snapshot.videoUpload?.fileName ?? "Video upload"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-3 px-4 pb-4">
+                    <div className="overflow-hidden rounded-xl border border-border bg-muted">
+                      {snapshot.videoUpload?.playbackUrl ? (
+                        <video
+                          className="block aspect-video w-full bg-muted object-contain"
+                          controls
+                          key={snapshot.videoUpload.playbackUrl}
+                          onError={() => {
+                            setSpeakerSample(null)
+                            setVideoPlaybackError(
+                              "The video link expired or the stored video is unavailable."
+                            )
+                          }}
+                          onLoadedMetadata={(event) => {
+                            if (Number.isFinite(event.currentTarget.duration)) {
+                              setVideoDurationMs(
+                                Math.round(event.currentTarget.duration * 1000)
+                              )
+                            }
+                          }}
+                          onEnded={() => setSpeakerSample(null)}
+                          onTimeUpdate={(event) => {
+                            const currentTime = Math.round(
+                              event.currentTarget.currentTime * 1000
+                            )
+                            setCurrentTimeMs(currentTime)
+                            if (
+                              speakerSample &&
+                              currentTime >= speakerSample.endOffsetMs
+                            ) {
+                              event.currentTarget.pause()
+                              setSpeakerSample(null)
+                            }
+                          }}
+                          playsInline
+                          preload="metadata"
+                          ref={videoRef}
+                          src={snapshot.videoUpload.playbackUrl}
+                        />
+                      ) : (
+                        <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+                          <FileVideo aria-hidden="true" />
+                          <p className="text-xs">
+                            The video will be available here once the upload has
+                            finished.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    {snapshot.videoUpload?.playbackUrl ? (
+                      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1.5">
+                          <Clock3
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0"
+                          />
+                          {formatVideoTimestamp(currentTimeMs)}
+                          {displayDurationMs
+                            ? ` / ${formatVideoTimestamp(displayDurationMs)}`
+                            : ""}
+                        </span>
+                        <span>Click a transcript line to seek</span>
+                      </div>
+                    ) : null}
+                    {videoPlaybackError ? (
+                      <Alert variant="destructive">
+                        <AlertTitle>Playback unavailable</AlertTitle>
+                        <AlertDescription>
+                          {videoPlaybackError}
+                        </AlertDescription>
+                        <div className="mt-2">
+                          <Button
+                            onClick={() => void refreshVideoPlayback()}
+                            size="sm"
+                            variant="outline"
+                          >
+                            <RefreshCw data-icon="inline-start" />
+                            Refresh link
+                          </Button>
+                        </div>
+                      </Alert>
+                    ) : null}
                   </CardContent>
                 </Card>
-              ) : null}
-              <Card className="shrink-0 shadow-none">
-                <CardHeader className="gap-2 px-4 py-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
-                      <FileVideo
-                        aria-hidden="true"
-                        className="size-4 shrink-0"
-                      />
-                      <span className="truncate">Source video</span>
-                    </CardTitle>
-                  </div>
-                  <CardDescription className="truncate">
-                    {snapshot.videoUpload?.fileName ?? "Video upload"}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3 px-4 pb-4">
-                  <div className="overflow-hidden rounded-xl border border-border bg-muted">
-                    {snapshot.videoUpload?.playbackUrl ? (
-                      <video
-                        className="block aspect-video w-full bg-muted object-contain"
-                        controls
-                        key={snapshot.videoUpload.playbackUrl}
-                        onError={() => {
-                          setSpeakerSample(null)
-                          setVideoPlaybackError(
-                            "The video link expired or the stored video is unavailable."
-                          )
-                        }}
-                        onLoadedMetadata={(event) => {
-                          if (Number.isFinite(event.currentTarget.duration)) {
-                            setVideoDurationMs(
-                              Math.round(event.currentTarget.duration * 1000)
-                            )
-                          }
-                        }}
-                        onEnded={() => setSpeakerSample(null)}
-                        onTimeUpdate={(event) => {
-                          const currentTime = Math.round(
-                            event.currentTarget.currentTime * 1000
-                          )
-                          setCurrentTimeMs(currentTime)
-                          if (
-                            speakerSample &&
-                            currentTime >= speakerSample.endOffsetMs
-                          ) {
-                            event.currentTarget.pause()
-                            setSpeakerSample(null)
-                          }
-                        }}
-                        playsInline
-                        preload="metadata"
-                        ref={videoRef}
-                        src={snapshot.videoUpload.playbackUrl}
-                      />
-                    ) : (
-                      <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
-                        <FileVideo aria-hidden="true" />
-                        <p className="text-xs">
-                          The video will be available here once the upload has
-                          finished.
-                        </p>
+                {snapshot.videoUpload &&
+                snapshot.videoUpload.status !== "completed" ? (
+                  <div className="flex flex-col gap-2 px-1 text-xs">
+                    {snapshot.videoUpload.status === "failed" ||
+                    snapshot.videoUpload.status === "uploaded" ||
+                    (snapshot.videoUpload.status === "cancelled" &&
+                      snapshot.videoUpload.bytes >=
+                        snapshot.videoUpload.expectedBytes) ||
+                    (snapshot.videoUpload.status === "uploading" &&
+                      Boolean(videoFile) &&
+                      !videoStarting) ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 text-muted-foreground">
+                          {snapshot.videoUpload.status === "failed"
+                            ? "Processing failed"
+                            : snapshot.videoUpload.status === "uploaded"
+                              ? "Upload complete"
+                              : snapshot.videoUpload.status === "cancelled"
+                                ? "Processing cancelled"
+                                : "Upload paused"}
+                        </span>
+                        <Button
+                          disabled={videoStarting}
+                          onClick={() => void retryVideoUpload()}
+                          size="sm"
+                          variant="outline"
+                        >
+                          <RefreshCw data-icon="inline-start" />
+                          {snapshot.videoUpload.status === "failed"
+                            ? "Retry"
+                            : snapshot.videoUpload.status === "uploaded"
+                              ? "Queue processing"
+                              : snapshot.videoUpload.status === "cancelled"
+                                ? "Retry processing"
+                                : "Resume upload"}
+                        </Button>
                       </div>
-                    )}
+                    ) : null}
+                    {snapshot.videoUpload.status === "uploading" &&
+                    !videoFile &&
+                    !videoStarting ? (
+                      <div className="flex flex-col gap-1.5">
+                        <p className="text-muted-foreground">
+                          This upload is paused. Select the original video file
+                          to resume it.
+                        </p>
+                        <Input
+                          accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv"
+                          aria-label="Select original video file"
+                          className="h-8 text-xs"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            if (file) {
+                              setVideoFile(file)
+                              setError("")
+                            }
+                          }}
+                          type="file"
+                        />
+                      </div>
+                    ) : null}
                   </div>
-                  {snapshot.videoUpload?.playbackUrl ? (
-                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                ) : null}
+                <Card className="shrink-0 shadow-none">
+                  <CardHeader className="gap-1 px-4 py-4">
+                    <CardTitle className="text-sm">At a glance</CardTitle>
+                    <CardDescription>
+                      Transcript settings and coverage
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-2 px-4 pb-4 text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Language</span>
+                      <span className="font-medium text-foreground">
+                        {snapshot.session.language}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Messages</span>
+                      <span className="font-medium text-foreground">
+                        {transcript.length}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-1.5">
+                        <Users
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0"
+                        />
+                        Speakers
+                      </span>
+                      <span className="font-medium text-foreground">
+                        {snapshot.speakers.length || "Not separated"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Grammar</span>
+                      <span className="font-medium text-foreground">
+                        {polishStatusLabel(snapshot.session.polishStatus)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
                       <span className="flex items-center gap-1.5">
                         <Clock3
                           aria-hidden="true"
                           className="size-3.5 shrink-0"
                         />
-                        {formatVideoTimestamp(currentTimeMs)}
+                        Duration
+                      </span>
+                      <span className="font-medium text-foreground tabular-nums">
                         {displayDurationMs
-                          ? ` / ${formatVideoTimestamp(displayDurationMs)}`
-                          : ""}
+                          ? formatVideoDuration(displayDurationMs)
+                          : "—"}
                       </span>
-                      <span>Click a transcript line to seek</span>
                     </div>
-                  ) : null}
-                  {videoPlaybackError ? (
-                    <Alert variant="destructive">
-                      <AlertTitle>Playback unavailable</AlertTitle>
-                      <AlertDescription>{videoPlaybackError}</AlertDescription>
-                      <div className="mt-2">
-                        <Button
-                          onClick={() => void refreshVideoPlayback()}
-                          size="sm"
-                          variant="outline"
-                        >
-                          <RefreshCw data-icon="inline-start" />
-                          Refresh link
-                        </Button>
-                      </div>
-                    </Alert>
-                  ) : null}
-                </CardContent>
-              </Card>
-              {snapshot.videoUpload &&
-              snapshot.videoUpload.status !== "completed" ? (
-                <div className="flex flex-col gap-2 px-1 text-xs">
-                  {snapshot.videoUpload.status === "failed" ||
-                  snapshot.videoUpload.status === "uploaded" ||
-                  (snapshot.videoUpload.status === "cancelled" &&
-                    snapshot.videoUpload.bytes >=
-                      snapshot.videoUpload.expectedBytes) ||
-                  (snapshot.videoUpload.status === "uploading" &&
-                    Boolean(videoFile) &&
-                    !videoStarting) ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="min-w-0 text-muted-foreground">
-                        {snapshot.videoUpload.status === "failed"
-                          ? "Processing failed"
-                          : snapshot.videoUpload.status === "uploaded"
-                            ? "Upload complete"
-                            : snapshot.videoUpload.status === "cancelled"
-                              ? "Processing cancelled"
-                              : "Upload paused"}
-                      </span>
-                      <Button
-                        disabled={videoStarting}
-                        onClick={() => void retryVideoUpload()}
-                        size="sm"
-                        variant="outline"
-                      >
-                        <RefreshCw data-icon="inline-start" />
-                        {snapshot.videoUpload.status === "failed"
-                          ? "Retry"
-                          : snapshot.videoUpload.status === "uploaded"
-                            ? "Queue processing"
-                            : snapshot.videoUpload.status === "cancelled"
-                              ? "Retry processing"
-                              : "Resume upload"}
-                      </Button>
-                    </div>
-                  ) : null}
-                  {snapshot.videoUpload.status === "uploading" &&
-                  !videoFile &&
-                  !videoStarting ? (
-                    <div className="flex flex-col gap-1.5">
-                      <p className="text-muted-foreground">
-                        This upload is paused. Select the original video file to
-                        resume it.
-                      </p>
-                      <Input
-                        accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv"
-                        aria-label="Select original video file"
-                        className="h-8 text-xs"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0]
-                          if (file) {
-                            setVideoFile(file)
-                            setError("")
-                          }
-                        }}
-                        type="file"
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              <Card className="shrink-0 shadow-none">
-                <CardHeader className="gap-1 px-4 py-4">
-                  <CardTitle className="text-sm">At a glance</CardTitle>
-                  <CardDescription>
-                    Transcript settings and coverage
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2 px-4 pb-4 text-xs text-muted-foreground">
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Language</span>
-                    <span className="font-medium text-foreground">
-                      {snapshot.session.language}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Messages</span>
-                    <span className="font-medium text-foreground">
-                      {transcript.length}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-1.5">
-                      <Users aria-hidden="true" className="size-3.5 shrink-0" />
-                      Speakers
-                    </span>
-                    <span className="font-medium text-foreground">
-                      {snapshot.speakers.length || "Not separated"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Grammar</span>
-                    <span className="font-medium text-foreground">
-                      {polishStatusLabel(snapshot.session.polishStatus)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-1.5">
-                      <Clock3
-                        aria-hidden="true"
-                        className="size-3.5 shrink-0"
-                      />
-                      Duration
-                    </span>
-                    <span className="font-medium text-foreground tabular-nums">
-                      {displayDurationMs
-                        ? formatVideoDuration(displayDurationMs)
-                        : "—"}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            </aside>
-          </div>
+                  </CardContent>
+                </Card>
+              </aside>
+            </div>
+          ) : null}
+          <VideoTranscriptWorkspace
+            key={snapshot.session.id}
+            currentTimeMs={currentTimeMs}
+            onCurrentTimeChange={setCurrentTimeMs}
+            onError={setError}
+            onRefreshPlayback={refreshVideoPlayback}
+            onRenameSpeaker={openSpeakerRename}
+            onSnapshotChange={(updater) =>
+              setSnapshot((current) => (current ? updater(current) : current))
+            }
+            onVideoDurationChange={setVideoDurationMs}
+            onVideoPlaybackError={setVideoPlaybackError}
+            snapshot={snapshot}
+            videoDurationMs={videoDurationMs}
+            videoPlaybackError={videoPlaybackError}
+            videoRef={videoRef}
+          />
         </>
       )}
 
@@ -1418,7 +1770,7 @@ export function VideoTranscriptionView({
           if (!open && !videoUploadInFlightRef.current) setVideoFile(null)
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>New video transcription</DialogTitle>
             <DialogDescription>
@@ -1464,6 +1816,10 @@ export function VideoTranscriptionView({
             <Field>
               <FieldLabel>Transcription endpoint</FieldLabel>
               <Select
+                items={transcriptionEndpoints.map((endpoint) => ({
+                  value: endpoint.id,
+                  label: `${endpoint.name} · ${endpoint.providerType} · ${transcriptionModeLabel(endpoint)}`,
+                }))}
                 onValueChange={(value) => setSelectedEndpoint(value ?? "")}
                 value={effectiveSelectedEndpoint}
               >
@@ -1483,10 +1839,43 @@ export function VideoTranscriptionView({
                 </SelectContent>
               </Select>
             </Field>
+            <VideoModelField
+              description="Choose the ASR model used for the timestamped transcript."
+              endpoint={selectedTranscriptionEndpoint}
+              label="Transcription model"
+              loading={
+                Boolean(selectedTranscriptionEndpoint) &&
+                !modelDiscovery[
+                  videoModelKey(
+                    selectedTranscriptionEndpoint?.id ?? "",
+                    "transcription"
+                  )
+                ]
+              }
+              models={modelOptionsFor(
+                selectedTranscriptionEndpoint,
+                "transcription"
+              )}
+              onValueChange={(value) =>
+                setModelValue(
+                  selectedTranscriptionEndpoint,
+                  "transcription",
+                  value
+                )
+              }
+              value={transcriptionModel}
+            />
             <Field>
               <FieldLabel>Speaker separation</FieldLabel>
               <Select
                 disabled={diarizationEndpoints.length === 0}
+                items={[
+                  { value: "none", label: "Keep one transcript stream" },
+                  ...diarizationEndpoints.map((endpoint) => ({
+                    value: endpoint.id,
+                    label: `${endpoint.name} · ${endpoint.providerType}`,
+                  })),
+                ]}
                 onValueChange={(value) =>
                   setSelectedDiarizationEndpoint(value ?? "none")
                 }
@@ -1514,9 +1903,44 @@ export function VideoTranscriptionView({
                 is available.
               </FieldDescription>
             </Field>
+            {effectiveDiarizationEndpoint ? (
+              <VideoModelField
+                description="Choose the diarization model used to identify speakers."
+                endpoint={selectedDiarizationEndpointItem}
+                label="Speaker separation model"
+                loading={
+                  Boolean(selectedDiarizationEndpointItem) &&
+                  !modelDiscovery[
+                    videoModelKey(
+                      selectedDiarizationEndpointItem?.id ?? "",
+                      "diarization"
+                    )
+                  ]
+                }
+                models={modelOptionsFor(
+                  selectedDiarizationEndpointItem,
+                  "diarization"
+                )}
+                onValueChange={(value) =>
+                  setModelValue(
+                    selectedDiarizationEndpointItem,
+                    "diarization",
+                    value
+                  )
+                }
+                value={diarizationModel}
+              />
+            ) : null}
             <Field>
               <FieldLabel>Grammar polishing</FieldLabel>
               <Select
+                items={[
+                  { value: "none", label: "Keep verbatim transcript" },
+                  ...grammarEndpoints.map((endpoint) => ({
+                    value: endpoint.id,
+                    label: `${endpoint.name} · ${endpoint.providerType}`,
+                  })),
+                ]}
                 onValueChange={(value) => setGrammarChoice(value ?? "none")}
                 value={effectiveGrammarEndpoint || "none"}
               >
@@ -1541,6 +1965,24 @@ export function VideoTranscriptionView({
                 The original ASR output stays available under Verbatim.
               </FieldDescription>
             </Field>
+            {effectiveGrammarEndpoint ? (
+              <VideoModelField
+                description="Choose the chat model used to polish the transcript."
+                endpoint={selectedGrammarEndpoint}
+                label="Grammar model"
+                loading={
+                  Boolean(selectedGrammarEndpoint) &&
+                  !modelDiscovery[
+                    videoModelKey(selectedGrammarEndpoint?.id ?? "", "chat")
+                  ]
+                }
+                models={modelOptionsFor(selectedGrammarEndpoint, "chat")}
+                onValueChange={(value) =>
+                  setModelValue(selectedGrammarEndpoint, "chat", value)
+                }
+                value={grammarModel}
+              />
+            ) : null}
           </FieldGroup>
           <DialogFooter>
             <Button onClick={() => setCreateOpen(false)} variant="outline">
@@ -1649,16 +2091,167 @@ export function VideoTranscriptionView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!skipSpeakerInFlight) setSkipSpeakerOpen(open)
+        }}
+        open={skipSpeakerOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Skip speaker separation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The transcript and timestamps will be kept, but this video will
+              not receive automatic speaker labels.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={skipSpeakerInFlight}>
+              Keep speaker separation
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={skipSpeakerInFlight}
+              onClick={() => {
+                setSkipSpeakerOpen(false)
+                void skipSpeakerSeparation()
+              }}
+            >
+              {skipSpeakerInFlight ? (
+                <LoaderCircle
+                  className="animate-spin"
+                  data-icon="inline-start"
+                />
+              ) : (
+                <SkipForward data-icon="inline-start" />
+              )}
+              Skip separation
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
 
+function LiveTranscriptPreview({
+  segments,
+}: {
+  segments: TranscriptionVideoPreviewSegment[]
+}) {
+  return (
+    <div
+      aria-label="Live transcript preview"
+      aria-live="polite"
+      className="space-y-3"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <AudioLines aria-hidden="true" className="size-4 text-primary" />
+            Live transcript preview
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Recent output from active workers. The final fused transcript will
+            replace this preview.
+          </p>
+        </div>
+        <Badge className="shrink-0" variant="outline">
+          <LoaderCircle
+            aria-hidden="true"
+            className="size-3 motion-safe:animate-spin motion-reduce:animate-none"
+          />
+          Live
+        </Badge>
+      </div>
+      <div className="divide-y rounded-xl border border-border/70 bg-muted/10">
+        {segments.map((segment, index) => (
+          <div
+            className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-3 py-2.5 text-sm"
+            key={`${segment.startOffsetMs}-${segment.endOffsetMs}-${index}`}
+          >
+            <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+              {formatVideoTimestamp(segment.startOffsetMs)}
+            </span>
+            <span className="min-w-0 leading-6 text-foreground">
+              {segment.text}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function VideoModelField({
+  description,
+  endpoint,
+  label,
+  loading,
+  models,
+  onValueChange,
+  value,
+}: {
+  description: string
+  endpoint?: Endpoint
+  label?: string
+  loading: boolean
+  models: DiscoveredVideoModel[]
+  onValueChange: (value: string) => void
+  value: string
+}) {
+  const fieldLabel = label ?? "Model"
+  return (
+    <Field>
+      <FieldLabel>{fieldLabel}</FieldLabel>
+      <Select
+        disabled={!endpoint || loading || models.length === 0}
+        items={models.map((model) => ({
+          value: model.id,
+          label: videoModelLabel(model),
+        }))}
+        onValueChange={(nextValue) => onValueChange(nextValue ?? "")}
+        value={value}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue
+            placeholder={
+              loading ? "Loading available models…" : "Endpoint default"
+            }
+          />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectLabel>{fieldLabel}</SelectLabel>
+            {models.map((model) => (
+              <SelectItem key={model.id} value={model.id}>
+                {videoModelLabel(model)}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <FieldDescription>{description}</FieldDescription>
+    </Field>
+  )
+}
+
+function videoModelLabel(model: DiscoveredVideoModel) {
+  const name = model.name?.trim()
+  const id = model.id.trim()
+  return name && name !== id ? `${name} · ${id}` : id
+}
+
 function VideoPipeline({
   hasDiarizedSpeakers,
+  onRequestSkipSpeakerSeparation,
+  skipSpeakerInFlight,
   upload,
   session,
 }: {
   hasDiarizedSpeakers: boolean
+  onRequestSkipSpeakerSeparation: () => void
+  skipSpeakerInFlight: boolean
   upload: TranscriptionVideoUpload
   session: TranscriptionSession
 }) {
@@ -1666,6 +2259,7 @@ function VideoPipeline({
   const pipelineStorageKey = `justai.video-transcription.pipeline.collapsed:${upload.sessionId}`
   const [open, setOpen] = useState(true)
   const isActive = ["uploading", "queued", "processing"].includes(upload.status)
+  const shouldAutoCollapse = ["completed", "cancelled"].includes(upload.status)
 
   useEffect(() => {
     if (!isActive) return
@@ -1674,6 +2268,15 @@ function VideoPipeline({
   }, [isActive])
 
   useEffect(() => {
+    if (shouldAutoCollapse) {
+      queueMicrotask(() => setOpen(false))
+      try {
+        window.localStorage.setItem(pipelineStorageKey, "true")
+      } catch {
+        // The pipeline remains usable when local storage is unavailable.
+      }
+      return
+    }
     let collapsed = false
     try {
       collapsed = window.localStorage.getItem(pipelineStorageKey) === "true"
@@ -1681,7 +2284,7 @@ function VideoPipeline({
       // Local storage can be unavailable in private browsing contexts.
     }
     queueMicrotask(() => setOpen(!collapsed))
-  }, [pipelineStorageKey])
+  }, [pipelineStorageKey, shouldAutoCollapse])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
@@ -1693,6 +2296,9 @@ function VideoPipeline({
   }
 
   const steps = getVideoPipelineSteps(upload, session, hasDiarizedSpeakers)
+  const parallelProgress = steps.find(
+    (step) => step.key === "transcription"
+  )?.parallel
   const activeStep = steps.find(
     (step) => step.status === "active" || step.status === "retrying"
   )
@@ -1708,6 +2314,15 @@ function VideoPipeline({
       )
   )
   const runTimeMs = getVideoPipelineRunTime(session, upload, now)
+  const workerStatus = upload.workerStatus
+  const workerCapacity = workerStatus?.capacity ?? 0
+  const skipSpeakerRequested = upload.stage === "skipping_diarization"
+  const showSpeakerSkipAction =
+    upload.status === "processing" &&
+    (upload.stage === "diarizing" || skipSpeakerRequested)
+  const workersSaturated = Boolean(
+    workerStatus && workerStatus.active >= workerStatus.capacity
+  )
   const overallLabel =
     upload.status === "completed"
       ? hasFailedStep
@@ -1718,9 +2333,19 @@ function VideoPipeline({
         : upload.status === "cancelled"
           ? "Processing cancelled"
           : activeStep
-            ? `${videoPipelineStepLabel(activeStep.key)} in progress`
+            ? skipSpeakerRequested
+              ? "Skipping speaker separation"
+              : parallelProgress?.phase === "preparing"
+                ? "Preparing audio slices"
+                : parallelProgress?.phase === "fusing"
+                  ? "Fusing transcript in progress"
+                  : parallelProgress?.phase === "transcribing"
+                    ? "Transcribing slices in parallel"
+                    : `${videoPipelineStepLabel(activeStep.key)} in progress`
             : upload.status === "queued"
-              ? "Waiting to start"
+              ? workersSaturated
+                ? "Waiting for an available worker"
+                : "Queued for transcription"
               : "Preparing video"
 
   return (
@@ -1731,7 +2356,7 @@ function VideoPipeline({
     >
       <Card
         aria-label="Video processing pipeline"
-        className="overflow-hidden border-border/80 shadow-none"
+        className="flex min-h-0 flex-col overflow-hidden border-border/80 shadow-none"
       >
         <CardHeader className="gap-3 px-4 py-4 sm:px-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1758,6 +2383,17 @@ function VideoPipeline({
               >
                 {completedCount}/{steps.length} steps
               </Badge>
+              {parallelProgress ? (
+                <Badge className="h-5 px-2 text-[10px]" variant="outline">
+                  {parallelProgress.workerCount ?? 1} parallel workers
+                </Badge>
+              ) : null}
+              {workerStatus &&
+              (upload.status === "queued" || upload.status === "processing") ? (
+                <Badge className="h-5 px-2 text-[10px]" variant="outline">
+                  {workerStatus.active}/{workerCapacity} video workers
+                </Badge>
+              ) : null}
               <span className="whitespace-nowrap">
                 Run time · {formatPipelineStepDuration(runTimeMs)}
               </span>
@@ -1788,8 +2424,23 @@ function VideoPipeline({
         </CardHeader>
         <CollapsibleContent>
           <CardContent className="px-4 pb-4 sm:px-5">
+            {upload.status === "queued" && workerStatus ? (
+              <VideoWorkerQueue status={workerStatus} />
+            ) : null}
+            {parallelProgress ? (
+              <ParallelTranscriptionFlow
+                key={
+                  upload.status === "completed" ||
+                  parallelProgress.phase === "complete"
+                    ? "complete"
+                    : "active"
+                }
+                progress={parallelProgress}
+                upload={upload}
+              />
+            ) : null}
             <div
-              className="flex flex-col gap-0 md:flex-row md:items-stretch"
+              className="flex min-w-0 flex-row items-stretch gap-0 overflow-x-auto pb-2 md:overflow-visible md:pb-0"
               role="list"
             >
               {steps.map((step, index) => {
@@ -1800,7 +2451,7 @@ function VideoPipeline({
                   <Fragment key={step.key}>
                     <div
                       className={cn(
-                        "min-w-0 flex-1 rounded-xl border p-3 transition-[transform,opacity,background-color,border-color] duration-200 ease-out motion-reduce:transition-none",
+                        "w-[13rem] min-w-0 flex-none rounded-xl border p-3 transition-[transform,opacity,background-color,border-color] duration-200 ease-out motion-reduce:transition-none md:w-auto md:flex-1",
                         videoPipelineStepClass(step.status),
                         active && "md:-translate-y-0.5"
                       )}
@@ -1845,7 +2496,12 @@ function VideoPipeline({
                         <span className="font-medium text-foreground tabular-nums">
                           {step.durationEstimated ? "~" : ""}
                           {formatPipelineStepDuration(
-                            getVideoPipelineStepDuration(step, now)
+                            getVideoPipelineStepDuration(
+                              step,
+                              now,
+                              steps,
+                              index
+                            )
                           )}
                         </span>
                       </div>
@@ -1854,12 +2510,34 @@ function VideoPipeline({
                           {step.error}
                         </p>
                       ) : null}
+                      {step.key === "diarization" && showSpeakerSkipAction ? (
+                        <Button
+                          className="mt-2 w-full justify-center"
+                          disabled={skipSpeakerInFlight || skipSpeakerRequested}
+                          onClick={onRequestSkipSpeakerSeparation}
+                          size="xs"
+                          type="button"
+                          variant="outline"
+                        >
+                          {skipSpeakerInFlight || skipSpeakerRequested ? (
+                            <LoaderCircle
+                              className="animate-spin"
+                              data-icon="inline-start"
+                            />
+                          ) : (
+                            <SkipForward data-icon="inline-start" />
+                          )}
+                          {skipSpeakerRequested
+                            ? "Skipping…"
+                            : "Skip speaker separation"}
+                        </Button>
+                      ) : null}
                     </div>
                     {index < steps.length - 1 ? (
                       <div
                         aria-hidden="true"
                         className={cn(
-                          "mx-4 h-3 w-px shrink-0 bg-border md:mx-2 md:my-auto md:h-px md:w-5",
+                          "mx-2 my-auto h-px w-5 shrink-0 bg-border",
                           ["completed", "skipped"].includes(step.status) &&
                             "bg-primary/40"
                         )}
@@ -1872,6 +2550,379 @@ function VideoPipeline({
           </CardContent>
         </CollapsibleContent>
       </Card>
+    </Collapsible>
+  )
+}
+
+function VideoWorkerQueue({
+  status,
+}: {
+  status: TranscriptionVideoWorkerStatus
+}) {
+  const capacity = Math.max(1, status.capacity)
+  const active = Math.min(capacity, Math.max(0, status.active))
+  const queued = Math.max(1, status.queued)
+  const position = Math.max(1, status.queuePosition ?? 1)
+  const saturated = active >= capacity
+  const visibleSlots = Math.min(capacity, 6)
+  const queuedBehind = Math.max(0, queued - position)
+  const visibleQueueItems = Math.min(queued, 5)
+  const yourQueueIndex = Math.min(position - 1, visibleQueueItems - 1)
+  const hiddenAhead = Math.max(0, position - visibleQueueItems)
+
+  return (
+    <div
+      aria-live="polite"
+      className="video-worker-queue mb-4 rounded-xl border border-primary/20 bg-primary/[0.035] p-3 sm:p-4"
+      role="status"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span className="video-worker-queue-icon flex size-9 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
+            <Clock3 aria-hidden="true" className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-foreground">
+              {saturated
+                ? "All transcription workers are busy"
+                : position === 1
+                  ? "Your transcription is next in line"
+                  : "Your transcription is queued"}
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {saturated
+                ? "Your video is safely queued and will start automatically as soon as a worker is free."
+                : position === 1
+                  ? "The worker pool is opening a slot for your video now."
+                  : "The videos ahead of you will be processed in order."}
+            </p>
+          </div>
+        </div>
+        <Badge className="shrink-0 text-[10px]" variant="secondary">
+          Queue position {position}
+        </Badge>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="video-worker-queue-lane rounded-lg border border-border/70 bg-background/65 p-2.5">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+            <span>Worker pool</span>
+            <span className="tabular-nums">
+              {active} of {capacity} busy
+            </span>
+          </div>
+          <div
+            className="mt-2 grid gap-1.5"
+            style={{
+              gridTemplateColumns: `repeat(${visibleSlots}, minmax(0, 1fr))`,
+            }}
+          >
+            {Array.from({ length: visibleSlots }, (_, index) => {
+              const busy = index < active
+              return (
+                <div
+                  className={cn(
+                    "flex min-w-0 items-center justify-center gap-1 rounded-md border px-1.5 py-2 text-[9px] text-muted-foreground",
+                    busy
+                      ? "video-worker-queue-worker border-primary/25 bg-primary/10 text-primary"
+                      : "border-border/60 bg-muted/20"
+                  )}
+                  key={index}
+                  title={
+                    busy
+                      ? "Worker is processing another video"
+                      : "Available worker"
+                  }
+                >
+                  <span className="size-1.5 shrink-0 rounded-full bg-current" />
+                  <span className="truncate">
+                    W{String(index + 1).padStart(2, "0")}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          {capacity > visibleSlots ? (
+            <p className="mt-1.5 text-[10px] text-muted-foreground">
+              +{capacity - visibleSlots} more configured worker
+              {capacity - visibleSlots === 1 ? "" : "s"}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="video-worker-queue-lane rounded-lg border border-border/70 bg-background/65 p-2.5">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+            <span>Queue flow</span>
+            <span className="tabular-nums">{queuedBehind} behind you</span>
+          </div>
+          <div className="relative mt-2 flex min-h-11 items-center gap-1.5 overflow-hidden rounded-md border border-border/60 bg-muted/20 px-2">
+            <span aria-hidden="true" className="video-worker-queue-flow" />
+            {Array.from({ length: visibleQueueItems }, (_, index) => {
+              const isYou = index === yourQueueIndex
+              return (
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "video-worker-queue-token relative z-1 flex size-6 shrink-0 items-center justify-center rounded-full border text-[9px] font-medium",
+                    isYou
+                      ? "border-primary/35 bg-primary/15 text-primary"
+                      : "border-border/70 bg-background text-muted-foreground"
+                  )}
+                  key={index}
+                >
+                  {isYou ? "You" : "•"}
+                </span>
+              )
+            })}
+            {hiddenAhead > 0 ? (
+              <span className="relative z-1 text-[10px] text-muted-foreground">
+                +{hiddenAhead} ahead
+              </span>
+            ) : queued > visibleQueueItems ? (
+              <span className="relative z-1 text-[10px] text-muted-foreground">
+                +{queued - visibleQueueItems}
+              </span>
+            ) : null}
+            <span className="relative z-1 ml-auto flex size-6 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary">
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-3 motion-safe:animate-spin motion-reduce:animate-none"
+              />
+            </span>
+          </div>
+          <p className="mt-1.5 text-[10px] text-muted-foreground">
+            No work is lost while you wait.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ParallelTranscriptionFlow({
+  progress,
+  upload,
+}: {
+  progress: TranscriptionVideoParallelProgress
+  upload: TranscriptionVideoUpload
+}) {
+  const phase =
+    upload.status === "completed" ? "complete" : progress.phase || "preparing"
+  const [open, setOpen] = useState(() => phase !== "complete")
+  const phaseOrder: Record<string, number> = {
+    preparing: 0,
+    transcribing: 1,
+    fusing: 2,
+    complete: 3,
+  }
+  const currentPhase = phaseOrder[phase] ?? 0
+  const interrupted =
+    upload.status === "failed" || upload.status === "cancelled"
+  const sliceCount = Math.max(0, progress.sliceCount ?? 0)
+  const completedSlices = Math.min(
+    sliceCount,
+    Math.max(0, progress.completedSlices ?? 0)
+  )
+  const workerCount = Math.max(1, Math.min(progress.workerCount ?? 1, 8))
+  const sliceProgress =
+    phase === "preparing"
+      ? 0
+      : phase === "fusing" || phase === "complete"
+        ? 100
+        : sliceCount > 0
+          ? Math.round((completedSlices / sliceCount) * 100)
+          : 0
+  const stages = [
+    {
+      key: "preparing",
+      label: "Prepare audio",
+      description: "Extract and cut overlapping slices",
+      icon: FileVideo,
+    },
+    {
+      key: "transcribing",
+      label: "Transcribe slices",
+      description: "Run multiple workers at once",
+      icon: AudioLines,
+    },
+    {
+      key: "fusing",
+      label: "Fuse transcript",
+      description: "Sort timestamps and remove overlap",
+      icon: GitMerge,
+    },
+  ]
+
+  return (
+    <Collapsible className="mb-4" onOpenChange={setOpen} open={open}>
+      <div
+        aria-label="Parallel transcription details"
+        className="rounded-xl border border-primary/15 bg-primary/[0.025] p-3 sm:p-4"
+      >
+        <CollapsibleTrigger
+          aria-label={
+            open
+              ? "Collapse parallel transcription details"
+              : "Expand parallel transcription details"
+          }
+          className="flex w-full items-start justify-between gap-3 text-left"
+          type="button"
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+              <AudioLines
+                aria-hidden="true"
+                className="size-3.5 text-primary"
+              />
+              Parallel transcription
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              The source is split into overlapping audio slices so long videos
+              do not wait on one continuous transcription stream.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Badge className="text-[10px]" variant="outline">
+              {progress.workerCount ?? 1} workers
+            </Badge>
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                "size-4 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
+                !open && "-rotate-90"
+              )}
+            />
+          </div>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent>
+          <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
+            {stages.map((stage, index) => {
+              const stageIndex = phaseOrder[stage.key] ?? index
+              const complete = phase === "complete" || stageIndex < currentPhase
+              const active = !complete && stageIndex === currentPhase
+              const failed = interrupted && active
+              const Icon = failed
+                ? CircleAlert
+                : complete
+                  ? Check
+                  : active
+                    ? LoaderCircle
+                    : stage.icon
+              return (
+                <Fragment key={stage.key}>
+                  <div
+                    className={cn(
+                      "flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 transition-[background-color,border-color,transform] duration-200 ease-out motion-reduce:transition-none",
+                      complete && "border-primary/20 bg-primary/[0.04]",
+                      active &&
+                        !failed &&
+                        "-translate-y-0.5 border-primary/35 bg-primary/10",
+                      failed &&
+                        "border-destructive/30 bg-destructive/10 text-destructive",
+                      !complete &&
+                        !active &&
+                        "border-border/70 bg-background/50"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground",
+                        complete &&
+                          "border-primary/25 bg-primary/10 text-primary",
+                        active && !failed && "border-primary/40 text-primary",
+                        failed &&
+                          "border-destructive/30 bg-destructive/10 text-destructive"
+                      )}
+                    >
+                      <Icon
+                        aria-hidden="true"
+                        className={cn(
+                          "size-3.5",
+                          active &&
+                            !failed &&
+                            "motion-safe:animate-spin motion-reduce:animate-none"
+                        )}
+                      />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[11px] font-medium">
+                        {stage.label}
+                      </span>
+                      <span className="block truncate text-[10px] text-muted-foreground">
+                        {failed
+                          ? upload.status === "cancelled"
+                            ? "Cancelled"
+                            : "Stopped"
+                          : stage.description}
+                      </span>
+                    </span>
+                  </div>
+                  {index < stages.length - 1 ? (
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "hidden h-px bg-border md:block",
+                        stageIndex < currentPhase && "bg-primary/40"
+                      )}
+                    />
+                  ) : null}
+                </Fragment>
+              )
+            })}
+          </div>
+
+          <div className="mt-3 rounded-lg border border-border/70 bg-background/70 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="font-medium text-foreground">
+                {sliceCount > 0
+                  ? `${completedSlices} of ${sliceCount} slices complete`
+                  : "Building the slice map…"}
+              </span>
+              <span className="text-muted-foreground">
+                {formatVideoDuration(progress.chunkDurationMs ?? 0)} windows ·{" "}
+                {formatVideoDuration(progress.overlapMs ?? 0)} overlap
+              </span>
+            </div>
+            <Progress
+              aria-label="Parallel slice transcription progress"
+              className="mt-2 h-1.5"
+              value={sliceProgress}
+            />
+            <div className="mt-3 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
+              {Array.from({ length: workerCount }, (_, index) => {
+                const workerActive = phase === "transcribing" && !interrupted
+                return (
+                  <div
+                    className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"
+                    key={index}
+                  >
+                    <span
+                      className={cn(
+                        "size-1.5 shrink-0 rounded-full bg-muted-foreground/40",
+                        workerActive &&
+                          "bg-primary motion-safe:animate-pulse motion-reduce:animate-none",
+                        (phase === "fusing" || phase === "complete") &&
+                          "bg-primary/70"
+                      )}
+                    />
+                    <span>Worker {String(index + 1).padStart(2, "0")}</span>
+                    <span className="ml-auto">
+                      {workerActive
+                        ? "processing"
+                        : phase === "preparing"
+                          ? "ready"
+                          : interrupted
+                            ? "stopped"
+                            : "joined"}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </CollapsibleContent>
+      </div>
     </Collapsible>
   )
 }
@@ -1905,10 +2956,15 @@ function getVideoPipelineSteps(
         (index > 0 && step.status === "pending")
     )
   )
+  const pipelineConflictsWithUpload = Boolean(
+    upload.pipeline?.length &&
+    storedVideoPipelineConflictsWithUpload(upload, upload.pipeline)
+  )
   if (
     upload.pipeline &&
     upload.pipeline.length > 0 &&
-    !pipelineLooksUninitialized
+    !pipelineLooksUninitialized &&
+    !pipelineConflictsWithUpload
   ) {
     const byKey = new Map(upload.pipeline.map((step) => [step.key, step]))
     const steps = videoPipelineKeys.map((key) => ({
@@ -1917,6 +2973,7 @@ function getVideoPipelineSteps(
         status: "pending" as const,
       }),
     }))
+    repairCancelledVideoPipeline(steps, upload)
     const diarizationStep = steps.find((step) => step.key === "diarization")
     if (hasDiarizedSpeakers && diarizationStep?.status === "skipped") {
       diarizationStep.status = "completed"
@@ -1925,11 +2982,133 @@ function getVideoPipelineSteps(
     return hydrateVideoPipelineTiming(steps, upload, session)
   }
 
-  return hydrateVideoPipelineTiming(
-    fallbackVideoPipeline(upload, session, hasDiarizedSpeakers),
+  const fallbackSteps = fallbackVideoPipeline(
     upload,
-    session
+    session,
+    hasDiarizedSpeakers
   )
+  const parallelProgress = upload.pipeline?.find(
+    (step) => step.key === "transcription"
+  )?.parallel
+  if (parallelProgress) {
+    const transcriptionStep = fallbackSteps.find(
+      (step) => step.key === "transcription"
+    )
+    if (transcriptionStep) transcriptionStep.parallel = parallelProgress
+  }
+  const storedDiarization = upload.pipeline?.find(
+    (step) => step.key === "diarization"
+  )
+  const fallbackDiarization = fallbackSteps.find(
+    (step) => step.key === "diarization"
+  )
+  if (storedDiarization?.status === "skipped" && fallbackDiarization) {
+    fallbackDiarization.status = "skipped"
+    fallbackDiarization.startedAt = undefined
+    fallbackDiarization.completedAt = undefined
+    fallbackDiarization.durationMs = 0
+    fallbackDiarization.error = undefined
+  }
+  return hydrateVideoPipelineTiming(fallbackSteps, upload, session)
+}
+
+function storedVideoPipelineConflictsWithUpload(
+  upload: TranscriptionVideoUpload,
+  pipeline: TranscriptionVideoPipelineStep[]
+) {
+  const stage = upload.stage || ""
+  let authoritativeIndex: number | null = null
+  if (upload.status === "completed" || stage === "completed") {
+    authoritativeIndex = videoPipelineKeys.length
+  } else if (stage === "uploading") {
+    authoritativeIndex = 0
+  } else if (stage === "uploaded" || stage === "queued") {
+    authoritativeIndex = 1
+  } else if (
+    ["starting", "extracting", "transcribing", "fusing", "processing"].includes(
+      stage
+    )
+  ) {
+    authoritativeIndex = 1
+  } else if (stage === "diarizing" || stage === "skipping_diarization") {
+    authoritativeIndex = 2
+  } else if (stage === "polishing") {
+    authoritativeIndex = 3
+  } else if (stage === "finalizing") {
+    authoritativeIndex = 4
+  }
+  if (authoritativeIndex === null) return false
+
+  const byKey = new Map(pipeline.map((step) => [step.key, step]))
+  for (let index = 0; index < authoritativeIndex; index += 1) {
+    const key = videoPipelineKeys[index]
+    const status = byKey.get(key)?.status ?? "pending"
+    if (key === "upload" || key === "transcription" || key === "finalization") {
+      if (status !== "completed") return true
+      continue
+    }
+    if (!["completed", "skipped", "failed"].includes(status)) return true
+  }
+
+  if (
+    authoritativeIndex < videoPipelineKeys.length &&
+    upload.status === "processing"
+  ) {
+    const currentStatus = byKey.get(
+      videoPipelineKeys[authoritativeIndex]
+    )?.status
+    if (stage === "skipping_diarization") {
+      return currentStatus !== "active" && currentStatus !== "skipped"
+    }
+    return currentStatus !== "active" && currentStatus !== "retrying"
+  }
+  return false
+}
+
+function repairCancelledVideoPipeline(
+  steps: TranscriptionVideoPipelineStep[],
+  upload: TranscriptionVideoUpload
+) {
+  if (
+    upload.status !== "cancelled" ||
+    upload.expectedBytes <= 0 ||
+    upload.bytes < upload.expectedBytes
+  ) {
+    return
+  }
+
+  const uploadStep = steps.find((step) => step.key === "upload")
+  const transcriptionStep = steps.find((step) => step.key === "transcription")
+  if (
+    !uploadStep ||
+    !transcriptionStep ||
+    uploadStep.status !== "cancelled" ||
+    (transcriptionStep.status !== "pending" &&
+      transcriptionStep.status !== "cancelled")
+  ) {
+    return
+  }
+
+  // A complete source object means the user cancelled processing after the
+  // upload had finished. Repair a stale pipeline snapshot from an in-flight
+  // cancel race so the UI does not claim that the source upload was lost.
+  uploadStep.status = "completed"
+  transcriptionStep.status = "cancelled"
+  const completedAt =
+    transcriptionStep.completedAt ||
+    upload.updatedAt ||
+    upload.completedAt ||
+    upload.createdAt
+  transcriptionStep.startedAt =
+    transcriptionStep.startedAt || uploadStep.completedAt || completedAt
+  transcriptionStep.completedAt = completedAt
+  if (transcriptionStep.startedAt) {
+    const start = Date.parse(transcriptionStep.startedAt)
+    const end = Date.parse(completedAt)
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      transcriptionStep.durationMs = Math.max(0, end - start)
+    }
+  }
 }
 
 function hydrateVideoPipelineTiming(
@@ -1978,6 +3157,18 @@ function hydrateVideoPipelineTiming(
             : cursor
       if (startedAt !== null) step.startedAt = new Date(startedAt).toISOString()
     }
+    if (
+      startedAt !== null &&
+      cursor !== null &&
+      (step.status === "active" || step.status === "retrying") &&
+      startedAt < cursor
+    ) {
+      // Some legacy snapshots recorded the active step from the session start.
+      // Pipeline steps are sequential, so never let an active step include
+      // time that belongs to the preceding completed step.
+      startedAt = cursor
+      step.startedAt = new Date(startedAt).toISOString()
+    }
 
     if (
       step.status === "completed" ||
@@ -2000,9 +3191,11 @@ function hydrateVideoPipelineTiming(
         step.durationEstimated = true
       } else if (completedAt === null) {
         completedAt =
-          step.key === "upload"
-            ? uploadProcessingBoundary
-            : (nextKnownStart(index) ?? terminalEnd)
+          step.durationMs && step.durationMs > 0 && startedAt !== null
+            ? startedAt + step.durationMs
+            : step.key === "upload"
+              ? uploadProcessingBoundary
+              : (nextKnownStart(index) ?? terminalEnd)
         if (completedAt !== null && startedAt !== null) {
           completedAt = Math.max(startedAt, completedAt)
         }
@@ -2175,11 +3368,16 @@ function fallbackVideoPipeline(
     setStatus("transcription", "retrying")
     return steps
   }
-  if (["starting", "extracting", "transcribing"].includes(stage)) {
+  if (["starting", "extracting", "transcribing", "fusing"].includes(stage)) {
     setStatus("transcription", "active")
     return steps
   }
   if (stage === "diarizing") {
+    setStatus("transcription", "completed")
+    setStatus("diarization", "active")
+    return steps
+  }
+  if (stage === "skipping_diarization") {
     setStatus("transcription", "completed")
     setStatus("diarization", "active")
     return steps
@@ -2259,7 +3457,7 @@ function videoPipelineStatusLabel(
     case "completed":
       return "Complete"
     case "skipped":
-      return "Not configured"
+      return "Skipped"
     case "failed":
       return "Failed"
     case "cancelled":
@@ -2310,11 +3508,21 @@ function videoPipelineStepClass(
 
 function getVideoPipelineStepDuration(
   step: TranscriptionVideoPipelineStep,
-  now: number
+  now: number,
+  steps: TranscriptionVideoPipelineStep[] = [],
+  index = -1
 ) {
   const storedDuration = step.durationMs ?? 0
   if (step.status === "active" || step.status === "retrying") {
-    const startedAt = step.startedAt ? Date.parse(step.startedAt) : NaN
+    let startedAt = step.startedAt ? Date.parse(step.startedAt) : NaN
+    const previousBoundary = getVideoPipelinePreviousBoundary(steps, index)
+    if (
+      previousBoundary !== null &&
+      Number.isFinite(previousBoundary) &&
+      (!Number.isFinite(startedAt) || startedAt < previousBoundary)
+    ) {
+      startedAt = previousBoundary
+    }
     if (Number.isFinite(startedAt)) return Math.max(0, now - startedAt)
   }
   if (storedDuration > 0) return storedDuration
@@ -2326,6 +3534,24 @@ function getVideoPipelineStepDuration(
     }
   }
   return 0
+}
+
+function getVideoPipelinePreviousBoundary(
+  steps: TranscriptionVideoPipelineStep[],
+  index: number
+) {
+  for (let current = index - 1; current >= 0; current -= 1) {
+    const step = steps[current]
+    if (step.status === "pending" || step.status === "skipped") continue
+    const completedAt = step.completedAt ? Date.parse(step.completedAt) : NaN
+    if (Number.isFinite(completedAt)) return completedAt
+    const startedAt = step.startedAt ? Date.parse(step.startedAt) : NaN
+    const duration = step.durationMs ?? 0
+    if (Number.isFinite(startedAt) && duration > 0) {
+      return startedAt + duration
+    }
+  }
+  return null
 }
 
 function getVideoPipelineRunTime(
@@ -2411,18 +3637,21 @@ function mergeVideoUploadSnapshot(
 
   const sourceStillExists =
     next.status !== "cancelled" || next.bytes >= next.expectedBytes
+  const pipeline =
+    next.pipeline && next.pipeline.length > 0 ? next.pipeline : current.pipeline
   return {
     ...current,
     ...next,
+    pipeline,
     progress:
       current.status === "uploading" && next.status === "uploading"
         ? Math.max(current.progress, next.progress)
         : next.progress,
-    // A snapshot can be produced while the signed playback URL is being
-    // regenerated. Keep the last usable URL instead of making the source
-    // video flicker in and out between polls.
+    // Session snapshots generate a fresh signed URL on every request. Keep
+    // the existing URL during polling so React does not reload the video;
+    // the explicit "Refresh link" action replaces it when it actually expires.
     playbackUrl: sourceStillExists
-      ? next.playbackUrl || current.playbackUrl
+      ? current.playbackUrl || next.playbackUrl
       : undefined,
   }
 }
