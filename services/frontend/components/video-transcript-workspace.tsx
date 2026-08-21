@@ -444,10 +444,25 @@ export function VideoTranscriptWorkspace({
     actionItems: [],
     updatedAt: "",
   }
+  const validInsightChapters = useMemo(() => {
+    const chapters = insights.chapters ?? []
+    return chapters.filter(
+      (chapter) =>
+        Number.isFinite(chapter.startOffsetMs) &&
+        chapter.startOffsetMs >= 0 &&
+        (displayDurationMs <= 0 || chapter.startOffsetMs <= displayDurationMs)
+    )
+  }, [displayDurationMs, insights.chapters])
+  const hiddenInsightChapterCount = Math.max(
+    0,
+    (insights.chapters?.length ?? 0) - validInsightChapters.length
+  )
   const exportSupportsInsights = ["pdf", "docx", "md", "txt"].includes(
     exportFormat
   )
   const insightsReady = insights.status === "completed"
+  const insightsProcessing =
+    insightsGenerating || insights.status === "processing"
   const speakerSummaries = useMemo<SpeakerSummary[]>(() => {
     const segmentsBySpeaker = new Map<string, TranscriptionSegment[]>()
     for (const segment of displaySegments) {
@@ -513,11 +528,21 @@ export function VideoTranscriptWorkspace({
       const video = videoRef.current
       if (!video) return
       setSpeakerSample(null)
-      video.currentTime = Math.max(0, offsetMs / 1000)
-      onCurrentTimeChange(Math.max(0, offsetMs))
+      const durationFromElementMs =
+        Number.isFinite(video.duration) && video.duration > 0
+          ? video.duration * 1000
+          : 0
+      const knownDurationMs = Math.max(displayDurationMs, durationFromElementMs)
+      const safeOffsetMs = Math.max(0, offsetMs)
+      const boundedOffsetMs =
+        knownDurationMs > 0
+          ? Math.min(safeOffsetMs, knownDurationMs)
+          : safeOffsetMs
+      video.currentTime = boundedOffsetMs / 1000
+      onCurrentTimeChange(boundedOffsetMs)
       if (play) void video.play().catch(() => undefined)
     },
-    [onCurrentTimeChange, videoRef]
+    [displayDurationMs, onCurrentTimeChange, videoRef]
   )
 
   const playSpeakerSample = useCallback(
@@ -1547,20 +1572,24 @@ export function VideoTranscriptWorkspace({
                   <Sparkles className="size-4 text-primary" /> AI insights
                 </CardTitle>
                 <Button
-                  disabled={insightsGenerating || !snapshot.segments.length}
+                  disabled={insightsProcessing || !snapshot.segments.length}
                   onClick={() => void generateInsights()}
                   size="sm"
                   variant="outline"
                 >
-                  {insightsGenerating || insights.status === "processing" ? (
+                  {insightsProcessing ? (
                     <LoaderCircle
-                      className="animate-spin"
+                      className="motion-safe:animate-spin motion-reduce:animate-none"
                       data-icon="inline-start"
                     />
                   ) : (
                     <Sparkles data-icon="inline-start" />
                   )}{" "}
-                  {insights.status === "completed" ? "Regenerate" : "Generate"}
+                  {insightsProcessing
+                    ? "Writing…"
+                    : insights.status === "completed"
+                      ? "Regenerate"
+                      : "Generate"}
                 </Button>
               </div>
               <CardDescription>
@@ -1571,9 +1600,7 @@ export function VideoTranscriptWorkspace({
                   Output language
                 </span>
                 <Select
-                  disabled={
-                    insightsGenerating || insights.status === "processing"
-                  }
+                  disabled={insightsProcessing}
                   items={insightLanguageOptions.map((option) => ({
                     value: option.value,
                     label: option.label,
@@ -1604,6 +1631,7 @@ export function VideoTranscriptWorkspace({
               </div>
             </CardHeader>
             <CardContent className="space-y-3 px-4 pb-4 text-xs">
+              {insightsProcessing ? <AiWritingIndicator /> : null}
               {insights.error ? (
                 <p className="text-destructive">{insights.error}</p>
               ) : null}
@@ -1612,11 +1640,21 @@ export function VideoTranscriptWorkspace({
                   {insights.summary}
                 </p>
               ) : null}
-              {(insights.chapters?.length ?? 0) > 0 ? (
+              {hiddenInsightChapterCount > 0 ? (
+                <p className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-300">
+                  <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+                  <span>
+                    {hiddenInsightChapterCount} chapter timestamp
+                    {hiddenInsightChapterCount === 1 ? " was" : "s were"} hidden
+                    because it fell outside the video duration.
+                  </span>
+                </p>
+              ) : null}
+              {validInsightChapters.length > 0 ? (
                 <div>
                   <p className="mb-1 font-medium text-foreground">Chapters</p>
                   <div className="space-y-1">
-                    {insights.chapters?.map((chapter) => (
+                    {validInsightChapters.map((chapter) => (
                       <button
                         className="flex w-full items-start gap-2 rounded-md p-1 text-left hover:bg-muted"
                         key={`${chapter.startOffsetMs}-${chapter.title}`}
@@ -2128,6 +2166,55 @@ export function VideoTranscriptWorkspace({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function AiWritingIndicator() {
+  return (
+    <div
+      aria-busy="true"
+      aria-live="polite"
+      className="animate-in rounded-xl border border-primary/20 bg-primary/5 p-3 duration-200 ease-out fade-in-0 slide-in-from-top-1 motion-reduce:animate-none"
+      role="status"
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 rounded-full border border-primary/30 motion-safe:animate-ping motion-reduce:animate-none"
+          />
+          <Sparkles aria-hidden="true" className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="font-medium text-foreground">
+            Writing AI insights
+            <span
+              aria-hidden="true"
+              className="inline-block w-5 text-primary motion-safe:animate-pulse motion-reduce:animate-none"
+            >
+              …
+            </span>
+          </p>
+          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+            Reading the full transcript and organizing the key moments.
+          </p>
+        </div>
+      </div>
+      <div aria-hidden="true" className="mt-3 space-y-1.5">
+        <span
+          className="block h-1.5 w-[84%] rounded-full bg-primary/20 motion-safe:animate-pulse motion-reduce:animate-none"
+          style={{ animationDelay: "0ms" }}
+        />
+        <span
+          className="block h-1.5 w-[62%] rounded-full bg-primary/15 motion-safe:animate-pulse motion-reduce:animate-none"
+          style={{ animationDelay: "120ms" }}
+        />
+        <span
+          className="block h-1.5 w-[72%] rounded-full bg-primary/15 motion-safe:animate-pulse motion-reduce:animate-none"
+          style={{ animationDelay: "240ms" }}
+        />
+      </div>
     </div>
   )
 }

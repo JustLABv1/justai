@@ -442,7 +442,7 @@ func transcriptionInsightSystemPrompt(requestedLanguage, transcriptLanguage stri
 	} else if normalizedTranscriptLanguage, ok := normalizeTranscriptionInsightLanguage(transcriptLanguage); ok && normalizedTranscriptLanguage != "auto" {
 		languageInstruction = fmt.Sprintf("Write every natural-language field in %s, matching the transcript language. Do not write the insights in English unless the transcript is English.", transcriptionInsightLanguageLabel(normalizedTranscriptLanguage))
 	}
-	return "You are an experienced meeting and video transcript analyst. " + languageInstruction + " Return only valid JSON with this exact shape: {\"summary\":\"string\",\"chapters\":[{\"title\":\"string\",\"summary\":\"string\",\"startOffsetMs\":0}],\"topics\":[\"string\"],\"actionItems\":[\"string\"]}. Create concise, factual chapters ordered by startOffsetMs. Use only information present in the transcript. Chapter startOffsetMs values must be the absolute offsets from the transcript timestamps, never offsets relative to a window. If no action items are stated, return an empty array. Keep startOffsetMs numeric and do not translate the transcript text itself. Do not use markdown fences or commentary."
+	return "You are an experienced meeting and video transcript analyst. " + languageInstruction + " Return only valid JSON with this exact shape: {\"summary\":\"string\",\"chapters\":[{\"title\":\"string\",\"summary\":\"string\",\"startOffsetMs\":0}],\"topics\":[\"string\"],\"actionItems\":[\"string\"]}. Create concise, factual chapters ordered by startOffsetMs. Use only information present in the transcript. Chapter startOffsetMs values must be the absolute offsets from the transcript timestamps, never offsets relative to a window, and must stay between 0 and the exact video duration supplied in the input. Never invent a timestamp beyond the transcript window or video duration. If no action items are stated, return an empty array. Keep startOffsetMs numeric and do not translate the transcript text itself. Do not use markdown fences or commentary."
 }
 
 func transcriptionInsightChunkSystemPrompt(requestedLanguage, transcriptLanguage string, chunkIndex, chunkCount int) string {
@@ -497,9 +497,13 @@ func splitTranscriptionInsightRows(rows []transcriptionExportRow) []transcriptio
 	return chunks
 }
 
-func buildTranscriptionInsightChunkInput(title, language string, chunk transcriptionInsightChunk, chunkIndex, chunkCount int) string {
+func buildTranscriptionInsightChunkInput(title, language string, chunk transcriptionInsightChunk, chunkIndex, chunkCount int, durationMs int64) string {
 	var input strings.Builder
-	fmt.Fprintf(&input, "Title: %s\nLanguage: %s\nWindow: %d of %d (%s–%s)\nTranscript window (timestamps are absolute):\n", title, language, chunkIndex, chunkCount, formatTranscriptTimestamp(chunk.StartOffsetMs), formatTranscriptTimestamp(chunk.EndOffsetMs))
+	duration := "unknown"
+	if durationMs > 0 {
+		duration = formatTranscriptTimestamp(durationMs)
+	}
+	fmt.Fprintf(&input, "Title: %s\nLanguage: %s\nVideo duration: %s\nWindow: %d of %d (%s–%s)\nTranscript window (timestamps are absolute):\n", title, language, duration, chunkIndex, chunkCount, formatTranscriptTimestamp(chunk.StartOffsetMs), formatTranscriptTimestamp(chunk.EndOffsetMs))
 	for _, row := range chunk.Rows {
 		input.WriteString(transcriptionInsightTranscriptLine(row))
 	}
@@ -588,6 +592,25 @@ func mergeTranscriptionInsightChapters(analyses []transcriptionInsightChunkAnaly
 		return chapters[left].StartOffsetMs < chapters[right].StartOffsetMs
 	})
 	return chapters
+}
+
+func sanitizeTranscriptionInsightChapters(chapters []models.TranscriptionInsightChapter, durationMs int64) []models.TranscriptionInsightChapter {
+	result := make([]models.TranscriptionInsightChapter, 0, len(chapters))
+	for _, chapter := range chapters {
+		chapter.Title = strings.TrimSpace(chapter.Title)
+		chapter.Summary = strings.TrimSpace(chapter.Summary)
+		if chapter.Title == "" || chapter.StartOffsetMs < 0 {
+			continue
+		}
+		if durationMs > 0 && chapter.StartOffsetMs > durationMs {
+			continue
+		}
+		result = append(result, chapter)
+	}
+	sort.SliceStable(result, func(left, right int) bool {
+		return result[left].StartOffsetMs < result[right].StartOffsetMs
+	})
+	return result
 }
 
 func mergeTranscriptionInsightStrings(values ...[]string) []string {
@@ -700,6 +723,11 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	durationMs, err := loadTranscriptionInsightDurationMs(c, a.DB, sessionID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 	if len(segments) == 0 {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("generate insights after transcript output is available"))
 		return
@@ -720,7 +748,7 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 			c,
 			endpoint,
 			transcriptionInsightChunkSystemPrompt(requestedLanguage, language, index+1, len(chunks)),
-			buildTranscriptionInsightChunkInput(title, language, chunk, index+1, len(chunks)),
+			buildTranscriptionInsightChunkInput(title, language, chunk, index+1, len(chunks), durationMs),
 		)
 		if chunkErr != nil {
 			generationErr := fmt.Errorf("insight generation failed for transcript window %d/%d: %w", index+1, len(chunks), chunkErr)
@@ -754,7 +782,7 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 		chunkTopics = append(chunkTopics, analysis.Response.Topics)
 		chunkActionItems = append(chunkActionItems, analysis.Response.ActionItems)
 	}
-	decoded.Chapters = mergeTranscriptionInsightChapters(analyses)
+	decoded.Chapters = sanitizeTranscriptionInsightChapters(mergeTranscriptionInsightChapters(analyses), durationMs)
 	decoded.Topics = mergeTranscriptionInsightStrings(append(chunkTopics, decoded.Topics)...)
 	decoded.ActionItems = mergeTranscriptionInsightStrings(append(chunkActionItems, decoded.ActionItems)...)
 	if strings.TrimSpace(decoded.Summary) == "" {
@@ -885,11 +913,36 @@ func loadTranscriptionAnnotations(ctx context.Context, db *sql.DB, sessionID uui
 	return result, rows.Err()
 }
 
+func loadTranscriptionInsightDurationMs(ctx context.Context, db *sql.DB, sessionID uuid.UUID) (int64, error) {
+	var durationMs int64
+	err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(
+			(
+				SELECT duration_ms
+				FROM transcription_video_uploads
+				WHERE session_id = $1 AND duration_ms > 0
+				ORDER BY created_at DESC
+				LIMIT 1
+			),
+			(
+				SELECT COALESCE(MAX(end_offset_ms), MAX(start_offset_ms), 0)
+				FROM transcription_segments
+				WHERE session_id = $1
+			),
+			0
+		)`, sessionID).Scan(&durationMs)
+	return durationMs, err
+}
+
 func loadTranscriptionInsights(ctx context.Context, db *sql.DB, sessionID uuid.UUID) (models.TranscriptionInsights, error) {
 	item := models.TranscriptionInsights{SessionID: sessionID, Status: "idle", Language: "auto", Chapters: []models.TranscriptionInsightChapter{}, Topics: []string{}, ActionItems: []string{}}
+	durationMs, err := loadTranscriptionInsightDurationMs(ctx, db, sessionID)
+	if err != nil {
+		return item, err
+	}
 	var chaptersJSON, topicsJSON, actionItemsJSON []byte
 	var errorMessage sql.NullString
-	err := db.QueryRowContext(ctx, `SELECT language, status, summary, chapters, topics, action_items, error_message, generated_at, updated_at FROM transcription_insights WHERE session_id = $1`, sessionID).Scan(&item.Language, &item.Status, &item.Summary, &chaptersJSON, &topicsJSON, &actionItemsJSON, &errorMessage, &item.GeneratedAt, &item.UpdatedAt)
+	err = db.QueryRowContext(ctx, `SELECT language, status, summary, chapters, topics, action_items, error_message, generated_at, updated_at FROM transcription_insights WHERE session_id = $1`, sessionID).Scan(&item.Language, &item.Status, &item.Summary, &chaptersJSON, &topicsJSON, &actionItemsJSON, &errorMessage, &item.GeneratedAt, &item.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return item, nil
 	}
@@ -900,6 +953,7 @@ func loadTranscriptionInsights(ctx context.Context, db *sql.DB, sessionID uuid.U
 	if err := json.Unmarshal(chaptersJSON, &item.Chapters); err != nil {
 		return item, err
 	}
+	item.Chapters = sanitizeTranscriptionInsightChapters(item.Chapters, durationMs)
 	if err := json.Unmarshal(topicsJSON, &item.Topics); err != nil {
 		return item, err
 	}

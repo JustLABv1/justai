@@ -140,9 +140,12 @@ func TestTranscriptionInsightChunkingPreservesFullTranscript(t *testing.T) {
 			t.Fatalf("chunk %d is empty", index)
 		}
 		seen = append(seen, chunk.Rows...)
-		input := buildTranscriptionInsightChunkInput("Long video", "de", chunk, index+1, len(chunks))
+		input := buildTranscriptionInsightChunkInput("Long video", "de", chunk, index+1, len(chunks), 8*60*60*1000)
 		if !strings.Contains(input, chunk.Rows[0].Text) || !strings.Contains(input, chunk.Rows[len(chunk.Rows)-1].Text) {
 			t.Fatalf("chunk %d input dropped a boundary transcript row", index)
+		}
+		if !strings.Contains(input, "Video duration: 08:00:00") {
+			t.Fatalf("chunk %d input does not include the video duration", index)
 		}
 	}
 	if len(seen) != len(rows) {
@@ -177,6 +180,24 @@ func TestTranscriptionInsightChapterMergeKeepsTimeline(t *testing.T) {
 	}
 	if chapters[0].StartOffsetMs != 0 || chapters[1].StartOffsetMs != 900000 || chapters[2].StartOffsetMs != 7200000 {
 		t.Fatalf("chapters are not ordered by absolute timestamp: %+v", chapters)
+	}
+}
+
+func TestSanitizeTranscriptionInsightChaptersKeepsChaptersWithinVideo(t *testing.T) {
+	durationMs := int64(2*60*60*1000 + 9*60*1000 + 52*1000)
+	chapters := sanitizeTranscriptionInsightChapters([]models.TranscriptionInsightChapter{
+		{Title: "Opening", StartOffsetMs: 0},
+		{Title: "Near the end", StartOffsetMs: durationMs},
+		{Title: "Outside the video", StartOffsetMs: durationMs + 47*60*1000},
+		{Title: "Negative", StartOffsetMs: -1},
+		{Title: " ", StartOffsetMs: 1000},
+	}, durationMs)
+
+	if len(chapters) != 2 {
+		t.Fatalf("expected invalid chapter timestamps to be removed, got %+v", chapters)
+	}
+	if chapters[0].Title != "Opening" || chapters[1].Title != "Near the end" {
+		t.Fatalf("unexpected sanitized chapters: %+v", chapters)
 	}
 }
 
