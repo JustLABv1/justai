@@ -1566,6 +1566,7 @@ export function VideoTranscriptionView({
             </div>
           ) : null}
           <VideoTranscriptWorkspace
+            key={snapshot.session.id}
             currentTimeMs={currentTimeMs}
             onCurrentTimeChange={setCurrentTimeMs}
             onError={setError}
@@ -1949,6 +1950,7 @@ function VideoPipeline({
   const pipelineStorageKey = `justai.video-transcription.pipeline.collapsed:${upload.sessionId}`
   const [open, setOpen] = useState(true)
   const isActive = ["uploading", "queued", "processing"].includes(upload.status)
+  const shouldAutoCollapse = ["completed", "cancelled"].includes(upload.status)
 
   useEffect(() => {
     if (!isActive) return
@@ -1957,6 +1959,15 @@ function VideoPipeline({
   }, [isActive])
 
   useEffect(() => {
+    if (shouldAutoCollapse) {
+      queueMicrotask(() => setOpen(false))
+      try {
+        window.localStorage.setItem(pipelineStorageKey, "true")
+      } catch {
+        // The pipeline remains usable when local storage is unavailable.
+      }
+      return
+    }
     let collapsed = false
     try {
       collapsed = window.localStorage.getItem(pipelineStorageKey) === "true"
@@ -1964,7 +1975,7 @@ function VideoPipeline({
       // Local storage can be unavailable in private browsing contexts.
     }
     queueMicrotask(() => setOpen(!collapsed))
-  }, [pipelineStorageKey])
+  }, [pipelineStorageKey, shouldAutoCollapse])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)

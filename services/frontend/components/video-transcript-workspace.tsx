@@ -14,6 +14,7 @@ import {
   GitMerge,
   LoaderCircle,
   MessageSquarePlus,
+  MoreHorizontal,
   Pause,
   Pencil,
   Play,
@@ -56,6 +57,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Select,
   SelectContent,
@@ -106,6 +114,7 @@ type VideoTranscriptWorkspaceProps = {
 }
 
 type TranscriptMode = "verbatim" | "polished" | "edited"
+type WorkspaceView = "review" | "insights" | "speakers" | "details"
 
 type AnnotationTarget = {
   segmentId: string
@@ -278,6 +287,9 @@ export function VideoTranscriptWorkspace({
 }: VideoTranscriptWorkspaceProps) {
   const [transcriptMode, setTranscriptMode] =
     useState<TranscriptMode>("verbatim")
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("review")
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [transcriptQuery, setTranscriptQuery] = useState("")
   const [speakerFilter, setSpeakerFilter] = useState("all")
@@ -308,10 +320,6 @@ export function VideoTranscriptWorkspace({
     speakerId: string
     endOffsetMs: number
   } | null>(null)
-  const [transcriptRailHeight, setTranscriptRailHeight] = useState<
-    number | null
-  >(null)
-  const transcriptRailRef = useRef<HTMLElement | null>(null)
   const messageRefs = useRef(new Map<string, HTMLDivElement>())
 
   const updateSnapshot = useCallback(
@@ -485,36 +493,6 @@ export function VideoTranscriptWorkspace({
       block: "nearest",
     })
   }, [filteredTranscript, matchIndex])
-
-  useEffect(() => {
-    const rail = transcriptRailRef.current
-    if (!rail) return
-    const updateHeight = () => {
-      if (!window.matchMedia("(min-width: 1024px)").matches) {
-        setTranscriptRailHeight(null)
-        return
-      }
-      const height = Math.ceil(rail.scrollHeight)
-      setTranscriptRailHeight(height > 0 ? height : null)
-    }
-    updateHeight()
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(updateHeight)
-    observer?.observe(rail)
-    window.addEventListener("resize", updateHeight)
-    return () => {
-      observer?.disconnect()
-      window.removeEventListener("resize", updateHeight)
-    }
-  }, [
-    annotations.length,
-    editorOpen,
-    insights.status,
-    snapshot.speakers.length,
-    snapshot.videoUpload?.playbackUrl,
-  ])
 
   useEffect(() => {
     const raw = new URLSearchParams(window.location.search).get("t")
@@ -794,70 +772,283 @@ export function VideoTranscriptWorkspace({
     }
   }
 
-  const transcriptCardStyle = transcriptRailHeight
-    ? { height: transcriptRailHeight, maxHeight: transcriptRailHeight }
-    : undefined
+  const workspaceGridClass = cn(
+    "grid gap-4",
+    workspaceView === "review" ? "lg:items-stretch" : "lg:items-start",
+    workspaceView === "details"
+      ? "lg:grid-cols-1"
+      : "lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)]"
+  )
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)] lg:items-start">
-      <Card
-        className="flex max-h-[min(70vh,42rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none"
-        style={transcriptCardStyle}
+    <div className="space-y-3">
+      <Tabs
+        aria-label="Transcript workspace sections"
+        className="min-w-0"
+        onValueChange={(value) => {
+          if (
+            value === "review" ||
+            value === "insights" ||
+            value === "speakers" ||
+            value === "details"
+          ) {
+            setWorkspaceView(value)
+          }
+        }}
+        value={workspaceView}
       >
-        <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <FileText aria-hidden="true" className="size-4 shrink-0" />
-                Transcript
-              </CardTitle>
-              <CardDescription>
-                {transcript.length} messages · {snapshot.segments.length}{" "}
-                segments
-                {preview.length > 0
-                  ? ` · ${preview.length} live preview lines`
-                  : ""}
-                {transcriptQuery
-                  ? ` · ${filteredTranscript.length} matches`
-                  : ""}
-              </CardDescription>
+        <TabsList className="w-full justify-start overflow-x-auto">
+          <TabsTrigger value="review">
+            Review
+            {annotations.length > 0 ? (
+              <span className="text-[10px] text-muted-foreground">
+                {annotations.length}
+              </span>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger value="insights">
+            Insights
+            {insightsReady ? (
+              <Badge className="h-4 px-1.5 text-[9px]" variant="secondary">
+                Ready
+              </Badge>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger value="speakers">
+            Speakers
+            {snapshot.speakers.length > 0 ? (
+              <span className="text-[10px] text-muted-foreground">
+                {snapshot.speakers.length}
+              </span>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger value="details">Details</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <div className={workspaceGridClass}>
+        <Card
+          className={cn(
+            "flex max-h-[min(calc(100dvh-22rem),56rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none lg:h-full",
+            workspaceView !== "review" && "hidden"
+          )}
+        >
+          <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <FileText aria-hidden="true" className="size-4 shrink-0" />
+                  Transcript
+                </CardTitle>
+                <CardDescription>
+                  {transcript.length} messages · {snapshot.segments.length}{" "}
+                  segments
+                  {preview.length > 0
+                    ? ` · ${preview.length} live preview lines`
+                    : ""}
+                  {transcriptQuery
+                    ? ` · ${filteredTranscript.length} matches`
+                    : ""}
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Tabs
+                  aria-label="Transcript display mode"
+                  onValueChange={(value) => {
+                    if (
+                      value === "verbatim" ||
+                      value === "polished" ||
+                      value === "edited"
+                    ) {
+                      setTranscriptMode(value)
+                    }
+                  }}
+                  value={transcriptMode}
+                >
+                  <TabsList>
+                    <TabsTrigger value="verbatim">Verbatim</TabsTrigger>
+                    <TabsTrigger disabled={!polishedAvailable} value="polished">
+                      Polished
+                    </TabsTrigger>
+                    <TabsTrigger disabled={!editedAvailable} value="edited">
+                      Edited
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                {editorOpen ? (
+                  <Button
+                    onClick={() => setEditorOpen(false)}
+                    size="sm"
+                    variant="default"
+                  >
+                    <Pencil data-icon="inline-start" />
+                    Done editing
+                  </Button>
+                ) : null}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        aria-label="Transcript tools"
+                        size="icon-sm"
+                        title="Transcript tools"
+                        variant="outline"
+                      />
+                    }
+                  >
+                    <MoreHorizontal aria-hidden="true" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setWorkspaceView("review")
+                        setEditorOpen((current) => !current)
+                        setTranscriptMode("edited")
+                      }}
+                    >
+                      <Pencil data-icon="inline-start" />
+                      {editorOpen ? "Close editor" : "Edit transcript"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setWorkspaceView("review")
+                        setFiltersOpen((current) => !current)
+                      }}
+                    >
+                      <CircleAlert data-icon="inline-start" />
+                      {filtersOpen ? "Hide filters" : "Show filters"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setWorkspaceView("review")
+                        setExportOpen((current) => !current)
+                      }}
+                    >
+                      <Download data-icon="inline-start" />
+                      {exportOpen ? "Hide export" : "Export transcript"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => setWorkspaceView("insights")}
+                    >
+                      <Sparkles data-icon="inline-start" />
+                      Open AI insights
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setWorkspaceView("speakers")}
+                    >
+                      <Users data-icon="inline-start" />
+                      Open speaker tools
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setWorkspaceView("details")}
+                    >
+                      <Clock3 data-icon="inline-start" />
+                      Open details
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Tabs
-                aria-label="Transcript display mode"
-                onValueChange={(value) => {
-                  if (
-                    value === "verbatim" ||
-                    value === "polished" ||
-                    value === "edited"
-                  ) {
-                    setTranscriptMode(value)
-                  }
-                }}
-                value={transcriptMode}
-              >
-                <TabsList>
-                  <TabsTrigger value="verbatim">Verbatim</TabsTrigger>
-                  <TabsTrigger disabled={!polishedAvailable} value="polished">
-                    Polished
-                  </TabsTrigger>
-                  <TabsTrigger disabled={!editedAvailable} value="edited">
-                    Edited
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <Button
-                onClick={() => {
-                  setEditorOpen((current) => !current)
-                  setTranscriptMode("edited")
-                }}
-                size="sm"
-                variant={editorOpen ? "default" : "outline"}
-              >
-                <Pencil data-icon="inline-start" />
-                {editorOpen ? "Close editor" : "Edit"}
-              </Button>
-              <div className="flex items-center gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative max-w-md min-w-48 flex-1">
+                <Search
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  aria-label="Search transcript"
+                  className="h-9 pl-9"
+                  onChange={(event) => setTranscriptQuery(event.target.value)}
+                  placeholder="Search transcript"
+                  value={transcriptQuery}
+                />
+              </div>
+              {filtersOpen ? (
+                <>
+                  <Select
+                    items={[
+                      { value: "all", label: "All speakers" },
+                      ...snapshot.speakers.map((speaker) => ({
+                        value: speaker.id,
+                        label: speakerDisplayName(speaker),
+                      })),
+                    ]}
+                    onValueChange={(value) => setSpeakerFilter(value ?? "all")}
+                    value={speakerFilter}
+                  >
+                    <SelectTrigger
+                      aria-label="Filter by speaker"
+                      className="h-9 w-40 text-xs"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All speakers</SelectItem>
+                      {snapshot.speakers.map((speaker) => (
+                        <SelectItem key={speaker.id} value={speaker.id}>
+                          {speakerDisplayName(speaker)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    className="h-9"
+                    onClick={() => setQualityOnly((current) => !current)}
+                    size="sm"
+                    variant={qualityOnly ? "default" : "outline"}
+                  >
+                    <CircleAlert data-icon="inline-start" /> Review flags
+                  </Button>
+                </>
+              ) : hasActiveFilter ? (
+                <Badge className="h-7" variant="outline">
+                  Filters active
+                </Badge>
+              ) : null}
+              {filteredTranscript.length > 0 &&
+              !editorOpen &&
+              hasActiveFilter ? (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Button
+                    aria-label="Previous search match"
+                    disabled={filteredTranscript.length < 2}
+                    onClick={() =>
+                      setMatchIndex(
+                        (current) =>
+                          (current - 1 + filteredTranscript.length) %
+                          filteredTranscript.length
+                      )
+                    }
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <ChevronLeft />
+                  </Button>
+                  <span className="min-w-16 text-center tabular-nums">
+                    {activeMatchIndex + 1} / {filteredTranscript.length}
+                  </span>
+                  <Button
+                    aria-label="Next search match"
+                    disabled={filteredTranscript.length < 2}
+                    onClick={() =>
+                      setMatchIndex(
+                        (current) => (current + 1) % filteredTranscript.length
+                      )
+                    }
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <ChevronRight />
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+            {exportOpen ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/80 bg-muted/20 p-2">
+                <span className="mr-1 text-xs font-medium text-foreground">
+                  Export transcript
+                </span>
                 <Select
                   items={[
                     { value: "pdf", label: "PDF" },
@@ -890,11 +1081,10 @@ export function VideoTranscriptWorkspace({
                 <Button
                   aria-label="Export transcript"
                   onClick={() => void exportTranscript()}
-                  size="icon-sm"
-                  title="Export transcript"
+                  size="sm"
                   variant="outline"
                 >
-                  <Download />
+                  <Download data-icon="inline-start" /> Download
                 </Button>
                 {exportSupportsInsights ? (
                   <label
@@ -920,866 +1110,845 @@ export function VideoTranscriptWorkspace({
                   </span>
                 ) : null}
               </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative max-w-md min-w-48 flex-1">
-              <Search
-                aria-hidden="true"
-                className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                aria-label="Search transcript"
-                className="h-9 pl-9"
-                onChange={(event) => setTranscriptQuery(event.target.value)}
-                placeholder="Search transcript"
-                value={transcriptQuery}
-              />
-            </div>
-            <Select
-              items={[
-                { value: "all", label: "All speakers" },
-                ...snapshot.speakers.map((speaker) => ({
-                  value: speaker.id,
-                  label: speakerDisplayName(speaker),
-                })),
-              ]}
-              onValueChange={(value) => setSpeakerFilter(value ?? "all")}
-              value={speakerFilter}
-            >
-              <SelectTrigger
-                aria-label="Filter by speaker"
-                className="h-9 w-40 text-xs"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All speakers</SelectItem>
-                {snapshot.speakers.map((speaker) => (
-                  <SelectItem key={speaker.id} value={speaker.id}>
-                    {speakerDisplayName(speaker)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              className="h-9"
-              onClick={() => setQualityOnly((current) => !current)}
-              size="sm"
-              variant={qualityOnly ? "default" : "outline"}
-            >
-              <CircleAlert data-icon="inline-start" /> Review flags
-            </Button>
-            {filteredTranscript.length > 0 && !editorOpen && hasActiveFilter ? (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Button
-                  aria-label="Previous search match"
-                  disabled={filteredTranscript.length < 2}
-                  onClick={() =>
-                    setMatchIndex(
-                      (current) =>
-                        (current - 1 + filteredTranscript.length) %
-                        filteredTranscript.length
-                    )
-                  }
-                  size="icon-sm"
-                  variant="ghost"
-                >
-                  <ChevronLeft />
-                </Button>
-                <span className="min-w-16 text-center tabular-nums">
-                  {activeMatchIndex + 1} / {filteredTranscript.length}
+            ) : null}
+            {editorOpen && selectedSegmentIds.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-2 text-xs">
+                <span className="text-muted-foreground">
+                  {selectedSegmentIds.length} lines selected
                 </span>
+                <Select
+                  items={snapshot.speakers.map((speaker) => ({
+                    value: speaker.id,
+                    label: speakerDisplayName(speaker),
+                  }))}
+                  onValueChange={(value) => setAssignmentSpeakerId(value ?? "")}
+                  value={assignmentSpeakerId}
+                >
+                  <SelectTrigger className="h-8 w-40 text-xs">
+                    <SelectValue placeholder="Assign speaker" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {snapshot.speakers.map((speaker) => (
+                      <SelectItem key={speaker.id} value={speaker.id}>
+                        {speakerDisplayName(speaker)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
-                  aria-label="Next search match"
-                  disabled={filteredTranscript.length < 2}
-                  onClick={() =>
-                    setMatchIndex(
-                      (current) => (current + 1) % filteredTranscript.length
-                    )
-                  }
-                  size="icon-sm"
+                  disabled={!assignmentSpeakerId}
+                  onClick={() => void assignSelectedSpeaker()}
+                  size="sm"
+                >
+                  <Users data-icon="inline-start" /> Assign speaker
+                </Button>
+                <Button
+                  onClick={() => setSelectedSegmentIds([])}
+                  size="sm"
                   variant="ghost"
                 >
-                  <ChevronRight />
+                  Clear
                 </Button>
               </div>
             ) : null}
-          </div>
-          {editorOpen && selectedSegmentIds.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-2 text-xs">
-              <span className="text-muted-foreground">
-                {selectedSegmentIds.length} lines selected
-              </span>
-              <Select
-                items={snapshot.speakers.map((speaker) => ({
-                  value: speaker.id,
-                  label: speakerDisplayName(speaker),
-                }))}
-                onValueChange={(value) => setAssignmentSpeakerId(value ?? "")}
-                value={assignmentSpeakerId}
-              >
-                <SelectTrigger className="h-8 w-40 text-xs">
-                  <SelectValue placeholder="Assign speaker" />
-                </SelectTrigger>
-                <SelectContent>
-                  {snapshot.speakers.map((speaker) => (
-                    <SelectItem key={speaker.id} value={speaker.id}>
-                      {speakerDisplayName(speaker)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                disabled={!assignmentSpeakerId}
-                onClick={() => void assignSelectedSpeaker()}
-                size="sm"
-              >
-                <Users data-icon="inline-start" /> Assign speaker
-              </Button>
-              <Button
-                onClick={() => setSelectedSegmentIds([])}
-                size="sm"
-                variant="ghost"
-              >
-                Clear
-              </Button>
-            </div>
-          ) : null}
-        </CardHeader>
-        <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
-          {editorOpen ? (
-            filteredSegments.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                {filteredSegments.map((segment) => {
-                  const issues = qualityIssues(segment)
-                  const baseText =
-                    segment.editedText?.trim() ||
-                    segment.text.trim() ||
-                    segment.rawText?.trim() ||
-                    ""
-                  const draft = editDrafts[segment.id] ?? baseText
-                  const selected = selectedSegmentIds.includes(segment.id)
+          </CardHeader>
+          <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
+            {editorOpen ? (
+              filteredSegments.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {filteredSegments.map((segment) => {
+                    const issues = qualityIssues(segment)
+                    const baseText =
+                      segment.editedText?.trim() ||
+                      segment.text.trim() ||
+                      segment.rawText?.trim() ||
+                      ""
+                    const draft = editDrafts[segment.id] ?? baseText
+                    const selected = selectedSegmentIds.includes(segment.id)
+                    return (
+                      <div
+                        className={cn(
+                          "rounded-xl border p-3",
+                          selected
+                            ? "border-primary/40 bg-primary/5"
+                            : "border-border"
+                        )}
+                        key={segment.id}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            aria-label={`Select line at ${formatVideoTimestamp(segment.startOffsetMs)}`}
+                            checked={selected}
+                            className="size-4 accent-primary"
+                            onChange={(event) =>
+                              setSelectedSegmentIds((current) =>
+                                event.target.checked
+                                  ? [...current, segment.id]
+                                  : current.filter((id) => id !== segment.id)
+                              )
+                            }
+                            type="checkbox"
+                          />
+                          <button
+                            className="font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                            onClick={() => seekTo(segment.startOffsetMs)}
+                            type="button"
+                          >
+                            {formatVideoTimestamp(segment.startOffsetMs)}
+                          </button>
+                          {segment.speakerId ? (
+                            <Badge variant="outline">
+                              {speakerDisplayName(
+                                speakerById.get(segment.speakerId)
+                              )}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline">Unassigned</Badge>
+                          )}
+                          {issues.map((issue) => (
+                            <Badge
+                              className="text-[10px]"
+                              key={issue}
+                              variant="destructive"
+                            >
+                              {issue}
+                            </Badge>
+                          ))}
+                          <Button
+                            className="ml-auto"
+                            disabled={savingSegmentId === segment.id}
+                            onClick={() => void saveSegmentEdit(segment)}
+                            size="sm"
+                            variant="outline"
+                          >
+                            {savingSegmentId === segment.id ? (
+                              <LoaderCircle
+                                className="animate-spin"
+                                data-icon="inline-start"
+                              />
+                            ) : (
+                              <Check data-icon="inline-start" />
+                            )}{" "}
+                            Save
+                          </Button>
+                        </div>
+                        <Textarea
+                          className="mt-2 min-h-20 resize-y text-sm leading-6"
+                          onChange={(event) =>
+                            setEditDrafts((current) => ({
+                              ...current,
+                              [segment.id]: event.target.value,
+                            }))
+                          }
+                          value={draft}
+                        />
+                        {(segment.text.trim() ||
+                          segment.polishedText?.trim()) && (
+                          <details className="mt-2 text-xs text-muted-foreground">
+                            <summary className="cursor-pointer select-none">
+                              Compare source and polish
+                            </summary>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              <p>
+                                <span className="font-medium text-foreground">
+                                  Verbatim:
+                                </span>{" "}
+                                {segment.text.trim() || segment.rawText?.trim()}
+                              </p>
+                              <p>
+                                <span className="font-medium text-foreground">
+                                  Polished:
+                                </span>{" "}
+                                {segment.polishedText?.trim() ||
+                                  "Not available"}
+                              </p>
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <Empty className="min-h-48 border-0 p-4">
+                  <EmptyHeader>
+                    <EmptyTitle>No lines need review</EmptyTitle>
+                    <EmptyDescription>
+                      Try clearing a filter or turn off Review flags.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )
+            ) : filteredTranscript.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                {filteredTranscript.map((message) => {
+                  const active = message.id === activeMessageId
+                  const speaker = speakerById.get(message.speakerKey)
+                  const issues = message.segmentIds
+                    .flatMap((id) =>
+                      qualityIssues(
+                        displaySegmentById.get(id) ??
+                          ({ text: "" } as TranscriptionSegment)
+                      )
+                    )
+                    .filter(
+                      (issue, index, list) => list.indexOf(issue) === index
+                    )
+                  const firstSegment = displaySegmentById.get(
+                    message.segmentIds[0]
+                  )
                   return (
                     <div
                       className={cn(
-                        "rounded-xl border p-3",
-                        selected
-                          ? "border-primary/40 bg-primary/5"
-                          : "border-border"
+                        "group grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2.5 py-3 text-left transition-colors",
+                        active
+                          ? "bg-primary/10 ring-1 ring-primary/30"
+                          : "hover:bg-muted/50"
                       )}
-                      key={segment.id}
+                      key={message.id}
+                      ref={(element) => {
+                        if (element)
+                          messageRefs.current.set(message.id, element)
+                        else messageRefs.current.delete(message.id)
+                      }}
                     >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          aria-label={`Select line at ${formatVideoTimestamp(segment.startOffsetMs)}`}
-                          checked={selected}
-                          className="size-4 accent-primary"
-                          onChange={(event) =>
-                            setSelectedSegmentIds((current) =>
-                              event.target.checked
-                                ? [...current, segment.id]
-                                : current.filter((id) => id !== segment.id)
-                            )
-                          }
-                          type="checkbox"
-                        />
+                      <button
+                        aria-current={active ? "true" : undefined}
+                        aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
+                        className={cn(
+                          "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums",
+                          active ? "text-primary" : "text-muted-foreground"
+                        )}
+                        onClick={() => seekTo(message.startOffsetMs)}
+                        type="button"
+                      >
+                        {active ? (
+                          <Play
+                            aria-hidden="true"
+                            className="mt-0.5 size-3 fill-current"
+                          />
+                        ) : null}
+                        {formatVideoTimestamp(message.startOffsetMs)}
+                      </button>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {speaker ? (
+                            <Button
+                              aria-label={`Rename ${speakerDisplayName(speaker)}`}
+                              className="group/speaker-name h-auto max-w-full justify-start p-0 hover:bg-transparent"
+                              onClick={() => onRenameSpeaker(speaker)}
+                              size="sm"
+                              title="Rename speaker"
+                              variant="ghost"
+                            >
+                              <Badge
+                                className="max-w-full truncate"
+                                variant="outline"
+                              >
+                                {speakerDisplayName(speaker)}
+                              </Badge>
+                              <Pencil
+                                aria-hidden="true"
+                                className="text-muted-foreground transition-colors group-hover/speaker-name:text-foreground"
+                                data-icon="inline-end"
+                              />
+                            </Button>
+                          ) : null}
+                          {issues.map((issue) => (
+                            <Badge
+                              className="text-[10px]"
+                              key={issue}
+                              variant="destructive"
+                            >
+                              {issue}
+                            </Badge>
+                          ))}
+                          <div className="ml-auto flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                            <Button
+                              aria-label="Add bookmark"
+                              onClick={() => {
+                                setAnnotationKind("bookmark")
+                                setAnnotationNote("")
+                                setAnnotationTarget({
+                                  segmentId:
+                                    firstSegment?.id ?? message.segmentIds[0],
+                                  startOffsetMs: message.startOffsetMs,
+                                  endOffsetMs: message.endOffsetMs,
+                                })
+                              }}
+                              size="icon-sm"
+                              title="Add bookmark"
+                              variant="ghost"
+                            >
+                              <Bookmark />
+                            </Button>
+                            <Button
+                              aria-label="Add comment"
+                              onClick={() => {
+                                setAnnotationKind("comment")
+                                setAnnotationNote("")
+                                setAnnotationTarget({
+                                  segmentId:
+                                    firstSegment?.id ?? message.segmentIds[0],
+                                  startOffsetMs: message.startOffsetMs,
+                                  endOffsetMs: message.endOffsetMs,
+                                })
+                              }}
+                              size="icon-sm"
+                              title="Add comment"
+                              variant="ghost"
+                            >
+                              <MessageSquarePlus />
+                            </Button>
+                          </div>
+                        </div>
                         <button
-                          className="font-mono text-[11px] text-muted-foreground hover:text-foreground"
-                          onClick={() => seekTo(segment.startOffsetMs)}
+                          className="block min-w-0 text-left text-sm leading-6 text-foreground"
+                          onClick={() => seekTo(message.startOffsetMs)}
                           type="button"
                         >
-                          {formatVideoTimestamp(segment.startOffsetMs)}
+                          {highlightText(message.text, transcriptQuery)}
                         </button>
-                        {segment.speakerId ? (
-                          <Badge variant="outline">
-                            {speakerDisplayName(
-                              speakerById.get(segment.speakerId)
-                            )}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">Unassigned</Badge>
-                        )}
-                        {issues.map((issue) => (
-                          <Badge
-                            className="text-[10px]"
-                            key={issue}
-                            variant="destructive"
-                          >
-                            {issue}
-                          </Badge>
-                        ))}
-                        <Button
-                          className="ml-auto"
-                          disabled={savingSegmentId === segment.id}
-                          onClick={() => void saveSegmentEdit(segment)}
-                          size="sm"
-                          variant="outline"
-                        >
-                          {savingSegmentId === segment.id ? (
-                            <LoaderCircle
-                              className="animate-spin"
-                              data-icon="inline-start"
-                            />
-                          ) : (
-                            <Check data-icon="inline-start" />
-                          )}{" "}
-                          Save
-                        </Button>
                       </div>
-                      <Textarea
-                        className="mt-2 min-h-20 resize-y text-sm leading-6"
-                        onChange={(event) =>
-                          setEditDrafts((current) => ({
-                            ...current,
-                            [segment.id]: event.target.value,
-                          }))
-                        }
-                        value={draft}
-                      />
-                      {(segment.text.trim() ||
-                        segment.polishedText?.trim()) && (
-                        <details className="mt-2 text-xs text-muted-foreground">
-                          <summary className="cursor-pointer select-none">
-                            Compare source and polish
-                          </summary>
-                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                            <p>
-                              <span className="font-medium text-foreground">
-                                Verbatim:
-                              </span>{" "}
-                              {segment.text.trim() || segment.rawText?.trim()}
-                            </p>
-                            <p>
-                              <span className="font-medium text-foreground">
-                                Polished:
-                              </span>{" "}
-                              {segment.polishedText?.trim() || "Not available"}
-                            </p>
-                          </div>
-                        </details>
-                      )}
                     </div>
                   )
                 })}
               </div>
-            ) : (
+            ) : transcript.length > 0 && transcriptQuery ? (
               <Empty className="min-h-48 border-0 p-4">
                 <EmptyHeader>
-                  <EmptyTitle>No lines need review</EmptyTitle>
+                  <EmptyTitle>No matching lines</EmptyTitle>
                   <EmptyDescription>
-                    Try clearing a filter or turn off Review flags.
+                    Try another word or clear the transcript search.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <Button
+                  onClick={() => setTranscriptQuery("")}
+                  size="sm"
+                  variant="outline"
+                >
+                  Clear search
+                </Button>
+              </Empty>
+            ) : preview.length > 0 ? (
+              <LiveTranscriptPreview segments={preview} />
+            ) : isVideoProcessing ? (
+              <Empty className="min-h-48 border-0 p-4">
+                <EmptyHeader>
+                  <EmptyTitle>Waiting for the first slice</EmptyTitle>
+                  <EmptyDescription>
+                    Workers are transcribing in parallel. Preview lines will
+                    appear as output arrives.
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
-            )
-          ) : filteredTranscript.length > 0 ? (
-            <div className="flex flex-col gap-1">
-              {filteredTranscript.map((message) => {
-                const active = message.id === activeMessageId
-                const speaker = speakerById.get(message.speakerKey)
-                const issues = message.segmentIds
-                  .flatMap((id) =>
-                    qualityIssues(
-                      displaySegmentById.get(id) ??
-                        ({ text: "" } as TranscriptionSegment)
-                    )
-                  )
-                  .filter((issue, index, list) => list.indexOf(issue) === index)
-                const firstSegment = displaySegmentById.get(
-                  message.segmentIds[0]
-                )
-                return (
-                  <div
-                    className={cn(
-                      "group grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2.5 py-3 text-left transition-colors",
-                      active
-                        ? "bg-primary/10 ring-1 ring-primary/30"
-                        : "hover:bg-muted/50"
-                    )}
-                    key={message.id}
-                    ref={(element) => {
-                      if (element) messageRefs.current.set(message.id, element)
-                      else messageRefs.current.delete(message.id)
-                    }}
-                  >
-                    <button
-                      aria-current={active ? "true" : undefined}
-                      aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
-                      className={cn(
-                        "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums",
-                        active ? "text-primary" : "text-muted-foreground"
-                      )}
-                      onClick={() => seekTo(message.startOffsetMs)}
-                      type="button"
-                    >
-                      {active ? (
-                        <Play
-                          aria-hidden="true"
-                          className="mt-0.5 size-3 fill-current"
-                        />
-                      ) : null}
-                      {formatVideoTimestamp(message.startOffsetMs)}
-                    </button>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {speaker ? (
-                          <Button
-                            aria-label={`Rename ${speakerDisplayName(speaker)}`}
-                            className="group/speaker-name h-auto max-w-full justify-start p-0 hover:bg-transparent"
-                            onClick={() => onRenameSpeaker(speaker)}
-                            size="sm"
-                            title="Rename speaker"
-                            variant="ghost"
-                          >
-                            <Badge
-                              className="max-w-full truncate"
-                              variant="outline"
-                            >
-                              {speakerDisplayName(speaker)}
-                            </Badge>
-                            <Pencil
-                              aria-hidden="true"
-                              className="text-muted-foreground transition-colors group-hover/speaker-name:text-foreground"
-                              data-icon="inline-end"
-                            />
-                          </Button>
-                        ) : null}
-                        {issues.map((issue) => (
-                          <Badge
-                            className="text-[10px]"
-                            key={issue}
-                            variant="destructive"
-                          >
-                            {issue}
-                          </Badge>
-                        ))}
-                        <div className="ml-auto flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                          <Button
-                            aria-label="Add bookmark"
-                            onClick={() => {
-                              setAnnotationKind("bookmark")
-                              setAnnotationNote("")
-                              setAnnotationTarget({
-                                segmentId:
-                                  firstSegment?.id ?? message.segmentIds[0],
-                                startOffsetMs: message.startOffsetMs,
-                                endOffsetMs: message.endOffsetMs,
-                              })
-                            }}
-                            size="icon-sm"
-                            title="Add bookmark"
-                            variant="ghost"
-                          >
-                            <Bookmark />
-                          </Button>
-                          <Button
-                            aria-label="Add comment"
-                            onClick={() => {
-                              setAnnotationKind("comment")
-                              setAnnotationNote("")
-                              setAnnotationTarget({
-                                segmentId:
-                                  firstSegment?.id ?? message.segmentIds[0],
-                                startOffsetMs: message.startOffsetMs,
-                                endOffsetMs: message.endOffsetMs,
-                              })
-                            }}
-                            size="icon-sm"
-                            title="Add comment"
-                            variant="ghost"
-                          >
-                            <MessageSquarePlus />
-                          </Button>
-                        </div>
-                      </div>
-                      <button
-                        className="block min-w-0 text-left text-sm leading-6 text-foreground"
-                        onClick={() => seekTo(message.startOffsetMs)}
-                        type="button"
-                      >
-                        {highlightText(message.text, transcriptQuery)}
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          ) : transcript.length > 0 && transcriptQuery ? (
-            <Empty className="min-h-48 border-0 p-4">
-              <EmptyHeader>
-                <EmptyTitle>No matching lines</EmptyTitle>
-                <EmptyDescription>
-                  Try another word or clear the transcript search.
-                </EmptyDescription>
-              </EmptyHeader>
-              <Button
-                onClick={() => setTranscriptQuery("")}
-                size="sm"
-                variant="outline"
-              >
-                Clear search
-              </Button>
-            </Empty>
-          ) : preview.length > 0 ? (
-            <LiveTranscriptPreview segments={preview} />
-          ) : isVideoProcessing ? (
-            <Empty className="min-h-48 border-0 p-4">
-              <EmptyHeader>
-                <EmptyTitle>Waiting for the first slice</EmptyTitle>
-                <EmptyDescription>
-                  Workers are transcribing in parallel. Preview lines will
-                  appear as output arrives.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <Empty className="min-h-48 border-0 p-4">
-              <EmptyHeader>
-                <EmptyTitle>No transcript yet</EmptyTitle>
-                <EmptyDescription>
-                  The transcript will appear here after video processing starts.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          )}
-        </CardContent>
-      </Card>
-
-      <aside className="flex min-h-0 flex-col gap-4" ref={transcriptRailRef}>
-        <Card className="shrink-0 shadow-none">
-          <CardHeader className="gap-1 px-4 py-4">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <Bookmark className="size-4 text-primary" /> Bookmarks & comments
-            </CardTitle>
-            <CardDescription>
-              Keep review notes attached to exact video moments.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            {annotations.length > 0 ? (
-              <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
-                {annotations.map((annotation) => (
-                  <div
-                    className="rounded-lg border border-border/80 p-2.5"
-                    key={annotation.id}
-                  >
-                    <div className="flex items-start gap-2">
-                      <button
-                        className="font-mono text-[11px] text-primary hover:underline"
-                        onClick={() => seekTo(annotation.startOffsetMs)}
-                        type="button"
-                      >
-                        {formatVideoTimestamp(annotation.startOffsetMs)}
-                      </button>
-                      <Badge variant="outline">
-                        {annotation.kind === "bookmark"
-                          ? "Bookmark"
-                          : "Comment"}
-                      </Badge>
-                      <Button
-                        className="ml-auto"
-                        onClick={() => void deleteAnnotation(annotation)}
-                        size="icon-sm"
-                        variant="ghost"
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
-                    {annotation.note ? (
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        {annotation.note}
-                      </p>
-                    ) : null}
-                    <Button
-                      className="mt-2 h-7 text-[11px]"
-                      onClick={() =>
-                        void copyTimestampLink(annotation.startOffsetMs)
-                      }
-                      size="sm"
-                      variant="ghost"
-                    >
-                      <Copy data-icon="inline-start" /> Copy timestamp link
-                    </Button>
-                  </div>
-                ))}
-              </div>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                Bookmark a line or add a comment while reviewing.
-              </p>
+              <Empty className="min-h-48 border-0 p-4">
+                <EmptyHeader>
+                  <EmptyTitle>No transcript yet</EmptyTitle>
+                  <EmptyDescription>
+                    The transcript will appear here after video processing
+                    starts.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             )}
           </CardContent>
         </Card>
 
-        <Card className="shrink-0 shadow-none">
-          <CardHeader className="gap-1 px-4 py-4">
-            <div className="flex items-center justify-between gap-2">
+        <div
+          className={cn(
+            workspaceView === "review"
+              ? "flex min-h-0 flex-col gap-4 lg:h-full"
+              : "contents"
+          )}
+        >
+          <Card
+            className={cn(
+              "min-h-0 flex-1 shadow-none",
+              workspaceView !== "review" && "hidden",
+              workspaceView === "review" && "order-last"
+            )}
+          >
+            <CardHeader className="gap-1 px-4 py-4">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <Sparkles className="size-4 text-primary" /> AI insights
+                <Bookmark className="size-4 text-primary" /> Bookmarks &
+                comments
               </CardTitle>
-              <Button
-                disabled={insightsGenerating || !snapshot.segments.length}
-                onClick={() => void generateInsights()}
-                size="sm"
-                variant="outline"
-              >
-                {insightsGenerating || insights.status === "processing" ? (
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />
-                ) : (
-                  <Sparkles data-icon="inline-start" />
-                )}{" "}
-                {insights.status === "completed" ? "Regenerate" : "Generate"}
-              </Button>
-            </div>
-            <CardDescription>
-              Summary, chapters, topics, and action items from the transcript.
-            </CardDescription>
-            <div className="flex flex-wrap items-center gap-2 pt-2">
-              <span className="text-xs text-muted-foreground">
-                Output language
-              </span>
-              <Select
-                disabled={
-                  insightsGenerating || insights.status === "processing"
-                }
-                items={insightLanguageOptions.map((option) => ({
-                  value: option.value,
-                  label: option.label,
-                }))}
-                onValueChange={(value) => setInsightLanguage(value ?? "auto")}
-                value={insightLanguage}
-              >
-                <SelectTrigger
-                  aria-label="AI insight output language"
-                  className="h-7 min-w-48 text-xs"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {insightLanguageOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {insights.status === "completed" &&
-              insights.language !== insightLanguage ? (
-                <span className="text-xs text-muted-foreground">
-                  Regenerate to apply
-                </span>
-              ) : null}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3 px-4 pb-4 text-xs">
-            {insights.error ? (
-              <p className="text-destructive">{insights.error}</p>
-            ) : null}
-            {insights.summary ? (
-              <p className="leading-5 text-muted-foreground">
-                {insights.summary}
-              </p>
-            ) : null}
-            {(insights.chapters?.length ?? 0) > 0 ? (
-              <div>
-                <p className="mb-1 font-medium text-foreground">Chapters</p>
-                <div className="space-y-1">
-                  {insights.chapters?.map((chapter) => (
-                    <button
-                      className="flex w-full items-start gap-2 rounded-md p-1 text-left hover:bg-muted"
-                      key={`${chapter.startOffsetMs}-${chapter.title}`}
-                      onClick={() => seekTo(chapter.startOffsetMs)}
-                      type="button"
+              <CardDescription>
+                Keep review notes attached to exact video moments.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex min-h-0 flex-1 flex-col px-4 pb-4">
+              {annotations.length > 0 ? (
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                  {annotations.map((annotation) => (
+                    <div
+                      className="rounded-lg border border-border/80 p-2.5"
+                      key={annotation.id}
                     >
-                      <span className="font-mono text-primary">
-                        {formatVideoTimestamp(chapter.startOffsetMs)}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block font-medium text-foreground">
-                          {chapter.title}
-                        </span>
-                        {chapter.summary ? (
-                          <span className="block text-muted-foreground">
-                            {chapter.summary}
-                          </span>
-                        ) : null}
-                      </span>
-                    </button>
+                      <div className="flex items-start gap-2">
+                        <button
+                          className="font-mono text-[11px] text-primary hover:underline"
+                          onClick={() => seekTo(annotation.startOffsetMs)}
+                          type="button"
+                        >
+                          {formatVideoTimestamp(annotation.startOffsetMs)}
+                        </button>
+                        <Badge variant="outline">
+                          {annotation.kind === "bookmark"
+                            ? "Bookmark"
+                            : "Comment"}
+                        </Badge>
+                        <Button
+                          className="ml-auto"
+                          onClick={() => void deleteAnnotation(annotation)}
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
+                      {annotation.note ? (
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {annotation.note}
+                        </p>
+                      ) : null}
+                      <Button
+                        className="mt-2 h-7 text-[11px]"
+                        onClick={() =>
+                          void copyTimestampLink(annotation.startOffsetMs)
+                        }
+                        size="sm"
+                        variant="ghost"
+                      >
+                        <Copy data-icon="inline-start" /> Copy timestamp link
+                      </Button>
+                    </div>
                   ))}
                 </div>
-              </div>
-            ) : null}
-            {(insights.topics?.length ?? 0) > 0 ? (
-              <div>
-                <p className="mb-1 font-medium text-foreground">Topics</p>
-                <div className="flex flex-wrap gap-1">
-                  {insights.topics?.map((topic) => (
-                    <Badge key={topic} variant="secondary">
-                      {topic}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {(insights.actionItems?.length ?? 0) > 0 ? (
-              <div>
-                <p className="mb-1 font-medium text-foreground">Action items</p>
-                <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
-                  {insights.actionItems?.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {insights.status === "idle" ? (
-              <p className="text-muted-foreground">
-                Generate insights when the transcript is ready.
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Bookmark a line or add a comment while reviewing.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
-        {speakerSummaries.length > 0 ? (
-          <Card className="shrink-0 shadow-none">
+          <Card
+            className={cn(
+              "shrink-0 shadow-none",
+              workspaceView !== "insights" && "hidden"
+            )}
+          >
             <CardHeader className="gap-1 px-4 py-4">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Users className="size-4 text-primary" /> Speaker summary
+                  <Sparkles className="size-4 text-primary" /> AI insights
                 </CardTitle>
                 <Button
-                  onClick={() => {
-                    setMergeSourceId("")
-                    setMergeTargetId("")
-                    setMergeOpen(true)
-                  }}
-                  size="icon-sm"
-                  title="Merge speakers"
-                  variant="outline"
-                >
-                  <GitMerge />
-                </Button>
-              </div>
-              <CardDescription>
-                Rename speakers, play samples, or merge duplicate labels.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2 px-4 pb-4">
-              <div className="max-h-72 min-h-0 space-y-2 overflow-y-auto pr-1">
-                {speakerSummaries.map((summary) => {
-                  const name = speakerDisplayName(summary.speaker)
-                  const playing =
-                    speakerSample?.speakerId === summary.speaker.id
-                  const canPlay =
-                    Boolean(snapshot.videoUpload?.playbackUrl) &&
-                    summary.sampleStartMs !== null &&
-                    summary.sampleEndMs !== null
-                  return (
-                    <div
-                      className="rounded-xl border border-border/80 bg-muted/20 p-3"
-                      key={summary.speaker.id}
-                    >
-                      <div className="flex min-w-0 items-start gap-2.5">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                          {speakerInitials(name)}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="min-w-0 truncate text-xs font-medium text-foreground">
-                              {name}
-                            </span>
-                            <Badge
-                              className="shrink-0 text-[9px]"
-                              variant="outline"
-                            >
-                              {summary.speaker.label}
-                            </Badge>
-                          </div>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            {summary.segmentCount}{" "}
-                            {summary.segmentCount === 1
-                              ? "segment"
-                              : "segments"}{" "}
-                            · {formatVideoDuration(summary.speakingMs)} speaking
-                          </p>
-                          {summary.sampleText ? (
-                            <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
-                              “{summary.sampleText}”
-                            </p>
-                          ) : null}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <Button
-                            aria-label={
-                              playing
-                                ? `Stop sample for ${name}`
-                                : `Play sample for ${name}`
-                            }
-                            disabled={!canPlay}
-                            onClick={() => playSpeakerSample(summary)}
-                            size="icon-sm"
-                            variant={playing ? "default" : "outline"}
-                          >
-                            {playing ? <Pause /> : <Play />}
-                          </Button>
-                          <Button
-                            aria-label={`Rename ${name}`}
-                            onClick={() => onRenameSpeaker(summary.speaker)}
-                            size="icon-sm"
-                            variant="ghost"
-                          >
-                            <Pencil />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Speaker assignment changes are preserved separately from the
-                original transcript text.
-              </p>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        <Card className="shrink-0 shadow-none">
-          <CardHeader className="gap-2 px-4 py-4">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <FileVideo className="size-4" /> Source video
-            </CardTitle>
-            <CardDescription className="truncate">
-              {snapshot.videoUpload?.fileName ?? "Video upload"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3 px-4 pb-4">
-            <div className="overflow-hidden rounded-xl border border-border bg-muted">
-              {snapshot.videoUpload?.playbackUrl ? (
-                <video
-                  className="block aspect-video w-full bg-muted object-contain"
-                  controls
-                  onError={() => {
-                    setSpeakerSample(null)
-                    onVideoPlaybackError(
-                      "The video link expired or the stored video is unavailable."
-                    )
-                  }}
-                  onLoadedMetadata={(event) => {
-                    if (Number.isFinite(event.currentTarget.duration))
-                      onVideoDurationChange(
-                        Math.round(event.currentTarget.duration * 1000)
-                      )
-                  }}
-                  onEnded={() => setSpeakerSample(null)}
-                  onTimeUpdate={(event) => {
-                    const current = Math.round(
-                      event.currentTarget.currentTime * 1000
-                    )
-                    onCurrentTimeChange(current)
-                    if (speakerSample && current >= speakerSample.endOffsetMs) {
-                      event.currentTarget.pause()
-                      setSpeakerSample(null)
-                    }
-                  }}
-                  playsInline
-                  preload="metadata"
-                  ref={videoRef}
-                  src={snapshot.videoUpload.playbackUrl}
-                />
-              ) : (
-                <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
-                  <FileVideo aria-hidden="true" />
-                  <p className="text-xs">
-                    The video will be available here once the upload has
-                    finished.
-                  </p>
-                </div>
-              )}
-            </div>
-            {snapshot.videoUpload?.playbackUrl ? (
-              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  <Clock3 className="size-3.5" />
-                  {formatVideoTimestamp(currentTimeMs)}
-                  {displayDurationMs
-                    ? ` / ${formatVideoTimestamp(displayDurationMs)}`
-                    : ""}
-                </span>
-                <span>Click a transcript line to seek</span>
-              </div>
-            ) : null}
-            {videoPlaybackError ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-                <p className="font-medium">Playback unavailable</p>
-                <p className="mt-1">{videoPlaybackError}</p>
-                <Button
-                  className="mt-2"
-                  onClick={() => void onRefreshPlayback()}
+                  disabled={insightsGenerating || !snapshot.segments.length}
+                  onClick={() => void generateInsights()}
                   size="sm"
                   variant="outline"
                 >
-                  <RefreshCw data-icon="inline-start" /> Refresh link
+                  {insightsGenerating || insights.status === "processing" ? (
+                    <LoaderCircle
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
+                  ) : (
+                    <Sparkles data-icon="inline-start" />
+                  )}{" "}
+                  {insights.status === "completed" ? "Regenerate" : "Generate"}
                 </Button>
               </div>
-            ) : null}
-          </CardContent>
-        </Card>
+              <CardDescription>
+                Summary, chapters, topics, and action items from the transcript.
+              </CardDescription>
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <span className="text-xs text-muted-foreground">
+                  Output language
+                </span>
+                <Select
+                  disabled={
+                    insightsGenerating || insights.status === "processing"
+                  }
+                  items={insightLanguageOptions.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
+                  onValueChange={(value) => setInsightLanguage(value ?? "auto")}
+                  value={insightLanguage}
+                >
+                  <SelectTrigger
+                    aria-label="AI insight output language"
+                    className="h-7 min-w-48 text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {insightLanguageOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {insights.status === "completed" &&
+                insights.language !== insightLanguage ? (
+                  <span className="text-xs text-muted-foreground">
+                    Regenerate to apply
+                  </span>
+                ) : null}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 px-4 pb-4 text-xs">
+              {insights.error ? (
+                <p className="text-destructive">{insights.error}</p>
+              ) : null}
+              {insights.summary ? (
+                <p className="leading-5 text-muted-foreground">
+                  {insights.summary}
+                </p>
+              ) : null}
+              {(insights.chapters?.length ?? 0) > 0 ? (
+                <div>
+                  <p className="mb-1 font-medium text-foreground">Chapters</p>
+                  <div className="space-y-1">
+                    {insights.chapters?.map((chapter) => (
+                      <button
+                        className="flex w-full items-start gap-2 rounded-md p-1 text-left hover:bg-muted"
+                        key={`${chapter.startOffsetMs}-${chapter.title}`}
+                        onClick={() => seekTo(chapter.startOffsetMs)}
+                        type="button"
+                      >
+                        <span className="font-mono text-primary">
+                          {formatVideoTimestamp(chapter.startOffsetMs)}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block font-medium text-foreground">
+                            {chapter.title}
+                          </span>
+                          {chapter.summary ? (
+                            <span className="block text-muted-foreground">
+                              {chapter.summary}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {(insights.topics?.length ?? 0) > 0 ? (
+                <div>
+                  <p className="mb-1 font-medium text-foreground">Topics</p>
+                  <div className="flex flex-wrap gap-1">
+                    {insights.topics?.map((topic) => (
+                      <Badge key={topic} variant="secondary">
+                        {topic}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {(insights.actionItems?.length ?? 0) > 0 ? (
+                <div>
+                  <p className="mb-1 font-medium text-foreground">
+                    Action items
+                  </p>
+                  <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
+                    {insights.actionItems?.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {insights.status === "idle" ? (
+                <p className="text-muted-foreground">
+                  Generate insights when the transcript is ready.
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
 
-        <Card className="shrink-0 shadow-none">
-          <CardHeader className="gap-1 px-4 py-4">
-            <CardTitle className="text-sm">At a glance</CardTitle>
-            <CardDescription>Transcript settings and coverage</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2 px-4 pb-4 text-xs text-muted-foreground">
-            <div className="flex items-center justify-between gap-3">
-              <span>Language</span>
-              <span className="font-medium text-foreground">
-                {snapshot.session.language}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span>Messages</span>
-              <span className="font-medium text-foreground">
-                {transcript.length}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-1.5">
-                <Users className="size-3.5" /> Speakers
-              </span>
-              <span className="font-medium text-foreground">
-                {snapshot.speakers.length || "Not separated"}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span>Grammar</span>
-              <span className="font-medium text-foreground">
-                {snapshot.session.polishStatus === "completed"
-                  ? "Available"
-                  : snapshot.session.polishStatus === "failed"
-                    ? "Failed"
-                    : snapshot.session.polishStatus === "processing"
-                      ? "Processing"
-                      : "Not requested"}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-1.5">
-                <Clock3 className="size-3.5" /> Duration
-              </span>
-              <span className="font-medium text-foreground tabular-nums">
-                {displayDurationMs
-                  ? formatVideoDuration(displayDurationMs)
-                  : "—"}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </aside>
+          {speakerSummaries.length > 0 ? (
+            <Card
+              className={cn(
+                "shrink-0 shadow-none",
+                workspaceView !== "speakers" && "hidden"
+              )}
+            >
+              <CardHeader className="gap-1 px-4 py-4">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Users className="size-4 text-primary" /> Speaker summary
+                  </CardTitle>
+                  <Button
+                    onClick={() => {
+                      setMergeSourceId("")
+                      setMergeTargetId("")
+                      setMergeOpen(true)
+                    }}
+                    size="icon-sm"
+                    title="Merge speakers"
+                    variant="outline"
+                  >
+                    <GitMerge />
+                  </Button>
+                </div>
+                <CardDescription>
+                  Rename speakers, play samples, or merge duplicate labels.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2 px-4 pb-4">
+                <div className="max-h-72 min-h-0 space-y-2 overflow-y-auto pr-1">
+                  {speakerSummaries.map((summary) => {
+                    const name = speakerDisplayName(summary.speaker)
+                    const playing =
+                      speakerSample?.speakerId === summary.speaker.id
+                    const canPlay =
+                      Boolean(snapshot.videoUpload?.playbackUrl) &&
+                      summary.sampleStartMs !== null &&
+                      summary.sampleEndMs !== null
+                    return (
+                      <div
+                        className="rounded-xl border border-border/80 bg-muted/20 p-3"
+                        key={summary.speaker.id}
+                      >
+                        <div className="flex min-w-0 items-start gap-2.5">
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
+                            {speakerInitials(name)}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                                {name}
+                              </span>
+                              <Badge
+                                className="shrink-0 text-[9px]"
+                                variant="outline"
+                              >
+                                {summary.speaker.label}
+                              </Badge>
+                            </div>
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              {summary.segmentCount}{" "}
+                              {summary.segmentCount === 1
+                                ? "segment"
+                                : "segments"}{" "}
+                              · {formatVideoDuration(summary.speakingMs)}{" "}
+                              speaking
+                            </p>
+                            {summary.sampleText ? (
+                              <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
+                                “{summary.sampleText}”
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Button
+                              aria-label={
+                                playing
+                                  ? `Stop sample for ${name}`
+                                  : `Play sample for ${name}`
+                              }
+                              disabled={!canPlay}
+                              onClick={() => playSpeakerSample(summary)}
+                              size="icon-sm"
+                              variant={playing ? "default" : "outline"}
+                            >
+                              {playing ? <Pause /> : <Play />}
+                            </Button>
+                            <Button
+                              aria-label={`Rename ${name}`}
+                              onClick={() => onRenameSpeaker(summary.speaker)}
+                              size="icon-sm"
+                              variant="ghost"
+                            >
+                              <Pencil />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Speaker assignment changes are preserved separately from the
+                  original transcript text.
+                </p>
+              </CardContent>
+            </Card>
+          ) : workspaceView === "speakers" ? (
+            <Card className="shrink-0 shadow-none">
+              <CardHeader className="gap-1 px-4 py-4">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Users className="size-4 text-primary" /> Speaker tools
+                </CardTitle>
+                <CardDescription>
+                  Speaker separation has not produced any labels for this
+                  transcript.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="px-4 pb-4 text-xs text-muted-foreground">
+                You can still review, edit, and export the transcript without
+                speaker assignments.
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card
+            className={cn(
+              "shrink-0 shadow-none lg:sticky lg:top-4",
+              workspaceView === "details" && "hidden",
+              workspaceView === "review" && "order-first"
+            )}
+          >
+            <CardHeader className="gap-2 px-4 py-4">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <FileVideo className="size-4" /> Source video
+              </CardTitle>
+              <CardDescription className="truncate">
+                {snapshot.videoUpload?.fileName ?? "Video upload"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 px-4 pb-4">
+              <div className="overflow-hidden rounded-xl border border-border bg-muted">
+                {snapshot.videoUpload?.playbackUrl ? (
+                  <video
+                    className="block aspect-video w-full bg-muted object-contain"
+                    controls
+                    onError={() => {
+                      setSpeakerSample(null)
+                      onVideoPlaybackError(
+                        "The video link expired or the stored video is unavailable."
+                      )
+                    }}
+                    onLoadedMetadata={(event) => {
+                      if (Number.isFinite(event.currentTarget.duration))
+                        onVideoDurationChange(
+                          Math.round(event.currentTarget.duration * 1000)
+                        )
+                    }}
+                    onEnded={() => setSpeakerSample(null)}
+                    onTimeUpdate={(event) => {
+                      const current = Math.round(
+                        event.currentTarget.currentTime * 1000
+                      )
+                      onCurrentTimeChange(current)
+                      if (
+                        speakerSample &&
+                        current >= speakerSample.endOffsetMs
+                      ) {
+                        event.currentTarget.pause()
+                        setSpeakerSample(null)
+                      }
+                    }}
+                    playsInline
+                    preload="metadata"
+                    ref={videoRef}
+                    src={snapshot.videoUpload.playbackUrl}
+                  />
+                ) : (
+                  <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+                    <FileVideo aria-hidden="true" />
+                    <p className="text-xs">
+                      The video will be available here once the upload has
+                      finished.
+                    </p>
+                  </div>
+                )}
+              </div>
+              {snapshot.videoUpload?.playbackUrl ? (
+                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <Clock3 className="size-3.5" />
+                    {formatVideoTimestamp(currentTimeMs)}
+                    {displayDurationMs
+                      ? ` / ${formatVideoTimestamp(displayDurationMs)}`
+                      : ""}
+                  </span>
+                  <span>Click a transcript line to seek</span>
+                </div>
+              ) : null}
+              {videoPlaybackError ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                  <p className="font-medium">Playback unavailable</p>
+                  <p className="mt-1">{videoPlaybackError}</p>
+                  <Button
+                    className="mt-2"
+                    onClick={() => void onRefreshPlayback()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <RefreshCw data-icon="inline-start" /> Refresh link
+                  </Button>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card
+            className={cn(
+              "shrink-0 shadow-none",
+              workspaceView !== "details" && "hidden"
+            )}
+          >
+            <CardHeader className="gap-1 px-4 py-4">
+              <CardTitle className="text-sm">At a glance</CardTitle>
+              <CardDescription>
+                Transcript settings and coverage
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2 px-4 pb-4 text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span>Language</span>
+                <span className="font-medium text-foreground">
+                  {snapshot.session.language}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Messages</span>
+                <span className="font-medium text-foreground">
+                  {transcript.length}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-1.5">
+                  <Users className="size-3.5" /> Speakers
+                </span>
+                <span className="font-medium text-foreground">
+                  {snapshot.speakers.length || "Not separated"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Grammar</span>
+                <span className="font-medium text-foreground">
+                  {snapshot.session.polishStatus === "completed"
+                    ? "Available"
+                    : snapshot.session.polishStatus === "failed"
+                      ? "Failed"
+                      : snapshot.session.polishStatus === "processing"
+                        ? "Processing"
+                        : "Not requested"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-1.5">
+                  <Clock3 className="size-3.5" /> Duration
+                </span>
+                <span className="font-medium text-foreground tabular-nums">
+                  {displayDurationMs
+                    ? formatVideoDuration(displayDurationMs)
+                    : "—"}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       <Dialog
         open={Boolean(annotationTarget)}
