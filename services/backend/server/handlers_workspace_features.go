@@ -516,10 +516,16 @@ func (a *App) detachConversationTag(c *gin.Context) {
 
 func (a *App) hydrateConversationOrganization(ctx context.Context, item *models.Conversation) error {
 	var folderID sql.NullString
-	if err := a.DB.QueryRowContext(ctx, `SELECT folder_id::text, pinned_at FROM conversations WHERE id = $1`, item.ID).Scan(&folderID, &item.PinnedAt); err != nil {
+	var ownerID, projectID sql.NullString
+	if err := a.DB.QueryRowContext(ctx, `SELECT folder_id::text, pinned_at, user_id::text, visibility, project_id::text FROM conversations WHERE id = $1`, item.ID).Scan(&folderID, &item.PinnedAt, &ownerID, &item.Visibility, &projectID); err != nil {
 		return err
 	}
 	item.FolderID = parseOptionalUUIDString(folderID.String)
+	item.OwnerID = uuid.Nil
+	if parsedOwner := parseOptionalUUIDString(ownerID.String); parsedOwner != nil {
+		item.OwnerID = *parsedOwner
+	}
+	item.ProjectID = parseOptionalUUIDString(projectID.String)
 	rows, err := a.DB.QueryContext(ctx, `SELECT t.id, t.name, t.color, t.created_at, t.updated_at FROM conversation_tag_links l JOIN conversation_tags t ON t.id = l.tag_id WHERE l.conversation_id = $1 ORDER BY lower(t.name)`, item.ID)
 	if err != nil {
 		return err
@@ -544,12 +550,12 @@ func (a *App) listNotes(c *gin.Context) {
 	}
 	query := strings.TrimSpace(c.Query("q"))
 	args := []any{principal.UserID, organizationID}
-	where := `n.user_id = $1 AND n.organization_id = $2`
+	where := `(n.user_id = $1 OR n.visibility = 'workspace') AND n.organization_id = $2`
 	if query != "" {
 		args = append(args, "%"+strings.ToLower(query)+"%")
 		where += ` AND (lower(n.title) LIKE $3 OR lower(n.content) LIKE $3)`
 	}
-	rows, err := a.DB.QueryContext(c, `SELECT n.id, n.title, n.content, n.source_conversation_id, n.pinned_at, n.created_at, n.updated_at FROM notes n WHERE `+where+` ORDER BY n.pinned_at DESC NULLS LAST, n.updated_at DESC LIMIT 200`, args...)
+	rows, err := a.DB.QueryContext(c, `SELECT n.id, n.user_id::text, n.visibility, n.title, n.content, n.source_conversation_id, n.pinned_at, n.created_at, n.updated_at FROM notes n WHERE `+where+` ORDER BY n.pinned_at DESC NULLS LAST, n.updated_at DESC LIMIT 200`, args...)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -558,11 +564,15 @@ func (a *App) listNotes(c *gin.Context) {
 	result := []models.Note{}
 	for rows.Next() {
 		var item models.Note
-		var sourceID sql.NullString
-		if err := rows.Scan(&item.ID, &item.Title, &item.Content, &sourceID, &item.PinnedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var sourceID, ownerID sql.NullString
+		if err := rows.Scan(&item.ID, &ownerID, &item.Visibility, &item.Title, &item.Content, &sourceID, &item.PinnedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
+		if parsedOwner := parseOptionalUUIDString(ownerID.String); parsedOwner != nil {
+			item.OwnerID = *parsedOwner
+		}
+		item.CanManage = item.OwnerID == principal.UserID
 		item.SourceConversationID = parseOptionalUUIDString(sourceID.String)
 		result = append(result, item)
 	}
@@ -579,6 +589,7 @@ func (a *App) createNote(c *gin.Context) {
 		Title                string  `json:"title"`
 		Content              string  `json:"content"`
 		SourceConversationID *string `json:"sourceConversationId"`
+		Visibility           string  `json:"visibility"`
 	}
 	if !decodeJSON(c, &request) {
 		return
@@ -589,6 +600,14 @@ func (a *App) createNote(c *gin.Context) {
 	}
 	if len([]rune(request.Title)) > 160 || len(request.Content) > 10*1024*1024 {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("note title or content is too large"))
+		return
+	}
+	request.Visibility = strings.TrimSpace(request.Visibility)
+	if request.Visibility == "" {
+		request.Visibility = "private"
+	}
+	if request.Visibility != "private" && request.Visibility != "workspace" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("visibility must be private or workspace"))
 		return
 	}
 	var sourceID any
@@ -602,12 +621,15 @@ func (a *App) createNote(c *gin.Context) {
 	}
 	var item models.Note
 	var rawSourceID sql.NullString
-	err = a.DB.QueryRowContext(c, `INSERT INTO notes (user_id, organization_id, title, content, source_conversation_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, title, content, source_conversation_id, pinned_at, created_at, updated_at`, principal.UserID, organizationID, request.Title, request.Content, sourceID).Scan(&item.ID, &item.Title, &item.Content, &rawSourceID, &item.PinnedAt, &item.CreatedAt, &item.UpdatedAt)
+	err = a.DB.QueryRowContext(c, `INSERT INTO notes (user_id, organization_id, title, content, source_conversation_id, visibility) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, title, content, source_conversation_id, pinned_at, created_at, updated_at`, principal.UserID, organizationID, request.Title, request.Content, sourceID, request.Visibility).Scan(&item.ID, &item.Title, &item.Content, &rawSourceID, &item.PinnedAt, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	item.SourceConversationID = parseOptionalUUIDString(rawSourceID.String)
+	item.OwnerID = principal.UserID
+	item.Visibility = request.Visibility
+	item.CanManage = true
 	c.JSON(http.StatusCreated, gin.H{"note": item})
 }
 
@@ -624,7 +646,8 @@ func (a *App) getNote(c *gin.Context) {
 	}
 	var item models.Note
 	var rawSourceID sql.NullString
-	err = a.DB.QueryRowContext(c, `SELECT id, title, content, source_conversation_id, pinned_at, created_at, updated_at FROM notes WHERE id = $1 AND user_id = $2 AND organization_id = $3`, id, principal.UserID, organizationID).Scan(&item.ID, &item.Title, &item.Content, &rawSourceID, &item.PinnedAt, &item.CreatedAt, &item.UpdatedAt)
+	var ownerID sql.NullString
+	err = a.DB.QueryRowContext(c, `SELECT id, user_id::text, visibility, title, content, source_conversation_id, pinned_at, created_at, updated_at FROM notes WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace')`, id, principal.UserID, organizationID).Scan(&item.ID, &ownerID, &item.Visibility, &item.Title, &item.Content, &rawSourceID, &item.PinnedAt, &item.CreatedAt, &item.UpdatedAt)
 	if err == sql.ErrNoRows {
 		writeError(c, http.StatusNotFound, fmt.Errorf("note not found"))
 		return
@@ -634,6 +657,10 @@ func (a *App) getNote(c *gin.Context) {
 		return
 	}
 	item.SourceConversationID = parseOptionalUUIDString(rawSourceID.String)
+	if parsedOwner := parseOptionalUUIDString(ownerID.String); parsedOwner != nil {
+		item.OwnerID = *parsedOwner
+	}
+	item.CanManage = item.OwnerID == principal.UserID
 	c.JSON(http.StatusOK, gin.H{"note": item})
 }
 
@@ -649,18 +676,39 @@ func (a *App) updateNote(c *gin.Context) {
 		return
 	}
 	var request struct {
-		Title   *string `json:"title"`
-		Content *string `json:"content"`
-		Pinned  *bool   `json:"pinned"`
+		Title      *string `json:"title"`
+		Content    *string `json:"content"`
+		Pinned     *bool   `json:"pinned"`
+		Visibility *string `json:"visibility"`
 	}
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if request.Title == nil && request.Content == nil && request.Pinned == nil {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("title, content, or pinned is required"))
+	if request.Title == nil && request.Content == nil && request.Pinned == nil && request.Visibility == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("title, content, pinned, or visibility is required"))
 		return
 	}
-	title, content, pinned := any(nil), any(nil), any(nil)
+	if request.Visibility != nil {
+		value := strings.TrimSpace(*request.Visibility)
+		if value != "private" && value != "workspace" {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("visibility must be private or workspace"))
+			return
+		}
+		var ownerID uuid.UUID
+		if err := a.DB.QueryRowContext(c, `SELECT user_id FROM notes WHERE id = $1 AND organization_id = $2`, id, organizationID).Scan(&ownerID); err != nil {
+			if err == sql.ErrNoRows {
+				writeError(c, http.StatusNotFound, fmt.Errorf("note not found"))
+			} else {
+				writeError(c, http.StatusInternalServerError, err)
+			}
+			return
+		}
+		if ownerID != principal.UserID {
+			writeError(c, http.StatusForbidden, fmt.Errorf("only the note owner can change sharing"))
+			return
+		}
+	}
+	title, content, pinned, visibility := any(nil), any(nil), any(nil), any(nil)
 	if request.Title != nil {
 		value := strings.TrimSpace(*request.Title)
 		if value == "" || len([]rune(value)) > 160 {
@@ -679,9 +727,13 @@ func (a *App) updateNote(c *gin.Context) {
 	if request.Pinned != nil {
 		pinned = *request.Pinned
 	}
+	if request.Visibility != nil {
+		visibility = strings.TrimSpace(*request.Visibility)
+	}
 	var item models.Note
 	var rawSourceID sql.NullString
-	err = a.DB.QueryRowContext(c, `UPDATE notes SET title = COALESCE($4::text, title), content = COALESCE($5::text, content), pinned_at = CASE WHEN $6::boolean IS NULL THEN pinned_at WHEN $6 THEN COALESCE(pinned_at, now()) ELSE NULL END, updated_at = now() WHERE id = $1 AND user_id = $2 AND organization_id = $3 RETURNING id, title, content, source_conversation_id, pinned_at, created_at, updated_at`, id, principal.UserID, organizationID, title, content, pinned).Scan(&item.ID, &item.Title, &item.Content, &rawSourceID, &item.PinnedAt, &item.CreatedAt, &item.UpdatedAt)
+	var ownerID sql.NullString
+	err = a.DB.QueryRowContext(c, `UPDATE notes SET title = COALESCE($4::text, title), content = COALESCE($5::text, content), pinned_at = CASE WHEN $6::boolean IS NULL THEN pinned_at WHEN $6 THEN COALESCE(pinned_at, now()) ELSE NULL END, visibility = COALESCE($7::text, visibility), updated_at = now() WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace') RETURNING id, user_id::text, visibility, title, content, source_conversation_id, pinned_at, created_at, updated_at`, id, principal.UserID, organizationID, title, content, pinned, visibility).Scan(&item.ID, &ownerID, &item.Visibility, &item.Title, &item.Content, &rawSourceID, &item.PinnedAt, &item.CreatedAt, &item.UpdatedAt)
 	if err == sql.ErrNoRows {
 		writeError(c, http.StatusNotFound, fmt.Errorf("note not found"))
 		return
@@ -691,6 +743,10 @@ func (a *App) updateNote(c *gin.Context) {
 		return
 	}
 	item.SourceConversationID = parseOptionalUUIDString(rawSourceID.String)
+	if parsedOwner := parseOptionalUUIDString(ownerID.String); parsedOwner != nil {
+		item.OwnerID = *parsedOwner
+	}
+	item.CanManage = item.OwnerID == principal.UserID
 	c.JSON(http.StatusOK, gin.H{"note": item})
 }
 

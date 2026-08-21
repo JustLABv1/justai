@@ -15,8 +15,11 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   RotateCcw,
+  Search,
   Settings2,
   ShieldCheck,
   Trash2,
@@ -26,6 +29,7 @@ import type { LucideIcon } from "lucide-react"
 
 import { BrandMark } from "@/components/brand-mark"
 import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
+import { GlobalSearchDialog } from "@/components/global-search-dialog"
 import { ThemeSwitcher } from "@/components/theme-switcher"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -51,6 +55,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { Separator } from "@/components/ui/separator"
 import type {
   Conversation,
   Organization,
@@ -135,6 +140,10 @@ type FocusWorkspaceSidebarProps = {
     conversationId: string,
     title: string
   ) => void | Promise<void>
+  onShareConversation: (
+    conversationId: string,
+    visibility: "private" | "workspace"
+  ) => void | Promise<void>
   onConversationRefresh?: () => void | Promise<void>
   onArchiveSession: (sessionId: string, archived: boolean) => void
   onDeleteSession: (session: TranscriptionSession) => void
@@ -147,6 +156,14 @@ type FocusWorkspaceSidebarProps = {
 type RecencyGroup<T> = {
   label: string
   items: T[]
+}
+
+type CreateAction = {
+  label: string
+  hint: string
+  icon: LucideIcon
+  onClick: () => void
+  disabled?: boolean
 }
 
 export function FocusWorkspaceSidebar({
@@ -169,6 +186,7 @@ export function FocusWorkspaceSidebar({
   onArchiveConversation,
   onDeleteConversation,
   onRenameConversation,
+  onShareConversation,
   onConversationRefresh,
   onArchiveSession,
   onDeleteSession,
@@ -178,6 +196,7 @@ export function FocusWorkspaceSidebar({
   disabledFeatures,
 }: FocusWorkspaceSidebarProps) {
   const [historyQuery, setHistoryQuery] = useState("")
+  const [searchOpen, setSearchOpen] = useState(false)
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
   const [railExpanded, setRailExpanded] = useState(false)
   const [railPreferenceLoaded, setRailPreferenceLoaded] = useState(false)
@@ -187,6 +206,33 @@ export function FocusWorkspaceSidebar({
     activeView === "video-transcription"
   const navigation = railNavigation
   const historyVisible = historyView && historyOpen
+
+  const createAction: CreateAction | null =
+    activeView === "chat"
+      ? {
+          label: "New chat",
+          hint: "Start a new conversation",
+          icon: Plus,
+          onClick: () => onNavigate("chat"),
+        }
+      : activeView === "transcription"
+        ? {
+            label: "New room",
+            hint: "Create a live transcription room",
+            icon: Headphones,
+            onClick: onNewTranscriptionSession,
+            disabled: Boolean(disabledFeatures.transcription),
+          }
+        : activeView === "video-transcription"
+          ? {
+              label: "New video transcription",
+              hint: "Upload and transcribe a video",
+              icon: FileVideo,
+              onClick: onNewVideoTranscription,
+              disabled: Boolean(disabledFeatures.transcription),
+            }
+          : null
+  const CreateIcon = createAction?.icon ?? Plus
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -332,6 +378,11 @@ export function FocusWorkspaceSidebar({
             <PanelLeftOpen data-icon="inline-start" />
           </Button>
         )}
+        {railExpanded && (
+          <p className="px-3 text-[10px] font-medium tracking-[0.16em] text-muted-foreground uppercase">
+            Workspace
+          </p>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -399,18 +450,56 @@ export function FocusWorkspaceSidebar({
           </DropdownMenuContent>
         </DropdownMenu>
         <Button
-          aria-label="New chat"
+          aria-label="Search workspace"
+          aria-keyshortcuts="Meta+K Control+K"
           className={cn(
-            "rounded-xl",
+            "rounded-xl text-muted-foreground",
             railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
           )}
-          onClick={() => onNavigate("chat")}
-          title="New chat"
+          onClick={() => setSearchOpen(true)}
           size="icon"
+          title="Search workspace (⌘K / Ctrl K)"
+          variant="ghost"
         >
-          <Plus data-icon="inline-start" />
-          {railExpanded && <span>New chat</span>}
+          <Search data-icon="inline-start" />
+          {railExpanded && <span>Search workspace</span>}
+          {railExpanded && (
+            <kbd
+              aria-hidden="true"
+              className="ml-auto hidden rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-flex"
+            >
+              ⌘K
+            </kbd>
+          )}
         </Button>
+
+        {createAction && (
+          <Button
+            aria-label={createAction.label}
+            className={cn(
+              "rounded-xl",
+              railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
+            )}
+            disabled={createAction.disabled}
+            onClick={createAction.onClick}
+            size="icon"
+            title={
+              createAction.disabled
+                ? "Disabled by platform administrator"
+                : createAction.hint
+            }
+          >
+            <CreateIcon data-icon="inline-start" />
+            {railExpanded && <span>{createAction.label}</span>}
+          </Button>
+        )}
+
+        <Separator className="my-1" />
+        {railExpanded && (
+          <p className="px-3 text-[10px] font-medium tracking-[0.16em] text-muted-foreground uppercase">
+            Navigate
+          </p>
+        )}
 
         <nav
           aria-label="Workspace navigation"
@@ -489,17 +578,17 @@ export function FocusWorkspaceSidebar({
         )}
         {!historyVisible && historyView && (
           <Button
-            aria-label="Open chat history"
+            aria-label="Show chat history"
             className={cn(
               "rounded-xl text-muted-foreground",
               railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
             )}
             onClick={() => onHistoryOpenChange(true)}
             size="icon"
-            title="Open chat history"
+            title="Show chat history"
             variant="ghost"
           >
-            <PanelLeftOpen data-icon="inline-start" />
+            <PanelRightOpen data-icon="inline-start" />
             {railExpanded && <span>Chat history</span>}
           </Button>
         )}
@@ -563,6 +652,14 @@ export function FocusWorkspaceSidebar({
         </DropdownMenu>
       </div>
 
+      <GlobalSearchDialog
+        disabledFeatures={disabledFeatures}
+        onNavigate={onNavigate}
+        onOpenChange={setSearchOpen}
+        open={searchOpen}
+        platformAdmin={user.platformAdmin}
+      />
+
       <div
         className={cn(
           "min-w-0 flex-col gap-3 overflow-hidden p-4",
@@ -583,14 +680,14 @@ export function FocusWorkspaceSidebar({
             </h2>
           </div>
           <Button
-            aria-label="Collapse chat history"
+            aria-label="Hide chat history"
             className="size-8 rounded-xl text-muted-foreground"
             onClick={() => onHistoryOpenChange(false)}
             size="icon"
-            title="Collapse chat history"
+            title="Hide chat history"
             variant="ghost"
           >
-            <PanelLeftClose data-icon="inline-start" />
+            <PanelRightClose data-icon="inline-start" />
           </Button>
         </div>
 
@@ -602,58 +699,21 @@ export function FocusWorkspaceSidebar({
           </Alert>
         )}
 
-        {activeView === "transcription" ? (
-          <Button
-            className="w-full shrink-0 justify-start"
-            disabled={Boolean(disabledFeatures.transcription)}
-            onClick={onNewTranscriptionSession}
-            title={
-              disabledFeatures.transcription
-                ? "Disabled by platform administrator"
-                : "New room"
-            }
-          >
-            <Plus data-icon="inline-start" />
-            New room
-          </Button>
-        ) : activeView === "video-transcription" ? (
-          <Button
-            className="w-full shrink-0 justify-start"
-            disabled={Boolean(disabledFeatures.transcription)}
-            onClick={onNewVideoTranscription}
-            title={
-              disabledFeatures.transcription
-                ? "Disabled by platform administrator"
-                : "New video transcription"
-            }
-          >
-            <Plus data-icon="inline-start" />
-            New video transcription
-          </Button>
-        ) : (
-          <>
-            <Button
-              className="w-full shrink-0 justify-start"
-              onClick={() => onNavigate("chat")}
-            >
-              <Plus data-icon="inline-start" />
-              New chat
-            </Button>
-
-            <AssistantThreadList
-              activeConversationId={activeConversationId}
-              archivedConversations={archivedConversations}
-              conversations={conversations}
-              organizationId={activeOrganization?.id ?? null}
-              historyQuery={historyQuery}
-              onArchive={onArchiveConversation}
-              onDelete={onDeleteConversation}
-              onHistoryQueryChange={setHistoryQuery}
-              onRename={onRenameConversation}
-              onConversationRefresh={onConversationRefresh}
-              onSelect={(id) => onNavigate("chat", id)}
-            />
-          </>
+        {activeView === "chat" && (
+          <AssistantThreadList
+            activeConversationId={activeConversationId}
+            archivedConversations={archivedConversations}
+            conversations={conversations}
+            organizationId={activeOrganization?.id ?? null}
+            historyQuery={historyQuery}
+            onArchive={onArchiveConversation}
+            onDelete={onDeleteConversation}
+            onHistoryQueryChange={setHistoryQuery}
+            onRename={onRenameConversation}
+            onShare={onShareConversation}
+            onConversationRefresh={onConversationRefresh}
+            onSelect={(id) => onNavigate("chat", id)}
+          />
         )}
 
         {(activeView === "transcription" ||

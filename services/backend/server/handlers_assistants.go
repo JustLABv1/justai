@@ -421,7 +421,8 @@ func (a *App) savedAssistantForConversation(ctx context.Context, conversationID,
 		JOIN saved_assistants a ON a.id = c.assistant_id
 		JOIN saved_assistant_versions v
 		  ON v.id = c.assistant_version_id AND v.assistant_id = a.id
-		WHERE c.id = $1 AND c.user_id = $2 AND c.organization_id = $3`, conversationID, userID, organizationID))
+		WHERE c.id = $1 AND c.organization_id = $3
+		  AND (c.user_id = $2 OR c.visibility = 'workspace')`, conversationID, userID, organizationID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

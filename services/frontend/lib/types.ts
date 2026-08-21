@@ -13,7 +13,13 @@ export type ViewId =
   | "profile"
 
 export type SettingsTab =
-  "workspace" | "endpoints" | "knowledge" | "mcp" | "members" | "admin"
+  | "workspace"
+  | "endpoints"
+  | "knowledge"
+  | "mcp"
+  | "members"
+  | "privacy"
+  | "admin"
 
 export type AdminTab =
   | "overview"
@@ -328,6 +334,7 @@ export type ConversationContext = {
   mcpServers: MCPServer[]
   transcriptionSessions: TranscriptionSession[]
   notes?: Note[]
+  project?: WorkspaceProject | null
 }
 
 export type ConversationFolder = {
@@ -348,6 +355,10 @@ export type ConversationTag = {
 export type Conversation = {
   id: string
   title: string
+  ownerId?: string
+  visibility?: "private" | "workspace" | string
+  canManage?: boolean
+  projectId?: string | null
   endpointId?: string | null
   assistantId?: string | null
   assistantVersionId?: string | null
@@ -388,12 +399,44 @@ export type Memory = {
 
 export type Note = {
   id: string
+  ownerId?: string
+  visibility?: "private" | "workspace" | string
+  canManage?: boolean
   title: string
   content: string
   sourceConversationId?: string | null
   pinnedAt?: string | null
   createdAt: string
   updatedAt: string
+}
+
+export type WorkspaceProject = {
+  id: string
+  ownerId?: string
+  name: string
+  description: string
+  visibility: "private" | "workspace" | string
+  canManage?: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type PrivacySettings = {
+  archivedConversationRetentionDays: number
+  knowledgeRetentionDays: number
+  transcriptionRetentionDays: number
+  updatedAt?: string | null
+}
+
+export type UniversalSearchResult = {
+  kind:
+    "conversation" | "note" | "knowledge" | "transcript" | "project" | string
+  id: string
+  title: string
+  snippet: string
+  updatedAt: string
+  conversationId?: string
+  sessionId?: string
 }
 
 export type WebSearchResult = {

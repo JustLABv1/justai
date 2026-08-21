@@ -101,6 +101,9 @@ func (a *App) createConversation(c *gin.Context) {
 	item.EndpointID = parseOptionalUUID(rawEndpointID)
 	item.AssistantID = requestedAssistantID
 	item.AssistantVersionID = assistantVersionID
+	item.OwnerID = principal.UserID
+	item.Visibility = "private"
+	item.CanManage = true
 	c.JSON(http.StatusCreated, gin.H{"conversation": item})
 }
 
@@ -115,7 +118,7 @@ func (a *App) listConversations(c *gin.Context) {
 		archiveFilter = "TRUE"
 	}
 	conditions := []string{
-		"c.user_id = $1",
+		"(c.user_id = $1 OR c.visibility = 'workspace')",
 		"c.organization_id = $2",
 		archiveFilter,
 		`EXISTS (
@@ -227,6 +230,7 @@ func (a *App) listConversations(c *gin.Context) {
 				writeError(c, http.StatusInternalServerError, err)
 				return
 			}
+			result[index].CanManage = result[index].OwnerID == principal.UserID
 		}
 	}
 	nextCursor := ""
@@ -286,7 +290,8 @@ func (a *App) getConversation(c *gin.Context) {
 		       c.created_at, c.updated_at, c.archived_at,
 		       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'assistant'))::int
 		FROM conversations c
-		WHERE c.id = $1 AND c.user_id = $2 AND c.organization_id = $3
+		WHERE c.id = $1 AND c.organization_id = $3
+		  AND (c.user_id = $2 OR c.visibility = 'workspace')
 	`, conversationID, principal.UserID, organizationID).Scan(
 		&item.ID,
 		&item.Title,
@@ -313,6 +318,7 @@ func (a *App) getConversation(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	item.CanManage = item.OwnerID == principal.UserID
 	c.JSON(http.StatusOK, gin.H{"conversation": item})
 }
 
@@ -325,16 +331,66 @@ func (a *App) updateConversation(c *gin.Context) {
 		return
 	}
 	var request struct {
-		Archived *bool   `json:"archived"`
-		Title    *string `json:"title"`
-		Pinned   *bool   `json:"pinned"`
-		FolderID *string `json:"folderId"`
+		Archived   *bool   `json:"archived"`
+		Title      *string `json:"title"`
+		Pinned     *bool   `json:"pinned"`
+		FolderID   *string `json:"folderId"`
+		Visibility *string `json:"visibility"`
+		ProjectID  *string `json:"projectId"`
 	}
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if request.Archived == nil && request.Title == nil && request.Pinned == nil && request.FolderID == nil {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("title, archived, pinned, or folderId is required"))
+	if request.Archived == nil && request.Title == nil && request.Pinned == nil && request.FolderID == nil && request.Visibility == nil && request.ProjectID == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("title, archived, pinned, folderId, visibility, or projectId is required"))
+		return
+	}
+	if request.Visibility != nil || request.ProjectID != nil {
+		visibility := ""
+		if request.Visibility != nil {
+			visibility = strings.TrimSpace(*request.Visibility)
+			if visibility != "private" && visibility != "workspace" {
+				writeError(c, http.StatusBadRequest, fmt.Errorf("visibility must be private or workspace"))
+				return
+			}
+		}
+		var projectValue any
+		if request.ProjectID != nil {
+			projectIDValue := strings.TrimSpace(*request.ProjectID)
+			projectValue = projectIDValue
+			if projectIDValue != "" {
+				parsed, parseErr := uuid.Parse(projectIDValue)
+				if parseErr != nil {
+					writeError(c, http.StatusBadRequest, fmt.Errorf("invalid project id"))
+					return
+				}
+				var available bool
+				if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM workspace_projects WHERE id = $1 AND organization_id = $2 AND (user_id = $3 OR visibility = 'workspace'))`, parsed, organizationID, principal.UserID).Scan(&available); err != nil {
+					writeError(c, http.StatusInternalServerError, err)
+					return
+				}
+				if !available {
+					writeError(c, http.StatusBadRequest, fmt.Errorf("project is not available"))
+					return
+				}
+			}
+		}
+		result, updateErr := a.DB.ExecContext(c, `
+			UPDATE conversations
+			SET visibility = CASE WHEN $4 = '' THEN visibility ELSE $4 END,
+			    project_id = CASE WHEN $5::text IS NULL THEN project_id ELSE NULLIF($5, '')::uuid END,
+			    updated_at = now()
+			WHERE id = $1 AND user_id = $2 AND organization_id = $3
+		`, conversationID, principal.UserID, organizationID, visibility, projectValue)
+		if updateErr != nil {
+			writeError(c, http.StatusInternalServerError, updateErr)
+			return
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			writeError(c, http.StatusNotFound, fmt.Errorf("conversation not found"))
+			return
+		}
+		c.Status(http.StatusNoContent)
 		return
 	}
 	title := ""
@@ -459,7 +515,8 @@ func (a *App) listConversationMessages(c *gin.Context) {
 	if err := a.DB.QueryRowContext(c, `
 		SELECT EXISTS (
 			SELECT 1 FROM conversations
-			WHERE id = $1 AND user_id = $2 AND organization_id = $3
+			WHERE id = $1 AND organization_id = $3
+			  AND (user_id = $2 OR visibility = 'workspace')
 		)
 	`, conversationID, principal.UserID, organizationID).Scan(&exists); err != nil {
 		writeError(c, http.StatusInternalServerError, err)

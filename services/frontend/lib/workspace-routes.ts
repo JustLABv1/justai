@@ -33,6 +33,7 @@ const settingsTabs: SettingsTab[] = [
   "knowledge",
   "mcp",
   "members",
+  "privacy",
   "admin",
 ]
 
@@ -93,9 +94,7 @@ export function workspacePath(
   }
 
   if (view === "transcription" || view === "video-transcription") {
-    return sessionId
-      ? `/${view}/${encodeURIComponent(sessionId)}`
-      : `/${view}`
+    return sessionId ? `/${view}/${encodeURIComponent(sessionId)}` : `/${view}`
   }
 
   if (view === "settings") {

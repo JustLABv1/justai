@@ -38,6 +38,7 @@ import type {
   TranscriptionSession,
   Note,
   SavedAssistant,
+  WorkspaceProject,
 } from "@/lib/types"
 import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
 import { cn } from "@/lib/utils"
@@ -87,6 +88,7 @@ export function Workspace() {
   const [servers, setServers] = useState<MCPServer[]>([])
   const [notes, setNotes] = useState<Note[]>([])
   const [savedAssistants, setSavedAssistants] = useState<SavedAssistant[]>([])
+  const [projects, setProjects] = useState<WorkspaceProject[]>([])
   const [draftAssistantId, setDraftAssistantId] = useState<string | null>(null)
   const [actionError, setActionError] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
@@ -262,6 +264,7 @@ export function Workspace() {
         setServers([])
         setNotes([])
         setSavedAssistants([])
+        setProjects([])
 
         // The platform-admin shell is intentionally independent from the
         // active workspace. Avoid loading workspace resources (and emitting
@@ -292,6 +295,7 @@ export function Workspace() {
                 api.get<{ servers: MCPServer[] }>("/api/v1/mcp/servers"),
                 api.get<{ notes: Note[] }>("/api/v1/notes"),
                 api.get<{ assistants: SavedAssistant[] }>("/api/v1/assistants"),
+                api.get<{ projects: WorkspaceProject[] }>("/api/v1/projects"),
               ])
         if (cancelled) return
 
@@ -358,6 +362,10 @@ export function Workspace() {
           8,
           "assistants"
         )
+        const projectResult = valueAt<{ projects: WorkspaceProject[] }>(
+          9,
+          "projects"
+        )
         if (conversationResult)
           setConversations(conversationResult.conversations)
         if (archivedConversationResult)
@@ -371,6 +379,7 @@ export function Workspace() {
         if (serverResult) setServers(serverResult.servers)
         if (notesResult) setNotes(notesResult.notes)
         if (assistantResult) setSavedAssistants(assistantResult.assistants)
+        if (projectResult) setProjects(projectResult.projects)
         setFeatureErrors(errors)
         setDisabledFeatures(disabled)
         setStatus("ready")
@@ -821,6 +830,26 @@ export function Workspace() {
     [refreshConversations]
   )
 
+  const handleShareConversation = useCallback(
+    async (conversationId: string, visibility: "private" | "workspace") => {
+      setActionError("")
+      try {
+        await api.patch(`/api/v1/conversations/${conversationId}`, {
+          visibility,
+        })
+        await refreshConversations()
+      } catch (caught) {
+        setActionError(
+          caught instanceof Error
+            ? caught.message
+            : "The conversation sharing setting could not be updated."
+        )
+        throw caught
+      }
+    },
+    [refreshConversations]
+  )
+
   const handleDeleteConversation = useCallback((conversation: Conversation) => {
     setDeleteTarget({
       kind: "conversation",
@@ -1005,6 +1034,7 @@ export function Workspace() {
             refreshConversations().then(() => undefined)
           }
           onRenameConversation={handleRenameConversation}
+          onShareConversation={handleShareConversation}
           onNewTranscriptionSession={handleNewTranscriptionSession}
           onNewVideoTranscription={handleNewVideoTranscription}
           onNavigate={(
@@ -1218,6 +1248,7 @@ export function Workspace() {
         </main>
         {activeView === "chat" && contextOpen && (
           <WorkspaceContext
+            conversation={activeConversation ?? null}
             conversationId={activeConversationId}
             onEnsureConversation={ensureConversationForContext}
             onClose={() => setContextOpen(false)}
@@ -1225,6 +1256,8 @@ export function Workspace() {
             servers={servers}
             sources={sources}
             notes={notes}
+            onProjectsChange={setProjects}
+            projects={projects}
             transcriptionSessions={transcriptionSessions}
           />
         )}

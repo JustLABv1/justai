@@ -1,7 +1,16 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { FileText, Pin, PinOff, Plus, Save, Trash2 } from "lucide-react"
+import {
+  FileText,
+  LockKeyhole,
+  Pin,
+  PinOff,
+  Plus,
+  Save,
+  Share2,
+  Trash2,
+} from "lucide-react"
 
 import { api } from "@/lib/api"
 import type { Note } from "@/lib/types"
@@ -23,6 +32,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 type NotesViewProps = {
   onUseInChat?: (note: Note) => void | Promise<void>
@@ -34,6 +50,9 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [title, setTitle] = useState("")
   const [content, setContent] = useState("")
+  const [visibility, setVisibility] = useState<"private" | "workspace">(
+    "private"
+  )
   const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -53,6 +72,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
       setSelectedId(next?.id ?? null)
       setTitle(next?.title ?? "")
       setContent(next?.content ?? "")
+      setVisibility(next?.visibility === "workspace" ? "workspace" : "private")
       setError("")
     } catch (caught) {
       setError(
@@ -76,6 +96,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
     setSelectedId(note.id)
     setTitle(note.title)
     setContent(note.content)
+    setVisibility(note.visibility === "workspace" ? "workspace" : "private")
   }
 
   async function createNote() {
@@ -110,6 +131,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
         {
           title: title.trim() || "Untitled note",
           content,
+          ...(selected.canManage ? { visibility } : {}),
         }
       )
       setNotes((current) =>
@@ -210,7 +232,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
       <div className="grid min-h-[34rem] gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <Card className="min-h-0 overflow-hidden">
           <CardHeader className="gap-3 border-b">
-            <CardTitle className="text-base">Your notes</CardTitle>
+            <CardTitle className="text-base">Workspace notes</CardTitle>
             <Input
               aria-label="Search notes"
               onChange={(event) => {
@@ -283,14 +305,16 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                   >
                     {selected.pinnedAt ? <PinOff /> : <Pin />}
                   </Button>
-                  <Button
-                    onClick={() => void deleteNote()}
-                    size="icon-sm"
-                    title="Delete note"
-                    variant="ghost"
-                  >
-                    <Trash2 />
-                  </Button>
+                  {selected.canManage && (
+                    <Button
+                      onClick={() => void deleteNote()}
+                      size="icon-sm"
+                      title="Delete note"
+                      variant="ghost"
+                    >
+                      <Trash2 />
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="flex min-h-0 flex-col gap-4 pt-5">
@@ -301,6 +325,35 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                   placeholder="Note title"
                   value={title}
                 />
+                {selected.canManage && (
+                  <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2">
+                    {visibility === "workspace" ? (
+                      <Share2 className="size-4 text-primary" />
+                    ) : (
+                      <LockKeyhole className="size-4 text-muted-foreground" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium">Note visibility</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Workspace notes can be read and edited by members.
+                      </p>
+                    </div>
+                    <Select
+                      onValueChange={(value) =>
+                        setVisibility(value as "private" | "workspace")
+                      }
+                      value={visibility}
+                    >
+                      <SelectTrigger className="w-36" size="sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="private">Private</SelectItem>
+                        <SelectItem value="workspace">Workspace</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Textarea
                   aria-label="Note content"
                   className="min-h-72 flex-1"

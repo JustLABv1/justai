@@ -5,6 +5,7 @@ import {
   BookOpenText,
   CheckCircle2,
   Database,
+  FolderKanban,
   GitBranch,
   Headphones,
   LoaderCircle,
@@ -29,6 +30,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Sheet,
   SheetContent,
@@ -38,12 +47,14 @@ import {
 } from "@/components/ui/sheet"
 import type {
   ConversationContext,
+  Conversation,
   KnowledgeSource,
   MCPServer,
   Note,
   RepositoryContext,
   TranscriptionSession,
   ViewId,
+  WorkspaceProject,
 } from "@/lib/types"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -52,6 +63,7 @@ type ContextTab = "sources" | "mcp" | "live"
 type EnsureConversationOptions = { activate?: boolean }
 
 type WorkspaceContextProps = {
+  conversation: Conversation | null
   conversationId: string | null
   onEnsureConversation?: (
     options?: EnsureConversationOptions
@@ -59,17 +71,22 @@ type WorkspaceContextProps = {
   sources: KnowledgeSource[]
   servers: MCPServer[]
   notes: Note[]
+  projects: WorkspaceProject[]
+  onProjectsChange: (projects: WorkspaceProject[]) => void
   transcriptionSessions: TranscriptionSession[]
   onNavigate: (view: ViewId) => void
   onClose: () => void
 }
 
 export function WorkspaceContext({
+  conversation,
   conversationId,
   onEnsureConversation,
   sources,
   servers,
   notes,
+  projects,
+  onProjectsChange,
   transcriptionSessions,
   onNavigate,
   onClose,
@@ -86,6 +103,12 @@ export function WorkspaceContext({
   const [busy, setBusy] = useState("")
   const [notice, setNotice] = useState("")
   const [repositoryDialogOpen, setRepositoryDialogOpen] = useState(false)
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false)
+  const [projectName, setProjectName] = useState("")
+  const [projectDescription, setProjectDescription] = useState("")
+  const [projectVisibility, setProjectVisibility] = useState<
+    "private" | "workspace"
+  >("private")
   const [repositoryURL, setRepositoryURL] = useState("")
   const [repositoryRef, setRepositoryRef] = useState("")
   const [repositoryToken, setRepositoryToken] = useState("")
@@ -187,6 +210,70 @@ export function WorkspaceContext({
       conversationId ?? (await onEnsureConversation?.({ activate: false }))
     if (!targetConversationId) throw new Error(message)
     return targetConversationId
+  }
+
+  async function refreshConversationContext(targetConversationId: string) {
+    const next = await api.get<ConversationContext>(
+      `/api/v1/conversations/${targetConversationId}/context`
+    )
+    setContext(next)
+    setLoadedConversationId(targetConversationId)
+  }
+
+  async function selectProject(value: string | null) {
+    setBusy("project")
+    setNotice("")
+    try {
+      const targetConversationId = await ensureContextConversation(
+        "A conversation is required before setting project context."
+      )
+      await api.patch(`/api/v1/conversations/${targetConversationId}`, {
+        projectId: !value || value === "none" ? "" : value,
+      })
+      await refreshConversationContext(targetConversationId)
+    } catch (caught) {
+      setNotice(
+        caught instanceof Error
+          ? caught.message
+          : "Project context could not be updated."
+      )
+    } finally {
+      setBusy("")
+    }
+  }
+
+  async function createProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!projectName.trim()) {
+      setNotice("Enter a project name.")
+      return
+    }
+    setBusy("project-create")
+    setNotice("")
+    try {
+      const result = await api.post<{ project: WorkspaceProject }>(
+        "/api/v1/projects",
+        {
+          name: projectName.trim(),
+          description: projectDescription.trim(),
+          visibility: projectVisibility,
+        }
+      )
+      onProjectsChange([result.project, ...projects])
+      setProjectDialogOpen(false)
+      setProjectName("")
+      setProjectDescription("")
+      setProjectVisibility("private")
+      await selectProject(result.project.id)
+    } catch (caught) {
+      setNotice(
+        caught instanceof Error
+          ? caught.message
+          : "The project could not be created."
+      )
+    } finally {
+      setBusy("")
+    }
   }
 
   const availableSources = Array.from(
@@ -447,6 +534,62 @@ export function WorkspaceContext({
           {visibleNotice}
         </p>
       )}
+
+      <div className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+        <ContextHeading
+          icon={FolderKanban}
+          label="Project context"
+          meta={visibleContext.project ? "Attached" : "Optional"}
+        />
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          A project brief follows this conversation and keeps responses aligned
+          across turns.
+          {conversation?.visibility === "workspace"
+            ? " Members can use the attached brief."
+            : ""}
+        </p>
+        <div className="flex gap-2">
+          <Select
+            disabled={
+              busy === "project" ||
+              (conversationId !== null && conversation?.canManage === false)
+            }
+            onValueChange={(value) => void selectProject(value)}
+            value={visibleContext.project?.id ?? "none"}
+          >
+            <SelectTrigger className="min-w-0 flex-1" size="sm">
+              <SelectValue placeholder="No project" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No project</SelectItem>
+              {projects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {project.name}
+                  {project.visibility === "workspace" ? " · Workspace" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            aria-label="Create project"
+            disabled={
+              busy === "project-create" ||
+              (conversationId !== null && conversation?.canManage === false)
+            }
+            onClick={() => setProjectDialogOpen(true)}
+            size="icon-sm"
+            title="Create project"
+            variant="outline"
+          >
+            <Plus />
+          </Button>
+        </div>
+        {visibleContext.project?.description && (
+          <p className="line-clamp-4 text-[11px] text-muted-foreground">
+            {visibleContext.project.description}
+          </p>
+        )}
+      </div>
 
       <div
         className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1"
@@ -881,6 +1024,70 @@ export function WorkspaceContext({
                   />
                 )}
                 Connect repository
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={projectDialogOpen}
+        onOpenChange={(open) => {
+          if (busy !== "project-create") setProjectDialogOpen(open)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create project context</DialogTitle>
+            <DialogDescription>
+              Save a short brief that is automatically included whenever this
+              project is attached to a conversation.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="flex flex-col gap-4" onSubmit={createProject}>
+            <Input
+              aria-label="Project name"
+              onChange={(event) => setProjectName(event.target.value)}
+              placeholder="Project name"
+              value={projectName}
+            />
+            <Textarea
+              aria-label="Project brief"
+              onChange={(event) => setProjectDescription(event.target.value)}
+              placeholder="Goals, terminology, constraints, and decisions…"
+              value={projectDescription}
+            />
+            <Select
+              onValueChange={(value) =>
+                setProjectVisibility(value as "private" | "workspace")
+              }
+              value={projectVisibility}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="private">Private project</SelectItem>
+                <SelectItem value="workspace">Workspace project</SelectItem>
+              </SelectContent>
+            </Select>
+            <DialogFooter>
+              <Button
+                disabled={busy === "project-create"}
+                onClick={() => setProjectDialogOpen(false)}
+                type="button"
+                variant="ghost"
+              >
+                Cancel
+              </Button>
+              <Button disabled={busy === "project-create"} type="submit">
+                {busy === "project-create" && (
+                  <LoaderCircle
+                    className="animate-spin"
+                    data-icon="inline-start"
+                  />
+                )}
+                Create project
               </Button>
             </DialogFooter>
           </form>
