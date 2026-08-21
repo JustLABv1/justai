@@ -60,18 +60,23 @@ type TranscriptionManager struct {
 	joins   map[string][]time.Time
 	clocks  map[uuid.UUID]int64
 	epochs  map[uuid.UUID]int64
+
+	videoDiarizationMu      sync.Mutex
+	videoDiarizationCancels map[uuid.UUID]videoDiarizationCancellation
+	videoDiarizationToken   uint64
 }
 
 func NewTranscriptionManager(cfg config.Config, db *sql.DB, secrets *security.SecretBox) *TranscriptionManager {
 	return &TranscriptionManager{
-		Config:  cfg,
-		DB:      db,
-		Secrets: secrets,
-		hubs:    make(map[uuid.UUID]*transcriptionHub),
-		buffers: make(map[uuid.UUID]*pcmBuffer),
-		joins:   make(map[string][]time.Time),
-		clocks:  make(map[uuid.UUID]int64),
-		epochs:  make(map[uuid.UUID]int64),
+		Config:                  cfg,
+		DB:                      db,
+		Secrets:                 secrets,
+		hubs:                    make(map[uuid.UUID]*transcriptionHub),
+		buffers:                 make(map[uuid.UUID]*pcmBuffer),
+		joins:                   make(map[string][]time.Time),
+		clocks:                  make(map[uuid.UUID]int64),
+		epochs:                  make(map[uuid.UUID]int64),
+		videoDiarizationCancels: make(map[uuid.UUID]videoDiarizationCancellation),
 	}
 }
 

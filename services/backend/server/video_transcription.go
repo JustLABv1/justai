@@ -40,6 +40,48 @@ var errVideoTranscriptionSkipDiarization = errors.New("video speaker separation 
 
 const videoDiarizationSkipStage = "skipping_diarization"
 
+type videoDiarizationCancellation struct {
+	cancel context.CancelFunc
+	token  uint64
+}
+
+// registerVideoDiarizationCancel gives the skip endpoint a way to interrupt
+// the provider request that is currently holding the diarization stage open.
+// The cleanup function is token-aware so a stale worker cannot unregister a
+// newer attempt for the same upload.
+func (m *TranscriptionManager) registerVideoDiarizationCancel(uploadID uuid.UUID, cancel context.CancelFunc) func() {
+	m.videoDiarizationMu.Lock()
+	defer m.videoDiarizationMu.Unlock()
+	m.videoDiarizationToken++
+	registration := videoDiarizationCancellation{
+		cancel: cancel,
+		token:  m.videoDiarizationToken,
+	}
+	if m.videoDiarizationCancels == nil {
+		m.videoDiarizationCancels = make(map[uuid.UUID]videoDiarizationCancellation)
+	}
+	m.videoDiarizationCancels[uploadID] = registration
+	return func() {
+		m.videoDiarizationMu.Lock()
+		defer m.videoDiarizationMu.Unlock()
+		current, ok := m.videoDiarizationCancels[uploadID]
+		if ok && current.token == registration.token {
+			delete(m.videoDiarizationCancels, uploadID)
+		}
+	}
+}
+
+func (m *TranscriptionManager) cancelVideoDiarization(uploadID uuid.UUID) bool {
+	m.videoDiarizationMu.Lock()
+	registration, ok := m.videoDiarizationCancels[uploadID]
+	m.videoDiarizationMu.Unlock()
+	if !ok || registration.cancel == nil {
+		return false
+	}
+	registration.cancel()
+	return true
+}
+
 type videoUploadRecord struct {
 	model         models.TranscriptionVideoUpload
 	storageDriver string
@@ -107,6 +149,13 @@ func videoRetryStage(retryFrom string) string {
 	default:
 		return "starting"
 	}
+}
+
+func videoResumeStep(retryFrom, uploadStage string) string {
+	if normalized := normalizeVideoRetryStep(retryFrom); normalized != "" {
+		return normalized
+	}
+	return videoRetryStepForUploadStage(uploadStage)
 }
 
 func videoDiarizationStageIsActive(stage string) bool {
@@ -236,11 +285,11 @@ func (m *TranscriptionManager) processVideoJob(ctx context.Context) error {
 	if payloadErr == nil && strings.TrimSpace(parsed.RetryFrom) != "" && retryFrom == "" {
 		payloadErr = fmt.Errorf("unsupported video retry step %q", parsed.RetryFrom)
 	}
-	if payloadErr == nil && uploadStage == videoDiarizationSkipStage && retryFrom == "" {
-		// A worker can be reclaimed after the user requested a skip but before
-		// the in-flight diarization call observed it. Resume at that boundary so
-		// the transcript is retained and ASR is not started a second time.
-		retryFrom = videoRetryStepDiarization
+	if payloadErr == nil && retryFrom == "" {
+		// The first attempt has no explicit retry boundary in its payload. If its
+		// worker is reclaimed, resume from the authoritative upload stage so a
+		// restart during diarization, polishing, or finalization never reruns ASR.
+		retryFrom = videoResumeStep(retryFrom, uploadStage)
 	}
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'processing', attempts = attempts + 1, started_at = COALESCE(started_at, now()), completed_at = NULL, lease_until = now() + $2 * interval '1 second', updated_at = now() WHERE id = $1`, jobID, int64(videoJobLeaseDuration/time.Second)); err != nil {
 		return err
@@ -586,6 +635,10 @@ func (m *TranscriptionManager) skipVideoDiarization(ctx context.Context, uploadI
 	if err := transaction.Commit(); err != nil {
 		return models.TranscriptionVideoUpload{}, err
 	}
+	// The diarization provider may be handling the entire video in one HTTP
+	// request. Cancel that request immediately after the stage transition so
+	// skipping does not have to wait for the provider's own timeout.
+	m.cancelVideoDiarization(uploadID)
 	m.broadcast(sessionID, "transcription.diarization", ginData{"status": "skipping"})
 	m.broadcastVideoProgress(uploadID, "processing", 86, videoDiarizationSkipStage, "")
 	return loadVideoUpload(ctx, m.DB, uploadID)
@@ -600,13 +653,43 @@ func (m *TranscriptionManager) videoDiarizationSkipRequested(ctx context.Context
 }
 
 func (m *TranscriptionManager) finishSkippedVideoDiarization(ctx context.Context, uploadID, sessionID uuid.UUID) error {
-	if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_segments SET speaker_id = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+	transaction, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	if _, err := m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID); err != nil {
+	defer transaction.Rollback()
+
+	var pipelineRaw []byte
+	var processingStartedAt sql.NullTime
+	if err := transaction.QueryRowContext(ctx, `
+		SELECT upload.pipeline_steps, session.started_at
+		FROM transcription_video_uploads upload
+		JOIN transcription_sessions session ON session.id = upload.session_id
+		WHERE upload.id = $1 AND upload.session_id = $2
+		FOR UPDATE OF upload`, uploadID, sessionID).Scan(&pipelineRaw, &processingStartedAt); err != nil {
 		return err
 	}
-	if err := m.skipVideoPipelineStep(ctx, uploadID, videoRetryStepDiarization); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_segments SET speaker_id = NULL, updated_at = now() WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
+		return err
+	}
+	if _, err := transaction.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID); err != nil {
+		return err
+	}
+
+	var startedAt *time.Time
+	if processingStartedAt.Valid {
+		value := processingStartedAt.Time.UTC()
+		startedAt = &value
+	}
+	steps := applyVideoPipelineDiarizationSkip(decodeVideoPipeline(pipelineRaw), startedAt, time.Now().UTC())
+	pipeline, err := encodeVideoPipeline(steps)
+	if err != nil {
+		return err
+	}
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET pipeline_steps = $2, updated_at = now() WHERE id = $1`, uploadID, pipeline); err != nil {
+		return err
+	}
+	if err := transaction.Commit(); err != nil {
 		return err
 	}
 	m.broadcast(sessionID, "transcription.diarization", ginData{"status": "skipped"})
@@ -693,6 +776,12 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 		}
 	}
 	if shouldDiarize {
+		diarizationCtx, cancelDiarization := context.WithCancel(jobCtx)
+		unregisterDiarizationCancel := m.registerVideoDiarizationCancel(uploadID, cancelDiarization)
+		defer func() {
+			unregisterDiarizationCancel()
+			cancelDiarization()
+		}()
 		skipHandled := false
 		if err := m.updateVideoProgress(jobCtx, uploadID, 86, "diarizing", ""); err != nil {
 			if !errors.Is(err, errVideoTranscriptionSkipDiarization) {
@@ -704,8 +793,33 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 			skipHandled = true
 		}
 		if !skipHandled {
-			if err := m.diarizeVideoAudio(jobCtx, uploadID, record.model.SessionID, record.storageKey, diarizationEndpoint.UUID, language, durationMs, storage); err != nil {
-				if errors.Is(err, errVideoTranscriptionSkipDiarization) {
+			requested, err := m.videoDiarizationSkipRequested(jobCtx, uploadID)
+			if err != nil {
+				return err
+			}
+			if requested {
+				if err := m.finishSkippedVideoDiarization(jobCtx, uploadID, record.model.SessionID); err != nil {
+					return err
+				}
+				skipHandled = true
+			}
+		}
+		if !skipHandled {
+			if err := m.diarizeVideoAudio(diarizationCtx, uploadID, record.model.SessionID, record.storageKey, diarizationEndpoint.UUID, language, durationMs, storage); err != nil {
+				skipRequested := errors.Is(err, errVideoTranscriptionSkipDiarization)
+				// The skip endpoint cancels only the child context used by
+				// diarization. The job context remains alive, so inspect the
+				// authoritative upload stage after the provider returns. This
+				// also covers providers that wrap context cancellation in their
+				// own transport error.
+				if !skipRequested && jobCtx.Err() == nil {
+					requested, checkErr := m.videoDiarizationSkipRequested(jobCtx, uploadID)
+					if checkErr != nil {
+						return checkErr
+					}
+					skipRequested = requested
+				}
+				if skipRequested {
 					if err := m.finishSkippedVideoDiarization(jobCtx, uploadID, record.model.SessionID); err != nil {
 						return err
 					}
@@ -732,6 +846,7 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 				if err := m.finishSkippedVideoDiarization(jobCtx, uploadID, record.model.SessionID); err != nil {
 					return err
 				}
+				skipHandled = true
 			}
 		}
 	}
@@ -1585,7 +1700,7 @@ func (m *TranscriptionManager) updateVideoProgress(ctx context.Context, uploadID
 			return errVideoTranscriptionSkipDiarization
 		}
 	}
-	result, err := m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET progress = $2, stage = $3, error_message = NULLIF($4, ''), updated_at = now() WHERE id = $1 AND status NOT IN ('cancelled', 'completed') AND stage <> $5`, uploadID, progress, stage, errorMessage, videoDiarizationSkipStage)
+	result, err := m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET progress = $2, stage = $3, error_message = NULLIF($4, ''), updated_at = now() WHERE id = $1 AND status NOT IN ('cancelled', 'completed') AND (stage <> $5 OR $3 <> 'diarizing')`, uploadID, progress, stage, errorMessage, videoDiarizationSkipStage)
 	if err != nil {
 		return err
 	}

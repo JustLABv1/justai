@@ -2545,10 +2545,15 @@ function getVideoPipelineSteps(
         (index > 0 && step.status === "pending")
     )
   )
+  const pipelineConflictsWithUpload = Boolean(
+    upload.pipeline?.length &&
+    storedVideoPipelineConflictsWithUpload(upload, upload.pipeline)
+  )
   if (
     upload.pipeline &&
     upload.pipeline.length > 0 &&
-    !pipelineLooksUninitialized
+    !pipelineLooksUninitialized &&
+    !pipelineConflictsWithUpload
   ) {
     const byKey = new Map(upload.pipeline.map((step) => [step.key, step]))
     const steps = videoPipelineKeys.map((key) => ({
@@ -2580,7 +2585,73 @@ function getVideoPipelineSteps(
     )
     if (transcriptionStep) transcriptionStep.parallel = parallelProgress
   }
+  const storedDiarization = upload.pipeline?.find(
+    (step) => step.key === "diarization"
+  )
+  const fallbackDiarization = fallbackSteps.find(
+    (step) => step.key === "diarization"
+  )
+  if (storedDiarization?.status === "skipped" && fallbackDiarization) {
+    fallbackDiarization.status = "skipped"
+    fallbackDiarization.startedAt = undefined
+    fallbackDiarization.completedAt = undefined
+    fallbackDiarization.durationMs = 0
+    fallbackDiarization.error = undefined
+  }
   return hydrateVideoPipelineTiming(fallbackSteps, upload, session)
+}
+
+function storedVideoPipelineConflictsWithUpload(
+  upload: TranscriptionVideoUpload,
+  pipeline: TranscriptionVideoPipelineStep[]
+) {
+  const stage = upload.stage || ""
+  let authoritativeIndex: number | null = null
+  if (upload.status === "completed" || stage === "completed") {
+    authoritativeIndex = videoPipelineKeys.length
+  } else if (stage === "uploading") {
+    authoritativeIndex = 0
+  } else if (stage === "uploaded" || stage === "queued") {
+    authoritativeIndex = 1
+  } else if (
+    ["starting", "extracting", "transcribing", "fusing", "processing"].includes(
+      stage
+    )
+  ) {
+    authoritativeIndex = 1
+  } else if (stage === "diarizing" || stage === "skipping_diarization") {
+    authoritativeIndex = 2
+  } else if (stage === "polishing") {
+    authoritativeIndex = 3
+  } else if (stage === "finalizing") {
+    authoritativeIndex = 4
+  }
+  if (authoritativeIndex === null) return false
+
+  const byKey = new Map(pipeline.map((step) => [step.key, step]))
+  for (let index = 0; index < authoritativeIndex; index += 1) {
+    const key = videoPipelineKeys[index]
+    const status = byKey.get(key)?.status ?? "pending"
+    if (key === "upload" || key === "transcription" || key === "finalization") {
+      if (status !== "completed") return true
+      continue
+    }
+    if (!["completed", "skipped", "failed"].includes(status)) return true
+  }
+
+  if (
+    authoritativeIndex < videoPipelineKeys.length &&
+    upload.status === "processing"
+  ) {
+    const currentStatus = byKey.get(
+      videoPipelineKeys[authoritativeIndex]
+    )?.status
+    if (stage === "skipping_diarization") {
+      return currentStatus !== "active" && currentStatus !== "skipped"
+    }
+    return currentStatus !== "active" && currentStatus !== "retrying"
+  }
+  return false
 }
 
 function repairCancelledVideoPipeline(
