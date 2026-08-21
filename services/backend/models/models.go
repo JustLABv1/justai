@@ -232,6 +232,7 @@ type TranscriptionInsightChapter struct {
 type TranscriptionInsights struct {
 	SessionID   uuid.UUID                     `json:"sessionId"`
 	Status      string                        `json:"status"`
+	Language    string                        `json:"language"`
 	Summary     string                        `json:"summary,omitempty"`
 	Chapters    []TranscriptionInsightChapter `json:"chapters,omitempty"`
 	Topics      []string                      `json:"topics,omitempty"`

@@ -65,6 +65,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { groupTranscriptionSegments } from "@/lib/transcription"
 import { cn } from "@/lib/utils"
@@ -120,6 +121,24 @@ type SpeakerSummary = {
   sampleEndMs: number | null
   sampleText: string
 }
+
+const insightLanguageOptions = [
+  { value: "auto", label: "Auto (transcript language)" },
+  { value: "en", label: "English" },
+  { value: "de", label: "German" },
+  { value: "fr", label: "French" },
+  { value: "es", label: "Spanish" },
+  { value: "it", label: "Italian" },
+  { value: "pt", label: "Portuguese" },
+  { value: "nl", label: "Dutch" },
+  { value: "pl", label: "Polish" },
+  { value: "uk", label: "Ukrainian" },
+  { value: "tr", label: "Turkish" },
+  { value: "ar", label: "Arabic" },
+  { value: "ja", label: "Japanese" },
+  { value: "ko", label: "Korean" },
+  { value: "zh", label: "Chinese" },
+] as const
 
 function formatVideoDuration(durationMs: number) {
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1000))
@@ -280,7 +299,11 @@ export function VideoTranscriptWorkspace({
   const [mergeTargetId, setMergeTargetId] = useState("")
   const [mergeSaving, setMergeSaving] = useState(false)
   const [insightsGenerating, setInsightsGenerating] = useState(false)
+  const [insightLanguage, setInsightLanguage] = useState(
+    () => snapshot.insights?.language ?? "auto"
+  )
   const [exportFormat, setExportFormat] = useState("pdf")
+  const [includeInsightsInExport, setIncludeInsightsInExport] = useState(true)
   const [speakerSample, setSpeakerSample] = useState<{
     speakerId: string
     endOffsetMs: number
@@ -407,11 +430,16 @@ export function VideoTranscriptWorkspace({
   const insights = snapshot.insights ?? {
     sessionId: snapshot.session.id,
     status: "idle" as const,
+    language: "auto",
     chapters: [],
     topics: [],
     actionItems: [],
     updatedAt: "",
   }
+  const exportSupportsInsights = ["pdf", "docx", "md", "txt"].includes(
+    exportFormat
+  )
+  const insightsReady = insights.status === "completed"
   const speakerSummaries = useMemo<SpeakerSummary[]>(() => {
     const segmentsBySpeaker = new Map<string, TranscriptionSegment[]>()
     for (const segment of displaySegments) {
@@ -705,16 +733,18 @@ export function VideoTranscriptWorkspace({
       insights: {
         ...(current.insights ?? {
           sessionId: current.session.id,
+          language: insightLanguage,
           updatedAt: "",
         }),
         sessionId: current.session.id,
+        language: insightLanguage,
         status: "processing",
       },
     }))
     try {
       const result = await api.post<{ insights: TranscriptionInsights }>(
         `/api/v1/transcription/sessions/${snapshot.session.id}/insights`,
-        {}
+        { language: insightLanguage }
       )
       updateSnapshot((current) => ({ ...current, insights: result.insights }))
       onError("")
@@ -729,8 +759,10 @@ export function VideoTranscriptWorkspace({
         insights: {
           ...(current.insights ?? {
             sessionId: current.session.id,
+            language: insightLanguage,
             updatedAt: "",
           }),
+          language: insightLanguage,
           status: "failed",
         },
       }))
@@ -741,9 +773,10 @@ export function VideoTranscriptWorkspace({
 
   const exportTranscript = async () => {
     try {
-      const blob = await api.getBlob(
-        `/api/v1/transcription/sessions/${snapshot.session.id}/export/${exportFormat}`
-      )
+      const includeInsights =
+        exportSupportsInsights && includeInsightsInExport && insightsReady
+      const exportUrl = `/api/v1/transcription/sessions/${snapshot.session.id}/export/${exportFormat}${includeInsights ? "?includeInsights=true" : ""}`
+      const blob = await api.getBlob(exportUrl)
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
@@ -862,6 +895,29 @@ export function VideoTranscriptWorkspace({
                 >
                   <Download />
                 </Button>
+                {exportSupportsInsights ? (
+                  <label
+                    className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                    title={
+                      insightsReady
+                        ? "Include the generated AI insights"
+                        : "Generate AI insights first"
+                    }
+                  >
+                    <Switch
+                      aria-label="Include AI insights in export"
+                      checked={includeInsightsInExport}
+                      disabled={!insightsReady}
+                      onCheckedChange={setIncludeInsightsInExport}
+                      size="sm"
+                    />
+                    AI insights
+                  </label>
+                ) : exportFormat === "json" ? (
+                  <span className="text-[11px] text-muted-foreground">
+                    Includes insights
+                  </span>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1381,6 +1437,42 @@ export function VideoTranscriptWorkspace({
             <CardDescription>
               Summary, chapters, topics, and action items from the transcript.
             </CardDescription>
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <span className="text-xs text-muted-foreground">
+                Output language
+              </span>
+              <Select
+                disabled={
+                  insightsGenerating || insights.status === "processing"
+                }
+                items={insightLanguageOptions.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+                onValueChange={(value) => setInsightLanguage(value ?? "auto")}
+                value={insightLanguage}
+              >
+                <SelectTrigger
+                  aria-label="AI insight output language"
+                  className="h-7 min-w-48 text-xs"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {insightLanguageOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {insights.status === "completed" &&
+              insights.language !== insightLanguage ? (
+                <span className="text-xs text-muted-foreground">
+                  Regenerate to apply
+                </span>
+              ) : null}
+            </div>
           </CardHeader>
           <CardContent className="space-y-3 px-4 pb-4 text-xs">
             {insights.error ? (

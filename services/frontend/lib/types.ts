@@ -498,6 +498,7 @@ export type TranscriptionInsightChapter = {
 export type TranscriptionInsights = {
   sessionId: string
   status: "idle" | "processing" | "completed" | "failed"
+  language: string
   summary?: string
   chapters?: TranscriptionInsightChapter[]
   topics?: string[]

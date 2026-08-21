@@ -66,7 +66,7 @@ func (a *App) Router() *gin.Engine {
 		}
 		var repositoryStorageReady bool
 		if err := a.DB.QueryRowContext(c, `
-			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '031_transcription_workspace.sql')
+			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '032_transcription_insight_language.sql')
 			   AND to_regclass('public.repository_contexts') IS NOT NULL
 			   AND to_regclass('public.repository_context_files') IS NOT NULL
 			   AND to_regclass('public.conversation_repository_contexts') IS NOT NULL

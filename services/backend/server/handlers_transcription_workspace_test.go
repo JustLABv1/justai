@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"justai-backend/config"
+	"justai-backend/models"
 )
 
 func TestTranscriptWorkspaceExportArtifacts(t *testing.T) {
@@ -21,7 +22,7 @@ func TestTranscriptWorkspaceExportArtifacts(t *testing.T) {
 		EndOffsetMs:   4250,
 	}}
 
-	pdf := buildTranscriptPDF("Sitzung 03", rows)
+	pdf := buildTranscriptPDF("Sitzung 03", rows, nil)
 	if !bytes.HasPrefix(pdf, []byte("%PDF-1.4")) {
 		t.Fatalf("PDF does not start with a PDF header")
 	}
@@ -31,7 +32,7 @@ func TestTranscriptWorkspaceExportArtifacts(t *testing.T) {
 		}
 	}
 
-	docx := buildTranscriptDOCX("Sitzung 03", rows)
+	docx := buildTranscriptDOCX("Sitzung 03", rows, nil)
 	archive, err := zip.NewReader(bytes.NewReader(docx), int64(len(docx)))
 	if err != nil {
 		t.Fatalf("DOCX is not a ZIP package: %v", err)
@@ -88,7 +89,7 @@ func TestTranscriptPDFPagination(t *testing.T) {
 		})
 	}
 
-	pdf := buildTranscriptPDF("Sitzung 02", rows)
+	pdf := buildTranscriptPDF("Sitzung 02", rows, nil)
 	pageCount := bytes.Count(pdf, []byte("/Type /Page /Parent"))
 	if pageCount < 2 {
 		t.Fatalf("expected a long transcript to paginate, got %d page(s)", pageCount)
@@ -97,6 +98,72 @@ func TestTranscriptPDFPagination(t *testing.T) {
 		if err := os.WriteFile(path, pdf, 0o600); err != nil {
 			t.Fatalf("write PDF pagination artifact: %v", err)
 		}
+	}
+}
+
+func TestTranscriptionInsightLanguagePrompt(t *testing.T) {
+	if normalized, ok := normalizeTranscriptionInsightLanguage("de-DE"); !ok || normalized != "de" {
+		t.Fatalf("expected de-DE to normalize to de, got %q (valid=%v)", normalized, ok)
+	}
+	prompt := transcriptionInsightSystemPrompt("de", "en")
+	if !strings.Contains(prompt, "German") || !strings.Contains(prompt, "Do not write the insights in another language") {
+		t.Fatalf("language instruction is missing from prompt: %s", prompt)
+	}
+	autoPrompt := transcriptionInsightSystemPrompt("auto", "de")
+	if !strings.Contains(autoPrompt, "German") {
+		t.Fatalf("auto language prompt did not follow the transcript language: %s", autoPrompt)
+	}
+}
+
+func TestTranscriptInsightExportFormatting(t *testing.T) {
+	insights := &models.TranscriptionInsights{
+		Status:   "completed",
+		Language: "de",
+		Summary:  "Eine kurze Zusammenfassung.",
+		Chapters: []models.TranscriptionInsightChapter{{Title: "Einleitung", Summary: "Der Anfang", StartOffsetMs: 0}},
+		Topics:   []string{"Haushalt"},
+		ActionItems: []string{
+			"Zahlen prüfen",
+		},
+	}
+	rows := []transcriptionExportRow{{Text: "Der Transkripttext.", StartOffsetMs: 0, EndOffsetMs: 2000}}
+
+	plainText := transcriptionPlainText(rows, insights)
+	if !strings.Contains(plainText, "AI INSIGHTS") || !strings.Contains(plainText, "Eine kurze Zusammenfassung.") {
+		t.Fatalf("plain text export does not contain insights: %s", plainText)
+	}
+	markdown := transcriptionMarkdown("Sitzung 02", rows, insights)
+	if !strings.Contains(markdown, "## AI insights") || !strings.Contains(markdown, "Zahlen prüfen") {
+		t.Fatalf("markdown export does not contain insights: %s", markdown)
+	}
+	pdf := buildTranscriptPDF("Sitzung 02", rows, insights)
+	if !bytes.Contains(pdf, []byte("AI insights")) {
+		t.Fatal("PDF export does not contain the insights section")
+	}
+	if path := os.Getenv("JUSTAI_TRANSCRIPT_PDF_INSIGHTS_VERIFY_PATH"); path != "" {
+		if err := os.WriteFile(path, pdf, 0o600); err != nil {
+			t.Fatalf("write PDF insights artifact: %v", err)
+		}
+	}
+	docx := buildTranscriptDOCX("Sitzung 02", rows, insights)
+	archive, err := zip.NewReader(bytes.NewReader(docx), int64(len(docx)))
+	if err != nil {
+		t.Fatalf("DOCX with insights is not a ZIP package: %v", err)
+	}
+	var document bytes.Buffer
+	for _, file := range archive.File {
+		if file.Name != "word/document.xml" {
+			continue
+		}
+		reader, openErr := file.Open()
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		_, _ = document.ReadFrom(reader)
+		_ = reader.Close()
+	}
+	if !strings.Contains(document.String(), "AI insights") || !strings.Contains(document.String(), "Eine kurze Zusammenfassung.") {
+		t.Fatalf("DOCX export does not contain insights: %s", document.String())
 	}
 }
 
