@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       '@ai-sdk/react':
-        specifier: ^4.0.70
+        specifier: ^4.0.71
         version: 4.0.72(react@19.2.8)(zod@4.4.3)
       '@assistant-ui/react':
         specifier: ^0.15.15
@@ -36,7 +36,7 @@ importers:
         specifier: ^3.46.0
         version: 3.46.0(react@19.2.8)
       ai:
-        specifier: ^7.0.67
+        specifier: ^7.0.68
         version: 7.0.69(zod@4.4.3)
       class-variance-authority:
         specifier: ^0.7.1
@@ -119,12 +119,6 @@ packages:
 
   '@ai-sdk/gateway@4.0.55':
     resolution: {integrity: sha512-7WP/nlDz2BkXFlZzwF3w5JgCvktyHC++LP4PZ4mQpbvxrq+M7OdNslevlkuddHhJ+62BZu4oiL/afXlsWOSJZQ==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/mcp@2.0.32':
-    resolution: {integrity: sha512-NkXUnIEUmOmjD42LGpXGdHPULYvAV4SYUojutqw5YVNmQA7g64YRv3NLOaST21b2vIScUAah4qWchi62iUpQdA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -2566,6 +2560,7 @@ packages:
   eslint@9.39.5:
     resolution: {integrity: sha512-DgZS62aPLXKlnxILS/AYCoRvHaZeXceIzlXPkkGGzJWSow1aEk0lbTlxUSlyjC8jcaKxAdOnTDz+o1JFSBsyjw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -4540,13 +4535,6 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
-  '@ai-sdk/mcp@2.0.32(zod@4.4.3)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.7
-      '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
-      pkce-challenge: 5.0.1
-      zod: 4.4.3
-
   '@ai-sdk/mcp@2.0.33(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.7
@@ -4583,7 +4571,7 @@ snapshots:
 
   '@assistant-ui/ai-sdk@0.0.1(@types/react@19.2.18)(react@19.2.8)(zod@4.4.3)(zustand@5.0.14(@types/react@19.2.18)(immer@11.1.17)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8)))':
     dependencies:
-      '@ai-sdk/mcp': 2.0.32(zod@4.4.3)
+      '@ai-sdk/mcp': 2.0.33(zod@4.4.3)
       '@ai-sdk/react': 4.0.72(react@19.2.8)(zod@4.4.3)
       '@assistant-ui/core': 0.3.14(@assistant-ui/store@0.3.10(@assistant-ui/tap@0.9.13(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.13(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.1.40)(react@19.2.8)(zustand@5.0.14(@types/react@19.2.18)(immer@11.1.17)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8)))
       '@assistant-ui/store': 0.3.10(@assistant-ui/tap@0.9.13(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
