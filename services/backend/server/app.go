@@ -66,7 +66,7 @@ func (a *App) Router() *gin.Engine {
 		}
 		var repositoryStorageReady bool
 		if err := a.DB.QueryRowContext(c, `
-				SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '030_transcription_worker_telemetry.sql')
+			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '031_transcription_workspace.sql')
 			   AND to_regclass('public.repository_contexts') IS NOT NULL
 			   AND to_regclass('public.repository_context_files') IS NOT NULL
 			   AND to_regclass('public.conversation_repository_contexts') IS NOT NULL
@@ -186,6 +186,14 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/video-uploads/:id/cancel", a.platformFeature("transcription"), a.cancelVideoTranscription)
 	org.GET("/transcription/video-uploads/:id/playback", a.platformFeature("transcription"), a.getVideoTranscriptionPlayback)
 	org.POST("/transcription/sessions/:id/sources", a.platformFeature("transcription"), a.createTranscriptionSource)
+	org.POST("/transcription/sessions/:id/segments/assign-speaker", a.platformFeature("transcription"), a.assignTranscriptionSegments)
+	org.PATCH("/transcription/sessions/:id/segments/:segmentId", a.platformFeature("transcription"), a.updateTranscriptionSegment)
+	org.GET("/transcription/sessions/:id/annotations", a.platformFeature("transcription"), a.listTranscriptionAnnotations)
+	org.POST("/transcription/sessions/:id/annotations", a.platformFeature("transcription"), a.createTranscriptionAnnotation)
+	org.PATCH("/transcription/sessions/:id/annotations/:annotationId", a.platformFeature("transcription"), a.updateTranscriptionAnnotation)
+	org.DELETE("/transcription/sessions/:id/annotations/:annotationId", a.platformFeature("transcription"), a.deleteTranscriptionAnnotation)
+	org.POST("/transcription/sessions/:id/insights", a.platformFeature("transcription"), a.generateTranscriptionInsights)
+	org.GET("/transcription/sessions/:id/export/:format", a.platformFeature("transcription"), a.exportTranscription)
 	org.POST("/transcription/sessions/:id/join-code", a.platformFeature("transcription"), a.rotateTranscriptionJoinCode)
 	org.GET("/transcription/sessions/:id/join-requests", a.platformFeature("transcription"), a.listTranscriptionJoinRequests)
 	org.POST("/transcription/join-requests/:id/approve", a.platformFeature("transcription"), a.approveTranscriptionJoinRequest)

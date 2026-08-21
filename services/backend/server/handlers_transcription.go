@@ -1215,7 +1215,7 @@ func (a *App) persistTranscriptionSegmentWithRawAndSpeaker(ctx context.Context, 
 }
 
 func (a *App) mergeTranscriptionSegment(ctx context.Context, sessionID, sourceID, speakerID uuid.UUID, text string, start, end int64) (models.TranscriptionSegment, bool, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT id, session_id, source_id, speaker_id, text, raw_text, polished_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at FROM transcription_segments WHERE session_id = $1 AND canonical = TRUE AND start_offset_ms <= $2 AND end_offset_ms >= $3 ORDER BY ABS(start_offset_ms - $4) LIMIT 24`, sessionID, end+1500, start-1500, start)
+	rows, err := a.DB.QueryContext(ctx, `SELECT id, session_id, source_id, speaker_id, text, raw_text, polished_text, edited_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at FROM transcription_segments WHERE session_id = $1 AND canonical = TRUE AND start_offset_ms <= $2 AND end_offset_ms >= $3 ORDER BY ABS(start_offset_ms - $4) LIMIT 24`, sessionID, end+1500, start-1500, start)
 	if err != nil {
 		return models.TranscriptionSegment{}, false, err
 	}
@@ -1223,9 +1223,9 @@ func (a *App) mergeTranscriptionSegment(ctx context.Context, sessionID, sourceID
 	for rows.Next() {
 		var item models.TranscriptionSegment
 		var sourceValue, speakerValue uuid.NullUUID
-		var rawText, polishedText sql.NullString
+		var rawText, polishedText, editedText sql.NullString
 		var heard []byte
-		if err := rows.Scan(&item.ID, &item.SessionID, &sourceValue, &speakerValue, &item.Text, &rawText, &polishedText, &item.StartOffsetMs, &item.EndOffsetMs, &item.Confidence, &item.SignalQuality, &item.Canonical, &heard, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &sourceValue, &speakerValue, &item.Text, &rawText, &polishedText, &editedText, &item.StartOffsetMs, &item.EndOffsetMs, &item.Confidence, &item.SignalQuality, &item.Canonical, &heard, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return models.TranscriptionSegment{}, false, err
 		}
 		item.RawText = rawText.String
@@ -1234,6 +1234,9 @@ func (a *App) mergeTranscriptionSegment(ctx context.Context, sessionID, sourceID
 		}
 		if polishedText.Valid {
 			item.PolishedText = &polishedText.String
+		}
+		if editedText.Valid {
+			item.EditedText = &editedText.String
 		}
 		if !transcriptionTextsMatch(item.Text, text) {
 			continue
@@ -1382,6 +1385,14 @@ func (a *App) transcriptionSnapshot(ctx context.Context, sessionID uuid.UUID) (g
 	if err != nil {
 		return nil, err
 	}
+	annotations, err := loadTranscriptionAnnotations(ctx, a.DB, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	insights, err := loadTranscriptionInsights(ctx, a.DB, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	videoUpload, err := loadLatestVideoUpload(ctx, a.DB, sessionID)
 	if err != nil {
 		return nil, err
@@ -1390,7 +1401,7 @@ func (a *App) transcriptionSnapshot(ctx context.Context, sessionID uuid.UUID) (g
 		return nil, err
 	}
 	a.attachVideoPlaybackURL(ctx, videoUpload)
-	return gin.H{"session": session, "sources": sources, "speakers": speakers, "segments": segments, "recordings": recordings, "videoUpload": videoUpload}, nil
+	return gin.H{"session": session, "sources": sources, "speakers": speakers, "segments": segments, "recordings": recordings, "annotations": annotations, "insights": insights, "videoUpload": videoUpload}, nil
 }
 
 func (a *App) listTranscriptionRecordings(c *gin.Context) {
@@ -1772,7 +1783,7 @@ func loadTranscriptionSpeakers(ctx context.Context, db *sql.DB, sessionID uuid.U
 }
 
 func loadTranscriptionSegments(ctx context.Context, db *sql.DB, sessionID uuid.UUID) ([]models.TranscriptionSegment, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, session_id, source_id, speaker_id, text, raw_text, polished_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at FROM transcription_segments WHERE session_id = $1 AND canonical = TRUE ORDER BY start_offset_ms, created_at`, sessionID)
+	rows, err := db.QueryContext(ctx, `SELECT id, session_id, source_id, speaker_id, text, raw_text, polished_text, edited_text, start_offset_ms, end_offset_ms, confidence, signal_quality, canonical, heard_by_source_ids, created_at, updated_at FROM transcription_segments WHERE session_id = $1 AND canonical = TRUE ORDER BY start_offset_ms, created_at`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1781,9 +1792,9 @@ func loadTranscriptionSegments(ctx context.Context, db *sql.DB, sessionID uuid.U
 	for rows.Next() {
 		var item models.TranscriptionSegment
 		var sourceID, speakerID uuid.NullUUID
-		var rawText, polishedText sql.NullString
+		var rawText, polishedText, editedText sql.NullString
 		var heard []byte
-		if err := rows.Scan(&item.ID, &item.SessionID, &sourceID, &speakerID, &item.Text, &rawText, &polishedText, &item.StartOffsetMs, &item.EndOffsetMs, &item.Confidence, &item.SignalQuality, &item.Canonical, &heard, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &sourceID, &speakerID, &item.Text, &rawText, &polishedText, &editedText, &item.StartOffsetMs, &item.EndOffsetMs, &item.Confidence, &item.SignalQuality, &item.Canonical, &heard, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		item.RawText = rawText.String
@@ -1792,6 +1803,9 @@ func loadTranscriptionSegments(ctx context.Context, db *sql.DB, sessionID uuid.U
 		}
 		if polishedText.Valid {
 			item.PolishedText = &polishedText.String
+		}
+		if editedText.Valid {
+			item.EditedText = &editedText.String
 		}
 		if sourceID.Valid {
 			item.SourceID = &sourceID.UUID

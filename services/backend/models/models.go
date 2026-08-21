@@ -198,6 +198,7 @@ type TranscriptionSegment struct {
 	Text             string      `json:"text"`
 	RawText          string      `json:"rawText,omitempty"`
 	PolishedText     *string     `json:"polishedText,omitempty"`
+	EditedText       *string     `json:"editedText,omitempty"`
 	StartOffsetMs    int64       `json:"startOffsetMs"`
 	EndOffsetMs      int64       `json:"endOffsetMs"`
 	Confidence       *float64    `json:"confidence,omitempty"`
@@ -206,6 +207,38 @@ type TranscriptionSegment struct {
 	HeardBySourceIDs []uuid.UUID `json:"heardBySourceIds,omitempty"`
 	CreatedAt        time.Time   `json:"createdAt"`
 	UpdatedAt        time.Time   `json:"updatedAt"`
+}
+
+type TranscriptionAnnotation struct {
+	ID            uuid.UUID  `json:"id"`
+	SessionID     uuid.UUID  `json:"sessionId"`
+	UserID        uuid.UUID  `json:"-"`
+	SegmentID     *uuid.UUID `json:"segmentId,omitempty"`
+	Kind          string     `json:"kind"`
+	Note          string     `json:"note,omitempty"`
+	StartOffsetMs int64      `json:"startOffsetMs"`
+	EndOffsetMs   int64      `json:"endOffsetMs"`
+	Resolved      bool       `json:"resolved"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}
+
+type TranscriptionInsightChapter struct {
+	Title         string `json:"title"`
+	Summary       string `json:"summary,omitempty"`
+	StartOffsetMs int64  `json:"startOffsetMs"`
+}
+
+type TranscriptionInsights struct {
+	SessionID   uuid.UUID                     `json:"sessionId"`
+	Status      string                        `json:"status"`
+	Summary     string                        `json:"summary,omitempty"`
+	Chapters    []TranscriptionInsightChapter `json:"chapters,omitempty"`
+	Topics      []string                      `json:"topics,omitempty"`
+	ActionItems []string                      `json:"actionItems,omitempty"`
+	Error       string                        `json:"error,omitempty"`
+	GeneratedAt *time.Time                    `json:"generatedAt,omitempty"`
+	UpdatedAt   time.Time                     `json:"updatedAt"`
 }
 
 type TranscriptionRecording struct {

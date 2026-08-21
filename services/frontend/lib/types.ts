@@ -465,6 +465,7 @@ export type TranscriptionSegment = {
   text: string
   rawText?: string
   polishedText?: string | null
+  editedText?: string | null
   startOffsetMs: number
   endOffsetMs: number
   confidence?: number | null
@@ -472,6 +473,37 @@ export type TranscriptionSegment = {
   canonical: boolean
   heardBySourceIds?: string[]
   createdAt: string
+  updatedAt: string
+}
+
+export type TranscriptionAnnotation = {
+  id: string
+  sessionId: string
+  segmentId?: string | null
+  kind: "bookmark" | "comment"
+  note?: string
+  startOffsetMs: number
+  endOffsetMs: number
+  resolved: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type TranscriptionInsightChapter = {
+  title: string
+  summary?: string
+  startOffsetMs: number
+}
+
+export type TranscriptionInsights = {
+  sessionId: string
+  status: "idle" | "processing" | "completed" | "failed"
+  summary?: string
+  chapters?: TranscriptionInsightChapter[]
+  topics?: string[]
+  actionItems?: string[]
+  error?: string
+  generatedAt?: string | null
   updatedAt: string
 }
 

@@ -92,8 +92,11 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api } from "@/lib/api"
 import { groupTranscriptionSegments } from "@/lib/transcription"
 import { cn } from "@/lib/utils"
+import { VideoTranscriptWorkspace } from "@/components/video-transcript-workspace"
 import type {
   Endpoint,
+  TranscriptionAnnotation,
+  TranscriptionInsights,
   TranscriptionSegment,
   TranscriptionSpeaker,
   TranscriptionSession,
@@ -109,6 +112,8 @@ type VideoSnapshot = {
   session: TranscriptionSession
   segments: TranscriptionSegment[]
   speakers: TranscriptionSpeaker[]
+  annotations?: TranscriptionAnnotation[]
+  insights?: TranscriptionInsights
   videoUpload?: TranscriptionVideoUpload | null
 }
 
@@ -143,7 +148,12 @@ export function VideoTranscriptionView({
   createSessionRequested?: boolean
   onCreateSessionRequestHandled?: () => void
 }) {
-  const [snapshot, setSnapshot] = useState<VideoSnapshot | null>(null)
+  const [snapshotState, setSnapshot] = useState<VideoSnapshot | null>(null)
+  // The rendered workspace is guarded below; this non-null view keeps the
+  // legacy branch type-safe while it is retained as a migration reference.
+  const snapshot = snapshotState as VideoSnapshot & {
+    videoUpload: TranscriptionVideoUpload
+  }
   const [error, setError] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [title, setTitle] = useState("Video transcript")
@@ -234,6 +244,8 @@ export function VideoTranscriptionView({
         session: { ...result.session, kind: "video" },
         segments: result.segments ?? [],
         speakers: result.speakers ?? [],
+        annotations: result.annotations ?? [],
+        insights: result.insights,
         videoUpload: result.videoUpload ?? null,
       })
       setError("")
@@ -289,6 +301,8 @@ export function VideoTranscriptionView({
           session: { ...result.session, kind: "video" },
           segments: result.segments ?? [],
           speakers: result.speakers ?? [],
+          annotations: result.annotations ?? current?.annotations ?? [],
+          insights: result.insights ?? current?.insights,
           videoUpload: mergeVideoUploadSnapshot(
             current?.videoUpload ?? upload,
             result.videoUpload
@@ -1022,522 +1036,551 @@ export function VideoTranscriptionView({
             />
           ) : null}
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)] lg:items-start">
-            <Card
-              className="flex max-h-[min(70vh,42rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none"
-              style={
-                transcriptRailHeight
-                  ? {
-                      height: transcriptRailHeight,
-                      maxHeight: transcriptRailHeight,
-                    }
-                  : undefined
-              }
-            >
-              <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="flex items-center gap-2 text-sm">
-                      <FileText
-                        aria-hidden="true"
-                        className="size-4 shrink-0"
-                      />
-                      Transcript
-                    </CardTitle>
-                    <CardDescription>
-                      {transcript.length} messages · {snapshot.segments.length}{" "}
-                      segments
-                      {livePreviewSegments.length > 0
-                        ? ` · ${livePreviewSegments.length} live preview lines`
-                        : ""}
-                      {transcriptQuery
-                        ? ` · ${filteredTranscript.length} matches`
-                        : ""}
-                    </CardDescription>
-                  </div>
-                  <Tabs
-                    aria-label="Transcript display mode"
-                    onValueChange={(value) => {
-                      if (value === "verbatim" || value === "polished") {
-                        setTranscriptMode(value)
+          {false ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)] lg:items-start">
+              <Card
+                className="flex max-h-[min(70vh,42rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none"
+                style={
+                  transcriptRailHeight
+                    ? {
+                        height: transcriptRailHeight ?? undefined,
+                        maxHeight: transcriptRailHeight ?? undefined,
                       }
-                    }}
-                    value={transcriptMode}
-                  >
-                    <TabsList>
-                      <TabsTrigger value="verbatim">Verbatim</TabsTrigger>
-                      <TabsTrigger
-                        disabled={!polishedAvailable}
-                        value="polished"
-                      >
-                        Polished
-                      </TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                </div>
-                <div className="relative max-w-md">
-                  <Search
-                    aria-hidden="true"
-                    className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <Input
-                    aria-label="Search transcript"
-                    className="h-9 pl-9"
-                    onChange={(event) => setTranscriptQuery(event.target.value)}
-                    placeholder="Search transcript"
-                    value={transcriptQuery}
-                  />
-                </div>
-              </CardHeader>
-              <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
-                {filteredTranscript.length > 0 ? (
-                  <div className="flex flex-col gap-1">
-                    {filteredTranscript.map((message) => {
-                      const active = message.id === activeMessageId
-                      const speaker = speakerById.get(message.speakerKey)
-                      return (
-                        <div
-                          className={cn(
-                            "grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2.5 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-                            active
-                              ? "bg-primary/10 ring-1 ring-primary/30"
-                              : "hover:bg-muted/50"
-                          )}
-                          key={message.id}
-                          onClick={(event) => {
-                            if (
-                              event.target instanceof Element &&
-                              event.target.closest("button")
-                            ) {
-                              return
-                            }
-                            seekToMessage(message.startOffsetMs)
-                          }}
-                          role="group"
-                        >
-                          <button
-                            aria-current={active ? "true" : undefined}
-                            aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
-                            className={cn(
-                              "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-                              active ? "text-primary" : "text-muted-foreground"
-                            )}
-                            onClick={() => seekToMessage(message.startOffsetMs)}
-                            type="button"
-                          >
-                            {active ? (
-                              <Play
-                                aria-hidden="true"
-                                className="mt-0.5 size-3 fill-current"
-                              />
-                            ) : null}
-                            {formatVideoTimestamp(message.startOffsetMs)}
-                          </button>
-                          <span className="min-w-0">
-                            {speaker ? (
-                              <Button
-                                aria-label={`Rename ${speaker.displayName || speaker.label}`}
-                                className="group/speaker-name mb-1 h-auto max-w-full justify-start p-0 hover:bg-transparent"
-                                onClick={() => openSpeakerRename(speaker)}
-                                size="sm"
-                                title="Rename speaker"
-                                variant="ghost"
-                              >
-                                <Badge
-                                  className="max-w-full truncate"
-                                  variant="outline"
-                                >
-                                  {speaker.displayName || speaker.label}
-                                </Badge>
-                                <Pencil
-                                  aria-hidden="true"
-                                  className="text-muted-foreground transition-colors group-hover/speaker-name:text-foreground group-focus-visible/speaker-name:text-foreground"
-                                  data-icon="inline-end"
-                                />
-                              </Button>
-                            ) : null}
-                            <span className="block min-w-0 text-sm leading-6 text-foreground">
-                              {message.text}
-                            </span>
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : transcript.length > 0 && transcriptQuery ? (
-                  <Empty className="min-h-48 border-0 p-4">
-                    <EmptyHeader>
-                      <EmptyTitle>No matching lines</EmptyTitle>
-                      <EmptyDescription>
-                        Try another word or clear the transcript search.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                    <Button
-                      onClick={() => setTranscriptQuery("")}
-                      size="sm"
-                      variant="outline"
+                    : undefined
+                }
+              >
+                <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <FileText
+                          aria-hidden="true"
+                          className="size-4 shrink-0"
+                        />
+                        Transcript
+                      </CardTitle>
+                      <CardDescription>
+                        {transcript.length} messages ·{" "}
+                        {snapshot.segments.length} segments
+                        {livePreviewSegments.length > 0
+                          ? ` · ${livePreviewSegments.length} live preview lines`
+                          : ""}
+                        {transcriptQuery
+                          ? ` · ${filteredTranscript.length} matches`
+                          : ""}
+                      </CardDescription>
+                    </div>
+                    <Tabs
+                      aria-label="Transcript display mode"
+                      onValueChange={(value) => {
+                        if (value === "verbatim" || value === "polished") {
+                          setTranscriptMode(value)
+                        }
+                      }}
+                      value={transcriptMode}
                     >
-                      Clear search
-                    </Button>
-                  </Empty>
-                ) : livePreviewSegments.length > 0 ? (
-                  <LiveTranscriptPreview segments={livePreviewSegments} />
-                ) : isVideoProcessing ? (
-                  <Empty className="min-h-48 border-0 p-4">
-                    <EmptyHeader>
-                      <EmptyTitle>Waiting for the first slice</EmptyTitle>
-                      <EmptyDescription>
-                        Workers are transcribing in parallel. Preview lines will
-                        appear as output arrives.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                ) : (
-                  <Empty className="min-h-48 border-0 p-4">
-                    <EmptyHeader>
-                      <EmptyTitle>No transcript yet</EmptyTitle>
-                      <EmptyDescription>
-                        The transcript will appear here after video processing
-                        starts.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                )}
-              </CardContent>
-            </Card>
-
-            <aside
-              className="flex min-h-0 flex-col gap-4"
-              ref={transcriptRailRef}
-            >
-              {speakerSummaries.length > 0 ? (
-                <Card
-                  aria-label="Speaker summary"
-                  className="shrink-0 shadow-none"
-                >
-                  <CardHeader className="gap-1 px-4 py-4">
-                    <CardTitle className="flex items-center gap-2 text-sm">
-                      <Users
-                        aria-hidden="true"
-                        className="size-4 shrink-0 text-primary"
-                      />
-                      Speaker summary
-                    </CardTitle>
-                    <CardDescription>
-                      Name each speaker and play a short sample from their first
-                      detected line.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-2 px-4 pb-4">
-                    <div className="max-h-72 min-h-0 space-y-2 overflow-y-auto pr-1">
-                      {speakerSummaries.map((summary) => {
-                        const speakerName =
-                          summary.speaker.displayName || summary.speaker.label
-                        const isPlaying =
-                          speakerSample?.speakerId === summary.speaker.id
-                        const canPlaySample =
-                          Boolean(snapshot.videoUpload?.playbackUrl) &&
-                          summary.sampleStartMs !== null &&
-                          summary.sampleEndMs !== null
+                      <TabsList>
+                        <TabsTrigger value="verbatim">Verbatim</TabsTrigger>
+                        <TabsTrigger
+                          disabled={!polishedAvailable}
+                          value="polished"
+                        >
+                          Polished
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                  <div className="relative max-w-md">
+                    <Search
+                      aria-hidden="true"
+                      className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
+                    />
+                    <Input
+                      aria-label="Search transcript"
+                      className="h-9 pl-9"
+                      onChange={(event) =>
+                        setTranscriptQuery(event.target.value)
+                      }
+                      placeholder="Search transcript"
+                      value={transcriptQuery}
+                    />
+                  </div>
+                </CardHeader>
+                <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
+                  {filteredTranscript.length > 0 ? (
+                    <div className="flex flex-col gap-1">
+                      {filteredTranscript.map((message) => {
+                        const active = message.id === activeMessageId
+                        const speaker = speakerById.get(message.speakerKey)
                         return (
                           <div
-                            className="rounded-xl border border-border/80 bg-muted/20 p-3"
-                            key={summary.speaker.id}
+                            className={cn(
+                              "grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2.5 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+                              active
+                                ? "bg-primary/10 ring-1 ring-primary/30"
+                                : "hover:bg-muted/50"
+                            )}
+                            key={message.id}
+                            onClick={(event) => {
+                              if (
+                                event.target instanceof Element &&
+                                event.target.closest("button")
+                              ) {
+                                return
+                              }
+                              seekToMessage(message.startOffsetMs)
+                            }}
+                            role="group"
                           >
-                            <div className="flex min-w-0 items-start gap-2.5">
-                              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                                {speakerInitials(speakerName)}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex min-w-0 items-center gap-2">
-                                  <span className="min-w-0 truncate text-xs font-medium text-foreground">
-                                    {speakerName}
-                                  </span>
-                                  <Badge
-                                    className="shrink-0 text-[9px]"
-                                    variant="outline"
-                                  >
-                                    {summary.speaker.label}
-                                  </Badge>
-                                </div>
-                                <p className="mt-1 text-[11px] text-muted-foreground">
-                                  {summary.segmentCount}{" "}
-                                  {summary.segmentCount === 1
-                                    ? "segment"
-                                    : "segments"}{" "}
-                                  ·{" "}
-                                  {formatSpeakerSummaryDuration(
-                                    summary.speakingMs
-                                  )}
-                                </p>
-                                {summary.sampleText ? (
-                                  <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
-                                    “{summary.sampleText}”
-                                  </p>
-                                ) : null}
-                              </div>
-                              <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              aria-current={active ? "true" : undefined}
+                              aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
+                              className={cn(
+                                "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+                                active
+                                  ? "text-primary"
+                                  : "text-muted-foreground"
+                              )}
+                              onClick={() =>
+                                seekToMessage(message.startOffsetMs)
+                              }
+                              type="button"
+                            >
+                              {active ? (
+                                <Play
+                                  aria-hidden="true"
+                                  className="mt-0.5 size-3 fill-current"
+                                />
+                              ) : null}
+                              {formatVideoTimestamp(message.startOffsetMs)}
+                            </button>
+                            <span className="min-w-0">
+                              {speaker ? (
                                 <Button
-                                  aria-label={
-                                    isPlaying
-                                      ? `Stop sample for ${speakerName}`
-                                      : `Play sample for ${speakerName}`
-                                  }
-                                  className="shrink-0"
-                                  disabled={!canPlaySample}
-                                  onClick={() => playSpeakerSample(summary)}
-                                  size="icon-sm"
-                                  title={
-                                    isPlaying
-                                      ? "Stop sample"
-                                      : "Play speaker sample"
-                                  }
-                                  variant={isPlaying ? "default" : "outline"}
-                                >
-                                  {isPlaying ? <Pause /> : <Play />}
-                                </Button>
-                                <Button
-                                  aria-label={`Rename ${speakerName}`}
-                                  className="shrink-0"
-                                  onClick={() =>
-                                    openSpeakerRename(summary.speaker)
-                                  }
-                                  size="icon-sm"
-                                  title={`Rename ${speakerName}`}
+                                  aria-label={`Rename ${speaker.displayName || speaker.label}`}
+                                  className="group/speaker-name mb-1 h-auto max-w-full justify-start p-0 hover:bg-transparent"
+                                  onClick={() => openSpeakerRename(speaker)}
+                                  size="sm"
+                                  title="Rename speaker"
                                   variant="ghost"
                                 >
-                                  <Pencil />
+                                  <Badge
+                                    className="max-w-full truncate"
+                                    variant="outline"
+                                  >
+                                    {speaker.displayName || speaker.label}
+                                  </Badge>
+                                  <Pencil
+                                    aria-hidden="true"
+                                    className="text-muted-foreground transition-colors group-hover/speaker-name:text-foreground group-focus-visible/speaker-name:text-foreground"
+                                    data-icon="inline-end"
+                                  />
                                 </Button>
-                              </div>
-                            </div>
+                              ) : null}
+                              <span className="block min-w-0 text-sm leading-6 text-foreground">
+                                {message.text}
+                              </span>
+                            </span>
                           </div>
                         )
                       })}
                     </div>
-                    <p
-                      aria-live="polite"
-                      className="text-[11px] text-muted-foreground"
-                    >
-                      {snapshot.videoUpload?.playbackUrl
-                        ? "Samples play for up to 8 seconds in the source video."
-                        : "Samples become available when source video playback is ready."}
-                    </p>
+                  ) : transcript.length > 0 && transcriptQuery ? (
+                    <Empty className="min-h-48 border-0 p-4">
+                      <EmptyHeader>
+                        <EmptyTitle>No matching lines</EmptyTitle>
+                        <EmptyDescription>
+                          Try another word or clear the transcript search.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                      <Button
+                        onClick={() => setTranscriptQuery("")}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Clear search
+                      </Button>
+                    </Empty>
+                  ) : livePreviewSegments.length > 0 ? (
+                    <LiveTranscriptPreview segments={livePreviewSegments} />
+                  ) : isVideoProcessing ? (
+                    <Empty className="min-h-48 border-0 p-4">
+                      <EmptyHeader>
+                        <EmptyTitle>Waiting for the first slice</EmptyTitle>
+                        <EmptyDescription>
+                          Workers are transcribing in parallel. Preview lines
+                          will appear as output arrives.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : (
+                    <Empty className="min-h-48 border-0 p-4">
+                      <EmptyHeader>
+                        <EmptyTitle>No transcript yet</EmptyTitle>
+                        <EmptyDescription>
+                          The transcript will appear here after video processing
+                          starts.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  )}
+                </CardContent>
+              </Card>
+
+              <aside
+                className="flex min-h-0 flex-col gap-4"
+                ref={transcriptRailRef}
+              >
+                {speakerSummaries.length > 0 ? (
+                  <Card
+                    aria-label="Speaker summary"
+                    className="shrink-0 shadow-none"
+                  >
+                    <CardHeader className="gap-1 px-4 py-4">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <Users
+                          aria-hidden="true"
+                          className="size-4 shrink-0 text-primary"
+                        />
+                        Speaker summary
+                      </CardTitle>
+                      <CardDescription>
+                        Name each speaker and play a short sample from their
+                        first detected line.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-2 px-4 pb-4">
+                      <div className="max-h-72 min-h-0 space-y-2 overflow-y-auto pr-1">
+                        {speakerSummaries.map((summary) => {
+                          const speakerName =
+                            summary.speaker.displayName || summary.speaker.label
+                          const isPlaying =
+                            speakerSample?.speakerId === summary.speaker.id
+                          const canPlaySample =
+                            Boolean(snapshot.videoUpload?.playbackUrl) &&
+                            summary.sampleStartMs !== null &&
+                            summary.sampleEndMs !== null
+                          return (
+                            <div
+                              className="rounded-xl border border-border/80 bg-muted/20 p-3"
+                              key={summary.speaker.id}
+                            >
+                              <div className="flex min-w-0 items-start gap-2.5">
+                                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
+                                  {speakerInitials(speakerName)}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                                      {speakerName}
+                                    </span>
+                                    <Badge
+                                      className="shrink-0 text-[9px]"
+                                      variant="outline"
+                                    >
+                                      {summary.speaker.label}
+                                    </Badge>
+                                  </div>
+                                  <p className="mt-1 text-[11px] text-muted-foreground">
+                                    {summary.segmentCount}{" "}
+                                    {summary.segmentCount === 1
+                                      ? "segment"
+                                      : "segments"}{" "}
+                                    ·{" "}
+                                    {formatSpeakerSummaryDuration(
+                                      summary.speakingMs
+                                    )}
+                                  </p>
+                                  {summary.sampleText ? (
+                                    <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
+                                      “{summary.sampleText}”
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <div className="flex shrink-0 items-center gap-1">
+                                  <Button
+                                    aria-label={
+                                      isPlaying
+                                        ? `Stop sample for ${speakerName}`
+                                        : `Play sample for ${speakerName}`
+                                    }
+                                    className="shrink-0"
+                                    disabled={!canPlaySample}
+                                    onClick={() => playSpeakerSample(summary)}
+                                    size="icon-sm"
+                                    title={
+                                      isPlaying
+                                        ? "Stop sample"
+                                        : "Play speaker sample"
+                                    }
+                                    variant={isPlaying ? "default" : "outline"}
+                                  >
+                                    {isPlaying ? <Pause /> : <Play />}
+                                  </Button>
+                                  <Button
+                                    aria-label={`Rename ${speakerName}`}
+                                    className="shrink-0"
+                                    onClick={() =>
+                                      openSpeakerRename(summary.speaker)
+                                    }
+                                    size="icon-sm"
+                                    title={`Rename ${speakerName}`}
+                                    variant="ghost"
+                                  >
+                                    <Pencil />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <p
+                        aria-live="polite"
+                        className="text-[11px] text-muted-foreground"
+                      >
+                        {snapshot.videoUpload?.playbackUrl
+                          ? "Samples play for up to 8 seconds in the source video."
+                          : "Samples become available when source video playback is ready."}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : null}
+                <Card className="shrink-0 shadow-none">
+                  <CardHeader className="gap-2 px-4 py-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
+                        <FileVideo
+                          aria-hidden="true"
+                          className="size-4 shrink-0"
+                        />
+                        <span className="truncate">Source video</span>
+                      </CardTitle>
+                    </div>
+                    <CardDescription className="truncate">
+                      {snapshot.videoUpload?.fileName ?? "Video upload"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-3 px-4 pb-4">
+                    <div className="overflow-hidden rounded-xl border border-border bg-muted">
+                      {snapshot.videoUpload?.playbackUrl ? (
+                        <video
+                          className="block aspect-video w-full bg-muted object-contain"
+                          controls
+                          key={snapshot.videoUpload.playbackUrl}
+                          onError={() => {
+                            setSpeakerSample(null)
+                            setVideoPlaybackError(
+                              "The video link expired or the stored video is unavailable."
+                            )
+                          }}
+                          onLoadedMetadata={(event) => {
+                            if (Number.isFinite(event.currentTarget.duration)) {
+                              setVideoDurationMs(
+                                Math.round(event.currentTarget.duration * 1000)
+                              )
+                            }
+                          }}
+                          onEnded={() => setSpeakerSample(null)}
+                          onTimeUpdate={(event) => {
+                            const currentTime = Math.round(
+                              event.currentTarget.currentTime * 1000
+                            )
+                            setCurrentTimeMs(currentTime)
+                            if (
+                              speakerSample &&
+                              currentTime >= speakerSample.endOffsetMs
+                            ) {
+                              event.currentTarget.pause()
+                              setSpeakerSample(null)
+                            }
+                          }}
+                          playsInline
+                          preload="metadata"
+                          ref={videoRef}
+                          src={snapshot.videoUpload.playbackUrl}
+                        />
+                      ) : (
+                        <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+                          <FileVideo aria-hidden="true" />
+                          <p className="text-xs">
+                            The video will be available here once the upload has
+                            finished.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    {snapshot.videoUpload?.playbackUrl ? (
+                      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1.5">
+                          <Clock3
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0"
+                          />
+                          {formatVideoTimestamp(currentTimeMs)}
+                          {displayDurationMs
+                            ? ` / ${formatVideoTimestamp(displayDurationMs)}`
+                            : ""}
+                        </span>
+                        <span>Click a transcript line to seek</span>
+                      </div>
+                    ) : null}
+                    {videoPlaybackError ? (
+                      <Alert variant="destructive">
+                        <AlertTitle>Playback unavailable</AlertTitle>
+                        <AlertDescription>
+                          {videoPlaybackError}
+                        </AlertDescription>
+                        <div className="mt-2">
+                          <Button
+                            onClick={() => void refreshVideoPlayback()}
+                            size="sm"
+                            variant="outline"
+                          >
+                            <RefreshCw data-icon="inline-start" />
+                            Refresh link
+                          </Button>
+                        </div>
+                      </Alert>
+                    ) : null}
                   </CardContent>
                 </Card>
-              ) : null}
-              <Card className="shrink-0 shadow-none">
-                <CardHeader className="gap-2 px-4 py-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
-                      <FileVideo
-                        aria-hidden="true"
-                        className="size-4 shrink-0"
-                      />
-                      <span className="truncate">Source video</span>
-                    </CardTitle>
-                  </div>
-                  <CardDescription className="truncate">
-                    {snapshot.videoUpload?.fileName ?? "Video upload"}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3 px-4 pb-4">
-                  <div className="overflow-hidden rounded-xl border border-border bg-muted">
-                    {snapshot.videoUpload?.playbackUrl ? (
-                      <video
-                        className="block aspect-video w-full bg-muted object-contain"
-                        controls
-                        key={snapshot.videoUpload.playbackUrl}
-                        onError={() => {
-                          setSpeakerSample(null)
-                          setVideoPlaybackError(
-                            "The video link expired or the stored video is unavailable."
-                          )
-                        }}
-                        onLoadedMetadata={(event) => {
-                          if (Number.isFinite(event.currentTarget.duration)) {
-                            setVideoDurationMs(
-                              Math.round(event.currentTarget.duration * 1000)
-                            )
-                          }
-                        }}
-                        onEnded={() => setSpeakerSample(null)}
-                        onTimeUpdate={(event) => {
-                          const currentTime = Math.round(
-                            event.currentTarget.currentTime * 1000
-                          )
-                          setCurrentTimeMs(currentTime)
-                          if (
-                            speakerSample &&
-                            currentTime >= speakerSample.endOffsetMs
-                          ) {
-                            event.currentTarget.pause()
-                            setSpeakerSample(null)
-                          }
-                        }}
-                        playsInline
-                        preload="metadata"
-                        ref={videoRef}
-                        src={snapshot.videoUpload.playbackUrl}
-                      />
-                    ) : (
-                      <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
-                        <FileVideo aria-hidden="true" />
-                        <p className="text-xs">
-                          The video will be available here once the upload has
-                          finished.
-                        </p>
+                {snapshot.videoUpload &&
+                snapshot.videoUpload.status !== "completed" ? (
+                  <div className="flex flex-col gap-2 px-1 text-xs">
+                    {snapshot.videoUpload.status === "failed" ||
+                    snapshot.videoUpload.status === "uploaded" ||
+                    (snapshot.videoUpload.status === "cancelled" &&
+                      snapshot.videoUpload.bytes >=
+                        snapshot.videoUpload.expectedBytes) ||
+                    (snapshot.videoUpload.status === "uploading" &&
+                      Boolean(videoFile) &&
+                      !videoStarting) ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 text-muted-foreground">
+                          {snapshot.videoUpload.status === "failed"
+                            ? "Processing failed"
+                            : snapshot.videoUpload.status === "uploaded"
+                              ? "Upload complete"
+                              : snapshot.videoUpload.status === "cancelled"
+                                ? "Processing cancelled"
+                                : "Upload paused"}
+                        </span>
+                        <Button
+                          disabled={videoStarting}
+                          onClick={() => void retryVideoUpload()}
+                          size="sm"
+                          variant="outline"
+                        >
+                          <RefreshCw data-icon="inline-start" />
+                          {snapshot.videoUpload.status === "failed"
+                            ? "Retry"
+                            : snapshot.videoUpload.status === "uploaded"
+                              ? "Queue processing"
+                              : snapshot.videoUpload.status === "cancelled"
+                                ? "Retry processing"
+                                : "Resume upload"}
+                        </Button>
                       </div>
-                    )}
+                    ) : null}
+                    {snapshot.videoUpload.status === "uploading" &&
+                    !videoFile &&
+                    !videoStarting ? (
+                      <div className="flex flex-col gap-1.5">
+                        <p className="text-muted-foreground">
+                          This upload is paused. Select the original video file
+                          to resume it.
+                        </p>
+                        <Input
+                          accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv"
+                          aria-label="Select original video file"
+                          className="h-8 text-xs"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            if (file) {
+                              setVideoFile(file)
+                              setError("")
+                            }
+                          }}
+                          type="file"
+                        />
+                      </div>
+                    ) : null}
                   </div>
-                  {snapshot.videoUpload?.playbackUrl ? (
-                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                ) : null}
+                <Card className="shrink-0 shadow-none">
+                  <CardHeader className="gap-1 px-4 py-4">
+                    <CardTitle className="text-sm">At a glance</CardTitle>
+                    <CardDescription>
+                      Transcript settings and coverage
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-2 px-4 pb-4 text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Language</span>
+                      <span className="font-medium text-foreground">
+                        {snapshot.session.language}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Messages</span>
+                      <span className="font-medium text-foreground">
+                        {transcript.length}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-1.5">
+                        <Users
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0"
+                        />
+                        Speakers
+                      </span>
+                      <span className="font-medium text-foreground">
+                        {snapshot.speakers.length || "Not separated"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Grammar</span>
+                      <span className="font-medium text-foreground">
+                        {polishStatusLabel(snapshot.session.polishStatus)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
                       <span className="flex items-center gap-1.5">
                         <Clock3
                           aria-hidden="true"
                           className="size-3.5 shrink-0"
                         />
-                        {formatVideoTimestamp(currentTimeMs)}
+                        Duration
+                      </span>
+                      <span className="font-medium text-foreground tabular-nums">
                         {displayDurationMs
-                          ? ` / ${formatVideoTimestamp(displayDurationMs)}`
-                          : ""}
+                          ? formatVideoDuration(displayDurationMs)
+                          : "—"}
                       </span>
-                      <span>Click a transcript line to seek</span>
                     </div>
-                  ) : null}
-                  {videoPlaybackError ? (
-                    <Alert variant="destructive">
-                      <AlertTitle>Playback unavailable</AlertTitle>
-                      <AlertDescription>{videoPlaybackError}</AlertDescription>
-                      <div className="mt-2">
-                        <Button
-                          onClick={() => void refreshVideoPlayback()}
-                          size="sm"
-                          variant="outline"
-                        >
-                          <RefreshCw data-icon="inline-start" />
-                          Refresh link
-                        </Button>
-                      </div>
-                    </Alert>
-                  ) : null}
-                </CardContent>
-              </Card>
-              {snapshot.videoUpload &&
-              snapshot.videoUpload.status !== "completed" ? (
-                <div className="flex flex-col gap-2 px-1 text-xs">
-                  {snapshot.videoUpload.status === "failed" ||
-                  snapshot.videoUpload.status === "uploaded" ||
-                  (snapshot.videoUpload.status === "cancelled" &&
-                    snapshot.videoUpload.bytes >=
-                      snapshot.videoUpload.expectedBytes) ||
-                  (snapshot.videoUpload.status === "uploading" &&
-                    Boolean(videoFile) &&
-                    !videoStarting) ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="min-w-0 text-muted-foreground">
-                        {snapshot.videoUpload.status === "failed"
-                          ? "Processing failed"
-                          : snapshot.videoUpload.status === "uploaded"
-                            ? "Upload complete"
-                            : snapshot.videoUpload.status === "cancelled"
-                              ? "Processing cancelled"
-                              : "Upload paused"}
-                      </span>
-                      <Button
-                        disabled={videoStarting}
-                        onClick={() => void retryVideoUpload()}
-                        size="sm"
-                        variant="outline"
-                      >
-                        <RefreshCw data-icon="inline-start" />
-                        {snapshot.videoUpload.status === "failed"
-                          ? "Retry"
-                          : snapshot.videoUpload.status === "uploaded"
-                            ? "Queue processing"
-                            : snapshot.videoUpload.status === "cancelled"
-                              ? "Retry processing"
-                              : "Resume upload"}
-                      </Button>
-                    </div>
-                  ) : null}
-                  {snapshot.videoUpload.status === "uploading" &&
-                  !videoFile &&
-                  !videoStarting ? (
-                    <div className="flex flex-col gap-1.5">
-                      <p className="text-muted-foreground">
-                        This upload is paused. Select the original video file to
-                        resume it.
-                      </p>
-                      <Input
-                        accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv"
-                        aria-label="Select original video file"
-                        className="h-8 text-xs"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0]
-                          if (file) {
-                            setVideoFile(file)
-                            setError("")
-                          }
-                        }}
-                        type="file"
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              <Card className="shrink-0 shadow-none">
-                <CardHeader className="gap-1 px-4 py-4">
-                  <CardTitle className="text-sm">At a glance</CardTitle>
-                  <CardDescription>
-                    Transcript settings and coverage
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2 px-4 pb-4 text-xs text-muted-foreground">
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Language</span>
-                    <span className="font-medium text-foreground">
-                      {snapshot.session.language}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Messages</span>
-                    <span className="font-medium text-foreground">
-                      {transcript.length}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-1.5">
-                      <Users aria-hidden="true" className="size-3.5 shrink-0" />
-                      Speakers
-                    </span>
-                    <span className="font-medium text-foreground">
-                      {snapshot.speakers.length || "Not separated"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Grammar</span>
-                    <span className="font-medium text-foreground">
-                      {polishStatusLabel(snapshot.session.polishStatus)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-1.5">
-                      <Clock3
-                        aria-hidden="true"
-                        className="size-3.5 shrink-0"
-                      />
-                      Duration
-                    </span>
-                    <span className="font-medium text-foreground tabular-nums">
-                      {displayDurationMs
-                        ? formatVideoDuration(displayDurationMs)
-                        : "—"}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            </aside>
-          </div>
+                  </CardContent>
+                </Card>
+              </aside>
+            </div>
+          ) : null}
+          <VideoTranscriptWorkspace
+            currentTimeMs={currentTimeMs}
+            onCurrentTimeChange={setCurrentTimeMs}
+            onError={setError}
+            onRefreshPlayback={refreshVideoPlayback}
+            onRenameSpeaker={openSpeakerRename}
+            onSnapshotChange={(updater) =>
+              setSnapshot((current) => (current ? updater(current) : current))
+            }
+            onVideoDurationChange={setVideoDurationMs}
+            onVideoPlaybackError={setVideoPlaybackError}
+            snapshot={snapshot}
+            videoDurationMs={videoDurationMs}
+            videoPlaybackError={videoPlaybackError}
+            videoRef={videoRef}
+          />
         </>
       )}
 
