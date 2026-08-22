@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@ai-sdk/react':
-        specifier: ^4.0.71
-        version: 4.0.72(react@19.2.8)(zod@4.4.3)
+        specifier: ^4.0.73
+        version: 4.0.76(react@19.2.8)(zod@4.4.3)
       '@assistant-ui/react':
         specifier: ^0.15.15
         version: 0.15.15(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(immer@11.1.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
@@ -24,8 +24,8 @@ importers:
         specifier: ^1.7.0
         version: 1.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@hugeicons/core-free-icons':
-        specifier: ^4.2.3
-        version: 4.2.3
+        specifier: ^4.3.0
+        version: 4.3.0
       '@hugeicons/react':
         specifier: ^1.1.9
         version: 1.1.9(react@19.2.8)
@@ -36,8 +36,8 @@ importers:
         specifier: ^3.46.0
         version: 3.46.0(react@19.2.8)
       ai:
-        specifier: ^7.0.68
-        version: 7.0.69(zod@4.4.3)
+        specifier: ^7.0.70
+        version: 7.0.73(zod@4.4.3)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -117,8 +117,8 @@ importers:
 
 packages:
 
-  '@ai-sdk/gateway@4.0.55':
-    resolution: {integrity: sha512-7WP/nlDz2BkXFlZzwF3w5JgCvktyHC++LP4PZ4mQpbvxrq+M7OdNslevlkuddHhJ+62BZu4oiL/afXlsWOSJZQ==}
+  '@ai-sdk/gateway@4.0.59':
+    resolution: {integrity: sha512-9MPyBBXU5snhuvqMa3OSOYtHP+wlyepJ+E0E+9lVNoxLGmi4sZqGeLbIxSYZeTf7qQ2xPshtfo5qDJHaOmAHvw==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -129,8 +129,20 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/mcp@2.0.34':
+    resolution: {integrity: sha512-JejeZFNplIAQpxI7F6FmE8y68kzcryJ+shmJl3hoj9DO/+ds7G/tIfGJvDEwzKhCZTZlWq5ra+MPrThx02YsGA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/provider-utils@5.0.27':
     resolution: {integrity: sha512-EzAn4pdgG5g0xXtH6lE2zyNmfjDQIDjATkfqzuidEI35g++hh4+07vnjzkT/RmGmIClPZiRj/Q2GMPV2V7mkHw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@5.0.28':
+    resolution: {integrity: sha512-TnHUyd/rCYQqHg5RuiOaz/hUql6U+kbUaBW0Rp+0N5UhnAInA9CzzV0HXvuAAPwppDsK6fAx9Rd+tRawpJ/3pg==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -139,8 +151,8 @@ packages:
     resolution: {integrity: sha512-6or44XprPzKbr8zkmzosowSE0pxkvJcoojBL+mCZvPUt3kvXp3XSNqeVun9golb1acEfSo6yaEBRT18h2VU+1Q==}
     engines: {node: '>=22'}
 
-  '@ai-sdk/react@4.0.72':
-    resolution: {integrity: sha512-cMaFGixFgvG3BhZdjrybRI/ycUrgu55gzKpTeN4hbB/nWm0W2T7OTaNe/g/j3lNoij2dbKMLzyTMM57CaO69Og==}
+  '@ai-sdk/react@4.0.76':
+    resolution: {integrity: sha512-CVzR29UV0mR69G6VZJUyM+GI28G5GOO/dmgD3K7MRBi4rbMxLC0WD6OuQjXNK/GaaVUuj6PiRbh2nPUOgPfaWQ==}
     engines: {node: '>=22'}
     peerDependencies:
       react: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
@@ -478,8 +490,8 @@ packages:
     peerDependencies:
       hono: ^4
 
-  '@hugeicons/core-free-icons@4.2.3':
-    resolution: {integrity: sha512-fpiU0qFZkv4ABi23xJ2m4qNr0BBfuIaYjPboN8WDA6aj9D+OzXa7eykxKOpACZRuGbDz1U9S5DsNx1d5KNnsgA==}
+  '@hugeicons/core-free-icons@4.3.0':
+    resolution: {integrity: sha512-5DC5gq2psNDKBQThOjpuFCtMco8nl2FkrBzZgG15cFGM0kSwUoych/pw0DmjBygF9qRDITdBPtmzJqLsOeImMg==}
 
   '@hugeicons/react@1.1.9':
     resolution: {integrity: sha512-O+lWSWjbijoAvMCxn4K2bQWCGN5+mP1y5j+X99j23mXMj+s0X25fs71T6t9YJLaBodwmZdaewD27dzS/PiboQw==}
@@ -1889,8 +1901,8 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  ai@7.0.69:
-    resolution: {integrity: sha512-gudEqQYt/FuRpQkckLHPYKOh5M5v5ayPmzQAk5xyZOaWkUM0ArNGdXQiBGEuZA7GCwYOjzmWxB44ZW0CyRhHfQ==}
+  ai@7.0.73:
+    resolution: {integrity: sha512-rm2Rk68seeyhfgXl1JA/oaHcQHL018AfgydkJWx7Bgz0wGDHyvl30SnRIU2V7ZVR60A5K0SOLyP78EZmEJ2tOw==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -4528,10 +4540,10 @@ packages:
 
 snapshots:
 
-  '@ai-sdk/gateway@4.0.55(zod@4.4.3)':
+  '@ai-sdk/gateway@4.0.59(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.7
-      '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
+      '@ai-sdk/provider-utils': 5.0.28(zod@4.4.3)
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
@@ -4539,6 +4551,13 @@ snapshots:
     dependencies:
       '@ai-sdk/provider': 4.0.7
       '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
+      pkce-challenge: 5.0.1
+      zod: 4.4.3
+
+  '@ai-sdk/mcp@2.0.34(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.7
+      '@ai-sdk/provider-utils': 5.0.28(zod@4.4.3)
       pkce-challenge: 5.0.1
       zod: 4.4.3
 
@@ -4551,16 +4570,25 @@ snapshots:
       undici: 7.29.0
       zod: 4.4.3
 
+  '@ai-sdk/provider-utils@5.0.28(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.7
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.0
+      undici: 7.29.0
+      zod: 4.4.3
+
   '@ai-sdk/provider@4.0.7':
     dependencies:
       json-schema: 0.4.0
 
-  '@ai-sdk/react@4.0.72(react@19.2.8)(zod@4.4.3)':
+  '@ai-sdk/react@4.0.76(react@19.2.8)(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/mcp': 2.0.33(zod@4.4.3)
+      '@ai-sdk/mcp': 2.0.34(zod@4.4.3)
       '@ai-sdk/provider': 4.0.7
-      '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
-      ai: 7.0.69(zod@4.4.3)
+      '@ai-sdk/provider-utils': 5.0.28(zod@4.4.3)
+      ai: 7.0.73(zod@4.4.3)
       react: 19.2.8
       swr: 2.5.0(react@19.2.8)
       throttleit: 2.1.0
@@ -4572,11 +4600,11 @@ snapshots:
   '@assistant-ui/ai-sdk@0.0.1(@types/react@19.2.18)(react@19.2.8)(zod@4.4.3)(zustand@5.0.14(@types/react@19.2.18)(immer@11.1.17)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8)))':
     dependencies:
       '@ai-sdk/mcp': 2.0.33(zod@4.4.3)
-      '@ai-sdk/react': 4.0.72(react@19.2.8)(zod@4.4.3)
+      '@ai-sdk/react': 4.0.76(react@19.2.8)(zod@4.4.3)
       '@assistant-ui/core': 0.3.14(@assistant-ui/store@0.3.10(@assistant-ui/tap@0.9.13(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.13(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.1.40)(react@19.2.8)(zustand@5.0.14(@types/react@19.2.18)(immer@11.1.17)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8)))
       '@assistant-ui/store': 0.3.10(@assistant-ui/tap@0.9.13(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
       '@assistant-ui/tap': 0.9.13(@types/react@19.2.18)(react@19.2.8)
-      ai: 7.0.69(zod@4.4.3)
+      ai: 7.0.73(zod@4.4.3)
       assistant-cloud: 0.1.40
       assistant-stream: 0.3.38
     optionalDependencies:
@@ -5013,7 +5041,7 @@ snapshots:
     dependencies:
       hono: 4.12.34
 
-  '@hugeicons/core-free-icons@4.2.3': {}
+  '@hugeicons/core-free-icons@4.3.0': {}
 
   '@hugeicons/react@1.1.9(react@19.2.8)':
     dependencies:
@@ -6348,11 +6376,11 @@ snapshots:
 
   acorn@8.18.0: {}
 
-  ai@7.0.69(zod@4.4.3):
+  ai@7.0.73(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 4.0.55(zod@4.4.3)
+      '@ai-sdk/gateway': 4.0.59(zod@4.4.3)
       '@ai-sdk/provider': 4.0.7
-      '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
+      '@ai-sdk/provider-utils': 5.0.28(zod@4.4.3)
       zod: 4.4.3
 
   ajv-formats@2.1.1(ajv@8.20.0):
