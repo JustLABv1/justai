@@ -3,8 +3,12 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMockChatStreams(t *testing.T) {
@@ -18,6 +22,49 @@ func TestMockChatStreams(t *testing.T) {
 	}
 	if !strings.Contains(response.String(), "JustAI is ready") {
 		t.Fatalf("unexpected mock response: %q", response.String())
+	}
+}
+
+func TestIsPublicIPRejectsSpecialUseRanges(t *testing.T) {
+	for _, raw := range []string{"100.64.0.1", "192.88.99.1", "198.18.0.1", "240.0.0.1", "224.0.0.1", "2001:db8::1", "2002::1", "3fff::1", "5f00::1", "64:ff9b::1", "64:ff9b:1::1"} {
+		if isPublicIP(net.ParseIP(raw)) {
+			t.Errorf("expected %s to be rejected as non-public", raw)
+		}
+	}
+	if !isPublicIP(net.ParseIP("8.8.8.8")) {
+		t.Fatal("expected public IPv4 address to remain allowed")
+	}
+}
+
+func TestValidateEndpointURLBlocksPrivateAndCredentialURLs(t *testing.T) {
+	for _, raw := range []string{"http://127.0.0.1:8080", "http://100.64.0.1", "http://user:secret@example.com", "http://example.com?credential=secret"} {
+		if err := ValidateEndpointURL(raw, false); err == nil {
+			t.Errorf("expected endpoint URL %q to be rejected", raw)
+		}
+	}
+	if err := ValidateEndpointURL("http://127.0.0.1:8080", true); err != nil {
+		t.Fatalf("operator private-target gate should allow explicit local endpoint: %v", err)
+	}
+}
+
+func TestSafeHTTPClientStripsSecretsAndRefererAcrossOrigins(t *testing.T) {
+	client := SafeHTTPClientForOrigin(time.Second, true, "https://1.1.1.1")
+	previous := &http.Request{URL: &url.URL{Scheme: "https", Host: "1.1.1.1", RawQuery: "key=secret"}}
+	next := &http.Request{
+		URL: &url.URL{Scheme: "https", Host: "8.8.8.8", Path: "/redirected"},
+		Header: http.Header{
+			"Authorization": []string{"Bearer secret"},
+			"Referer":       []string{"https://1.1.1.1?key=secret"},
+			"X-Api-Key":     []string{"secret"},
+		},
+	}
+	if err := client.CheckRedirect(next, []*http.Request{previous}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Authorization", "Referer", "X-Api-Key"} {
+		if value := next.Header.Get(name); value != "" {
+			t.Fatalf("cross-origin redirect retained %s: %q", name, value)
+		}
 	}
 }
 

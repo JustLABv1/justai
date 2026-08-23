@@ -423,7 +423,7 @@ func (s *ChunkedStream) postTranscription(job chunkedAudio, prompt string) (*htt
 	if s.endpoint.Credential != "" {
 		request.Header.Set("Authorization", "Bearer "+s.endpoint.Credential)
 	}
-	response, err := doRequest(request, s.endpoint.TimeoutSeconds)
+	response, err := doRequest(request, s.endpoint.TimeoutSeconds, s.endpoint.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}

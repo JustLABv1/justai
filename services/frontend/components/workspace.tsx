@@ -1129,7 +1129,9 @@ export function Workspace() {
           >
             {activeView === "chat" && (
               <ChatView
+                key={`chat:${activeOrganizationId ?? "none"}:${user.id}`}
                 assistants={savedAssistants}
+                cacheScope={`${activeOrganizationId ?? "none"}:${user.id}`}
                 conversationId={activeConversationId}
                 conversation={activeConversation}
                 endpoints={endpoints}

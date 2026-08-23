@@ -175,7 +175,48 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
       cache: init?.cache ?? "no-store",
       signal: controller.signal,
     })
+    if (!response.ok) {
+      let message = response.statusText
+      let code: string | undefined
+      let requestId: string | undefined
+      let details: unknown
+      try {
+        const payload = (await response.json()) as {
+          error?:
+            | string
+            | {
+                message?: string
+                code?: string
+                requestId?: string
+                details?: unknown
+              }
+          message?: string
+          code?: string
+          requestId?: string
+          details?: unknown
+        }
+        const error =
+          typeof payload.error === "object" ? payload.error : undefined
+        message =
+          error?.message ??
+          (typeof payload.error === "string"
+            ? payload.error
+            : payload.message) ??
+          message
+        code = error?.code ?? payload.code
+        requestId = error?.requestId ?? payload.requestId
+        details = error?.details ?? payload.details
+      } catch {
+        // Keep the HTTP status text when the backend did not return JSON.
+      }
+      throw new APIError(message, response.status, { code, requestId, details })
+    }
+    // Keep the timeout alive while the response body is being consumed. A
+    // server that sends headers and then stalls must not leave a download
+    // pending forever.
+    return await response.blob()
   } catch (caught) {
+    if (caught instanceof APIError) throw caught
     if (caught instanceof DOMException && caught.name === "AbortError") {
       if (init?.signal?.aborted) {
         throw new APIError("The request was cancelled.", 499, {
@@ -192,41 +233,6 @@ async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
   } finally {
     globalThis.clearTimeout(timeout)
   }
-  if (!response.ok) {
-    let message = response.statusText
-    let code: string | undefined
-    let requestId: string | undefined
-    let details: unknown
-    try {
-      const payload = (await response.json()) as {
-        error?:
-          | string
-          | {
-              message?: string
-              code?: string
-              requestId?: string
-              details?: unknown
-            }
-        message?: string
-        code?: string
-        requestId?: string
-        details?: unknown
-      }
-      const error =
-        typeof payload.error === "object" ? payload.error : undefined
-      message =
-        error?.message ??
-        (typeof payload.error === "string" ? payload.error : payload.message) ??
-        message
-      code = error?.code ?? payload.code
-      requestId = error?.requestId ?? payload.requestId
-      details = error?.details ?? payload.details
-    } catch {
-      // Keep the HTTP status text when the backend did not return JSON.
-    }
-    throw new APIError(message, response.status, { code, requestId, details })
-  }
-  return response.blob()
 }
 
 export const api = {

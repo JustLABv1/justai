@@ -93,7 +93,7 @@ func (a *App) createUploadedSource(c *gin.Context, userID, organizationID uuid.U
 		return
 	}
 	mimeType := fileHeader.Header.Get("Content-Type")
-	content, err := rag.ExtractUpload(fileHeader.Filename, mimeType, body)
+	content, err := rag.ExtractUploadContext(c, fileHeader.Filename, mimeType, body)
 	if err != nil {
 		writeError(c, http.StatusUnprocessableEntity, err)
 		return

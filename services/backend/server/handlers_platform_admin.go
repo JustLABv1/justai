@@ -333,22 +333,6 @@ func (a *App) updatePlatformUser(c *gin.Context) {
 	if !decodeJSON(c, &request) {
 		return
 	}
-	var currentAdmin bool
-	if err := a.DB.QueryRowContext(c, `SELECT is_platform_admin FROM users WHERE id = $1`, id).Scan(&currentAdmin); err != nil {
-		writeError(c, http.StatusNotFound, fmt.Errorf("user not found"))
-		return
-	}
-	if request.PlatformAdmin != nil && currentAdmin && !*request.PlatformAdmin {
-		var admins int
-		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM users WHERE is_platform_admin = TRUE`).Scan(&admins); err != nil {
-			writeError(c, http.StatusInternalServerError, err)
-			return
-		}
-		if admins <= 1 {
-			writeError(c, http.StatusConflict, fmt.Errorf("the final platform administrator cannot be demoted"))
-			return
-		}
-	}
 	status := ""
 	if request.Status != nil {
 		status = strings.ToLower(strings.TrimSpace(*request.Status))
@@ -356,21 +340,47 @@ func (a *App) updatePlatformUser(c *gin.Context) {
 			writeError(c, http.StatusBadRequest, fmt.Errorf("status must be active or suspended"))
 			return
 		}
-		if currentAdmin && status == "suspended" {
-			var admins int
-			if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM users WHERE is_platform_admin = TRUE AND COALESCE(status, 'active') = 'active'`).Scan(&admins); err != nil {
-				writeError(c, http.StatusInternalServerError, err)
-				return
+	}
+	transaction, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(c, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	var currentAdmin bool
+	var currentStatus string
+	if err := transaction.QueryRowContext(c, `SELECT is_platform_admin, COALESCE(status, 'active') FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&currentAdmin, &currentStatus); err != nil {
+		writeError(c, http.StatusNotFound, fmt.Errorf("user not found"))
+		return
+	}
+	removingActiveAdmin := currentAdmin && currentStatus == "active" && ((request.PlatformAdmin != nil && !*request.PlatformAdmin) || status == "suspended")
+	if removingActiveAdmin {
+		var admins int
+		if err := transaction.QueryRowContext(c, `SELECT COUNT(*) FROM users WHERE is_platform_admin = TRUE AND COALESCE(status, 'active') = 'active'`).Scan(&admins); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if admins <= 1 {
+			message := "the final active platform administrator cannot be changed"
+			if request.PlatformAdmin != nil && !*request.PlatformAdmin && status != "suspended" {
+				message = "the final platform administrator cannot be demoted"
+			} else if status == "suspended" && (request.PlatformAdmin == nil || *request.PlatformAdmin) {
+				message = "the final active platform administrator cannot be suspended"
 			}
-			if admins <= 1 {
-				writeError(c, http.StatusConflict, fmt.Errorf("the final active platform administrator cannot be suspended"))
-				return
-			}
+			writeError(c, http.StatusConflict, fmt.Errorf("%s", message))
+			return
 		}
 	}
 	platformAdminChanged := request.PlatformAdmin != nil && *request.PlatformAdmin != currentAdmin
-	_, err = a.DB.ExecContext(c, `UPDATE users SET email = COALESCE(NULLIF($2, ''), email), display_name = COALESCE(NULLIF($3, ''), display_name), status = COALESCE(NULLIF($4, ''), status), suspended_at = CASE WHEN $4 = 'suspended' THEN COALESCE(suspended_at, now()) WHEN $4 = 'active' THEN NULL ELSE suspended_at END, suspended_reason = CASE WHEN $4 = 'suspended' THEN NULLIF($5, '') WHEN $4 = 'active' THEN NULL ELSE suspended_reason END, is_platform_admin = COALESCE($6, is_platform_admin), session_version = CASE WHEN $7 THEN COALESCE(session_version, 0) + 1 ELSE COALESCE(session_version, 0) END, updated_at = now() WHERE id = $1`, id, valueOrEmpty(request.Email), valueOrEmpty(request.DisplayName), status, strings.TrimSpace(request.SuspendedReason), request.PlatformAdmin, request.Status != nil || platformAdminChanged)
-	if err != nil {
+	if _, err := transaction.ExecContext(c, `UPDATE users SET email = COALESCE(NULLIF($2, ''), email), display_name = COALESCE(NULLIF($3, ''), display_name), status = COALESCE(NULLIF($4, ''), status), suspended_at = CASE WHEN $4 = 'suspended' THEN COALESCE(suspended_at, now()) WHEN $4 = 'active' THEN NULL ELSE suspended_at END, suspended_reason = CASE WHEN $4 = 'suspended' THEN NULLIF($5, '') WHEN $4 = 'active' THEN NULL ELSE suspended_reason END, is_platform_admin = COALESCE($6, is_platform_admin), session_version = CASE WHEN $7 THEN COALESCE(session_version, 0) + 1 ELSE COALESCE(session_version, 0) END, updated_at = now() WHERE id = $1`, id, valueOrEmpty(request.Email), valueOrEmpty(request.DisplayName), status, strings.TrimSpace(request.SuspendedReason), request.PlatformAdmin, request.Status != nil || platformAdminChanged); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := transaction.Commit(); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -430,28 +440,33 @@ func (a *App) deletePlatformUser(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("explicit confirmation is required"))
 		return
 	}
-	var admin bool
-	if err := a.DB.QueryRowContext(c, `SELECT is_platform_admin FROM users WHERE id = $1`, id).Scan(&admin); err != nil {
-		writeError(c, http.StatusNotFound, fmt.Errorf("user not found"))
-		return
-	}
-	if admin {
-		var activeAdmins int
-		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM users WHERE is_platform_admin = TRUE`).Scan(&activeAdmins); err != nil {
-			writeError(c, http.StatusInternalServerError, err)
-			return
-		}
-		if activeAdmins <= 1 {
-			writeError(c, http.StatusConflict, fmt.Errorf("the final platform administrator cannot be removed"))
-			return
-		}
-	}
 	transaction, err := a.DB.BeginTx(c, nil)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(c, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	var admin bool
+	var status string
+	if err := transaction.QueryRowContext(c, `SELECT is_platform_admin, COALESCE(status, 'active') FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&admin, &status); err != nil {
+		writeError(c, http.StatusNotFound, fmt.Errorf("user not found"))
+		return
+	}
+	if admin && status == "active" {
+		var activeAdmins int
+		if err := transaction.QueryRowContext(c, `SELECT COUNT(*) FROM users WHERE is_platform_admin = TRUE AND COALESCE(status, 'active') = 'active'`).Scan(&activeAdmins); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if activeAdmins <= 1 {
+			writeError(c, http.StatusConflict, fmt.Errorf("the final active platform administrator cannot be removed"))
+			return
+		}
+	}
 	rows, err := transaction.QueryContext(c, `SELECT organization_id FROM organization_members WHERE user_id = $1 AND role = 'owner'`, id)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)

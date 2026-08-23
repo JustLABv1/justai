@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -31,6 +32,11 @@ type Endpoint struct {
 	TimeoutSeconds     int
 	MaxOutputTokens    int
 	Temperature        float64
+	// AllowPrivate is populated only from the operator-controlled
+	// JUSTAI_ALLOW_PRIVATE_TARGETS configuration. It is intentionally not
+	// persisted with endpoint settings, so an endpoint administrator cannot use
+	// it as an SSRF bypass.
+	AllowPrivate bool
 }
 
 type Message struct {
@@ -157,7 +163,7 @@ func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, o
 	if endpoint.Credential != "" {
 		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
 	}
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return err
 	}
@@ -224,7 +230,7 @@ func embedOpenAI(ctx context.Context, endpoint Endpoint, input string) ([]float6
 	if endpoint.Credential != "" {
 		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
 	}
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +263,7 @@ func embedOllama(ctx context.Context, endpoint Endpoint, input string) ([]float6
 		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +303,7 @@ func embedGemini(ctx context.Context, endpoint Endpoint, input string) ([]float6
 		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +359,7 @@ func streamOllama(ctx context.Context, endpoint Endpoint, options ChatOptions, o
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return err
 	}
@@ -415,7 +421,7 @@ func chatGemini(ctx context.Context, endpoint Endpoint, options ChatOptions, onD
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return err
 	}
@@ -468,7 +474,7 @@ func chatAnthropic(ctx context.Context, endpoint Endpoint, options ChatOptions, 
 	if endpoint.Credential != "" {
 		request.Header.Set("x-api-key", endpoint.Credential)
 	}
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return err
 	}
@@ -590,13 +596,235 @@ func decodeImageDataURL(value string) (string, string, error) {
 	return mimeType, base64.StdEncoding.EncodeToString(data), nil
 }
 
-func doRequest(request *http.Request, timeoutSeconds int) (*http.Response, error) {
+func doRequest(request *http.Request, timeoutSeconds int, allowPrivate bool) (*http.Response, error) {
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
-	client := &http.Client{Timeout: timeout}
+	if request == nil || request.URL == nil {
+		return nil, fmt.Errorf("provider request URL is missing")
+	}
+	if err := validateRequestURL(request.URL.String(), allowPrivate); err != nil {
+		return nil, err
+	}
+	client := SafeHTTPClientForOrigin(timeout, allowPrivate, request.URL.String())
 	return client.Do(request)
+}
+
+// ValidateEndpointURL validates an operator-configured provider URL. The
+// allowPrivate switch is supplied by server configuration, never by the
+// endpoint request itself. DNS is validated here as a defense in depth; the
+// transport repeats the check immediately before dialing to close rebinding
+// races.
+func ValidateEndpointURL(rawURL string, allowPrivate bool) error {
+	return validateEndpointURL(rawURL, allowPrivate)
+}
+
+// ValidateRequestURL validates a concrete request URL. Query parameters are
+// allowed here because Gemini and signed object URLs carry credentials or
+// signatures in the query; configured endpoint base URLs still reject them.
+func ValidateRequestURL(rawURL string, allowPrivate bool) error {
+	return validateRequestURL(rawURL, allowPrivate)
+}
+
+// SafeHTTPClient returns the same redirect and connection-time egress policy
+// used for provider API calls. It is also used when a provider response points
+// at a second URL (for example an image-generation result), where a plain
+// http.Client would otherwise reintroduce SSRF.
+func SafeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
+	return SafeHTTPClientForOrigin(timeout, allowPrivate, "")
+}
+
+// SafeHTTPClientForOrigin applies private-target permission only to the
+// configured origin. Redirects to a different origin must still resolve to a
+// public address, even when the configured endpoint is intentionally local.
+func SafeHTTPClientForOrigin(timeout time.Duration, allowPrivate bool, privateOrigin string) *http.Client {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	var origin *url.URL
+	if strings.TrimSpace(privateOrigin) != "" {
+		if parsed, err := url.Parse(privateOrigin); err == nil {
+			origin = parsed
+		}
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: &http.Transport{DialContext: safeDialContextForOrigin(allowPrivate, origin)},
+		CheckRedirect: func(next *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("provider redirect limit exceeded")
+			}
+			redirectAllowPrivate := allowPrivate
+			if origin != nil && !sameOrigin(origin, next.URL) {
+				redirectAllowPrivate = false
+			}
+			if err := validateRequestURL(next.URL.String(), redirectAllowPrivate); err != nil {
+				return err
+			}
+			if len(via) > 0 && !sameOrigin(via[len(via)-1].URL, next.URL) {
+				next.Header.Del("Authorization")
+				next.Header.Del("x-api-key")
+				// Go derives Referer from the previous request URL. Provider APIs
+				// such as Gemini carry keys in that query string, so never forward
+				// it across origins.
+				next.Header.Del("Referer")
+			}
+			return nil
+		},
+	}
+}
+
+func validateEndpointURL(rawURL string, allowPrivate bool) error {
+	return validateURL(rawURL, allowPrivate, true)
+}
+
+func validateRequestURL(rawURL string, allowPrivate bool) error {
+	return validateURL(rawURL, allowPrivate, false)
+}
+
+func validateURL(rawURL string, allowPrivate, rejectQuery bool) error {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed == nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil {
+		return fmt.Errorf("provider base URL must be an absolute http(s) URL without credentials")
+	}
+	if (rejectQuery && parsed.RawQuery != "") || parsed.Fragment != "" {
+		return fmt.Errorf("provider base URL must not include a query or fragment")
+	}
+	if allowPrivate {
+		return nil
+	}
+	return validatePublicHost(parsed.Hostname())
+}
+
+func sameOrigin(left, right *url.URL) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	return strings.EqualFold(left.Scheme, right.Scheme) && strings.EqualFold(left.Host, right.Host)
+}
+
+func validatePublicHost(host string) error {
+	if ip := net.ParseIP(host); ip != nil {
+		if !isPublicIP(ip) {
+			return fmt.Errorf("provider target resolves to a non-public address")
+		}
+		return nil
+	}
+	addresses, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("provider hostname could not be resolved: %w", err)
+	}
+	if len(addresses) == 0 {
+		return fmt.Errorf("provider hostname has no addresses")
+	}
+	for _, address := range addresses {
+		if !isPublicIP(address) {
+			return fmt.Errorf("provider hostname resolves to a non-public address")
+		}
+	}
+	return nil
+}
+
+func safeDialContext(allowPrivate bool) func(context.Context, string, string) (net.Conn, error) {
+	return safeDialContextForOrigin(allowPrivate, nil)
+}
+
+func safeDialContextForOrigin(allowPrivate bool, privateOrigin *url.URL) func(context.Context, string, string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		// Private access is scoped to the operator-configured origin. A redirect
+		// to another hostname must use the public-only path below, including the
+		// connection-time DNS check, so DNS rebinding cannot bypass redirect
+		// validation. A nil origin preserves SafeHTTPClient's explicit
+		// allow-private behavior for callers that intentionally opt into it.
+		allowPrivateForDial := allowPrivate && (privateOrigin == nil ||
+			(strings.EqualFold(host, privateOrigin.Hostname()) && port == endpointPort(privateOrigin)))
+		if allowPrivateForDial {
+			return dialer.DialContext(ctx, network, address)
+		}
+		if parsed := net.ParseIP(host); parsed != nil {
+			if !isPublicIP(parsed) {
+				return nil, fmt.Errorf("provider target resolves to a non-public address")
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(parsed.String(), port))
+		}
+		addresses, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		var lastErr error
+		for _, address := range addresses {
+			if !isPublicIP(address) {
+				continue
+			}
+			connection, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(address.String(), port))
+			if dialErr == nil {
+				return connection, nil
+			}
+			lastErr = dialErr
+		}
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, fmt.Errorf("provider hostname resolves only to non-public addresses")
+	}
+}
+
+func endpointPort(endpoint *url.URL) string {
+	if endpoint == nil {
+		return ""
+	}
+	if port := endpoint.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(endpoint.Scheme, "https") {
+		return "443"
+	}
+	if strings.EqualFold(endpoint.Scheme, "http") {
+		return "80"
+	}
+	return ""
+}
+
+// isPublicIP deliberately excludes address classes that are not globally
+// reachable, including CGNAT (100.64/10), multicast, documentation, and
+// benchmarking ranges that net.IP.IsPrivate does not cover.
+func isPublicIP(ip net.IP) bool {
+	if ip == nil || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return false
+	}
+	for _, network := range blockedIPNetworks {
+		if network.Contains(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+var blockedIPNetworks = mustParseIPNetworks([]string{
+	"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+	"172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16",
+	"198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+	"::/128", "::1/128", "100::/64", "2001:0000::/32", "2001:0002::/48", "2001:0010::/28",
+	"2001:0020::/28", "2001:0030::/28", "2001:04:112::/48", "2001:db8::/32", "2002::/16", "3fff::/20", "5f00::/16", "64:ff9b::/96", "64:ff9b:1::/48",
+	"fc00::/7", "fe80::/10", "ff00::/8",
+})
+
+func mustParseIPNetworks(values []string) []*net.IPNet {
+	result := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, err := net.ParseCIDR(value)
+		if err != nil {
+			panic(fmt.Sprintf("invalid blocked IP network %q: %v", value, err))
+		}
+		result = append(result, network)
+	}
+	return result
 }
 
 func responseError(response *http.Response) error {

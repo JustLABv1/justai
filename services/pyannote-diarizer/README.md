@@ -33,9 +33,18 @@ traffic must stay on the internal network.
 docker build -t justai-pyannote services/pyannote-diarizer
 docker run --rm -p 8000:8000 \
   -e HF_TOKEN=hf_... \
-  -e PYANNOTE_SERVICE_TOKEN=change-me \
+  -e PYANNOTE_SERVICE_TOKEN=replace-with-a-long-random-token \
+  -e PYANNOTE_ALLOWED_MEDIA_ORIGINS=https://s3.example.com \
   justai-pyannote
 ```
+
+`PYANNOTE_SERVICE_TOKEN` is mandatory (the service refuses to start without
+it). `PYANNOTE_ALLOWED_MEDIA_ORIGINS` is also mandatory and must contain the
+exact scheme/host/port origin used by the backend's signed media URLs. Private
+origins are rejected unless repeated in
+`PYANNOTE_ALLOW_PRIVATE_MEDIA_ORIGINS`; redirects are limited and must remain
+on the same origin. Downloads are bounded to the configured byte and timeout
+limits, so do not use a broad wildcard or an untrusted public origin.
 
 For a CUDA build, pass a CUDA PyTorch index when building and run the container
 with the NVIDIA container runtime:

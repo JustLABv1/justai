@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -29,6 +30,9 @@ type App struct {
 	Live    *TranscriptionManager
 
 	repositoryImportSlots chan struct{}
+	authProtectionMu      sync.Mutex
+	authLimiter           *authAttemptLimiter
+	passwordHashSlots     chan struct{}
 }
 
 func New(cfg config.Config, db *sql.DB) *App {

@@ -58,7 +58,7 @@ func Probe(ctx context.Context, endpoint Endpoint) ([]ChatModel, error) {
 	if endpoint.Credential != "" {
 		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
 	}
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,7 @@ func requestModelCatalog(ctx context.Context, endpoint Endpoint, suffix string, 
 			request.Header.Set("x-api-key", endpoint.Credential)
 		}
 	}
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return err
 	}

@@ -74,7 +74,7 @@ func (a *App) preflightEndpoint(c *gin.Context) {
 		}
 	}
 
-	if err := validateEndpointRequest(&input.endpointRequest); err != nil {
+	if err := validateEndpointRequestWithPolicy(&input.endpointRequest, a.Config.AllowPrivate); err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
@@ -115,6 +115,7 @@ func (a *App) preflightEndpoint(c *gin.Context) {
 		TimeoutSeconds:     intValue(input.TimeoutSeconds, endpointTimeoutDefault(input.ProviderType)),
 		MaxOutputTokens:    intValue(input.MaxOutputTokens, 2048),
 		Temperature:        floatValue(input.Temperature, 0.2),
+		AllowPrivate:       a.Config.AllowPrivate,
 	}
 	c.Header("Cache-Control", "no-store")
 

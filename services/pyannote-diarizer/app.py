@@ -7,16 +7,21 @@ speaker turns, so it does not need to embed Python or a GPU runtime.
 
 from __future__ import annotations
 
+import hmac
 import inspect
+import ipaddress
 import logging
 import math
 import os
+import socket
 import subprocess
 import tempfile
+import time
 import wave
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 import torch
@@ -34,13 +39,37 @@ HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
 SERVICE_TOKEN = os.getenv("PYANNOTE_SERVICE_TOKEN", "").strip()
 DEVICE_NAME = os.getenv("PYANNOTE_DEVICE", "auto").strip().lower()
 TORCH_THREADS = int(os.getenv("PYANNOTE_TORCH_THREADS", "2"))
-DOWNLOAD_TIMEOUT_SECONDS = float(
-    os.getenv("PYANNOTE_DOWNLOAD_TIMEOUT_SECONDS", "1800")
+DOWNLOAD_TIMEOUT_SECONDS = float(os.getenv("PYANNOTE_DOWNLOAD_TIMEOUT_SECONDS", "1800"))
+MAX_SOURCE_BYTES = int(os.getenv("PYANNOTE_MAX_SOURCE_BYTES", str(5 * 1024 * 1024 * 1024)))
+MAX_CONFIGURED_DOWNLOAD_TIMEOUT_SECONDS = 30 * 60
+MAX_CONFIGURED_SOURCE_BYTES = 8 * 1024 * 1024 * 1024
+ALLOWED_MEDIA_ORIGINS = tuple(
+    origin.strip().rstrip("/")
+    for origin in os.getenv("PYANNOTE_ALLOWED_MEDIA_ORIGINS", "").split(",")
+    if origin.strip()
 )
-MAX_SOURCE_BYTES = int(
-    os.getenv("PYANNOTE_MAX_SOURCE_BYTES", str(20 * 1024 * 1024 * 1024))
+ALLOW_PRIVATE_MEDIA_ORIGINS = tuple(
+    origin.strip().rstrip("/")
+    for origin in os.getenv("PYANNOTE_ALLOW_PRIVATE_MEDIA_ORIGINS", "").split(",")
+    if origin.strip()
 )
+MAX_REDIRECTS = 3
 MIN_AUDIO_SECONDS = float(os.getenv("PYANNOTE_MIN_AUDIO_SECONDS", "1"))
+
+if not SERVICE_TOKEN:
+    raise RuntimeError("PYANNOTE_SERVICE_TOKEN is required; refusing to start unauthenticated")
+if len(SERVICE_TOKEN) < 16:
+    raise RuntimeError("PYANNOTE_SERVICE_TOKEN must be at least 16 characters")
+if not ALLOWED_MEDIA_ORIGINS:
+    raise RuntimeError("PYANNOTE_ALLOWED_MEDIA_ORIGINS must contain at least one exact origin")
+if DOWNLOAD_TIMEOUT_SECONDS <= 0 or DOWNLOAD_TIMEOUT_SECONDS > MAX_CONFIGURED_DOWNLOAD_TIMEOUT_SECONDS:
+    raise RuntimeError(
+        f"PYANNOTE_DOWNLOAD_TIMEOUT_SECONDS must be between 1 and {MAX_CONFIGURED_DOWNLOAD_TIMEOUT_SECONDS}"
+    )
+if MAX_SOURCE_BYTES <= 0 or MAX_SOURCE_BYTES > MAX_CONFIGURED_SOURCE_BYTES:
+    raise RuntimeError(
+        f"PYANNOTE_MAX_SOURCE_BYTES must be between 1 and {MAX_CONFIGURED_SOURCE_BYTES}"
+    )
 
 
 def resolve_device() -> torch.device:
@@ -110,35 +139,149 @@ class DiarizeResponse(BaseModel):
 
 
 def require_service_token(request: Request) -> None:
-    if not SERVICE_TOKEN:
-        return
     authorization = request.headers.get("authorization", "")
-    if authorization != f"Bearer {SERVICE_TOKEN}":
+    if not hmac.compare_digest(authorization, f"Bearer {SERVICE_TOKEN}"):
         raise HTTPException(status_code=401, detail="invalid service token")
 
 
+def origin_for_url(url: str) -> str:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="media_url must be an absolute HTTP(S) URL without credentials")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="media_url has an invalid port") from error
+    effective_port = port or (443 if parsed.scheme == "https" else 80)
+    return f"{parsed.scheme}://{parsed.hostname.lower()}:{effective_port}"
+
+
+def validate_media_url(
+    url: str, expected_origin: str | None = None
+) -> tuple[str, tuple[str, ...]]:
+    origin = origin_for_url(url)
+    allowed_origins = {origin_for_url(value) for value in ALLOWED_MEDIA_ORIGINS}
+    private_origins = {origin_for_url(value) for value in ALLOW_PRIVATE_MEDIA_ORIGINS}
+    if origin not in allowed_origins:
+        raise HTTPException(status_code=400, detail="media_url origin is not allowlisted")
+    if expected_origin is not None and origin != expected_origin:
+        raise HTTPException(status_code=502, detail="media URL redirect changed origin")
+    parsed = urlsplit(url)
+    host = parsed.hostname
+    assert host is not None
+    try:
+        addresses = {
+            ipaddress.ip_address(info[4][0])
+            for info in socket.getaddrinfo(
+                host,
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+        }
+    except (socket.gaierror, ValueError) as error:
+        raise HTTPException(status_code=502, detail="media URL hostname could not be resolved") from error
+    if not addresses:
+        raise HTTPException(status_code=502, detail="media URL hostname has no addresses")
+    # A private origin is allowed only because its exact scheme/host/port was
+    # explicitly configured above. Public origins must never resolve to a
+    # private, reserved, multicast, or CGNAT address.
+    if not all(address.is_global for address in addresses) and origin not in private_origins:
+        raise HTTPException(status_code=400, detail="media URL resolves to a non-public address")
+    return origin, tuple(sorted(address.compressed for address in addresses))
+
+
+def pinned_media_url(url: str, address: str) -> str:
+    parsed = urlsplit(url)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    literal = f"[{address}]" if ":" in address else address
+    return urlunsplit(
+        (parsed.scheme, f"{literal}:{port}", parsed.path or "/", parsed.query, "")
+    )
+
+
 def download_source(url: str, destination: Path) -> None:
+    current_url = url
+    current_origin, _ = validate_media_url(current_url)
+    deadline = time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
+    inactivity_timeout = min(DOWNLOAD_TIMEOUT_SECONDS, 30.0)
     try:
         with httpx.Client(
-            follow_redirects=True,
-            timeout=httpx.Timeout(DOWNLOAD_TIMEOUT_SECONDS),
+            follow_redirects=False,
+            timeout=httpx.Timeout(
+                inactivity_timeout, connect=min(15.0, inactivity_timeout)
+            ),
+            # Media egress is validated and allowlisted by this service; do
+            # not let ambient proxy variables bypass that decision.
+            trust_env=False,
         ) as client:
-            with client.stream("GET", url) as response:
-                response.raise_for_status()
-                content_length = response.headers.get("content-length")
-                if content_length and int(content_length) > MAX_SOURCE_BYTES:
+            for redirect_count in range(MAX_REDIRECTS + 1):
+                if time.monotonic() >= deadline:
                     raise HTTPException(
-                        status_code=413, detail="source media is too large"
+                        status_code=504, detail="source media download timed out"
                     )
-                downloaded = 0
-                with destination.open("wb") as output:
-                    for chunk in response.iter_bytes(1024 * 1024):
-                        downloaded += len(chunk)
-                        if downloaded > MAX_SOURCE_BYTES:
-                            raise HTTPException(
-                                status_code=413, detail="source media is too large"
-                            )
-                        output.write(chunk)
+                _, addresses = validate_media_url(current_url, current_origin)
+                parsed = urlsplit(current_url)
+                assert parsed.hostname is not None
+                redirected = False
+                last_transport_error: httpx.TransportError | None = None
+                for address in addresses:
+                    try:
+                        with client.stream(
+                            "GET",
+                            pinned_media_url(current_url, address),
+                            headers={"Host": parsed.netloc},
+                            extensions={"sni_hostname": parsed.hostname},
+                        ) as response:
+                            if response.is_redirect:
+                                location = response.headers.get("location")
+                                if not location or redirect_count >= MAX_REDIRECTS:
+                                    raise HTTPException(
+                                        status_code=502,
+                                        detail="source media redirect limit exceeded",
+                                    )
+                                current_url = urljoin(current_url, location)
+                                redirected = True
+                                break
+                            response.raise_for_status()
+                            content_length = response.headers.get("content-length")
+                            if content_length:
+                                try:
+                                    if int(content_length) > MAX_SOURCE_BYTES:
+                                        raise HTTPException(
+                                            status_code=413,
+                                            detail="source media is too large",
+                                        )
+                                except ValueError as error:
+                                    raise HTTPException(
+                                        status_code=502,
+                                        detail="source media returned an invalid content length",
+                                    ) from error
+                            downloaded = 0
+                            with destination.open("wb") as output:
+                                for chunk in response.iter_bytes(1024 * 1024):
+                                    if time.monotonic() >= deadline:
+                                        raise HTTPException(
+                                            status_code=504,
+                                            detail="source media download timed out",
+                                        )
+                                    downloaded += len(chunk)
+                                    if downloaded > MAX_SOURCE_BYTES:
+                                        raise HTTPException(
+                                            status_code=413,
+                                            detail="source media is too large",
+                                        )
+                                    output.write(chunk)
+                            return
+                    except httpx.TransportError as error:
+                        last_transport_error = error
+                if redirected:
+                    continue
+                if last_transport_error is not None:
+                    raise last_transport_error
+                raise HTTPException(
+                    status_code=502, detail="media URL hostname has no addresses"
+                )
+            raise HTTPException(status_code=502, detail="source media redirect limit exceeded")
     except httpx.HTTPStatusError as error:
         logger.warning(
             "source media download returned an HTTP error (status=%s)",

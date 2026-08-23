@@ -88,6 +88,18 @@ func TestOIDCIdentityClaimsRequireMatchingNonce(t *testing.T) {
 	}
 }
 
+func TestOIDCIdentityProvisionRequiresVerifiedEmailForNewIdentity(t *testing.T) {
+	if oidcIdentityMayProvision(false, false) {
+		t.Fatal("unverified email was allowed to provision a new identity")
+	}
+	if !oidcIdentityMayProvision(false, true) {
+		t.Fatal("verified email was rejected for a new identity")
+	}
+	if !oidcIdentityMayProvision(true, false) {
+		t.Fatal("an existing linked identity should remain usable")
+	}
+}
+
 func TestOIDCCallbackRejectsMissingExpiredOrReplayedState(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

@@ -49,7 +49,7 @@ func TestStreamChatWithToolsAggregatesOpenAIChunks(t *testing.T) {
 
 	var text strings.Builder
 	var calls []ToolCall
-	err := StreamChatWithTools(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", Capabilities: map[string]bool{"tool-calling": true}}, ToolChatOptions{
+	err := StreamChatWithTools(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", AllowPrivate: true, Capabilities: map[string]bool{"tool-calling": true}}, ToolChatOptions{
 		Messages: []ToolMessage{{Role: "user", Content: "Turn on the kitchen light."}},
 		Tools:    []ToolDefinition{{Name: "mcp_light_on", Parameters: []byte("{\"type\":\"object\"}")}},
 	}, func(event ToolChatEvent) error {
@@ -93,7 +93,7 @@ func TestStreamChatWithToolsUsesNullContentForAssistantToolCalls(t *testing.T) {
 	defer server.Close()
 
 	var response strings.Builder
-	err := StreamChatWithTools(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", Capabilities: map[string]bool{"tool-calling": true}}, ToolChatOptions{
+	err := StreamChatWithTools(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", AllowPrivate: true, Capabilities: map[string]bool{"tool-calling": true}}, ToolChatOptions{
 		Messages: []ToolMessage{
 			{Role: "assistant", Content: "I am checking.", ToolCalls: []ToolCall{{ID: "call_1", Name: "mcp_get_scan", Arguments: "{}"}}},
 			{Role: "tool", ToolCallID: "call_1", Content: `{"status":"ok"}`},
@@ -119,7 +119,7 @@ func TestStreamChatWithToolsAcceptsNonStreamingMessageShape(t *testing.T) {
 	defer server.Close()
 
 	var response strings.Builder
-	err := StreamChatWithTools(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", Capabilities: map[string]bool{"tool-calling": true}}, ToolChatOptions{
+	err := StreamChatWithTools(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", AllowPrivate: true, Capabilities: map[string]bool{"tool-calling": true}}, ToolChatOptions{
 		Messages: []ToolMessage{{Role: "tool", ToolCallID: "call_1", Content: `{"status":"ok"}`}},
 		Tools:    []ToolDefinition{{Name: "mcp_get_scan", Parameters: []byte(`{"type":"object"}`)}},
 	}, func(event ToolChatEvent) error {
@@ -148,7 +148,7 @@ func TestSynthesizeSpeechUsesConfiguredSpeechModel(t *testing.T) {
 	}))
 	defer server.Close()
 
-	data, contentType, err := SynthesizeSpeech(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", SpeechModel: "voice-model"}, "Hello", "alloy")
+	data, contentType, err := SynthesizeSpeech(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", AllowPrivate: true, SpeechModel: "voice-model"}, "Hello", "alloy")
 	if err != nil {
 		t.Fatal(err)
 	}

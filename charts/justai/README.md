@@ -76,14 +76,18 @@ helm upgrade --install justai ./charts/justai \
   --set secrets.existingSecret=justai-secrets \
   --set secrets.refs.pyannoteHfToken.name=justai-pyannote-secrets \
   --set secrets.refs.pyannoteServiceToken.name=justai-pyannote-secrets \
-  --set secrets.refs.pyannoteHttpsProxy.name=justai-pyannote-secrets
+  --set secrets.refs.pyannoteHttpsProxy.name=justai-pyannote-secrets \
+  --set-string 'pyannote.allowedMediaOrigins={https://s3.example.com}'
 ```
 
 The Secret keys default to `hf-token`, `service-token`, `http-proxy`,
 `https-proxy`, and `no-proxy`; override them under `secrets.refs` when your
-Secret uses different names. The Hugging Face token is required to download
-the gated model. The service token is optional, but when configured it must be
-used as the credential on the JustAI Pyannote endpoint.
+Secret uses different names. The Hugging Face and service tokens are both
+required; the service refuses to start without the latter, and it must be used
+as the credential on the JustAI Pyannote endpoint. `pyannote.allowedMediaOrigins`
+must list the exact S3/media scheme, host, and port. Add an origin to
+`pyannote.allowPrivateMediaOrigins` only when that exact origin is intentionally
+private (for example an in-cluster MinIO service).
 
 For a private test deployment only, `secrets.create=true` can create the
 Secret from `secrets.data.pyannoteHfToken`, `secrets.data.pyannoteServiceToken`,

@@ -139,7 +139,7 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 	if endpoint.Credential != "" {
 		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
 	}
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return err
 	}
@@ -312,7 +312,7 @@ func SynthesizeSpeech(ctx context.Context, endpoint Endpoint, text, voice string
 	if endpoint.Credential != "" {
 		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
 	}
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return nil, "", err
 	}

@@ -126,7 +126,7 @@ func (a *App) initVideoTranscriptionUpload(c *gin.Context) {
 		return
 	}
 	upload.Pipeline = decodeVideoPipeline(pipelineRaw)
-	c.JSON(http.StatusCreated, videoUploadResponse{Upload: upload, PartURLs: a.videoUploadPartURLs(storage, storageKey, multipartID, partCount)})
+	c.JSON(http.StatusCreated, videoUploadResponse{Upload: upload, PartURLs: a.videoUploadPartURLs(storage, storageKey, multipartID, partCount, request.FileBytes, partSize)})
 }
 
 func (a *App) getVideoTranscriptionUpload(c *gin.Context) {
@@ -145,7 +145,7 @@ func (a *App) getVideoTranscriptionUpload(c *gin.Context) {
 	if upload.model.Status == "uploading" {
 		storage, storageErr := newS3Storage(a.Config)
 		if storageErr == nil {
-			response.PartURLs = a.videoUploadPartURLs(storage, upload.storageKey, upload.multipartID, upload.model.PartCount)
+			response.PartURLs = a.videoUploadPartURLs(storage, upload.storageKey, upload.multipartID, upload.model.PartCount, upload.model.ExpectedBytes, upload.model.PartSize)
 		}
 	}
 	c.JSON(http.StatusOK, response)
@@ -217,7 +217,7 @@ func (a *App) completeVideoTranscriptionUpload(c *gin.Context) {
 		for _, part := range parts {
 			s3Parts = append(s3Parts, s3MultipartPart{PartNumber: part.PartNumber, ETag: part.ETag})
 		}
-		if err := storage.completeMultipart(c, upload.storageKey, upload.multipartID, s3Parts); err != nil {
+		if err := storage.completeMultipartAndVerify(c, upload.storageKey, upload.multipartID, s3Parts, upload.model.ExpectedBytes); err != nil {
 			writeError(c, http.StatusBadGateway, fmt.Errorf("could not complete video upload: %w", err))
 			return
 		}
@@ -361,10 +361,14 @@ func (a *App) videoPlaybackURL(ctx context.Context, record videoUploadRecord) (s
 	return storage.presignURL(http.MethodGet, record.storageKey, nil, videoPlaybackURLLifetime), expiresAt, nil
 }
 
-func (a *App) videoUploadPartURLs(storage *s3Storage, storageKey, multipartID string, partCount int) []videoUploadPartURL {
+func (a *App) videoUploadPartURLs(storage *s3Storage, storageKey, multipartID string, partCount int, expectedBytes, partSize int64) []videoUploadPartURL {
 	result := make([]videoUploadPartURL, 0, partCount)
 	for part := 1; part <= partCount; part++ {
-		result = append(result, videoUploadPartURL{PartNumber: part, URL: storage.presignMultipartPart(storageKey, multipartID, part, 24*time.Hour)})
+		partBytes := partSize
+		if remaining := expectedBytes - int64(part-1)*partSize; remaining < partBytes {
+			partBytes = remaining
+		}
+		result = append(result, videoUploadPartURL{PartNumber: part, URL: storage.presignMultipartPart(storageKey, multipartID, part, 24*time.Hour, partBytes)})
 	}
 	return result
 }

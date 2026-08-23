@@ -88,6 +88,7 @@ func TestDiarizeMediaURLPyannote(t *testing.T) {
 	segments, err := DiarizeMediaURL(context.Background(), Endpoint{
 		ProviderType:     "pyannote",
 		BaseURL:          server.URL,
+		AllowPrivate:     true,
 		Credential:       "service-token",
 		DiarizationModel: "pyannote/speaker-diarization-3.1",
 	}, "https://media.example.test/video.mp4", "de")
@@ -110,6 +111,7 @@ func TestDiarizeMediaURLReturnsProviderFailure(t *testing.T) {
 	_, err := DiarizeMediaURL(context.Background(), Endpoint{
 		ProviderType: "pyannote",
 		BaseURL:      server.URL,
+		AllowPrivate: true,
 	}, "https://media.example.test/video.mp4", "de")
 	if err == nil {
 		t.Fatal("expected diarization provider failure")
@@ -207,6 +209,7 @@ func TestChunkedStreamPostsWhisperAudioAndStreamsSSE(t *testing.T) {
 	stream, err := OpenChunked(context.Background(), Endpoint{
 		ProviderType:       "openai-compatible",
 		BaseURL:            server.URL + "/v1",
+		AllowPrivate:       true,
 		TranscriptionModel: "whisper-large-v3-turbo",
 		TimeoutSeconds:     10,
 	}, "", "en", ChunkedOptions{Window: 100 * time.Millisecond, Overlap: 20 * time.Millisecond, Minimum: 10 * time.Millisecond})
@@ -273,6 +276,7 @@ func TestChunkedStreamUnwrapsEmbeddedSSEFromJSONResponse(t *testing.T) {
 	stream, err := OpenChunked(context.Background(), Endpoint{
 		ProviderType:       "openai-compatible",
 		BaseURL:            server.URL + "/v1",
+		AllowPrivate:       true,
 		TranscriptionModel: "whisper-large-v3-turbo",
 		TimeoutSeconds:     10,
 	}, "", "en", ChunkedOptions{Window: 100 * time.Millisecond, Overlap: 20 * time.Millisecond, Minimum: 10 * time.Millisecond})
@@ -374,6 +378,7 @@ func TestChunkedStreamLimitsRollingPromptSentToProvider(t *testing.T) {
 	stream, err := OpenChunked(context.Background(), Endpoint{
 		ProviderType:       "openai-compatible",
 		BaseURL:            server.URL + "/v1",
+		AllowPrivate:       true,
 		TranscriptionModel: "whisper-large-v3-turbo",
 		TimeoutSeconds:     10,
 	}, "", "en", ChunkedOptions{Window: 100 * time.Millisecond, Overlap: 20 * time.Millisecond, Minimum: 50 * time.Millisecond, PromptMaxChars: 24})
@@ -429,6 +434,7 @@ func TestChunkedStreamCanDisableRollingPrompt(t *testing.T) {
 	stream, err := OpenChunked(context.Background(), Endpoint{
 		ProviderType:       "openai-compatible",
 		BaseURL:            server.URL + "/v1",
+		AllowPrivate:       true,
 		TranscriptionModel: "whisper-large-v3-turbo",
 		TimeoutSeconds:     10,
 	}, "", "en", ChunkedOptions{
@@ -500,6 +506,7 @@ func TestChunkedStreamRetriesContextLimitWithoutRollingPrompt(t *testing.T) {
 	stream, err := OpenChunked(context.Background(), Endpoint{
 		ProviderType:       "openai-compatible",
 		BaseURL:            server.URL + "/v1",
+		AllowPrivate:       true,
 		TranscriptionModel: "whisper-large-v3-turbo",
 		TimeoutSeconds:     10,
 	}, "", "en", ChunkedOptions{Window: 100 * time.Millisecond, Overlap: 20 * time.Millisecond, Minimum: 50 * time.Millisecond, PromptMaxChars: 24})
@@ -544,6 +551,7 @@ func TestChunkedStreamDoesNotRequestDigitalSilence(t *testing.T) {
 	stream, err := OpenChunked(context.Background(), Endpoint{
 		ProviderType:       "openai-compatible",
 		BaseURL:            server.URL + "/v1",
+		AllowPrivate:       true,
 		TranscriptionModel: "whisper-large-v3-turbo",
 		TimeoutSeconds:     10,
 	}, "", "en", ChunkedOptions{Window: 100 * time.Millisecond, Overlap: 20 * time.Millisecond, Minimum: 10 * time.Millisecond})

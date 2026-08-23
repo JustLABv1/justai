@@ -88,7 +88,7 @@ func TestVideoMultipartPresignIncludesUploadScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := storage.presignMultipartPart("transcription-video/session/upload.mp4", "multipart-id", 3, 24*time.Hour)
+	value := storage.presignMultipartPart("transcription-video/session/upload.mp4", "multipart-id", 3, 24*time.Hour, 16777216)
 	parsed, err := url.Parse(value)
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestVideoMultipartPresignIncludesUploadScope(t *testing.T) {
 	if query.Get("partNumber") != "3" || query.Get("uploadId") != "multipart-id" {
 		t.Fatalf("multipart scope missing from presigned URL: %s", value)
 	}
-	if query.Get("X-Amz-SignedHeaders") != "host" || query.Get("X-Amz-Signature") == "" {
+	if query.Get("X-Amz-SignedHeaders") != "content-length;host" || query.Get("X-Amz-Signature") == "" {
 		t.Fatalf("presigned URL is missing its signature: %s", value)
 	}
 	if !strings.Contains(value, "/videos/transcription-video/session/upload.mp4?") {

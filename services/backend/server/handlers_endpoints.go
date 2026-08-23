@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -110,7 +111,7 @@ func (a *App) createEndpoint(c *gin.Context) {
 		writeError(c, http.StatusForbidden, err)
 		return
 	}
-	if err := validateEndpointRequest(&request); err != nil {
+	if err := validateEndpointRequestWithPolicy(&request, a.Config.AllowPrivate); err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
@@ -250,7 +251,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 	if request.ChatModel == "" {
 		request.ChatModel = current.ChatModel
 	}
-	if err := validateEndpointRequest(&request); err != nil {
+	if err := validateEndpointRequestWithPolicy(&request, a.Config.AllowPrivate); err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
@@ -297,6 +298,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 	if isDefault && !enabled {
 		isDefault = false
 	}
+	clearCredential := request.Credential == "" && !sameEndpointOrigin(current.BaseURL, request.BaseURL)
 	transaction, err := a.DB.BeginTx(c, nil)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -313,7 +315,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 			return
 		}
 	}
-	_, err = transaction.ExecContext(c, `UPDATE endpoint_settings SET endpoint_kind = $2, provider_type = $3, name = $4, base_url = $5, api_path = NULLIF($6, ''), api_version = NULLIF($7, ''), chat_model = NULLIF($8, ''), vision_model = NULLIF($9, ''), image_model = NULLIF($10, ''), embedding_model = NULLIF($11, ''), transcription_model = NULLIF($12, ''), diarization_model = NULLIF($13, ''), speech_model = NULLIF($14, ''), capabilities = $15, credential_ciphertext = COALESCE($16, credential_ciphertext), enabled = $17, is_default = $18, timeout_seconds = $19, max_output_tokens = $20, temperature = $21, updated_at = now() WHERE id = $1`, id, request.EndpointKind, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.ImageModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, capabilities, encrypted, enabled, isDefault, intValue(request.TimeoutSeconds, current.TimeoutSeconds), intValue(request.MaxOutputTokens, current.MaxOutputTokens), floatValue(request.Temperature, current.Temperature))
+	_, err = transaction.ExecContext(c, `UPDATE endpoint_settings SET endpoint_kind = $2, provider_type = $3, name = $4, base_url = $5, api_path = NULLIF($6, ''), api_version = NULLIF($7, ''), chat_model = NULLIF($8, ''), vision_model = NULLIF($9, ''), image_model = NULLIF($10, ''), embedding_model = NULLIF($11, ''), transcription_model = NULLIF($12, ''), diarization_model = NULLIF($13, ''), speech_model = NULLIF($14, ''), capabilities = $15, credential_ciphertext = CASE WHEN $16 THEN NULL WHEN $17 IS NOT NULL THEN $17 ELSE credential_ciphertext END, enabled = $18, is_default = $19, timeout_seconds = $20, max_output_tokens = $21, temperature = $22, updated_at = now() WHERE id = $1`, id, request.EndpointKind, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.ImageModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, capabilities, clearCredential, encrypted, enabled, isDefault, intValue(request.TimeoutSeconds, current.TimeoutSeconds), intValue(request.MaxOutputTokens, current.MaxOutputTokens), floatValue(request.Temperature, current.Temperature))
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -547,6 +549,12 @@ func (a *App) providerEndpoint(ctx context.Context, id uuid.UUID) (provider.Endp
 	if err != nil {
 		return endpoint, err
 	}
+	if endpoint.ProviderType != "mock" {
+		if err := provider.ValidateEndpointURL(endpoint.BaseURL, a.Config.AllowPrivate); err != nil {
+			return endpoint, err
+		}
+	}
+	endpoint.AllowPrivate = a.Config.AllowPrivate
 	_ = json.Unmarshal(capabilities, &endpoint.Capabilities)
 	if len(credential) > 0 {
 		endpoint.Credential, err = a.Secrets.Decrypt(credential)
@@ -627,6 +635,10 @@ func (a *App) canUseEndpoint(item models.Endpoint, principal middleware.Principa
 }
 
 func validateEndpointRequest(request *endpointRequest) error {
+	return validateEndpointRequestWithPolicy(request, false)
+}
+
+func validateEndpointRequestWithPolicy(request *endpointRequest, allowPrivate bool) error {
 	supported := map[string]bool{"mock": true, "openai": true, "openai-compatible": true, "gemini": true, "anthropic": true, "ollama": true, "pyannote": true}
 	if !supported[request.ProviderType] {
 		return fmt.Errorf("unsupported provider type")
@@ -652,7 +664,21 @@ func validateEndpointRequest(request *endpointRequest) error {
 			return fmt.Errorf("base URL is required for this provider")
 		}
 	}
+	if request.ProviderType != "mock" {
+		if err := provider.ValidateEndpointURL(request.BaseURL, allowPrivate); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func sameEndpointOrigin(left, right string) bool {
+	parsedLeft, errLeft := url.Parse(strings.TrimSpace(left))
+	parsedRight, errRight := url.Parse(strings.TrimSpace(right))
+	if errLeft != nil || errRight != nil || parsedLeft == nil || parsedRight == nil {
+		return false
+	}
+	return strings.EqualFold(parsedLeft.Scheme, parsedRight.Scheme) && strings.EqualFold(parsedLeft.Host, parsedRight.Host)
 }
 
 func inferEndpointKind(providerType string, capabilities map[string]bool) string {

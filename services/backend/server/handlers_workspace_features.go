@@ -8,6 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	stdhtml "html"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -948,7 +952,11 @@ func imageEndpointURL(endpoint provider.Endpoint, suffix string) string {
 }
 
 func imageProviderRequest(ctx context.Context, endpoint provider.Endpoint, method, suffix string, body io.Reader, contentType string) (*http.Response, error) {
-	request, err := http.NewRequestWithContext(ctx, method, imageEndpointURL(endpoint, suffix), body)
+	requestURL := imageEndpointURL(endpoint, suffix)
+	if err := provider.ValidateEndpointURL(requestURL, endpoint.AllowPrivate); err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 	if err != nil {
 		return nil, err
 	}
@@ -956,7 +964,8 @@ func imageProviderRequest(ctx context.Context, endpoint provider.Endpoint, metho
 	if endpoint.Credential != "" {
 		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
 	}
-	return (&http.Client{Timeout: time.Duration(maxInt(endpoint.TimeoutSeconds, 120)) * time.Second}).Do(request)
+	client := provider.SafeHTTPClientForOrigin(time.Duration(maxInt(endpoint.TimeoutSeconds, 120))*time.Second, endpoint.AllowPrivate, endpointOrigin(endpoint))
+	return client.Do(request)
 }
 
 func maxInt(value, fallback int) int {
@@ -966,7 +975,14 @@ func maxInt(value, fallback int) int {
 	return fallback
 }
 
-func decodeProviderImage(response *http.Response) ([]byte, string, error) {
+const (
+	maxGeneratedImageBytes  = 15 * 1024 * 1024
+	maxGeneratedImageWidth  = 16384
+	maxGeneratedImageHeight = 16384
+	maxGeneratedImagePixels = 100_000_000
+)
+
+func decodeProviderImage(ctx context.Context, response *http.Response, allowPrivate bool, privateOrigin string) ([]byte, string, error) {
 	defer response.Body.Close()
 	if response.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
@@ -978,7 +994,7 @@ func decodeProviderImage(response *http.Response) ([]byte, string, error) {
 			URL     string `json:"url"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxGeneratedImageBytes+256*1024)).Decode(&payload); err != nil {
 		return nil, "", err
 	}
 	if len(payload.Data) == 0 {
@@ -986,14 +1002,26 @@ func decodeProviderImage(response *http.Response) ([]byte, string, error) {
 	}
 	if payload.Data[0].B64JSON != "" {
 		data, err := base64.StdEncoding.DecodeString(payload.Data[0].B64JSON)
-		return data, "image/png", err
+		if err != nil {
+			return nil, "", err
+		}
+		return validateGeneratedImage(data, "")
 	}
 	if payload.Data[0].URL != "" {
 		parsed, err := url.Parse(payload.Data[0].URL)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return nil, "", fmt.Errorf("image provider returned an invalid image URL")
 		}
-		imageResponse, err := (&http.Client{Timeout: 30 * time.Second}).Get(parsed.String())
+		privateImageOrigin := privateOrigin
+		allowPrivateImage := allowPrivate && sameURLOrigin(parsed, privateImageOrigin)
+		if err := provider.ValidateRequestURL(parsed.String(), allowPrivateImage); err != nil {
+			return nil, "", err
+		}
+		imageRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+		if err != nil {
+			return nil, "", err
+		}
+		imageResponse, err := provider.SafeHTTPClientForOrigin(30*time.Second, allowPrivate, privateImageOrigin).Do(imageRequest)
 		if err != nil {
 			return nil, "", err
 		}
@@ -1001,25 +1029,72 @@ func decodeProviderImage(response *http.Response) ([]byte, string, error) {
 		if imageResponse.StatusCode >= 300 {
 			return nil, "", fmt.Errorf("image URL returned status %d", imageResponse.StatusCode)
 		}
-		data, err := io.ReadAll(io.LimitReader(imageResponse.Body, 15*1024*1024+1))
-		if err != nil || len(data) > 15*1024*1024 {
+		declaredMime := strings.TrimSpace(strings.Split(imageResponse.Header.Get("Content-Type"), ";")[0])
+		if imageResponse.ContentLength > maxGeneratedImageBytes {
 			return nil, "", fmt.Errorf("generated image is too large")
 		}
-		return data, firstImageMime(imageResponse.Header.Get("Content-Type")), nil
+		data, err := io.ReadAll(io.LimitReader(imageResponse.Body, maxGeneratedImageBytes+1))
+		if err != nil {
+			return nil, "", err
+		}
+		if len(data) > maxGeneratedImageBytes {
+			return nil, "", fmt.Errorf("generated image is too large")
+		}
+		return validateGeneratedImage(data, declaredMime)
 	}
 	return nil, "", fmt.Errorf("image provider returned no usable image data")
 }
 
-func firstImageMime(value string) string {
-	value = strings.TrimSpace(strings.Split(value, ";")[0])
-	if strings.HasPrefix(value, "image/") {
-		return value
+func endpointOrigin(endpoint provider.Endpoint) string {
+	parsed, err := url.Parse(endpoint.BaseURL)
+	if err != nil || parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
 	}
-	return "image/png"
+	parsed.Path = ""
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func sameURLOrigin(left *url.URL, right string) bool {
+	if left == nil || strings.TrimSpace(right) == "" {
+		return false
+	}
+	rightURL, err := url.Parse(right)
+	if err != nil || rightURL == nil {
+		return false
+	}
+	return strings.EqualFold(left.Scheme, rightURL.Scheme) && strings.EqualFold(left.Host, rightURL.Host)
+}
+
+func validateGeneratedImage(data []byte, declaredMime string) ([]byte, string, error) {
+	if len(data) == 0 || len(data) > maxGeneratedImageBytes {
+		return nil, "", fmt.Errorf("generated image is empty or too large")
+	}
+	contentType := http.DetectContentType(data)
+	if contentType == "application/octet-stream" {
+		return nil, "", fmt.Errorf("generated image has an unsupported content type")
+	}
+	supported := map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true}
+	if !supported[contentType] {
+		return nil, "", fmt.Errorf("generated image has an unsupported content type")
+	}
+	if declaredMime != "" && declaredMime != "application/octet-stream" && declaredMime != contentType {
+		return nil, "", fmt.Errorf("generated image content type does not match its bytes")
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("generated image is invalid: %w", err)
+	}
+	if config.Width <= 0 || config.Height <= 0 || config.Width > maxGeneratedImageWidth || config.Height > maxGeneratedImageHeight || int64(config.Width)*int64(config.Height) > maxGeneratedImagePixels {
+		return nil, "", fmt.Errorf("generated image dimensions are too large")
+	}
+	return data, contentType, nil
 }
 
 func (a *App) storeGeneratedImage(ctx context.Context, userID, organizationID, endpointID uuid.UUID, prompt, mode, mimeType string, data []byte) (models.GeneratedImage, error) {
-	if len(data) == 0 || len(data) > 15*1024*1024 {
+	if len(data) == 0 || len(data) > maxGeneratedImageBytes {
 		return models.GeneratedImage{}, fmt.Errorf("generated image is empty or too large")
 	}
 	var item models.GeneratedImage
@@ -1077,7 +1152,7 @@ func (a *App) generateImage(c *gin.Context) {
 		writeError(c, http.StatusBadGateway, err)
 		return
 	}
-	data, mimeType, err := decodeProviderImage(response)
+	data, mimeType, err := decodeProviderImage(c, response, endpoint.AllowPrivate, endpointOrigin(endpoint))
 	if err != nil {
 		writeError(c, http.StatusBadGateway, err)
 		return
@@ -1150,7 +1225,7 @@ func (a *App) editImage(c *gin.Context) {
 		writeError(c, http.StatusBadGateway, err)
 		return
 	}
-	data, mimeType, err := decodeProviderImage(response)
+	data, mimeType, err := decodeProviderImage(c, response, endpoint.AllowPrivate, endpointOrigin(endpoint))
 	if err != nil {
 		writeError(c, http.StatusBadGateway, err)
 		return

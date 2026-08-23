@@ -135,6 +135,10 @@ func (s *s3Storage) presignProcessingURL(method, key string, query url.Values, l
 }
 
 func (s *s3Storage) presignURLAt(endpoint *url.URL, method, key string, query url.Values, lifetime time.Duration) string {
+	return s.presignURLAtWithHeaders(endpoint, method, key, query, lifetime, nil)
+}
+
+func (s *s3Storage) presignURLAtWithHeaders(endpoint *url.URL, method, key string, query url.Values, lifetime time.Duration, signedHeaderValues map[string]string) string {
 	object := s.objectURLAt(endpoint, key)
 	if lifetime <= 0 {
 		lifetime = 15 * time.Minute
@@ -150,15 +154,32 @@ func (s *s3Storage) presignURLAt(endpoint *url.URL, method, key string, query ur
 	values.Set("X-Amz-Credential", s.access+"/"+scope)
 	values.Set("X-Amz-Date", now.Format("20060102T150405Z"))
 	values.Set("X-Amz-Expires", strconv.FormatInt(int64(lifetime/time.Second), 10))
-	values.Set("X-Amz-SignedHeaders", "host")
-	canonicalHeaders := "host:" + object.Host + "\n"
+	signedHeaderNames := []string{"host"}
+	for name := range signedHeaderValues {
+		signedHeaderNames = append(signedHeaderNames, strings.ToLower(strings.TrimSpace(name)))
+	}
+	sort.Strings(signedHeaderNames)
+	values.Set("X-Amz-SignedHeaders", strings.Join(signedHeaderNames, ";"))
+	canonicalHeaderValues := make(map[string]string, len(signedHeaderValues)+1)
+	canonicalHeaderValues["host"] = object.Host
+	for name, value := range signedHeaderValues {
+		canonicalHeaderValues[strings.ToLower(strings.TrimSpace(name))] = strings.TrimSpace(value)
+	}
+	var canonicalHeadersBuilder strings.Builder
+	for _, name := range signedHeaderNames {
+		canonicalHeadersBuilder.WriteString(name)
+		canonicalHeadersBuilder.WriteByte(':')
+		canonicalHeadersBuilder.WriteString(canonicalHeaderValues[name])
+		canonicalHeadersBuilder.WriteByte('\n')
+	}
+	canonicalHeaders := canonicalHeadersBuilder.String()
 	canonicalQueryValue := canonicalQuery(values)
 	canonicalRequest := strings.Join([]string{
 		method,
 		object.EscapedPath(),
 		canonicalQueryValue,
 		canonicalHeaders,
-		"host",
+		strings.Join(signedHeaderNames, ";"),
 		"UNSIGNED-PAYLOAD",
 	}, "\n")
 	stringToSign := strings.Join([]string{
@@ -216,10 +237,13 @@ func (s *s3Storage) initiateMultipart(ctx context.Context, key, contentType stri
 	return result.UploadID, nil
 }
 
-func (s *s3Storage) presignMultipartPart(key, uploadID string, partNumber int, lifetime time.Duration) string {
+func (s *s3Storage) presignMultipartPart(key, uploadID string, partNumber int, lifetime time.Duration, expectedLength ...int64) string {
 	query := url.Values{}
 	query.Set("partNumber", strconv.Itoa(partNumber))
 	query.Set("uploadId", uploadID)
+	if len(expectedLength) > 0 && expectedLength[0] > 0 {
+		return s.presignURLAtWithHeaders(s.endpoint, http.MethodPut, key, query, lifetime, map[string]string{"content-length": strconv.FormatInt(expectedLength[0], 10)})
+	}
 	return s.presignURL(http.MethodPut, key, query, lifetime)
 }
 
@@ -235,7 +259,46 @@ func (s *s3Storage) completeMultipart(ctx context.Context, key, uploadID string,
 		return err
 	}
 	defer response.Body.Close()
-	return readS3Response(response)
+	if err := readS3Response(response); err != nil {
+		return err
+	}
+	return nil
+}
+
+// objectSize reads the authoritative object length after multipart
+// completion. The client-provided expected size is only metadata; S3 HEAD is
+// the source of truth before a completed upload can enter the processing
+// queue.
+func (s *s3Storage) objectSize(ctx context.Context, key string) (int64, error) {
+	response, err := s.request(ctx, http.MethodHead, key, nil, nil, "")
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= http.StatusMultipleChoices {
+		return 0, s3ErrorFromResponse(response)
+	}
+	if response.ContentLength < 0 {
+		return 0, fmt.Errorf("s3 HEAD response omitted object size")
+	}
+	return response.ContentLength, nil
+}
+
+func (s *s3Storage) completeMultipartAndVerify(ctx context.Context, key, uploadID string, parts []s3MultipartPart, expectedBytes int64) error {
+	if err := s.completeMultipart(ctx, key, uploadID, parts); err != nil {
+		return err
+	}
+	actualBytes, err := s.objectSize(ctx, key)
+	if err != nil {
+		_ = s.delete(ctx, key)
+		return fmt.Errorf("could not verify completed upload size: %w", err)
+	}
+	if actualBytes != expectedBytes {
+		_ = s.delete(ctx, key)
+		_ = s.abortMultipart(ctx, key, uploadID)
+		return fmt.Errorf("uploaded object size %d bytes does not match declared size %d bytes", actualBytes, expectedBytes)
+	}
+	return nil
 }
 
 func (s *s3Storage) abortMultipart(ctx context.Context, key, uploadID string) error {

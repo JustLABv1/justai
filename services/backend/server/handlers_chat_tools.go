@@ -439,7 +439,7 @@ func (a *App) generateImageForChat(ctx context.Context, userID, organizationID u
 	if err != nil {
 		return generatedImageRecord{}, err
 	}
-	data, mimeType, err := decodeProviderImage(response)
+	data, mimeType, err := decodeProviderImage(ctx, response, endpoint.AllowPrivate, endpointOrigin(endpoint))
 	if err != nil {
 		return generatedImageRecord{}, err
 	}
@@ -504,7 +504,7 @@ func (a *App) editImageForChat(ctx context.Context, userID, organizationID uuid.
 	if err != nil {
 		return generatedImageRecord{}, err
 	}
-	result, resultMimeType, err := decodeProviderImage(response)
+	result, resultMimeType, err := decodeProviderImage(ctx, response, endpoint.AllowPrivate, endpointOrigin(endpoint))
 	if err != nil {
 		return generatedImageRecord{}, err
 	}

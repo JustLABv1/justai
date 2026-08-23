@@ -451,7 +451,7 @@ func DiarizeMediaURL(ctx context.Context, endpoint Endpoint, mediaURL, language 
 	if endpoint.Credential != "" {
 		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
 	}
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -505,7 +505,7 @@ func Diarize(ctx context.Context, endpoint Endpoint, pcm []byte, language string
 	if endpoint.Credential != "" {
 		request.Header.Set("Authorization", "Bearer "+endpoint.Credential)
 	}
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +549,7 @@ func diarizeGemini(ctx context.Context, endpoint Endpoint, pcm []byte, language 
 		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := doRequest(request, endpoint.TimeoutSeconds)
+	response, err := doRequest(request, endpoint.TimeoutSeconds, endpoint.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}
