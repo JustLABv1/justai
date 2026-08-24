@@ -1,5 +1,7 @@
 ARG SETUPTOOLS_VERSION=80.10.2
 
+# Local builds compile the verified artifact here. CI overrides this named stage
+# with the digest-pinned image produced by docker/ffmpeg/Dockerfile.
 FROM alpine:3.24 AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=9.0.1
@@ -142,7 +144,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OPENBLAS_NUM_THREADS=2
 
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=ffmpeg-builder /opt/ffmpeg /opt/ffmpeg
+COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg
 COPY --from=builder /app/app.py /app/app.py
 
 RUN ["/opt/venv/bin/python", "-c", "import importlib.metadata as metadata, importlib.util, os; assert metadata.version('setuptools') == os.environ['SETUPTOOLS_VERSION']; assert importlib.util.find_spec('pip') is None"]

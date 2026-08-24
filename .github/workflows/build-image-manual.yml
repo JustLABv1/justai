@@ -10,6 +10,8 @@ on:
 
 env:
   IMAGE: ghcr.io/justlabv1/justai
+  FFMPEG_IMAGE: ghcr.io/justlabv1/justai-ffmpeg
+  FFMPEG_TAG: 9.0.1-openssl-3.5.7
 
 jobs:
   build:
@@ -31,6 +33,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build & Push Shared FFmpeg
+        id: ffmpeg
+        uses: docker/build-push-action@v7
+        with:
+          context: docker/ffmpeg
+          file: docker/ffmpeg/Dockerfile
+          push: true
+          tags: ${{ env.FFMPEG_IMAGE }}:${{ env.FFMPEG_TAG }}
+          cache-from: type=gha,scope=ffmpeg
+          cache-to: type=gha,scope=ffmpeg,mode=max
+          provenance: mode=max
+          sbom: true
+
       - name: Build & Push Backend
         uses: docker/build-push-action@v7
         with:
@@ -38,6 +53,8 @@ jobs:
           file: services/backend/Dockerfile
           push: true
           tags: ${{ env.IMAGE }}:backend-${{ github.event.inputs.branch }}
+          build-contexts: |
+            ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ steps.ffmpeg.outputs.digest }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
 
@@ -60,6 +77,8 @@ jobs:
           file: Dockerfile
           push: true
           tags: ${{ env.IMAGE }}:${{ github.event.inputs.branch }}
+          build-contexts: |
+            ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ steps.ffmpeg.outputs.digest }}
           cache-from: type=gha,scope=combined
           cache-to: type=gha,scope=combined,mode=max
 
@@ -70,5 +89,7 @@ jobs:
           file: services/pyannote-diarizer/Dockerfile
           push: true
           tags: ${{ env.IMAGE }}:pyannote-${{ github.event.inputs.branch }}
+          build-contexts: |
+            ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ steps.ffmpeg.outputs.digest }}
           cache-from: type=gha,scope=pyannote
           cache-to: type=gha,scope=pyannote,mode=max

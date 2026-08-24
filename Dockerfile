@@ -25,8 +25,9 @@ RUN go mod download
 COPY services/backend/ ./
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o justai-backend
 
-# Stage 3: Build a static FFmpeg 9 binary. Alpine 3.24 packages FFmpeg 8.1.2,
-# which is affected by CVE-2026-64830 and CVE-2026-64831.
+# Stage 3: Build a static FFmpeg 9 binary. CI overrides this named stage with
+# the digest-pinned image produced by docker/ffmpeg/Dockerfile. The source build
+# remains as a verified fallback for ordinary local Docker builds.
 FROM alpine:3.24 AS ffmpeg-builder
 ARG FFMPEG_VERSION=9.0.1
 ARG OPENSSL_VERSION=3.5.7
@@ -124,7 +125,8 @@ RUN apk add --upgrade --no-cache \
 
 COPY --from=poppler-runtime /opt/poppler /opt/poppler
 COPY --from=poppler-runtime /usr/local/bin/pdftotext /usr/local/bin/pdftotext
-COPY --from=ffmpeg-builder /opt/ffmpeg /opt/ffmpeg
+COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg
+COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffprobe /opt/ffmpeg/bin/ffprobe
 
 # Create user and group
 RUN addgroup --system --gid 1001 nodejs \
