@@ -243,10 +243,11 @@ jobs:
       - name: Verify runtime Python packaging
         run: |
           set -euo pipefail
-          version="$(docker run --rm --entrypoint python justai-pyannote:ci -c 'import importlib.metadata as metadata; print(metadata.version("setuptools"))')"
-          test "${version}" = "80.10.2"
           if docker run --rm --entrypoint python justai-pyannote:ci -m pip --version; then
             echo "pip must not be present in the pyannote runtime image"
             exit 1
           fi
-          docker run --rm --entrypoint /usr/bin/python justai-pyannote:ci -c 'import importlib.util; assert importlib.util.find_spec("pip") is None; assert importlib.util.find_spec("setuptools") is None'
+          docker run --rm --entrypoint python justai-pyannote:ci -c 'import importlib.metadata as metadata, importlib.util; installed = {dist.metadata["Name"].lower() for dist in metadata.distributions() if dist.metadata["Name"]}; forbidden = {"pip", "setuptools"}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed)'
+          docker run --rm --entrypoint /usr/bin/python justai-pyannote:ci -c 'import importlib.util, pathlib, site; root = pathlib.Path(site.getsitepackages()[0]); assert all(importlib.util.find_spec(name) is None for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack")); assert not list(root.rglob("bom.cdx.json"))'
+          layers="$(docker image inspect justai-pyannote:ci --format '{{ len .RootFS.Layers }}')"
+          test "$layers" -lt "11"

@@ -91,8 +91,9 @@ COPY requirements.txt ./
 
 # Pip is not needed by the runtime. Removing it also removes its vendored
 # historical SBOM, which otherwise reports packages that are not installed.
-# Torch requires setuptools<82; keep the compatible release above both
-# setuptools CVE fix levels and verify it before copying the venv.
+# Torch declares setuptools<82, so use the compatible pinned release while pip
+# resolves and validates the environment. Setuptools is a build/install tool for
+# this service and is removed before the runtime venv is copied.
 RUN python -m venv "$VIRTUAL_ENV" \
     && python -m pip install --upgrade pip \
     && pip install --index-url "${TORCH_INDEX_URL}" \
@@ -106,48 +107,58 @@ RUN python -m venv "$VIRTUAL_ENV" \
     && pip check \
     && python -c 'import importlib.metadata as metadata, sys; assert metadata.version("setuptools") == sys.argv[1]' "${SETUPTOOLS_VERSION}"
 
-RUN rm -rf "$VIRTUAL_ENV/lib/python3.14/site-packages/pip" \
-    && rm -rf "$VIRTUAL_ENV/lib/python3.14/site-packages/pip-"*.dist-info
+RUN python -c 'import pathlib, shutil; root = pathlib.Path("/opt/venv/lib/python3.14/site-packages"); [shutil.rmtree(path, ignore_errors=True) for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack") for path in (root / name, *root.glob(name + "-*.dist-info"), *root.glob(name + "-*.egg-info"))]; (root / "distutils-precedence.pth").unlink(missing_ok=True)'
 
 COPY app.py ./
 
-RUN python -c 'import torch, torchaudio; print(f"torch={torch.__version__} torchaudio={torchaudio.__version__}")'
+RUN python -c 'import fastapi, lightning, pyannote.audio, torch, torchaudio, uvicorn; print(f"torch={torch.__version__} torchaudio={torchaudio.__version__}")' \
+    && python -c 'import importlib.metadata as metadata, importlib.util; installed = {dist.metadata["Name"].lower() for dist in metadata.distributions() if dist.metadata["Name"]}; forbidden = {"pip", "setuptools"}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed)'
 
-FROM reg.mini.dev/python:3.14 AS runtime
+FROM reg.mini.dev/python:3.14 AS runtime-base-prepared
 
 USER root
-
-ARG SETUPTOOLS_VERSION
-ARG APP_VERSION=dev
-
-LABEL org.opencontainers.image.version=$APP_VERSION
-
-ENV SETUPTOOLS_VERSION=${SETUPTOOLS_VERSION}
 
 # Older runtime-base digests shipped pip 26.2.1 and setuptools 70.3.0 outside
 # /opt/venv. pip's embedded SBOM kept that vulnerable setuptools version visible
 # to image scanners even though the application venv was already fixed. Current
 # base digests omit both packages, so make the cleanup work for either layout.
 # This base is distroless and has no shell; use exec-form Python for the cleanup.
-RUN ["python", "-c", "import importlib.util, pathlib, shutil, site; root = pathlib.Path(site.getsitepackages()[0]); [shutil.rmtree(path, ignore_errors=True) for name in ('pip', 'setuptools') for path in (root / name, *root.glob(name + '-*.dist-info'), *root.glob(name + '-*.egg-info'))]; [pathlib.Path(path).unlink(missing_ok=True) for path in ('/usr/bin/pip', '/usr/bin/pip3', '/usr/bin/pip3.14')]; importlib.invalidate_caches(); assert importlib.util.find_spec('pip') is None; assert importlib.util.find_spec('setuptools') is None"]
+RUN ["python", "-c", "import importlib.util, pathlib, shutil, site; root = pathlib.Path(site.getsitepackages()[0]); [shutil.rmtree(path, ignore_errors=True) for name in ('pip', 'setuptools', 'pkg_resources', '_distutils_hack') for path in (root / name, *root.glob(name + '-*.dist-info'), *root.glob(name + '-*.egg-info'))]; (root / 'distutils-precedence.pth').unlink(missing_ok=True); [pathlib.Path(path).unlink(missing_ok=True) for path in ('/usr/bin/pip', '/usr/bin/pip3', '/usr/bin/pip3.14')]; importlib.invalidate_caches(); assert all(importlib.util.find_spec(name) is None for name in ('pip', 'setuptools', 'pkg_resources', '_distutils_hack'))"]
 
-WORKDIR /app
+# Deleting files in a later container layer only adds whiteouts; scanners that
+# inspect every layer can still read pip's old embedded bom.cdx.json from the
+# Minimus base layer. Copy the prepared merged filesystem onto scratch so the
+# reusable runtime base contains the cleaned filesystem as one physical layer
+# and no inherited pip/setuptools layer history.
+FROM scratch AS runtime-base
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+COPY --from=runtime-base-prepared / /
+
+FROM runtime-base AS runtime
+
+ARG APP_VERSION=dev
+
+LABEL org.opencontainers.image.version=$APP_VERSION
+
+ENV IMAGE_NAME=python \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/opt/venv \
-    PATH=/opt/venv/bin:/opt/ffmpeg/bin:$PATH \
+    PATH=/opt/venv/bin:/opt/ffmpeg/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin \
     HF_HOME=/tmp/huggingface \
     HUGGINGFACE_HUB_CACHE=/tmp/huggingface/hub \
     OMP_NUM_THREADS=2 \
     MKL_NUM_THREADS=2 \
     OPENBLAS_NUM_THREADS=2
 
+WORKDIR /app
+
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg
 COPY --from=builder /app/app.py /app/app.py
 
-RUN ["/opt/venv/bin/python", "-c", "import importlib.metadata as metadata, importlib.util, os; assert metadata.version('setuptools') == os.environ['SETUPTOOLS_VERSION']; assert importlib.util.find_spec('pip') is None"]
+RUN ["/opt/venv/bin/python", "-c", "import importlib.metadata as metadata, importlib.util; installed = {dist.metadata['Name'].lower() for dist in metadata.distributions() if dist.metadata['Name']}; forbidden = {'pip', 'setuptools'}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed)"]
 
 USER 1000
 
