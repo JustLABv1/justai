@@ -351,21 +351,28 @@
 }
 
 @keyframes mcp-approval-border-shimmer {
+  from {
+    background-position: 0 0;
+  }
   to {
-    background-position: 220% 0;
+    /* Shift one complete repeating gradient tile: no visible reset. */
+    background-position: -200% 0;
   }
 }
 
 .mcp-approval-shimmer {
   background: linear-gradient(
-    105deg,
-    color-mix(in oklch, var(--border) 75%, transparent) 35%,
-    color-mix(in oklch, var(--primary) 72%, white) 48%,
-    color-mix(in oklch, var(--primary) 38%, transparent) 56%,
-    color-mix(in oklch, var(--border) 75%, transparent) 68%
+    90deg,
+    color-mix(in oklch, var(--border) 78%, transparent) 0%,
+    color-mix(in oklch, var(--border) 78%, transparent) 42%,
+    color-mix(in oklch, var(--primary) 52%, white) 48%,
+    color-mix(in oklch, var(--primary) 72%, white) 50%,
+    color-mix(in oklch, var(--primary) 52%, white) 52%,
+    color-mix(in oklch, var(--border) 78%, transparent) 58%,
+    color-mix(in oklch, var(--border) 78%, transparent) 100%
   );
-  background-size: 220% 100%;
-  animation: mcp-approval-border-shimmer 2.8s linear infinite;
+  background-size: 200% 100%;
+  animation: mcp-approval-border-shimmer 3.6s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
