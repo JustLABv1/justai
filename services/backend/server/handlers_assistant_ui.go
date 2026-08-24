@@ -534,13 +534,11 @@ func (a *App) assistantUIChat(c *gin.Context) {
 				toolRoundOffset = resumedEvent.Round
 			}
 			toolParts = replaceAssistantUIToolPart(toolParts, *resumedEvent)
-			switch resumedEvent.Status {
-			case "completed":
-				_ = writeChunk(map[string]any{"type": "tool-output-available", "toolCallId": resumedEvent.CallID, "output": assistantUIJSONValue(resumedEvent.Result), "dynamic": true})
-			case "declined":
-				_ = writeChunk(map[string]any{"type": "tool-output-denied", "toolCallId": resumedEvent.CallID})
-			case "failed":
-				_ = writeChunk(map[string]any{"type": "tool-output-error", "toolCallId": resumedEvent.CallID, "errorText": resumedEvent.Error, "dynamic": true})
+			for _, chunk := range assistantUIResumedToolChunks(*resumedEvent) {
+				if err := writeChunk(chunk); err != nil {
+					runStatus = "error"
+					return
+				}
 			}
 		}
 	}
@@ -1241,6 +1239,35 @@ func assistantUIJSONValue(value string) any {
 		return json.RawMessage(value)
 	}
 	return value
+}
+
+// assistantUIResumedToolChunks makes an approval continuation self-contained.
+// The AI SDK processes every HTTP response as a UI-message stream and rejects a
+// tool output when that stream's current state does not contain the matching
+// invocation. Re-emitting the input is idempotent when the browser retained the
+// pending part and repairs the state after a reload, reconnect, or race.
+func assistantUIResumedToolChunks(event chatToolEvent) []map[string]any {
+	input := map[string]any{
+		"type":             "tool-input-available",
+		"toolCallId":       event.CallID,
+		"toolName":         assistantUIToolName(event),
+		"input":            event.Arguments,
+		"dynamic":          true,
+		"providerExecuted": true,
+	}
+	if providerMetadata := assistantUIToolProviderMetadata(event); providerMetadata != nil {
+		input["providerMetadata"] = providerMetadata
+	}
+	chunks := []map[string]any{input}
+	switch event.Status {
+	case "completed":
+		chunks = append(chunks, map[string]any{"type": "tool-output-available", "toolCallId": event.CallID, "output": assistantUIJSONValue(event.Result), "dynamic": true, "providerExecuted": true})
+	case "declined":
+		chunks = append(chunks, map[string]any{"type": "tool-output-denied", "toolCallId": event.CallID})
+	case "failed":
+		chunks = append(chunks, map[string]any{"type": "tool-output-error", "toolCallId": event.CallID, "errorText": event.Error, "dynamic": true, "providerExecuted": true})
+	}
+	return chunks
 }
 
 func assistantUIApprovalToolParts(messages []assistantUIMessage) []map[string]any {

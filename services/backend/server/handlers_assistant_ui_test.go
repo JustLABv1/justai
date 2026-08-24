@@ -384,6 +384,46 @@ func TestReplaceAssistantUIToolPartReturnsUpdatedSlice(t *testing.T) {
 	}
 }
 
+func TestAssistantUIResumedToolChunksRehydrateInvocationBeforeOutput(t *testing.T) {
+	event := chatToolEvent{
+		Kind:             "mcp_tool",
+		Status:           "completed",
+		ToolName:         "lookup",
+		ProviderToolName: "mcp_12345678_lookup",
+		CallID:           "chatcmpl-tool-1",
+		Arguments:        map[string]any{"query": "status"},
+		Result:           `{"ok":true}`,
+	}
+	chunks := assistantUIResumedToolChunks(event)
+	if len(chunks) != 2 {
+		t.Fatalf("expected invocation and output chunks, got %+v", chunks)
+	}
+	if chunks[0]["type"] != "tool-input-available" || chunks[0]["toolCallId"] != event.CallID {
+		t.Fatalf("expected matching invocation first, got %+v", chunks[0])
+	}
+	if chunks[0]["toolName"] != event.ProviderToolName || chunks[0]["providerExecuted"] != true {
+		t.Fatalf("expected provider-safe backend invocation, got %+v", chunks[0])
+	}
+	if chunks[1]["type"] != "tool-output-available" || chunks[1]["toolCallId"] != event.CallID {
+		t.Fatalf("expected matching output second, got %+v", chunks[1])
+	}
+}
+
+func TestAssistantUIResumedToolChunksRehydrateDeclinedAndFailedCalls(t *testing.T) {
+	for _, test := range []struct {
+		status     string
+		outputType string
+	}{
+		{status: "declined", outputType: "tool-output-denied"},
+		{status: "failed", outputType: "tool-output-error"},
+	} {
+		chunks := assistantUIResumedToolChunks(chatToolEvent{Status: test.status, ToolName: "lookup", CallID: "call-1", Error: "stopped"})
+		if len(chunks) != 2 || chunks[0]["type"] != "tool-input-available" || chunks[1]["type"] != test.outputType {
+			t.Fatalf("expected self-contained %s continuation, got %+v", test.status, chunks)
+		}
+	}
+}
+
 func TestAssistantUIMessageContainsApproval(t *testing.T) {
 	raw := []byte(`{"parts":[{"type":"dynamic-tool","toolCallId":"call-1","state":"approval-requested","approval":{"id":"approval-1"}}]}`)
 	if !assistantUIMessageContainsApproval(raw, "approval-1", "call-1") {
