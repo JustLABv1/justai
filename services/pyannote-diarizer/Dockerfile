@@ -1,3 +1,5 @@
+ARG SETUPTOOLS_VERSION=80.10.2
+
 FROM alpine:3.24 AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=9.0.1
@@ -65,6 +67,7 @@ FROM reg.mini.dev/python:3.14-dev AS builder
 
 USER root
 
+ARG SETUPTOOLS_VERSION
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 # Keep torch and torchaudio on the same release. PyTorch 2.11.0 publishes
 # Linux CPU wheels for CPython 3.14 and is above the CVE-2026-24747 fix level.
@@ -95,11 +98,11 @@ RUN python -m venv "$VIRTUAL_ENV" \
       "torchaudio==${TORCH_VERSION}" \
     && pip install -r requirements.txt \
     && pip install --upgrade \
-      "setuptools==80.10.2" \
+      "setuptools==${SETUPTOOLS_VERSION}" \
       "wheel==0.46.2" \
       "msgpack==1.2.1" \
     && pip check \
-    && python -c 'import importlib.metadata as metadata; assert metadata.version("setuptools") == "80.10.2"'
+    && python -c 'import importlib.metadata as metadata, sys; assert metadata.version("setuptools") == sys.argv[1]' "${SETUPTOOLS_VERSION}"
 
 RUN rm -rf "$VIRTUAL_ENV/lib/python3.14/site-packages/pip" \
     && rm -rf "$VIRTUAL_ENV/lib/python3.14/site-packages/pip-"*.dist-info
@@ -110,9 +113,21 @@ RUN python -c 'import torch, torchaudio; print(f"torch={torch.__version__} torch
 
 FROM reg.mini.dev/python:3.14 AS runtime
 
+USER root
+
+ARG SETUPTOOLS_VERSION
 ARG APP_VERSION=dev
 
 LABEL org.opencontainers.image.version=$APP_VERSION
+
+ENV SETUPTOOLS_VERSION=${SETUPTOOLS_VERSION}
+
+# Older runtime-base digests shipped pip 26.2.1 and setuptools 70.3.0 outside
+# /opt/venv. pip's embedded SBOM kept that vulnerable setuptools version visible
+# to image scanners even though the application venv was already fixed. Current
+# base digests omit both packages, so make the cleanup work for either layout.
+# This base is distroless and has no shell; use exec-form Python for the cleanup.
+RUN ["python", "-c", "import importlib.util, pathlib, shutil, site; root = pathlib.Path(site.getsitepackages()[0]); [shutil.rmtree(path, ignore_errors=True) for name in ('pip', 'setuptools') for path in (root / name, *root.glob(name + '-*.dist-info'), *root.glob(name + '-*.egg-info'))]; [pathlib.Path(path).unlink(missing_ok=True) for path in ('/usr/bin/pip', '/usr/bin/pip3', '/usr/bin/pip3.14')]; importlib.invalidate_caches(); assert importlib.util.find_spec('pip') is None; assert importlib.util.find_spec('setuptools') is None"]
 
 WORKDIR /app
 
@@ -129,6 +144,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=ffmpeg-builder /opt/ffmpeg /opt/ffmpeg
 COPY --from=builder /app/app.py /app/app.py
+
+RUN ["/opt/venv/bin/python", "-c", "import importlib.metadata as metadata, importlib.util, os; assert metadata.version('setuptools') == os.environ['SETUPTOOLS_VERSION']; assert importlib.util.find_spec('pip') is None"]
+
+USER 1000
 
 EXPOSE 8000
 
