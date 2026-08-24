@@ -12,7 +12,10 @@ then copied into the shell-less production image. Release builds replace that
 fallback stage with the digest-pinned shared artifact built from
 `docker/ffmpeg/Dockerfile`, avoiding repeated FFmpeg/OpenSSL compilation. This
 keeps FFmpeg’s HTTPS support while avoiding Alpine’s vulnerable FFmpeg package
-tree.
+tree. The prepared Minimus runtime filesystem is flattened onto a scratch stage
+after removing its build-time Python packaging tools. This ensures layer-aware
+scanners cannot recover pip's historical embedded SBOM or its stale setuptools
+component from a deleted lower layer.
 
 ## Hugging Face setup
 
