@@ -53,7 +53,10 @@ exact scheme/host/port origin used by the backend's signed media URLs. Private
 origins are rejected unless repeated in
 `PYANNOTE_ALLOW_PRIVATE_MEDIA_ORIGINS`; redirects are limited and must remain
 on the same origin. Downloads are bounded to the configured byte and timeout
-limits, so do not use a broad wildcard or an untrusted public origin.
+limits, so do not use a broad wildcard or an untrusted public origin. The
+source-size limit defaults to 5 GiB and accepts up to 20 GiB so installations
+upgraded from older chart releases keep working. Runtime caches use writable
+directories below `/tmp`, including Matplotlib's configuration cache.
 
 For a CUDA build, pass a CUDA PyTorch index when building and run the container
 with the NVIDIA container runtime:

@@ -12,6 +12,10 @@
 {{- $proxyHTTPRefName := .Values.secrets.refs.pyannoteHttpProxy.name | default "" -}}
 {{- $proxyHTTPSRefName := .Values.secrets.refs.pyannoteHttpsProxy.name | default "" -}}
 {{- $proxyNoProxyRefName := .Values.secrets.refs.pyannoteNoProxy.name | default "" -}}
+{{- $maxSourceBytes := int64 .Values.pyannote.maxSourceBytes -}}
+{{- if or (lt $maxSourceBytes 1) (gt $maxSourceBytes 21474836480) }}
+{{- fail "pyannote.maxSourceBytes must be an integer between 1 and 21474836480" }}
+{{- end }}
 {{- if and (not $hfTokenRefName) (not $hfToken) (not $externalSecretStore) }}
 {{- fail "pyannote.enabled requires a Hugging Face token through secrets.refs.pyannoteHfToken, secrets.data.pyannoteHfToken with secrets.create=true, or an existing Secret/Vault Secret" }}
 {{- end }}
