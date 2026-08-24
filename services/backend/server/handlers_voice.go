@@ -61,6 +61,7 @@ type voiceToolBinding struct {
 	MCPAppMIMEType    string
 	Definition        provider.ToolDefinition
 	RequiresApproval  bool
+	Automatic         bool
 }
 
 type voiceToolDiscovery struct {
@@ -450,6 +451,12 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	if provider.SupportsToolCalling(endpoint) {
 		discovery := a.discoverConversationTools(ctx, userID, organizationID, conversationID)
 		definitions, bindings := discovery.Definitions, discovery.Bindings
+		if a.platformCapabilityEnabled(ctx, "mcp") {
+			router := automaticMCPRouterDiscovery()
+			definitions = mergeVoiceToolDiscovery(definitions, bindings, router)
+			automatic := a.discoverAutomaticMCPTools(ctx, userID, organizationID, content, bindings)
+			definitions = mergeVoiceToolDiscovery(definitions, bindings, automatic)
+		}
 		if len(definitions) > 0 {
 			toolHistory, historyErr := a.conversationToolHistory(ctx, conversationID)
 			if historyErr != nil {
@@ -521,7 +528,11 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 							continue
 						}
 					}
-					event := chatToolEvent{Kind: "mcp_tool", Status: "running", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, IconURL: binding.IconURL, ToolName: binding.ToolName, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
+					eventKind := "mcp_tool"
+					if binding.Builtin {
+						eventKind = "builtin_tool"
+					}
+					event := chatToolEvent{Kind: eventKind, Status: "running", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, IconURL: binding.IconURL, ToolName: binding.ToolName, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments, Automatic: binding.Automatic}
 					messageID := a.persistChatToolEvent(ctx, conversationID, event)
 					approvalID := ""
 					approved := true
@@ -537,7 +548,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 							_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": approvalErr.Error()}})
 							return
 						}
-					} else {
+					} else if !binding.Builtin {
 						// Trusted execution is deliberately narrow: discovery only marks
 						// a binding as auto-approved when the server is trusted and the
 						// tool explicitly advertises read-only, non-destructive hints.
@@ -562,7 +573,20 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 					event.Status = "running"
 					event.ApprovalID = approvalID
 					a.updateChatToolEvent(ctx, conversationID, messageID, event)
-					result, callErr := a.executeVoiceTool(ctx, userID, organizationID, conversationID, binding, arguments)
+					var result json.RawMessage
+					var callErr error
+					if binding.Builtin && binding.ToolName == "discover_mcp_tools" {
+						query := strings.TrimSpace(stringToolArgument(arguments, "query"))
+						if query == "" {
+							callErr = fmt.Errorf("an MCP capability query is required")
+						} else {
+							discovered := a.discoverAutomaticMCPTools(ctx, userID, organizationID, query, bindings)
+							definitions = mergeVoiceToolDiscovery(definitions, bindings, discovered)
+							result = automaticMCPDiscoveryResult(discovered)
+						}
+					} else {
+						result, callErr = a.executeVoiceTool(ctx, userID, organizationID, conversationID, binding, arguments)
+					}
 					if callErr != nil {
 						event.Status = "failed"
 						event.Error = callErr.Error()
@@ -641,7 +665,7 @@ func (a *App) discoverConversationToolsWithRefresh(ctx context.Context, userID, 
 		result.Errors = []string{"MCP tools require an active conversation context"}
 		return result
 	}
-	rows, err := a.DB.QueryContext(ctx, `SELECT ms.id, ms.name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = ms.id) THEN '/api/v1/mcp/servers/' || ms.id::text || '/icon' ELSE COALESCE(ms.icon_url, '') END FROM conversation_mcp_servers cms JOIN mcp_servers ms ON ms.id = cms.server_id WHERE cms.conversation_id = $1 AND ms.enabled = TRUE ORDER BY cms.created_at`, conversationID)
+	rows, err := a.DB.QueryContext(ctx, `SELECT ms.id, ms.name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = ms.id) THEN '/api/v1/mcp/servers/' || ms.id::text || '/icon' ELSE COALESCE(ms.icon_url, '') END FROM conversation_mcp_servers cms JOIN conversations c ON c.id = cms.conversation_id JOIN mcp_servers ms ON ms.id = cms.server_id WHERE cms.conversation_id = $1 AND c.organization_id = $3 AND (c.user_id = $2 OR c.visibility = 'workspace') AND ms.enabled = TRUE AND (ms.scope_type = 'global' OR (ms.scope_type = 'organization' AND ms.scope_id = $3) OR (ms.scope_type = 'user' AND ms.scope_id = $2)) ORDER BY cms.created_at`, conversationID, userID, organizationID)
 	if err != nil {
 		result.Errors = []string{"could not load configured MCP servers: " + err.Error()}
 		return result
@@ -871,11 +895,14 @@ func (a *App) awaitVoiceApproval(ctx context.Context, connection *websocket.Conn
 
 func (a *App) executeVoiceTool(ctx context.Context, userID, organizationID, conversationID uuid.UUID, binding voiceToolBinding, arguments map[string]any) (json.RawMessage, error) {
 	attached, err := a.conversationHasMCPServer(ctx, userID, organizationID, conversationID, binding.ServerID)
+	if binding.Automatic {
+		attached, err = a.automaticMCPServerAvailable(ctx, userID, organizationID, binding.ServerID)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if !attached {
-		return nil, fmt.Errorf("MCP server is no longer attached to this conversation")
+		return nil, fmt.Errorf("MCP server is no longer available to this conversation")
 	}
 	server, err := a.loadMCPServer(ctx, binding.ServerID.String())
 	if err != nil {

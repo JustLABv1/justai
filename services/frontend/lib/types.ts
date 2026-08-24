@@ -310,6 +310,7 @@ export type MCPServer = {
   enabled: boolean
   allowedTools: string[]
   trustedReadOnly?: boolean
+  autoDiscover?: boolean
   lastTestedAt?: string | null
   lastError?: string
   protocolVersion?: string

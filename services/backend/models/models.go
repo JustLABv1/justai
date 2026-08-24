@@ -393,6 +393,7 @@ type MCPServer struct {
 	Enabled              bool            `json:"enabled"`
 	AllowedTools         json.RawMessage `json:"allowedTools"`
 	TrustedReadOnly      bool            `json:"trustedReadOnly"`
+	AutoDiscover         bool            `json:"autoDiscover"`
 	LastTestedAt         *time.Time      `json:"lastTestedAt,omitempty"`
 	LastError            string          `json:"lastError,omitempty"`
 	ProtocolVersion      string          `json:"protocolVersion,omitempty"`

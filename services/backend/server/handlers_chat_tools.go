@@ -60,7 +60,7 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 
 func isAssistantBuiltInToolName(name string) bool {
 	switch name {
-	case "web_search", "browse_url", "generate_image", "edit_image":
+	case "web_search", "browse_url", "generate_image", "edit_image", "discover_mcp_tools":
 		return true
 	default:
 		return false
