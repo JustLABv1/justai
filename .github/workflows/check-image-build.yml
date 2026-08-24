@@ -4,6 +4,14 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  packages: read
+
+env:
+  FFMPEG_IMAGE: ghcr.io/justlabv1/justai-ffmpeg
+  FFMPEG_TAG: 9.0.1-openssl-3.5.7
+
 jobs:
   changes:
     name: Detect changed services
@@ -14,6 +22,7 @@ jobs:
       frontend_image: ${{ steps.filter.outputs.frontend_image }}
       backend_image: ${{ steps.filter.outputs.backend_image }}
       combined_image: ${{ steps.filter.outputs.combined_image }}
+      ffmpeg_image: ${{ steps.filter.outputs.ffmpeg_image }}
       pyannote: ${{ steps.filter.outputs.pyannote }}
       pyannote_image: ${{ steps.filter.outputs.pyannote_image }}
     steps:
@@ -35,6 +44,9 @@ jobs:
               - 'services/backend/Dockerfile'
             combined_image:
               - 'Dockerfile'
+            ffmpeg_image:
+              - 'docker/ffmpeg/**'
+              - '.github/workflows/build-ffmpeg-image.yml'
             pyannote:
               - 'services/pyannote-diarizer/**'
               - '.github/workflows/check-image-build.yml'
@@ -103,10 +115,42 @@ jobs:
           context: services/frontend
           file: services/frontend/Dockerfile
           push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+  resolve-ffmpeg-artifact:
+    name: Resolve Shared FFmpeg Artifact
+    needs: changes
+    if: |
+      needs.changes.outputs.backend_image == 'true' ||
+      needs.changes.outputs.combined_image == 'true' ||
+      needs.changes.outputs.pyannote_image == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      context: ${{ steps.resolve.outputs.context }}
+    steps:
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve optional named context
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          reference="${FFMPEG_IMAGE}:${FFMPEG_TAG}"
+          if docker buildx imagetools inspect "$reference" >/dev/null 2>&1; then
+            echo "context=ffmpeg-builder=docker-image://${reference}" >> "$GITHUB_OUTPUT"
+          else
+            echo 'context=' >> "$GITHUB_OUTPUT"
+            echo 'Shared artifact unavailable; using the source-build fallback.'
+          fi
 
   backend-image-build:
     name: Backend — Docker Build Check
-    needs: changes
+    needs: [changes, resolve-ffmpeg-artifact]
     if: needs.changes.outputs.backend_image == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -118,10 +162,13 @@ jobs:
           context: services/backend
           file: services/backend/Dockerfile
           push: false
+          build-contexts: ${{ needs.resolve-ffmpeg-artifact.outputs.context }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
 
   combined-image-build:
     name: Combined — Docker Build Check
-    needs: changes
+    needs: [changes, resolve-ffmpeg-artifact]
     if: needs.changes.outputs.combined_image == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -133,6 +180,33 @@ jobs:
           context: .
           file: Dockerfile
           push: false
+          build-contexts: ${{ needs.resolve-ffmpeg-artifact.outputs.context }}
+          cache-from: type=gha,scope=combined
+          cache-to: type=gha,scope=combined,mode=max
+
+  ffmpeg-image-build:
+    name: Shared FFmpeg — Docker Build Check
+    needs: changes
+    if: needs.changes.outputs.ffmpeg_image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: docker/ffmpeg
+          file: docker/ffmpeg/Dockerfile
+          push: false
+          load: true
+          tags: justai-ffmpeg:ci
+          cache-from: type=gha,scope=ffmpeg
+          cache-to: type=gha,scope=ffmpeg,mode=max
+      - name: Verify runtime binaries
+        run: |
+          set -euo pipefail
+          docker run --rm justai-ffmpeg:ci -version | grep -F 'ffmpeg version 9.0.1'
+          docker run --rm --entrypoint /opt/ffmpeg/bin/ffprobe justai-ffmpeg:ci -version | grep -F 'ffprobe version 9.0.1'
 
   pyannote-compile:
     name: Pyannote — Compile Check
@@ -149,7 +223,7 @@ jobs:
 
   pyannote-image-build:
     name: Pyannote — Docker Build Check
-    needs: changes
+    needs: [changes, resolve-ffmpeg-artifact]
     if: needs.changes.outputs.pyannote_image == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -163,6 +237,9 @@ jobs:
           push: false
           load: true
           tags: justai-pyannote:ci
+          build-contexts: ${{ needs.resolve-ffmpeg-artifact.outputs.context }}
+          cache-from: type=gha,scope=pyannote
+          cache-to: type=gha,scope=pyannote,mode=max
       - name: Verify runtime Python packaging
         run: |
           set -euo pipefail

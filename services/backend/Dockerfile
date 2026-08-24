@@ -1,3 +1,5 @@
+# Local builds compile the verified artifact here. CI overrides this named stage
+# with the digest-pinned image produced by docker/ffmpeg/Dockerfile.
 FROM alpine:3.24 AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=9.0.1
@@ -95,7 +97,8 @@ RUN apk add --upgrade --no-cache \
     wget
 
 COPY --from=builder /app/justai-backend /app/
-COPY --from=ffmpeg-builder /opt/ffmpeg /opt/ffmpeg
+COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg
+COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffprobe /opt/ffmpeg/bin/ffprobe
 
 ENV PATH=/opt/ffmpeg/bin:$PATH
 

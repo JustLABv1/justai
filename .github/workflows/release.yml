@@ -16,14 +16,50 @@ on:
 
 env:
   IMAGE: ghcr.io/justlabv1/justai
+  FFMPEG_IMAGE: ghcr.io/justlabv1/justai-ffmpeg
+  FFMPEG_TAG: 9.0.1-openssl-3.5.7
   HELM_CHART: justai
   HELM_CHART_PATH: charts/justai
   HELM_REGISTRY: ghcr.io/justlabv1/charts
 
 jobs:
+  build-ffmpeg:
+    name: Build & Push Shared FFmpeg Image
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push shared FFmpeg artifact
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: docker/ffmpeg
+          file: docker/ffmpeg/Dockerfile
+          push: true
+          tags: ${{ env.FFMPEG_IMAGE }}:${{ env.FFMPEG_TAG }}
+          cache-from: type=gha,scope=ffmpeg
+          cache-to: type=gha,scope=ffmpeg,mode=max
+          provenance: mode=max
+          sbom: true
+
   build-backend:
     name: Build & Push Backend
     if: github.event_name == 'push'
+    needs: build-ffmpeg
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -57,6 +93,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.version }}
+          build-contexts: |
+            ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ needs.build-ffmpeg.outputs.digest }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
 
@@ -104,6 +142,7 @@ jobs:
   build-combined:
     name: Build & Push Combined Image
     if: github.event_name == 'push'
+    needs: build-ffmpeg
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -137,12 +176,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.version }}
+          build-contexts: |
+            ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ needs.build-ffmpeg.outputs.digest }}
           cache-from: type=gha,scope=combined
           cache-to: type=gha,scope=combined,mode=max
 
   build-pyannote:
     name: Build & Push Pyannote Image
     if: github.event_name == 'push'
+    needs: build-ffmpeg
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -176,6 +218,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.version }}
+          build-contexts: |
+            ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ needs.build-ffmpeg.outputs.digest }}
           cache-from: type=gha,scope=pyannote
           cache-to: type=gha,scope=pyannote,mode=max
 
