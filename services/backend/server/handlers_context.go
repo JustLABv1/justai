@@ -118,17 +118,23 @@ func (a *App) loadConversationKnowledge(c *gin.Context, conversationID uuid.UUID
 }
 
 func (a *App) loadConversationMCP(c *gin.Context, conversationID uuid.UUID, result *models.ConversationContext) error {
+	principal, _ := middleware.GetPrincipal(c)
+	organizationID, _ := middleware.GetOrganizationID(c)
 	rows, err := a.DB.QueryContext(c, `
 		SELECT ms.id, ms.scope_type, ms.scope_id, ms.name, ms.endpoint_url, ms.auth_type,
 		       CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = ms.id) THEN '/api/v1/mcp/servers/' || ms.id::text || '/icon' ELSE COALESCE(ms.icon_url, '') END,
 		       ms.encrypted_credential IS NOT NULL, ms.enabled, ms.allowed_tools,
-		       ms.trusted_read_only, ms.last_tested_at, COALESCE(ms.last_error, ''),
+		       ms.trusted_read_only, ms.auto_discover, ms.last_tested_at, COALESCE(ms.last_error, ''),
 		       COALESCE(ms.protocol_version, ''),
 		       (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = ms.id),
 		       ms.created_at, ms.updated_at
 		FROM conversation_mcp_servers cms
 		JOIN mcp_servers ms ON ms.id = cms.server_id
-		WHERE cms.conversation_id = $1 ORDER BY cms.created_at`, conversationID)
+		WHERE cms.conversation_id = $1 AND ms.enabled = TRUE
+		  AND (ms.scope_type = 'global'
+		       OR (ms.scope_type = 'organization' AND ms.scope_id = $3)
+		       OR (ms.scope_type = 'user' AND ms.scope_id = $2))
+		ORDER BY cms.created_at`, conversationID, principal.UserID, organizationID)
 	if err != nil {
 		return err
 	}
@@ -424,7 +430,7 @@ func scanMCPServerContext(scanner interface{ Scan(dest ...any) error }) (models.
 	var item models.MCPServer
 	var scopeID sql.NullString
 	var allowed []byte
-	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.EndpointURL, &item.AuthType, &item.IconURL, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.EndpointURL, &item.AuthType, &item.IconURL, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.AutoDiscover, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	item.ScopeID = parseMCPScopeID(scopeID)

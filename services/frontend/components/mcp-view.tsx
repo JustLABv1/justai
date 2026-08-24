@@ -12,6 +12,7 @@ import {
   Pencil,
   Plug,
   ShieldCheck,
+  Sparkles,
   Square,
   TerminalSquare,
   Trash2,
@@ -64,6 +65,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -93,6 +95,7 @@ type MCPForm = {
   scopeType: string
   allowedTools: string
   trustedReadOnly: boolean
+  autoDiscover: boolean
 }
 
 const emptyForm: MCPForm = {
@@ -107,6 +110,7 @@ const emptyForm: MCPForm = {
   scopeType: "organization",
   allowedTools: "",
   trustedReadOnly: false,
+  autoDiscover: true,
 }
 
 type MCPAction = {
@@ -279,7 +283,7 @@ export function MCPView({
           : [server, ...servers]
       )
       setNotice(
-        `${form.name} is connected. Tool discovery is explicit and allowlisted.`
+        `${form.name} is connected. ${form.autoDiscover ? "Relevant tools can now be surfaced automatically." : "Add it to a chat when you want to use its tools."}`
       )
     } catch (caught) {
       if (caught instanceof APIError) {
@@ -317,6 +321,7 @@ export function MCPView({
       scopeType: server.scopeType,
       allowedTools: server.allowedTools.join(", "),
       trustedReadOnly: Boolean(server.trustedReadOnly),
+      autoDiscover: Boolean(server.autoDiscover),
     })
     setOpen(true)
   }
@@ -547,6 +552,11 @@ export function MCPView({
                     Trusted read-only
                   </Badge>
                 )}
+                {server.autoDiscover && (
+                  <Badge variant="outline" className="gap-1.5">
+                    <Sparkles aria-hidden="true" /> Available automatically
+                  </Badge>
+                )}
                 {server.credentialConfigured && (
                   <Badge variant="outline" className="gap-1.5">
                     <KeyRound aria-hidden="true" />
@@ -717,6 +727,19 @@ export function MCPView({
                               {server.trustedReadOnly
                                 ? "Remove read-only trust"
                                 : "Trust read-only tools"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={busyId === server.id}
+                              onClick={() =>
+                                void patchServer(server, {
+                                  autoDiscover: !server.autoDiscover,
+                                })
+                              }
+                            >
+                              <Sparkles aria-hidden="true" />
+                              {server.autoDiscover
+                                ? "Require manual attachment"
+                                : "Make available automatically"}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               disabled={busyId === server.id}
@@ -1097,6 +1120,23 @@ export function MCPView({
                   Comma-separated. Leave empty to inspect all discovered tools,
                   subject to approval policy.
                 </FieldDescription>
+              </Field>
+              <Field orientation="horizontal">
+                <div className="min-w-0 flex-1">
+                  <FieldLabel htmlFor="mcp-auto-discover">
+                    Available automatically
+                  </FieldLabel>
+                  <FieldDescription>
+                    Let JustAI surface a small set of relevant tools without
+                    adding this server to every chat. Automatically selected
+                    calls always require approval.
+                  </FieldDescription>
+                </div>
+                <Switch
+                  id="mcp-auto-discover"
+                  checked={form.autoDiscover}
+                  onCheckedChange={(checked) => update("autoDiscover", checked)}
+                />
               </Field>
             </FieldGroup>
             <DialogFooter className="mt-6">

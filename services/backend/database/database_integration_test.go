@@ -47,6 +47,7 @@ func TestRunMigrationsIntegration(t *testing.T) {
 		"MCP server icon":                      `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mcp_servers' AND column_name = 'icon_url')`,
 		"MCP server icon uploads":              `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'mcp_server_icons')`,
 		"MCP tool metadata":                    `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mcp_server_tools' AND column_name = 'metadata')`,
+		"MCP automatic discovery policy":       `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mcp_servers' AND column_name = 'auto_discover')`,
 		"vision model":                         `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'endpoint_settings' AND column_name = 'vision_model')`,
 		"local auth control":                   `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'platform_settings' AND column_name = 'local_auth_enabled')`,
 		"OIDC provider catalog":                `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'oidc_providers')`,

@@ -510,6 +510,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	var outputParent any
 	toolRoundOffset := 0
 	toolParts := assistantUIApprovalToolParts(requestMessages)
+	var resumedAutomaticEvent *chatToolEvent
 	if approval != nil {
 		resumedEvent, resumedMessageID, resumeErr := a.resumeAssistantUIApproval(c, principal.UserID, organizationID, conversationID, *approval)
 		if resumeErr != nil {
@@ -521,6 +522,10 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			outputParent = resumedMessageID
 		}
 		if resumedEvent != nil {
+			if resumedEvent.Automatic {
+				copy := *resumedEvent
+				resumedAutomaticEvent = &copy
+			}
 			if resumedEvent.Round > 0 {
 				// A resumed approval is the result of the previous model step.
 				// Continue numbering from that persisted step so provider history
@@ -556,10 +561,19 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		bindings[name] = binding
 	}
 	if a.platformCapabilityEnabled(c, "mcp") {
+		router := automaticMCPRouterDiscovery()
+		definitions = mergeVoiceToolDiscovery(definitions, bindings, router)
 		toolDiscovery := a.discoverConversationTools(c, principal.UserID, organizationID, conversationID)
-		definitions = append(definitions, toolDiscovery.Definitions...)
-		for name, binding := range toolDiscovery.Bindings {
-			bindings[name] = binding
+		definitions = mergeVoiceToolDiscovery(definitions, bindings, toolDiscovery)
+		if latestUser != nil {
+			automatic := a.discoverAutomaticMCPTools(c, principal.UserID, organizationID, latestUser.Text, bindings)
+			definitions = mergeVoiceToolDiscovery(definitions, bindings, automatic)
+		}
+		if resumedAutomaticEvent != nil && !automaticMCPBindingExists(bindings, resumedAutomaticEvent.ServerID, resumedAutomaticEvent.ToolName) {
+			if name, binding, ok := a.discoverAutomaticMCPTool(c, principal.UserID, organizationID, resumedAutomaticEvent.ServerID, resumedAutomaticEvent.ToolName); ok {
+				bindings[name] = binding
+				definitions = append(definitions, binding.Definition)
+			}
 		}
 	}
 	if len(definitions) > 0 && !provider.SupportsToolCalling(endpoint) {
@@ -1487,11 +1501,14 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 		return nil, uuid.Nil, fmt.Errorf("pending tool server is invalid")
 	}
 	attached, err := a.conversationHasMCPServer(ctx, userID, organizationID, conversationID, event.ServerID)
+	if event.Automatic {
+		attached, err = a.automaticMCPServerAvailable(ctx, userID, organizationID, event.ServerID)
+	}
 	if err != nil {
 		return nil, uuid.Nil, err
 	}
 	if !attached {
-		return nil, uuid.Nil, fmt.Errorf("MCP server is no longer attached to this conversation")
+		return nil, uuid.Nil, fmt.Errorf("MCP server is no longer available to this conversation")
 	}
 	if !approval.Approved {
 		event.Status = "declined"
@@ -1509,7 +1526,11 @@ func (a *App) resumeAssistantUIApproval(ctx context.Context, userID, organizatio
 	// pending tool by both its attached server and raw MCP name rather than
 	// treating the raw name as a provider name.
 	if !pendingBindingFound {
-		providerToolName, pendingBinding, pendingBindingFound = findMCPBindingWithProviderName(bindings, event.ServerID, event.ToolName)
+		if event.Automatic {
+			providerToolName, pendingBinding, pendingBindingFound = a.discoverAutomaticMCPTool(ctx, userID, organizationID, event.ServerID, event.ToolName)
+		} else {
+			providerToolName, pendingBinding, pendingBindingFound = findMCPBindingWithProviderName(bindings, event.ServerID, event.ToolName)
+		}
 	}
 	binding, ok := pendingBinding, pendingBindingFound
 	if !ok {
@@ -1668,7 +1689,7 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			if binding.Builtin {
 				eventKind = "builtin_tool"
 			}
-			event := chatToolEvent{Kind: eventKind, Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, IconURL: binding.IconURL, ToolName: binding.ToolName, ProviderToolName: call.Name, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments}
+			event := chatToolEvent{Kind: eventKind, Status: "running", Round: round, ServerID: binding.ServerID, ServerName: binding.ServerName, IconURL: binding.IconURL, ToolName: binding.ToolName, ProviderToolName: call.Name, MCPAppResourceURI: binding.MCPAppResourceURI, MCPAppMIMEType: binding.MCPAppMIMEType, CallID: call.ID, Arguments: arguments, Automatic: binding.Automatic}
 			messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 			if messageRowID != uuid.Nil {
 				*parentID = messageRowID
@@ -1704,7 +1725,18 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			var result json.RawMessage
 			var callErr error
 			if binding.Builtin {
-				result, callErr = a.executeBuiltInChatTool(ctx, userID, organizationID, conversationID, binding.ToolName, arguments, latestUser)
+				if binding.ToolName == "discover_mcp_tools" {
+					query := strings.TrimSpace(stringToolArgument(arguments, "query"))
+					if query == "" {
+						callErr = fmt.Errorf("an MCP capability query is required")
+					} else {
+						discovered := a.discoverAutomaticMCPTools(ctx, userID, organizationID, query, bindings)
+						definitions = mergeVoiceToolDiscovery(definitions, bindings, discovered)
+						result = automaticMCPDiscoveryResult(discovered)
+					}
+				} else {
+					result, callErr = a.executeBuiltInChatTool(ctx, userID, organizationID, conversationID, binding.ToolName, arguments, latestUser)
+				}
 			} else {
 				a.auditVoiceTool(ctx, userID, organizationID, "chat.mcp.auto_approved", binding.ServerID, map[string]any{
 					"conversationId": conversationID,
