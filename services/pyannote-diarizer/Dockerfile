@@ -107,7 +107,7 @@ RUN python -m venv "$VIRTUAL_ENV" \
     && pip check \
     && python -c 'import importlib.metadata as metadata, sys; assert metadata.version("setuptools") == sys.argv[1]' "${SETUPTOOLS_VERSION}"
 
-RUN python -c 'import pathlib, shutil; root = pathlib.Path("/opt/venv/lib/python3.14/site-packages"); [shutil.rmtree(path, ignore_errors=True) for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack") for path in (root / name, *root.glob(name + "-*.dist-info"), *root.glob(name + "-*.egg-info"))]; (root / "distutils-precedence.pth").unlink(missing_ok=True)'
+RUN python -c 'import pathlib, shutil; root = pathlib.Path("/opt/venv/lib/python3.14/site-packages"); [shutil.rmtree(path, ignore_errors=True) for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack") for path in (root / name, *root.glob(name + "-*.dist-info"), *root.glob(name + "-*.egg-info"))]; (root / "distutils-precedence.pth").unlink(missing_ok=True); [path.unlink(missing_ok=True) for path in pathlib.Path("/opt/venv/bin").glob("pip*")]'
 
 COPY app.py ./
 
@@ -118,12 +118,13 @@ FROM reg.mini.dev/python:3.14 AS runtime-base-prepared
 
 USER root
 
-# Older runtime-base digests shipped pip 26.2.1 and setuptools 70.3.0 outside
-# /opt/venv. pip's embedded SBOM kept that vulnerable setuptools version visible
-# to image scanners even though the application venv was already fixed. Current
-# base digests omit both packages, so make the cleanup work for either layout.
+# Runtime-base digests can ship pip 26.2.1 and setuptools 70.3.0 outside
+# /opt/venv. The amd64 image also includes a pip bootstrap wheel under
+# /usr/share/python-wheels whose embedded SBOM declares setuptools 70.3.0 even
+# after the installed packages are removed. Neither pip nor its bootstrap wheel
+# is needed at runtime, so remove both layouts before flattening the base.
 # This base is distroless and has no shell; use exec-form Python for the cleanup.
-RUN ["python", "-c", "import importlib.util, pathlib, shutil, site; root = pathlib.Path(site.getsitepackages()[0]); [shutil.rmtree(path, ignore_errors=True) for name in ('pip', 'setuptools', 'pkg_resources', '_distutils_hack') for path in (root / name, *root.glob(name + '-*.dist-info'), *root.glob(name + '-*.egg-info'))]; (root / 'distutils-precedence.pth').unlink(missing_ok=True); [pathlib.Path(path).unlink(missing_ok=True) for path in ('/usr/bin/pip', '/usr/bin/pip3', '/usr/bin/pip3.14')]; importlib.invalidate_caches(); assert all(importlib.util.find_spec(name) is None for name in ('pip', 'setuptools', 'pkg_resources', '_distutils_hack'))"]
+RUN ["python", "-c", "import importlib.util, pathlib, shutil, site; roots = {pathlib.Path(path) for path in site.getsitepackages()}; [shutil.rmtree(path, ignore_errors=True) for root in roots for name in ('pip', 'setuptools', 'pkg_resources', '_distutils_hack') for path in (root / name, *root.glob(name + '-*.dist-info'), *root.glob(name + '-*.egg-info'))]; [(root / 'distutils-precedence.pth').unlink(missing_ok=True) for root in roots]; [pathlib.Path(path).unlink(missing_ok=True) for path in ('/usr/bin/pip', '/usr/bin/pip3', '/usr/bin/pip3.14')]; shutil.rmtree('/usr/share/python-wheels', ignore_errors=True); importlib.invalidate_caches(); assert all(importlib.util.find_spec(name) is None for name in ('pip', 'setuptools', 'pkg_resources', '_distutils_hack')); assert not pathlib.Path('/usr/share/python-wheels').exists()"]
 
 # Deleting files in a later container layer only adds whiteouts; scanners that
 # inspect every layer can still read pip's old embedded bom.cdx.json from the
@@ -158,7 +159,7 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg
 COPY --from=builder /app/app.py /app/app.py
 
-RUN ["/opt/venv/bin/python", "-c", "import importlib.metadata as metadata, importlib.util; installed = {dist.metadata['Name'].lower() for dist in metadata.distributions() if dist.metadata['Name']}; forbidden = {'pip', 'setuptools'}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed)"]
+RUN ["/opt/venv/bin/python", "-c", "import importlib.metadata as metadata, importlib.util, pathlib; installed = {dist.metadata['Name'].lower() for dist in metadata.distributions() if dist.metadata['Name']}; forbidden = {'pip', 'setuptools'}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed); assert not list(pathlib.Path('/opt/venv/bin').glob('pip*')); assert not pathlib.Path('/usr/share/python-wheels').exists()"]
 
 USER 1000
 

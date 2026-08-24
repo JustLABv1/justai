@@ -15,7 +15,10 @@ keeps FFmpeg’s HTTPS support while avoiding Alpine’s vulnerable FFmpeg packa
 tree. The prepared Minimus runtime filesystem is flattened onto a scratch stage
 after removing its build-time Python packaging tools. This ensures layer-aware
 scanners cannot recover pip's historical embedded SBOM or its stale setuptools
-component from a deleted lower layer.
+component from a deleted lower layer. The cleanup also removes the Minimus base
+image's `/usr/share/python-wheels` bootstrap cache. On amd64, that cache contains
+a pip wheel whose nested SBOM declares historical vendored packages even though
+they are not importable.
 
 ## Hugging Face setup
 
