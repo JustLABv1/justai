@@ -1380,7 +1380,40 @@ func validateHost(host string) error {
 }
 
 func privateIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsLinkLocalMulticast()
+	return !publicIP(ip)
+}
+
+var blockedIPNetworks = mustParseIPNetworks([]string{
+	"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+	"172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16",
+	"198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+	"::/128", "::1/128", "100::/64", "2001:0000::/32", "2001:0002::/48", "2001:0010::/28",
+	"2001:0020::/28", "2001:0030::/28", "2001:04:112::/48", "2001:db8::/32", "2002::/16", "3fff::/20", "5f00::/16", "64:ff9b::/96", "64:ff9b:1::/48",
+	"fc00::/7", "fe80::/10", "ff00::/8",
+})
+
+func mustParseIPNetworks(values []string) []*net.IPNet {
+	result := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, err := net.ParseCIDR(value)
+		if err != nil {
+			panic(fmt.Sprintf("invalid blocked IP network %q: %v", value, err))
+		}
+		result = append(result, network)
+	}
+	return result
+}
+
+func publicIP(ip net.IP) bool {
+	if ip == nil || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return false
+	}
+	for _, network := range blockedIPNetworks {
+		if network.Contains(ip) {
+			return false
+		}
+	}
+	return true
 }
 
 func firstNonEmpty(values ...string) string {

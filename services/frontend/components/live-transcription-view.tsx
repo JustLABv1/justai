@@ -141,9 +141,10 @@ export function LiveTranscriptionView({
   )
   const diarizationEndpoints = useMemo(
     () =>
-      endpoints.filter((endpoint) =>
-        endpoint.providerType !== "pyannote" &&
-        endpointSupportsCapability(endpoint, "diarization")
+      endpoints.filter(
+        (endpoint) =>
+          endpoint.providerType !== "pyannote" &&
+          endpointSupportsCapability(endpoint, "diarization")
       ),
     [endpoints]
   )
@@ -589,10 +590,36 @@ export function LiveTranscriptionView({
     async (
       socket: WebSocket,
       session: TranscriptionSession,
-      source: TranscriptionSource
+      source: TranscriptionSource,
+      attempt: number
     ) => {
       if (!navigator.mediaDevices?.getUserMedia)
         throw new Error("This browser does not support microphone capture.")
+      const isCurrent = () =>
+        captureAttemptRef.current === attempt &&
+        captureSocketRef.current === socket &&
+        socket.readyState === WebSocket.OPEN
+      let stream: MediaStream | null = null
+      let context: AudioContext | null = null
+      let worklet: AudioWorkletNode | null = null
+      let analyser: AnalyserNode | null = null
+      let levelTimer: number | null = null
+      const cleanupLocal = () => {
+        if (levelTimer !== null) {
+          window.clearInterval(levelTimer)
+          if (levelTimerRef.current === levelTimer) levelTimerRef.current = null
+          levelTimer = null
+        }
+        worklet?.disconnect()
+        if (workletRef.current === worklet) workletRef.current = null
+        analyser?.disconnect()
+        if (analyserRef.current === analyser) analyserRef.current = null
+        stream?.getTracks().forEach((track) => track.stop())
+        if (audioStreamRef.current === stream) audioStreamRef.current = null
+        if (audioContextRef.current === context) audioContextRef.current = null
+        void context?.close()
+        context = null
+      }
       const constraints: MediaStreamConstraints = {
         audio: {
           ...(deviceLabel ? { deviceId: { exact: deviceLabel } } : {}),
@@ -601,17 +628,39 @@ export function LiveTranscriptionView({
           autoGainControl: true,
         },
       }
-      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      stream = await navigator.mediaDevices.getUserMedia(constraints)
+      if (!isCurrent()) {
+        cleanupLocal()
+        return
+      }
       audioStreamRef.current = stream
       void refreshDevices()
-      const context = new AudioContext()
+      try {
+        context = new AudioContext()
+      } catch (caught) {
+        cleanupLocal()
+        throw caught
+      }
+      if (!isCurrent()) {
+        cleanupLocal()
+        return
+      }
       audioContextRef.current = context
-      await context.audioWorklet.addModule("/audio-worklet.js")
-      const sourceNode = context.createMediaStreamSource(stream)
-      const analyser = context.createAnalyser()
+      try {
+        await context!.audioWorklet.addModule("/audio-worklet.js")
+      } catch (caught) {
+        cleanupLocal()
+        throw caught
+      }
+      if (!isCurrent()) {
+        cleanupLocal()
+        return
+      }
+      const sourceNode = context!.createMediaStreamSource(stream)
+      analyser = context!.createAnalyser()
       analyser.fftSize = 512
-      const worklet = new AudioWorkletNode(context, "justai-pcm-processor")
-      const silentGain = context.createGain()
+      worklet = new AudioWorkletNode(context!, "justai-pcm-processor")
+      const silentGain = context!.createGain()
       silentGain.gain.value = 0
       sourceNode.connect(analyser)
       sourceNode.connect(worklet)
@@ -624,8 +673,8 @@ export function LiveTranscriptionView({
       const voiceThreshold = 0.01
       const voiceHangoverMs = 650
       worklet.port.onmessage = (message: MessageEvent<Float32Array>) => {
-        if (socket.readyState !== WebSocket.OPEN) return
-        const samples = downsample(message.data, context.sampleRate, 16000)
+        if (!isCurrent()) return
+        const samples = downsample(message.data, context!.sampleRate, 16000)
         const rms = calculateRMS(samples)
         const now = performance.now()
         if (rms >= voiceThreshold) voiceUntil = now + voiceHangoverMs
@@ -642,7 +691,8 @@ export function LiveTranscriptionView({
         socket.send(frame)
       }
       const levelBuffer = new Uint8Array(analyser.fftSize)
-      const levelTimer = window.setInterval(() => {
+      levelTimer = window.setInterval(() => {
+        if (!isCurrent()) return
         analyser.getByteTimeDomainData(levelBuffer)
         let total = 0
         levelBuffer.forEach((value) => {
@@ -660,7 +710,16 @@ export function LiveTranscriptionView({
           )
       }, 100)
       levelTimerRef.current = levelTimer
-      void context.resume()
+      try {
+        await context!.resume()
+      } catch (caught) {
+        cleanupLocal()
+        throw caught
+      }
+      if (!isCurrent()) {
+        cleanupLocal()
+        return
+      }
       if (session.recordAudio) {
         const recording = await api.post<{ recording: TranscriptionRecording }>(
           "/api/v1/transcription/recordings/start",
@@ -670,6 +729,15 @@ export function LiveTranscriptionView({
             mimeType: "audio/webm;codecs=opus",
           }
         )
+        if (!isCurrent()) {
+          void api
+            .post(
+              `/api/v1/transcription/recordings/${recording.recording.id}/complete`
+            )
+            .catch(() => undefined)
+          cleanupLocal()
+          return
+        }
         const recordingId = recording.recording.id
         recordingIdRef.current = recordingId
         recordingUploadQueueRef.current = Promise.resolve()
@@ -693,6 +761,10 @@ export function LiveTranscriptionView({
         recorder.onstop = () => completeRecording(recordingId, uploads)
         recorder.start(5000)
         mediaRecorderRef.current = recorder
+      }
+      if (!isCurrent()) {
+        cleanupLocal()
+        return
       }
       setCapturing(true)
     },
@@ -786,7 +858,7 @@ export function LiveTranscriptionView({
         })
       )
       try {
-        await beginAudio(socket, session, source)
+        await beginAudio(socket, session, source, attempt)
       } catch (caught) {
         if (captureAttemptRef.current === attempt) closeCapture()
         throw caught

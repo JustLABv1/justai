@@ -27,6 +27,7 @@ func TestDiscoverOpenAICompatibleModels(t *testing.T) {
 	models, err := DiscoverChatModels(context.Background(), Endpoint{
 		ProviderType: "openai-compatible",
 		BaseURL:      server.URL + "/v1",
+		AllowPrivate: true,
 		Credential:   "secret",
 		ChatModel:    "configured-model",
 	})
@@ -51,6 +52,7 @@ func TestDiscoverOpenAICompatibleModelsUsesLiteLLMConfiguredAliases(t *testing.T
 	models, err := DiscoverChatModels(context.Background(), Endpoint{
 		ProviderType: "openai-compatible",
 		BaseURL:      server.URL + "/v1",
+		AllowPrivate: true,
 		ChatModel:    "local-gemma",
 	})
 	if err != nil {
@@ -78,6 +80,7 @@ func TestDiscoverOpenAICompatibleModelsTriesLiteLLMProxyRoot(t *testing.T) {
 	models, err := DiscoverChatModels(context.Background(), Endpoint{
 		ProviderType: "openai-compatible",
 		BaseURL:      server.URL + "/v1",
+		AllowPrivate: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +103,7 @@ func TestDiscoverOllamaModels(t *testing.T) {
 	models, err := DiscoverChatModels(context.Background(), Endpoint{
 		ProviderType: "ollama",
 		BaseURL:      server.URL,
+		AllowPrivate: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +126,7 @@ func TestDiscoverGeminiModelsFiltersNonGenerationModels(t *testing.T) {
 	models, err := DiscoverChatModels(context.Background(), Endpoint{
 		ProviderType: "gemini",
 		BaseURL:      server.URL,
+		AllowPrivate: true,
 		Credential:   "secret",
 	})
 	if err != nil {

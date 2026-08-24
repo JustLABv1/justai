@@ -948,18 +948,71 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			_ = a.Live.send(client, "error", ginData{"message": err.Error()})
 			return
 		}
-		_ = a.Live.send(client, "transcription.snapshot", snapshot)
-		for {
-			messageType, payload, err := connection.ReadMessage()
-			if err != nil {
-				return
-			}
-			if messageType == websocket.TextMessage {
-				var event struct {
-					Type string `json:"type"`
+		if err := a.Live.send(client, "transcription.snapshot", snapshot); err != nil {
+			return
+		}
+		const (
+			viewerPongWait   = 60 * time.Second
+			viewerPingPeriod = 30 * time.Second
+			viewerWriteWait  = 10 * time.Second
+		)
+		connection.SetReadLimit(4 * 1024)
+		_ = connection.SetReadDeadline(time.Now().Add(viewerPongWait))
+		connection.SetPongHandler(func(string) error {
+			return connection.SetReadDeadline(time.Now().Add(viewerPongWait))
+		})
+		pingTicker := time.NewTicker(viewerPingPeriod)
+		defer pingTicker.Stop()
+		viewerDone := make(chan struct{})
+		defer close(viewerDone)
+		requestDone := ctx.Request.Context().Done()
+		type viewerMessage struct {
+			messageType int
+			payload     []byte
+			err         error
+		}
+		messages := make(chan viewerMessage, 1)
+		go func() {
+			for {
+				messageType, payload, err := connection.ReadMessage()
+				select {
+				case messages <- viewerMessage{messageType: messageType, payload: payload, err: err}:
+				case <-viewerDone:
+					return
+				case <-requestDone:
+					return
 				}
-				if json.Unmarshal(payload, &event) == nil && event.Type == "ping" {
-					_ = a.Live.send(client, "pong", ginData{"serverTime": time.Now().UnixMilli()})
+				if err != nil {
+					return
+				}
+			}
+		}()
+		for {
+			select {
+			case <-requestDone:
+				return
+			case message := <-messages:
+				if message.err != nil {
+					return
+				}
+				if message.messageType == websocket.TextMessage {
+					var event struct {
+						Type string `json:"type"`
+					}
+					if json.Unmarshal(message.payload, &event) == nil && event.Type == "ping" {
+						if err := a.Live.send(client, "pong", ginData{"serverTime": time.Now().UnixMilli()}); err != nil {
+							return
+						}
+					}
+				}
+			case <-pingTicker.C:
+				client.writeMu.Lock()
+				_ = connection.SetWriteDeadline(time.Now().Add(viewerWriteWait))
+				err := connection.WriteControl(websocket.PingMessage, nil, time.Now().Add(viewerWriteWait))
+				_ = connection.SetWriteDeadline(time.Time{})
+				client.writeMu.Unlock()
+				if err != nil {
+					return
 				}
 			}
 		}

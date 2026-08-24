@@ -12,7 +12,9 @@ func CORS(origins []string) gin.HandlerFunc {
 		origin := c.GetHeader("Origin")
 		allowed := origin == ""
 		for _, configured := range origins {
-			if configured == "*" || configured == origin {
+			// Credentialed CORS cannot safely use a wildcard origin. Ignore it
+			// instead of reflecting the request's arbitrary Origin value.
+			if configured != "*" && configured == origin {
 				allowed = true
 				break
 			}

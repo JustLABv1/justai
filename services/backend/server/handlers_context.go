@@ -462,7 +462,7 @@ func (a *App) createConversationAttachment(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
-	content, err := rag.ExtractUpload(fileHeader.Filename, fileHeader.Header.Get("Content-Type"), body)
+	content, err := rag.ExtractUploadContext(c, fileHeader.Filename, fileHeader.Header.Get("Content-Type"), body)
 	if err != nil {
 		writeError(c, http.StatusUnprocessableEntity, err)
 		return

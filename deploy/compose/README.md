@@ -50,6 +50,8 @@ directory:
 ```bash
 cd deploy/compose
 export HF_TOKEN=hf_...
+export PYANNOTE_SERVICE_TOKEN='replace-with-a-long-random-token'
+export PYANNOTE_ALLOWED_MEDIA_ORIGINS='https://s3.example.com'
 docker compose --profile pyannote up -d --build pyannote-diarizer
 ```
 
@@ -69,11 +71,14 @@ Diarization model: pyannote/speaker-diarization-3.1
 Capability: Speaker diarization
 ```
 
-If `PYANNOTE_SERVICE_TOKEN` is set, enter the same value as the endpoint
+Enter the same mandatory `PYANNOTE_SERVICE_TOKEN` value as the endpoint
 credential. The Hugging Face token remains only in the pyannote service. The
-backend sends the service a short-lived S3 URL, so the S3 endpoint must be
-reachable from the pyannote container. When the browser-facing and
-container-facing routes differ, configure both S3 endpoint variables.
+backend sends the service a short-lived S3 URL, so the exact S3 origin must be
+listed in `PYANNOTE_ALLOWED_MEDIA_ORIGINS` and be reachable from the pyannote
+container. If that origin is private (for example MinIO), repeat it in
+`PYANNOTE_ALLOW_PRIVATE_MEDIA_ORIGINS`. Redirects stay on the same origin;
+when the browser-facing and container-facing routes differ, configure both S3
+endpoint variables.
 
 For the development stack, use the root-level file and its service name:
 

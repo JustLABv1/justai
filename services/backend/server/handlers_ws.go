@@ -63,7 +63,9 @@ func (a *App) upgradeWebSocket(c *gin.Context) (*websocket.Conn, error) {
 			return true
 		}
 		for _, allowed := range a.Config.FrontendOrigins {
-			if allowed == "*" || allowed == origin {
+			// A wildcard Origin is not safe for cookie-authenticated sockets;
+			// fail closed rather than treating every caller as a configured app.
+			if allowed != "*" && allowed == origin {
 				return true
 			}
 		}

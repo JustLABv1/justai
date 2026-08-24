@@ -90,6 +90,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { APIError, api, API_URL } from "@/lib/api"
 import { chatRequestId } from "@/lib/chat-request-id"
+import { conversationCacheKey } from "@/lib/conversation-cache"
 import type {
   Conversation,
   ConversationContext,
@@ -110,6 +111,7 @@ type EnsureConversationOptions = {
 
 type Props = {
   conversationId: string | null
+  cacheScope: string
   conversation?: Conversation
   assistants: SavedAssistant[]
   endpoints: Endpoint[]
@@ -164,30 +166,39 @@ const CONVERSATION_CACHE_LIMIT = 20
 const CONTEXT_HINT_DISMISSED_STORAGE_KEY = "justai.chat.context-hint-dismissed"
 const conversationCache = new Map<string, CachedConversation>()
 
-function readCachedConversation(id: string): LoadedConversation | null {
-  const cached = conversationCache.get(id)
+function readCachedConversation(
+  scope: string,
+  id: string
+): LoadedConversation | null {
+  const key = conversationCacheKey(scope, id)
+  const cached = conversationCache.get(key)
   if (!cached) return null
   if (Date.now() - cached.cachedAt > CONVERSATION_CACHE_TTL_MS) {
-    conversationCache.delete(id)
+    conversationCache.delete(key)
     return null
   }
-  conversationCache.delete(id)
-  conversationCache.set(id, cached)
+  conversationCache.delete(key)
+  conversationCache.set(key, cached)
   return { messages: cached.messages, context: cached.context }
 }
 
-function cacheConversation(id: string, loaded: LoadedConversation) {
-  conversationCache.delete(id)
-  conversationCache.set(id, { ...loaded, cachedAt: Date.now() })
+function cacheConversation(
+  scope: string,
+  id: string,
+  loaded: LoadedConversation
+) {
+  const key = conversationCacheKey(scope, id)
+  conversationCache.delete(key)
+  conversationCache.set(key, { ...loaded, cachedAt: Date.now() })
   while (conversationCache.size > CONVERSATION_CACHE_LIMIT) {
-    const oldestId = conversationCache.keys().next().value
-    if (typeof oldestId !== "string") break
-    conversationCache.delete(oldestId)
+    const oldestKey = conversationCache.keys().next().value
+    if (typeof oldestKey !== "string") break
+    conversationCache.delete(oldestKey)
   }
 }
 
-function invalidateConversationCache(id: string | null) {
-  if (id) conversationCache.delete(id)
+function invalidateConversationCache(scope: string, id: string | null) {
+  if (id) conversationCache.delete(conversationCacheKey(scope, id))
 }
 
 function supportsVoiceTranscription(endpoint: Endpoint) {
@@ -2484,6 +2495,7 @@ function AssistantThreadLayout({
 
 function AssistantChatSurface({
   conversationId,
+  cacheScope,
   conversationAssistantId,
   initialMessages,
   assistants,
@@ -2507,6 +2519,7 @@ function AssistantChatSurface({
   conversationContext,
 }: {
   conversationId: string | null
+  cacheScope: string
   conversationAssistantId?: string | null
   initialMessages: UIMessage[]
   assistants: SavedAssistant[]
@@ -2691,9 +2704,9 @@ function AssistantChatSurface({
       createResumableSessionStorage({
         // A newly-created conversation uses a temporary key until the route
         // catches up; existing conversations are always isolated by id.
-        key: `justai:resumable:${conversationId ?? "new"}`,
+        key: `justai:resumable:${cacheScope}:${conversationId ?? "new"}`,
       }),
-    [conversationId]
+    [cacheScope, conversationId]
   )
   const transport = useMemo(
     () =>
@@ -2937,6 +2950,7 @@ function AssistantChatSurface({
 
 export function ChatView({
   conversationId,
+  cacheScope,
   conversation,
   assistants,
   endpoints,
@@ -2956,7 +2970,9 @@ export function ChatView({
     string | null
   >(conversationId)
   const [surfaceKey, setSurfaceKey] = useState(
-    conversationId ? `loading:${conversationId}` : "new"
+    conversationId
+      ? `loading:${cacheScope}:${conversationId}`
+      : `new:${cacheScope}`
   )
   const [surfaceReady, setSurfaceReady] = useState(!conversationId)
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([])
@@ -3020,6 +3036,7 @@ export function ChatView({
     onConversationCreatedRef.current = onConversationCreated
     onConversationUpdatedRef.current = onConversationUpdated
   }, [
+    cacheScope,
     conversationId,
     conversation?.assistantId,
     onConversationCreated,
@@ -3130,20 +3147,20 @@ export function ChatView({
         setInitialMessages([])
         setConversationContext(EMPTY_CONTEXT)
         setActiveConversationId(null)
-        setSurfaceKey("new")
+        setSurfaceKey(`new:${cacheScope}`)
         setSurfaceReady(true)
         setHistoryLoading(false)
       })
       return () => controller.abort()
     }
 
-    const cached = readCachedConversation(conversationId)
+    const cached = readCachedConversation(cacheScope, conversationId)
     if (cached) {
       queueMicrotask(() => {
         setInitialMessages(cached.messages)
         setConversationContext(cached.context)
         setActiveConversationId(conversationId)
-        setSurfaceKey(conversationId)
+        setSurfaceKey(`${cacheScope}:${conversationId}`)
         setSurfaceReady(true)
         setHistoryLoading(false)
       })
@@ -3158,17 +3175,17 @@ export function ChatView({
         .current(conversationId, controller.signal)
         .then((loaded) => {
           if (controller.signal.aborted || !loaded) return
-          cacheConversation(conversationId, loaded)
+          cacheConversation(cacheScope, conversationId, loaded)
           setInitialMessages(loaded.messages)
           setConversationContext(loaded.context)
           setActiveConversationId(conversationId)
-          setSurfaceKey(conversationId)
+          setSurfaceKey(`${cacheScope}:${conversationId}`)
           setSurfaceReady(true)
           setHistoryLoading(false)
         })
     })
     return () => controller.abort()
-  }, [conversationId])
+  }, [cacheScope, conversationId])
 
   useEffect(() => {
     if (!conversationId) return
@@ -3255,14 +3272,17 @@ export function ChatView({
     [ensureLocalConversation]
   )
 
-  const refreshConversationContext = useCallback(async (id: string) => {
-    const context = await api.get<ConversationContext>(
-      `/api/v1/conversations/${id}/context`
-    )
-    invalidateConversationCache(id)
-    setConversationContext(context)
-    onConversationUpdatedRef.current?.()
-  }, [])
+  const refreshConversationContext = useCallback(
+    async (id: string) => {
+      const context = await api.get<ConversationContext>(
+        `/api/v1/conversations/${id}/context`
+      )
+      invalidateConversationCache(cacheScope, id)
+      setConversationContext(context)
+      onConversationUpdatedRef.current?.()
+    },
+    [cacheScope]
+  )
 
   const removeRepository = useCallback(
     async (repositoryId: string) => {
@@ -3347,7 +3367,7 @@ export function ChatView({
         activate: false,
         inheritRepositories: false,
       })
-      invalidateConversationCache(id)
+      invalidateConversationCache(cacheScope, id)
       const body = new FormData()
       body.append("file", file)
       const source = await api.upload<KnowledgeSource>(
@@ -3367,27 +3387,35 @@ export function ChatView({
         throw caught
       }
     },
-    [ensureConversation, refreshConversationContext, waitForKnowledgeSource]
+    [
+      cacheScope,
+      ensureConversation,
+      refreshConversationContext,
+      waitForKnowledgeSource,
+    ]
   )
 
-  const removeUploadedFile = useCallback(async (sourceId: string) => {
-    const id = activeConversationRef.current
-    if (!id) return
-    await api.delete(
-      `/api/v1/conversations/${id}/context/knowledge/${sourceId}`
-    )
-    const context = await api.get<ConversationContext>(
-      `/api/v1/conversations/${id}/context`
-    )
-    invalidateConversationCache(id)
-    setConversationContext(context)
-    onConversationUpdatedRef.current?.()
-  }, [])
+  const removeUploadedFile = useCallback(
+    async (sourceId: string) => {
+      const id = activeConversationRef.current
+      if (!id) return
+      await api.delete(
+        `/api/v1/conversations/${id}/context/knowledge/${sourceId}`
+      )
+      const context = await api.get<ConversationContext>(
+        `/api/v1/conversations/${id}/context`
+      )
+      invalidateConversationCache(cacheScope, id)
+      setConversationContext(context)
+      onConversationUpdatedRef.current?.()
+    },
+    [cacheScope]
+  )
 
   const handleSurfaceConversationUpdated = useCallback(() => {
-    invalidateConversationCache(activeConversationRef.current)
+    invalidateConversationCache(cacheScope, activeConversationRef.current)
     onConversationUpdatedRef.current?.()
-  }, [])
+  }, [cacheScope])
 
   const handleSurfaceConversationCreated = useCallback(
     (conversation: Conversation) => {
@@ -3516,6 +3544,7 @@ export function ChatView({
             <AssistantChatSurface
               activeEndpoint={activeEndpoint}
               assistants={assistants}
+              cacheScope={cacheScope}
               conversationId={activeConversationId}
               conversationAssistantId={conversation?.assistantId}
               endpoints={activeChatEndpoints}

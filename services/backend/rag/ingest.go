@@ -282,6 +282,7 @@ func (w *Worker) embeddingEndpoint(ctx context.Context, scopeType string, scopeI
 			return nil, err
 		}
 	}
+	endpoint.AllowPrivate = w.allowPrivate
 	return &endpoint, nil
 }
 
@@ -295,7 +296,7 @@ func vectorLiteral(values []float64) string {
 
 func (w *Worker) fetchURL(ctx context.Context, rawURL string) (string, error) {
 	target, err := url.Parse(rawURL)
-	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Hostname() == "" {
+	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Hostname() == "" || target.User != nil {
 		return "", fmt.Errorf("only http and https URLs are supported")
 	}
 	if !w.allowPrivate {
@@ -313,7 +314,7 @@ func (w *Worker) fetchURL(ctx context.Context, rawURL string) (string, error) {
 		if len(via) >= 5 {
 			return fmt.Errorf("source URL redirect limit exceeded")
 		}
-		if request.URL.Scheme != "http" && request.URL.Scheme != "https" {
+		if request.URL.Scheme != "http" && request.URL.Scheme != "https" || request.URL.User != nil {
 			return fmt.Errorf("source redirects must use http or https")
 		}
 		if !w.allowPrivate {
@@ -788,6 +789,7 @@ func (w *Worker) conversationEmbeddingEndpoint(ctx context.Context, conversation
 			return nil, err
 		}
 	}
+	endpoint.AllowPrivate = w.allowPrivate
 	return &endpoint, nil
 }
 
@@ -839,6 +841,7 @@ func (w *Worker) searchEmbeddingEndpoint(ctx context.Context, organizationID, us
 			return nil, err
 		}
 	}
+	endpoint.AllowPrivate = w.allowPrivate
 	return &endpoint, nil
 }
 
@@ -1239,7 +1242,7 @@ func validateHost(host string) error {
 		return err
 	}
 	for _, address := range addresses {
-		if isPrivateIP(address) {
+		if !isPublicIP(address) {
 			return fmt.Errorf("source hostname resolves to a private target")
 		}
 	}
@@ -1271,7 +1274,7 @@ func safeDialContext(allowPrivate bool) func(context.Context, string, string) (n
 		}
 		var lastErr error
 		for _, address := range addresses {
-			if isPrivateIP(address) {
+			if !isPublicIP(address) {
 				continue
 			}
 			connection, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(address.String(), port))
@@ -1288,10 +1291,56 @@ func safeDialContext(allowPrivate bool) func(context.Context, string, string) (n
 }
 
 func isPrivateIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsLinkLocalMulticast()
+	return !isPublicIP(ip)
+}
+
+var blockedIPNetworks = mustParseIPNetworks([]string{
+	"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+	"172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16",
+	"198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+	"::/128", "::1/128", "100::/64", "2001:0000::/32", "2001:0002::/48", "2001:0010::/28",
+	"2001:0020::/28", "2001:0030::/28", "2001:04:112::/48", "2001:db8::/32", "2002::/16", "3fff::/20", "5f00::/16", "64:ff9b::/96", "64:ff9b:1::/48",
+	"fc00::/7", "fe80::/10", "ff00::/8",
+})
+
+func mustParseIPNetworks(values []string) []*net.IPNet {
+	result := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, err := net.ParseCIDR(value)
+		if err != nil {
+			panic(fmt.Sprintf("invalid blocked IP network %q: %v", value, err))
+		}
+		result = append(result, network)
+	}
+	return result
+}
+
+func isPublicIP(ip net.IP) bool {
+	if ip == nil || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return false
+	}
+	for _, network := range blockedIPNetworks {
+		if network.Contains(ip) {
+			return false
+		}
+	}
+	return true
 }
 
 func ExtractUpload(filename, mimeType string, body []byte) (string, error) {
+	return ExtractUploadContext(context.Background(), filename, mimeType, body)
+}
+
+const (
+	pdfExtractionTimeout = 15 * time.Second
+	maxPDFTextBytes      = 16 * 1024 * 1024
+)
+
+// ExtractUploadContext keeps PDF parsing bounded even when pdftotext receives
+// a malformed or adversarial document. The compatibility wrapper above is
+// retained for non-request callers; HTTP handlers should pass their request
+// context so cancellation also stops the subprocess.
+func ExtractUploadContext(ctx context.Context, filename, mimeType string, body []byte) (string, error) {
 	lowerName := strings.ToLower(filename)
 	lowerMime := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
 	if strings.HasPrefix(lowerMime, "image/") || imageExtension(lowerName) {
@@ -1312,11 +1361,37 @@ func ExtractUpload(filename, mimeType string, body []byte) (string, error) {
 		return "", fmt.Errorf("unsupported attachment type; use PDF, Markdown, text, HTML, or JSON")
 	}
 	if strings.HasSuffix(lowerName, ".pdf") || strings.Contains(lowerMime, "pdf") {
-		command := exec.Command("pdftotext", "-layout", "-", "-")
+		parseContext, cancel := context.WithTimeout(ctx, pdfExtractionTimeout)
+		defer cancel()
+		command := exec.CommandContext(parseContext, "pdftotext", "-layout", "-", "-")
 		command.Stdin = bytes.NewReader(body)
-		output, err := command.Output()
+		stdout, err := command.StdoutPipe()
 		if err != nil {
+			return "", fmt.Errorf("PDF extraction could not start: %w", err)
+		}
+		if err := command.Start(); err != nil {
 			return "", fmt.Errorf("PDF extraction requires pdftotext: %w", err)
+		}
+		output, readErr := io.ReadAll(io.LimitReader(stdout, maxPDFTextBytes+1))
+		if len(output) > maxPDFTextBytes {
+			// Stop immediately instead of draining attacker-controlled output for
+			// the rest of the extraction window.
+			cancel()
+			_ = command.Wait()
+			return "", fmt.Errorf("PDF extracted text exceeds the %d MiB limit", maxPDFTextBytes/(1024*1024))
+		}
+		waitErr := command.Wait()
+		if parseContext.Err() != nil {
+			return "", fmt.Errorf("PDF extraction timed out")
+		}
+		if readErr != nil || waitErr != nil {
+			if waitErr != nil {
+				return "", fmt.Errorf("PDF extraction requires pdftotext: %w", waitErr)
+			}
+			return "", fmt.Errorf("PDF extraction failed: %w", readErr)
+		}
+		if len(output) == 0 {
+			return "", nil
 		}
 		return strings.TrimSpace(string(output)), nil
 	}

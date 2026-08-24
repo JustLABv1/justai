@@ -34,6 +34,8 @@ type transcriptionClient struct {
 	sourceID   uuid.UUID
 }
 
+const transcriptionSocketWriteWait = 10 * time.Second
+
 type transcriptionHub struct {
 	mu       sync.Mutex
 	clients  map[*transcriptionClient]struct{}
@@ -220,8 +222,14 @@ func (m *TranscriptionManager) broadcast(sessionID uuid.UUID, eventType string, 
 	hub.mu.Unlock()
 	for _, client := range clients {
 		client.writeMu.Lock()
-		_ = client.connection.WriteJSON(models.SocketEnvelope{Type: eventType, Sequence: sequence, Data: data})
+		_ = client.connection.SetWriteDeadline(time.Now().Add(transcriptionSocketWriteWait))
+		err := client.connection.WriteJSON(models.SocketEnvelope{Type: eventType, Sequence: sequence, Data: data})
+		_ = client.connection.SetWriteDeadline(time.Time{})
 		client.writeMu.Unlock()
+		if err != nil {
+			_ = client.connection.Close()
+			m.unregister(sessionID, client)
+		}
 	}
 }
 
@@ -257,7 +265,10 @@ func (m *TranscriptionManager) closeSession(sessionID uuid.UUID) {
 func (m *TranscriptionManager) send(client *transcriptionClient, eventType string, data any) error {
 	client.writeMu.Lock()
 	defer client.writeMu.Unlock()
-	return client.connection.WriteJSON(models.SocketEnvelope{Type: eventType, Data: data})
+	_ = client.connection.SetWriteDeadline(time.Now().Add(transcriptionSocketWriteWait))
+	err := client.connection.WriteJSON(models.SocketEnvelope{Type: eventType, Data: data})
+	_ = client.connection.SetWriteDeadline(time.Time{})
+	return err
 }
 
 func (m *TranscriptionManager) markSource(sessionID, sourceID uuid.UUID, status string) {

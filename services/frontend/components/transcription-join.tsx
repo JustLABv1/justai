@@ -163,6 +163,10 @@ export function TranscriptionJoin() {
   const analyserRef = useRef<AnalyserNode | null>(null)
   const levelTimerRef = useRef<number | null>(null)
   const pollInFlightRef = useRef(false)
+  const pollAttemptRef = useRef(0)
+  const captureAttemptRef = useRef(0)
+  const joinOperationRef = useRef(0)
+  const mountedRef = useRef(true)
   const sourceIdRef = useRef<string | null>(null)
   const intentionalCloseRef = useRef(false)
 
@@ -338,83 +342,151 @@ export function TranscriptionJoin() {
     [applySnapshot]
   )
 
-  const startMicrophone = useCallback(async () => {
-    const socket = socketRef.current
-    if (!socket || socket.readyState !== WebSocket.OPEN)
-      throw new Error("The room connection is not ready yet.")
-    if (!navigator.mediaDevices?.getUserMedia)
-      throw new Error("This browser does not support microphone capture.")
+  const startMicrophone = useCallback(
+    async (attempt = captureAttemptRef.current) => {
+      const socket = socketRef.current
+      if (!socket || socket.readyState !== WebSocket.OPEN)
+        throw new Error("The room connection is not ready yet.")
+      if (!navigator.mediaDevices?.getUserMedia)
+        throw new Error("This browser does not support microphone capture.")
 
-    stopAudio()
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    })
-    streamRef.current = stream
-    const context = new AudioContext()
-    contextRef.current = context
-    await context.audioWorklet.addModule("/audio-worklet.js")
-    const source = context.createMediaStreamSource(stream)
-    const analyser = context.createAnalyser()
-    analyser.fftSize = 256
-    analyserRef.current = analyser
-    const node = new AudioWorkletNode(context, "justai-pcm-processor")
-    workletRef.current = node
-    const gain = context.createGain()
-    gain.gain.value = 0
-    source.connect(analyser)
-    source.connect(node)
-    node.connect(gain)
-    gain.connect(context.destination)
-    let sequence = 0
-    node.port.onmessage = (message: MessageEvent<Float32Array>) => {
-      if (socket.readyState !== WebSocket.OPEN) return
-      const samples = downsample(message.data, context.sampleRate, 16000)
-      const frame = new ArrayBuffer(17 + samples.length * 2)
-      const view = new DataView(frame)
-      view.setUint8(0, 1)
-      view.setBigUint64(1, BigInt(Date.now()), true)
-      view.setUint32(9, sequence, true)
-      view.setUint32(13, 16000, true)
-      samples.forEach((value, index) =>
-        view.setInt16(
-          17 + index * 2,
-          Math.max(-1, Math.min(1, value)) * (value < 0 ? 0x8000 : 0x7fff),
-          true
-        )
-      )
-      sequence += 1
-      socket.send(frame)
-    }
-    const meter = new Uint8Array(analyser.fftSize)
-    levelTimerRef.current = window.setInterval(() => {
-      analyser.getByteTimeDomainData(meter)
-      let total = 0
-      meter.forEach((value) => {
-        const normalized = (value - 128) / 128
-        total += normalized * normalized
+      const isCurrent = () =>
+        mountedRef.current &&
+        !intentionalCloseRef.current &&
+        captureAttemptRef.current === attempt &&
+        socketRef.current === socket &&
+        socket.readyState === WebSocket.OPEN
+      let stream: MediaStream | null = null
+      let context: AudioContext | null = null
+      let node: AudioWorkletNode | null = null
+      let analyser: AnalyserNode | null = null
+      let levelTimer: number | null = null
+      const cleanupLocal = () => {
+        if (levelTimer !== null) {
+          window.clearInterval(levelTimer)
+          if (levelTimerRef.current === levelTimer) levelTimerRef.current = null
+          levelTimer = null
+        }
+        node?.disconnect()
+        if (workletRef.current === node) workletRef.current = null
+        analyser?.disconnect()
+        if (analyserRef.current === analyser) analyserRef.current = null
+        stream?.getTracks().forEach((track) => track.stop())
+        if (streamRef.current === stream) streamRef.current = null
+        if (contextRef.current === context) contextRef.current = null
+        void context?.close()
+        context = null
+      }
+      stopAudio()
+      if (!isCurrent()) return
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
       })
-      const nextLevel = Math.min(1, Math.sqrt(total / meter.length) * 3)
-      setLevel(nextLevel)
-      if (socket.readyState === WebSocket.OPEN)
-        socket.send(JSON.stringify({ type: "source.level", level: nextLevel }))
-    }, 100)
-    await context.resume()
-    if (socket.readyState !== WebSocket.OPEN)
-      throw new Error(
-        "The room connection closed while opening the microphone."
-      )
-    socket.send(JSON.stringify({ type: "source.resume" }))
-    setMicrophoneActive(true)
-    setState("connected")
-  }, [stopAudio])
+      if (!isCurrent()) {
+        cleanupLocal()
+        return
+      }
+      streamRef.current = stream
+      try {
+        context = new AudioContext()
+      } catch (caught) {
+        cleanupLocal()
+        throw caught
+      }
+      if (!isCurrent()) {
+        cleanupLocal()
+        return
+      }
+      contextRef.current = context
+      try {
+        await context!.audioWorklet.addModule("/audio-worklet.js")
+      } catch (caught) {
+        cleanupLocal()
+        throw caught
+      }
+      if (!isCurrent()) {
+        cleanupLocal()
+        return
+      }
+      const source = context!.createMediaStreamSource(stream)
+      analyser = context!.createAnalyser()
+      analyser.fftSize = 256
+      analyserRef.current = analyser
+      node = new AudioWorkletNode(context!, "justai-pcm-processor")
+      workletRef.current = node
+      const gain = context!.createGain()
+      gain.gain.value = 0
+      source.connect(analyser)
+      source.connect(node)
+      node.connect(gain)
+      gain.connect(context!.destination)
+      let sequence = 0
+      node.port.onmessage = (message: MessageEvent<Float32Array>) => {
+        if (!isCurrent()) return
+        const samples = downsample(message.data, context!.sampleRate, 16000)
+        const frame = new ArrayBuffer(17 + samples.length * 2)
+        const view = new DataView(frame)
+        view.setUint8(0, 1)
+        view.setBigUint64(1, BigInt(Date.now()), true)
+        view.setUint32(9, sequence, true)
+        view.setUint32(13, 16000, true)
+        samples.forEach((value, index) =>
+          view.setInt16(
+            17 + index * 2,
+            Math.max(-1, Math.min(1, value)) * (value < 0 ? 0x8000 : 0x7fff),
+            true
+          )
+        )
+        sequence += 1
+        socket.send(frame)
+      }
+      const meter = new Uint8Array(analyser.fftSize)
+      levelTimer = window.setInterval(() => {
+        if (!isCurrent()) return
+        analyser.getByteTimeDomainData(meter)
+        let total = 0
+        meter.forEach((value) => {
+          const normalized = (value - 128) / 128
+          total += normalized * normalized
+        })
+        const nextLevel = Math.min(1, Math.sqrt(total / meter.length) * 3)
+        setLevel(nextLevel)
+        if (socket.readyState === WebSocket.OPEN)
+          socket.send(
+            JSON.stringify({ type: "source.level", level: nextLevel })
+          )
+      }, 100)
+      levelTimerRef.current = levelTimer
+      try {
+        await context!.resume()
+      } catch (caught) {
+        cleanupLocal()
+        throw caught
+      }
+      if (!isCurrent()) {
+        cleanupLocal()
+        return
+      }
+      if (socket.readyState !== WebSocket.OPEN)
+        throw new Error(
+          "The room connection closed while opening the microphone."
+        )
+      socket.send(JSON.stringify({ type: "source.resume" }))
+      setMicrophoneActive(true)
+      setState("connected")
+    },
+    [stopAudio]
+  )
 
   const connectCapture = useCallback(
     async (captureGrant: string, sourceId: string) => {
       if (socketRef.current) return
+      const attempt = captureAttemptRef.current + 1
+      captureAttemptRef.current = attempt
       intentionalCloseRef.current = false
       sourceIdRef.current = sourceId
       setCurrentSourceId(sourceId)
@@ -423,11 +495,22 @@ export function TranscriptionJoin() {
         "/api/v1/transcription/capture-tickets",
         captureGrant
       )
+      if (
+        !mountedRef.current ||
+        intentionalCloseRef.current ||
+        captureAttemptRef.current !== attempt
+      )
+        return
       const socket = new WebSocket(
         socketURL("/api/v1/ws/transcription", ticket.ticket)
       )
       socketRef.current = socket
       socket.onmessage = (message) => {
+        if (
+          captureAttemptRef.current !== attempt ||
+          intentionalCloseRef.current
+        )
+          return
         try {
           handleRoomEvent(JSON.parse(message.data) as JoinSocketEvent)
         } catch {
@@ -435,14 +518,21 @@ export function TranscriptionJoin() {
         }
       }
       socket.onerror = () => {
-        if (!intentionalCloseRef.current)
+        if (
+          captureAttemptRef.current === attempt &&
+          !intentionalCloseRef.current
+        )
           setError("The room connection failed; reconnecting…")
       }
       socket.onclose = () => {
         if (socketRef.current !== socket) return
         socketRef.current = null
         stopAudio()
-        if (intentionalCloseRef.current) return
+        if (
+          captureAttemptRef.current !== attempt ||
+          intentionalCloseRef.current
+        )
+          return
         setError("The room connection closed; reconnecting…")
         setState("pending")
       }
@@ -464,75 +554,106 @@ export function TranscriptionJoin() {
           if (settled) return
           settled = true
           window.clearTimeout(timer)
+          if (
+            captureAttemptRef.current !== attempt ||
+            intentionalCloseRef.current
+          ) {
+            resolve()
+            return
+          }
           reject(new Error("The room connection closed before connecting."))
         })
       })
-      try {
-        await startMicrophone()
-      } catch (caught) {
-        intentionalCloseRef.current = true
+      if (
+        !mountedRef.current ||
+        intentionalCloseRef.current ||
+        captureAttemptRef.current !== attempt ||
+        socketRef.current !== socket
+      ) {
         socket.close()
-        socketRef.current = null
-        stopAudio()
+        if (socketRef.current === socket) socketRef.current = null
+        return
+      }
+      try {
+        await startMicrophone(attempt)
+      } catch (caught) {
+        if (captureAttemptRef.current === attempt) {
+          intentionalCloseRef.current = true
+          socket.close()
+          if (socketRef.current === socket) socketRef.current = null
+          stopAudio()
+        }
         throw caught
       }
     },
     [handleRoomEvent, startMicrophone, stopAudio]
   )
 
-  const pollRequest = useCallback(async () => {
-    if (!requestId || !pollToken || pollInFlightRef.current) return
-    pollInFlightRef.current = true
-    try {
-      const result = await api.get<JoinPollResult>(
-        `/api/v1/transcription/join-requests/${requestId}?token=${encodeURIComponent(pollToken)}`
-      )
-      setTitle(result.sessionTitle ?? "Live session")
-      if (result.status === "denied" || result.status === "expired") {
-        setError(
-          result.status === "denied"
-            ? "The host declined this microphone."
-            : "This join request expired."
+  const pollRequest = useCallback(
+    async (attempt = pollAttemptRef.current) => {
+      if (!requestId || !pollToken || pollInFlightRef.current) return
+      pollInFlightRef.current = true
+      const isCurrent = () =>
+        mountedRef.current && pollAttemptRef.current === attempt
+      try {
+        const result = await api.get<JoinPollResult>(
+          `/api/v1/transcription/join-requests/${requestId}?token=${encodeURIComponent(pollToken)}`
         )
-        clearStoredJoin(code)
-        replaceJoinURL(code)
-        setSnapshot(null)
-        setState("form")
-        return
-      }
-      if (
-        result.status === "approved" &&
-        result.captureGrant &&
-        result.sourceId &&
-        !socketRef.current
-      ) {
-        try {
-          await connectCapture(result.captureGrant, result.sourceId)
-        } catch (caught) {
+        if (!isCurrent()) return
+        setTitle(result.sessionTitle ?? "Live session")
+        if (result.status === "denied" || result.status === "expired") {
           setError(
-            caught instanceof Error
-              ? caught.message
-              : "The microphone could not be connected."
+            result.status === "denied"
+              ? "The host declined this microphone."
+              : "This join request expired."
           )
-          setState("pending")
+          clearStoredJoin(code)
+          replaceJoinURL(code)
+          setSnapshot(null)
+          setState("form")
+          return
         }
+        if (
+          result.status === "approved" &&
+          result.captureGrant &&
+          result.sourceId &&
+          !socketRef.current
+        ) {
+          try {
+            await connectCapture(result.captureGrant, result.sourceId)
+            if (!isCurrent()) return
+          } catch (caught) {
+            if (!isCurrent()) return
+            setError(
+              caught instanceof Error
+                ? caught.message
+                : "The microphone could not be connected."
+            )
+            setState("pending")
+          }
+        }
+      } catch (caught) {
+        if (!isCurrent()) return
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "The join request could not be checked."
+        )
+      } finally {
+        if (isCurrent()) pollInFlightRef.current = false
       }
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The join request could not be checked."
-      )
-    } finally {
-      pollInFlightRef.current = false
-    }
-  }, [code, connectCapture, pollToken, requestId])
+    },
+    [code, connectCapture, pollToken, requestId]
+  )
 
   useEffect(() => {
     if (state !== "pending" || !requestId || !pollToken) return
-    const initialPoll = window.setTimeout(() => void pollRequest(), 0)
-    const timer = window.setInterval(() => void pollRequest(), 1500)
+    const attempt = pollAttemptRef.current + 1
+    pollAttemptRef.current = attempt
+    const initialPoll = window.setTimeout(() => void pollRequest(attempt), 0)
+    const timer = window.setInterval(() => void pollRequest(attempt), 1500)
     return () => {
+      pollAttemptRef.current += 1
       window.clearTimeout(initialPoll)
       window.clearInterval(timer)
       pollInFlightRef.current = false
@@ -557,8 +678,13 @@ export function TranscriptionJoin() {
     return () => window.clearTimeout(timer)
   }, [initialCode, requestFromURL])
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      joinOperationRef.current += 1
+      pollAttemptRef.current += 1
+      captureAttemptRef.current += 1
       intentionalCloseRef.current = true
       try {
         socketRef.current?.send(JSON.stringify({ type: "transcription.stop" }))
@@ -568,12 +694,13 @@ export function TranscriptionJoin() {
       socketRef.current?.close()
       socketRef.current = null
       stopAudio()
-    },
-    [stopAudio]
-  )
+    }
+  }, [stopAudio])
 
   const submit = async () => {
     if (submitting) return
+    const operation = joinOperationRef.current + 1
+    joinOperationRef.current = operation
     const normalizedCode = code.trim().toUpperCase()
     const normalizedName = sourceName.trim() || "Room microphone"
     setError("")
@@ -588,6 +715,7 @@ export function TranscriptionJoin() {
         sourceName: normalizedName,
         deviceLabel: navigator.userAgent,
       })
+      if (!mountedRef.current || joinOperationRef.current !== operation) return
       const stored: StoredJoin = {
         code: normalizedCode,
         requestId: result.requestId,
@@ -603,18 +731,21 @@ export function TranscriptionJoin() {
       setTitle(result.sessionTitle)
       setState("pending")
     } catch (caught) {
+      if (!mountedRef.current || joinOperationRef.current !== operation) return
       setError(
         caught instanceof Error
           ? caught.message
           : "The room code could not be accepted."
       )
     } finally {
-      setSubmitting(false)
+      if (mountedRef.current && joinOperationRef.current === operation)
+        setSubmitting(false)
     }
   }
 
   const toggleMicrophone = async () => {
     if (microphoneActive) {
+      captureAttemptRef.current += 1
       stopAudio()
       if (socketRef.current?.readyState === WebSocket.OPEN)
         socketRef.current.send(JSON.stringify({ type: "source.pause" }))
@@ -622,9 +753,17 @@ export function TranscriptionJoin() {
       return
     }
     setError("")
+    const attempt = captureAttemptRef.current + 1
+    captureAttemptRef.current = attempt
     try {
-      await startMicrophone()
+      await startMicrophone(attempt)
     } catch (caught) {
+      if (
+        !mountedRef.current ||
+        intentionalCloseRef.current ||
+        captureAttemptRef.current !== attempt
+      )
+        return
       setError(
         caught instanceof Error
           ? caught.message
@@ -634,7 +773,11 @@ export function TranscriptionJoin() {
   }
 
   const leaveRoom = () => {
+    joinOperationRef.current += 1
+    pollAttemptRef.current += 1
+    captureAttemptRef.current += 1
     intentionalCloseRef.current = true
+    setSubmitting(false)
     try {
       socketRef.current?.send(JSON.stringify({ type: "transcription.stop" }))
     } catch {

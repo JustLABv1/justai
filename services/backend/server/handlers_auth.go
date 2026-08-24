@@ -29,13 +29,30 @@ type credentialsRequest struct {
 }
 
 type oidcIdentityClaims struct {
-	Subject string `json:"sub"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Nonce   string `json:"nonce"`
+	Subject       string `json:"sub"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	Name          string `json:"name"`
+	Nonce         string `json:"nonce"`
 }
 
 func (a *App) register(c *gin.Context) {
+	var request credentialsRequest
+	if !decodeJSON(c, &request) {
+		return
+	}
+	request.Email = strings.ToLower(strings.TrimSpace(request.Email))
+	request.DisplayName = strings.TrimSpace(request.DisplayName)
+	if request.Email == "" || !strings.Contains(request.Email, "@") {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("a valid email is required"))
+		return
+	}
+	if request.DisplayName == "" {
+		request.DisplayName = strings.Split(request.Email, "@")[0]
+	}
+	if !a.allowAuthAttempt(c, request.Email) {
+		return
+	}
 	settings, settingsErr := a.readPlatformSettings(c)
 	if settingsErr == nil && !settings.LocalAuthEnabled {
 		message := strings.TrimSpace(settings.MaintenanceMessage)
@@ -53,20 +70,12 @@ func (a *App) register(c *gin.Context) {
 		middleware.AbortError(c, http.StatusServiceUnavailable, "feature_disabled", message)
 		return
 	}
-	var request credentialsRequest
-	if !decodeJSON(c, &request) {
+	release, ok := a.acquirePasswordSlot(c)
+	if !ok {
 		return
-	}
-	request.Email = strings.ToLower(strings.TrimSpace(request.Email))
-	request.DisplayName = strings.TrimSpace(request.DisplayName)
-	if request.Email == "" || !strings.Contains(request.Email, "@") {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("a valid email is required"))
-		return
-	}
-	if request.DisplayName == "" {
-		request.DisplayName = strings.Split(request.Email, "@")[0]
 	}
 	passwordHash, err := security.HashPassword(request.Password)
+	release()
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
@@ -91,6 +100,9 @@ func (a *App) login(c *gin.Context) {
 		return
 	}
 	request.Email = strings.ToLower(strings.TrimSpace(request.Email))
+	if !a.allowAuthAttempt(c, request.Email) {
+		return
+	}
 	var user models.User
 	var passwordHash sql.NullString
 	err := a.DB.QueryRowContext(c, `SELECT id, email, display_name, is_platform_admin, password_hash, COALESCE(status, 'active'), COALESCE(session_version, 0) FROM users WHERE email = $1`, request.Email).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &passwordHash, &user.Status, &user.SessionVersion)
@@ -111,7 +123,13 @@ func (a *App) login(c *gin.Context) {
 		middleware.AbortError(c, http.StatusServiceUnavailable, "feature_disabled", message)
 		return
 	}
-	if !passwordHash.Valid || !security.CheckPassword(request.Password, passwordHash.String) {
+	release, ok := a.acquirePasswordSlot(c)
+	if !ok {
+		return
+	}
+	passwordValid := passwordHash.Valid && security.CheckPassword(request.Password, passwordHash.String)
+	release()
+	if !passwordValid {
 		writeError(c, http.StatusUnauthorized, fmt.Errorf("invalid email or password"))
 		return
 	}
@@ -139,6 +157,9 @@ func (a *App) createUserWorkspace(ctx context.Context, email, displayName, passw
 		return models.User{}, err
 	}
 	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(ctx, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return models.User{}, err
+	}
 	var count int
 	if err := transaction.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
 		return models.User{}, err
@@ -305,7 +326,18 @@ func (a *App) oidcCallback(c *gin.Context) {
 		return
 	}
 	var identityExists bool
-	_ = a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM oidc_identities WHERE issuer = $1 AND subject = $2)`, provider.Issuer, claims.Subject).Scan(&identityExists)
+	if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM oidc_identities WHERE issuer = $1 AND subject = $2)`, provider.Issuer, claims.Subject).Scan(&identityExists); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	// An unverified email claim may still be used by an already-linked
+	// identity, but it must never be sufficient to attach a new identity to an
+	// existing account or create a new account. Otherwise an OIDC provider that
+	// lets users change an unverified email becomes an account-takeover path.
+	if !oidcIdentityMayProvision(identityExists, claims.EmailVerified) {
+		writeError(c, http.StatusForbidden, fmt.Errorf("OIDC email address must be verified before first sign-in"))
+		return
+	}
 	settings, settingsErr := a.readPlatformSettings(c)
 	if settingsErr == nil && (!settings.LoginEnabled || (!settings.SignupEnabled && !identityExists)) {
 		var existingAdmin bool
@@ -346,6 +378,10 @@ func validOIDCIdentityClaims(claims oidcIdentityClaims, expectedNonce string) bo
 	return claims.Subject != "" && claims.Email != "" && expectedNonce != "" && claims.Nonce == expectedNonce
 }
 
+func oidcIdentityMayProvision(identityExists, emailVerified bool) bool {
+	return identityExists || emailVerified
+}
+
 func safeOIDCNext(value string) string {
 	value = strings.TrimSpace(value)
 	parsed, err := url.Parse(value)
@@ -361,6 +397,9 @@ func (a *App) upsertOIDCUser(ctx context.Context, issuer, subject, email, name s
 	if err == nil {
 		return user, nil
 	}
+	if err != sql.ErrNoRows {
+		return models.User{}, err
+	}
 	if name == "" {
 		name = strings.Split(email, "@")[0]
 	}
@@ -369,6 +408,22 @@ func (a *App) upsertOIDCUser(ctx context.Context, issuer, subject, email, name s
 		return models.User{}, err
 	}
 	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(ctx, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return models.User{}, err
+	}
+	// Re-check the identity after taking the bootstrap lock. Two concurrent
+	// callbacks can both miss the identity in the pool query above; only the
+	// transaction that wins the lock may create or attach it.
+	err = transaction.QueryRowContext(ctx, `SELECT u.id, u.email, u.display_name, u.is_platform_admin, COALESCE(u.status, 'active'), COALESCE(u.session_version, 0) FROM oidc_identities oi JOIN users u ON u.id = oi.user_id WHERE oi.issuer = $1 AND oi.subject = $2 FOR UPDATE`, issuer, subject).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &user.Status, &user.SessionVersion)
+	if err == nil {
+		if err := transaction.Commit(); err != nil {
+			return models.User{}, err
+		}
+		return user, nil
+	}
+	if err != sql.ErrNoRows {
+		return models.User{}, err
+	}
 	var existingID uuid.UUID
 	err = transaction.QueryRowContext(ctx, `SELECT id FROM users WHERE email = $1`, strings.ToLower(email)).Scan(&existingID)
 	if err == nil {

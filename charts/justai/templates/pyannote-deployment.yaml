@@ -15,6 +15,12 @@
 {{- if and (not $hfTokenRefName) (not $hfToken) (not $externalSecretStore) }}
 {{- fail "pyannote.enabled requires a Hugging Face token through secrets.refs.pyannoteHfToken, secrets.data.pyannoteHfToken with secrets.create=true, or an existing Secret/Vault Secret" }}
 {{- end }}
+{{- if not (gt (len .Values.pyannote.allowedMediaOrigins) 0) }}
+{{- fail "pyannote.enabled requires pyannote.allowedMediaOrigins to contain exact media URL origins" }}
+{{- end }}
+{{- if and (not $serviceTokenRefName) (not $serviceToken) (not $externalSecretStore) }}
+{{- fail "pyannote.enabled requires a service token through secrets.refs.pyannoteServiceToken, secrets.data.pyannoteServiceToken with secrets.create=true, or an existing Secret/Vault Secret" }}
+{{- end }}
 {{- if and $hfToken (not $globalSecretStore) (not $hfTokenRefName) }}
 {{- fail "secrets.data.pyannoteHfToken requires secrets.create=true, secrets.vault.enabled=true, or secrets.refs.pyannoteHfToken.name" }}
 {{- end }}
@@ -113,6 +119,10 @@ spec:
               value: {{ .Values.pyannote.downloadTimeoutSeconds | quote }}
             - name: PYANNOTE_MAX_SOURCE_BYTES
               value: {{ .Values.pyannote.maxSourceBytes | quote }}
+            - name: PYANNOTE_ALLOWED_MEDIA_ORIGINS
+              value: {{ join "," .Values.pyannote.allowedMediaOrigins | quote }}
+            - name: PYANNOTE_ALLOW_PRIVATE_MEDIA_ORIGINS
+              value: {{ join "," .Values.pyannote.allowPrivateMediaOrigins | quote }}
             - name: HF_HOME
               value: /tmp/huggingface
             - name: HUGGINGFACE_HUB_CACHE
@@ -154,7 +164,7 @@ spec:
                   name: {{ $sharedSecret | quote }}
                   key: {{ $sharedHfKey | quote }}
             {{- end }}
-            {{- if or $serviceToken $serviceTokenRefName }}
+            {{- if or $globalSecretStore $serviceTokenRefName }}
             - name: PYANNOTE_SERVICE_TOKEN
               valueFrom:
                 secretKeyRef:
