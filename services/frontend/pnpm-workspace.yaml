@@ -1,7 +1,7 @@
 packages: []
 
 overrides:
-  nanoid@3.3.16: 3.3.18
+  nanoid@3.3.16: 6.0.1
 
 allowBuilds:
   sharp: true
