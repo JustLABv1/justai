@@ -161,3 +161,15 @@ jobs:
           context: services/pyannote-diarizer
           file: services/pyannote-diarizer/Dockerfile
           push: false
+          load: true
+          tags: justai-pyannote:ci
+      - name: Verify runtime Python packaging
+        run: |
+          set -euo pipefail
+          version="$(docker run --rm --entrypoint python justai-pyannote:ci -c 'import importlib.metadata as metadata; print(metadata.version("setuptools"))')"
+          test "${version}" = "80.10.2"
+          if docker run --rm --entrypoint python justai-pyannote:ci -m pip --version; then
+            echo "pip must not be present in the pyannote runtime image"
+            exit 1
+          fi
+          docker run --rm --entrypoint /usr/bin/python justai-pyannote:ci -c 'import importlib.util; assert importlib.util.find_spec("pip") is None; assert importlib.util.find_spec("setuptools") is None'
