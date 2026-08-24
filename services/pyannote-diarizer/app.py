@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import time
 import wave
+import warnings
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -27,6 +28,16 @@ import httpx
 import torch
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import AnyHttpUrl, BaseModel, Field
+
+# pyannote.audio warns when TorchCodec cannot load shared FFmpeg libraries.
+# This service intentionally bypasses its path decoder and always passes a
+# normalized in-memory waveform, so that optional decoder is never exercised.
+warnings.filterwarnings(
+    "ignore",
+    message=r"\s*torchcodec is not installed correctly",
+    category=UserWarning,
+    module=r"pyannote\.audio\.core\.io",
+)
 from pyannote.audio import Pipeline
 
 
@@ -42,7 +53,10 @@ TORCH_THREADS = int(os.getenv("PYANNOTE_TORCH_THREADS", "2"))
 DOWNLOAD_TIMEOUT_SECONDS = float(os.getenv("PYANNOTE_DOWNLOAD_TIMEOUT_SECONDS", "1800"))
 MAX_SOURCE_BYTES = int(os.getenv("PYANNOTE_MAX_SOURCE_BYTES", str(5 * 1024 * 1024 * 1024)))
 MAX_CONFIGURED_DOWNLOAD_TIMEOUT_SECONDS = 30 * 60
-MAX_CONFIGURED_SOURCE_BYTES = 8 * 1024 * 1024 * 1024
+# Releases before the download hardening used 20 GiB as the Helm default.
+# Keep that value as the bounded upper limit so existing installations can
+# upgrade without the new image rejecting their retained configuration.
+MAX_CONFIGURED_SOURCE_BYTES = 20 * 1024 * 1024 * 1024
 ALLOWED_MEDIA_ORIGINS = tuple(
     origin.strip().rstrip("/")
     for origin in os.getenv("PYANNOTE_ALLOWED_MEDIA_ORIGINS", "").split(",")
@@ -68,7 +82,8 @@ if DOWNLOAD_TIMEOUT_SECONDS <= 0 or DOWNLOAD_TIMEOUT_SECONDS > MAX_CONFIGURED_DO
     )
 if MAX_SOURCE_BYTES <= 0 or MAX_SOURCE_BYTES > MAX_CONFIGURED_SOURCE_BYTES:
     raise RuntimeError(
-        f"PYANNOTE_MAX_SOURCE_BYTES must be between 1 and {MAX_CONFIGURED_SOURCE_BYTES}"
+        "PYANNOTE_MAX_SOURCE_BYTES "
+        f"({MAX_SOURCE_BYTES}) must be between 1 and {MAX_CONFIGURED_SOURCE_BYTES}"
     )
 
 
