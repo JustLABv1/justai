@@ -79,6 +79,8 @@ export interface ToolCallsSectionProps {
     call: ToolCallEntry,
     kind: "input" | "output"
   ) => ReactNode
+  /** Render approval controls inline instead of in the composer approval queue. */
+  approvalActions?: boolean
 }
 
 // ============================================================================
@@ -122,6 +124,7 @@ export function ToolCallsSection({
   iconSize = 21,
   renderIcon,
   renderContent,
+  approvalActions = true,
 }: ToolCallsSectionProps) {
   const pendingApprovalIndices = useMemo(
     () =>
@@ -451,7 +454,7 @@ export function ToolCallsSection({
                           <p className="mt-1 text-[10px] text-amber-800/80 dark:text-amber-200/80">
                             Review this MCP request before it runs.
                           </p>
-                          {call.respondToApproval && (
+                          {approvalActions && call.respondToApproval && (
                             <div className="mt-2 flex flex-wrap gap-2">
                               <Button
                                 aria-busy={approvalIsSubmitting}

@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/tool-calls-section"
 import { cn } from "@/lib/utils"
 import { formatToolName } from "@/lib/utils/tool-icons"
+import { RegisterMCPApprovals } from "@/components/assistant-ui/mcp-approval-context"
 
 type RetrievalStatus = {
   status?: string
@@ -266,6 +267,7 @@ function toolCallError(part: ToolCallPart) {
 
 function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
   const aui = useAui()
+  const messageId = useAuiState((state) => state.message.id)
   const messageParts = useAuiState((state) => state.message.parts)
   const threadIsRunning = useAuiState((state) => state.thread.isRunning)
   const toolCalls = useMemo(
@@ -303,17 +305,24 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
   if (toolCalls.length === 0) return null
 
   return (
-    <ToolCallsSection
-      className="my-2 w-full max-w-2xl"
-      toolCalls={toolCalls}
-      renderContent={(content, call, kind) =>
-        kind === "output" ? (
-          <ToolResultContent toolName={call.tool_name} value={content} />
-        ) : (
-          <CompactMarkdown content={content} />
-        )
-      }
-    />
+    <>
+      <RegisterMCPApprovals
+        approvals={toolCalls.filter((call) => call.status === "waiting")}
+        messageId={messageId}
+      />
+      <ToolCallsSection
+        approvalActions={false}
+        className="my-2 w-full max-w-2xl"
+        toolCalls={toolCalls}
+        renderContent={(content, call, kind) =>
+          kind === "output" ? (
+            <ToolResultContent toolName={call.tool_name} value={content} />
+          ) : (
+            <CompactMarkdown content={content} />
+          )
+        }
+      />
+    </>
   )
 }
 

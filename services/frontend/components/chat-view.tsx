@@ -77,6 +77,10 @@ import {
 } from "@/components/assistant-ui/message-parts"
 import { ChatAttachmentPreview } from "@/components/assistant-ui/attachment-preview"
 import { VoiceControl } from "@/components/assistant-ui/voice"
+import {
+  MCPApprovalCards,
+  MCPApprovalProvider,
+} from "@/components/assistant-ui/mcp-approval-context"
 import { createJustAIVoiceAdapter } from "@/components/assistant-ui/voice-adapter"
 import { BrandMark } from "@/components/brand-mark"
 import { Button } from "@/components/ui/button"
@@ -2434,51 +2438,56 @@ function AssistantThreadLayout({
   }
 
   return (
-    <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-      <SelectionToolbarPrimitive.Root className="z-50 flex items-center gap-1 rounded-lg border bg-background/95 p-1 text-xs text-foreground shadow-lg backdrop-blur">
-        <SelectionToolbarPrimitive.Quote className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
-          <Quote className="size-3.5" aria-hidden="true" />
-          Quote
-        </SelectionToolbarPrimitive.Quote>
-      </SelectionToolbarPrimitive.Root>
-      <ThreadPrimitive.Viewport
-        className="relative min-h-0 flex-1 overflow-y-auto"
-        turnAnchor="bottom"
-        autoScroll
-        scrollToBottomOnInitialize
-        scrollToBottomOnRunStart
-        scrollToBottomOnThreadSwitch
-      >
-        <FollowStreamingResponse />
-        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-3 sm:px-8 lg:px-12">
-          <EmptyThread>
-            {isEmpty && <div className="mt-2 w-full">{composer}</div>}
-          </EmptyThread>
+    <MCPApprovalProvider>
+      <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+        <SelectionToolbarPrimitive.Root className="z-50 flex items-center gap-1 rounded-lg border bg-background/95 p-1 text-xs text-foreground shadow-lg backdrop-blur">
+          <SelectionToolbarPrimitive.Quote className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
+            <Quote className="size-3.5" aria-hidden="true" />
+            Quote
+          </SelectionToolbarPrimitive.Quote>
+        </SelectionToolbarPrimitive.Root>
+        <ThreadPrimitive.Viewport
+          className="relative min-h-0 flex-1 overflow-y-auto"
+          turnAnchor="bottom"
+          autoScroll
+          scrollToBottomOnInitialize
+          scrollToBottomOnRunStart
+          scrollToBottomOnThreadSwitch
+        >
+          <FollowStreamingResponse />
+          <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-3 sm:px-8 lg:px-12">
+            <EmptyThread>
+              {isEmpty && <div className="mt-2 w-full">{composer}</div>}
+            </EmptyThread>
+            {!isEmpty && (
+              <div className="mt-auto">
+                <ThreadPrimitive.Messages>
+                  {({ message }) => {
+                    if (message.composer.isEditing) {
+                      return <MessageEditComposer />
+                    }
+                    return message.role === "user" ? (
+                      <UserMessage />
+                    ) : (
+                      <AssistantMessage />
+                    )
+                  }}
+                </ThreadPrimitive.Messages>
+              </div>
+            )}
+          </div>
           {!isEmpty && (
-            <div className="mt-auto">
-              <ThreadPrimitive.Messages>
-                {({ message }) => {
-                  if (message.composer.isEditing) {
-                    return <MessageEditComposer />
-                  }
-                  return message.role === "user" ? (
-                    <UserMessage />
-                  ) : (
-                    <AssistantMessage />
-                  )
-                }}
-              </ThreadPrimitive.Messages>
-            </div>
+            <ThreadPrimitive.ViewportFooter className="relative sticky bottom-0 z-20 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-5 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+              <ScrollToLatest />
+              <div className="flex flex-col">
+                <MCPApprovalCards />
+                {composer}
+              </div>
+            </ThreadPrimitive.ViewportFooter>
           )}
-        </div>
-        {!isEmpty && (
-          <ThreadPrimitive.ViewportFooter className="relative sticky bottom-0 z-20 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-5 backdrop-blur supports-[backdrop-filter]:bg-background/75">
-            <ScrollToLatest />
-            {composer}
-          </ThreadPrimitive.ViewportFooter>
-        )}
-      </ThreadPrimitive.Viewport>
-    </ThreadPrimitive.Root>
+        </ThreadPrimitive.Viewport>
+      </ThreadPrimitive.Root>
+    </MCPApprovalProvider>
   )
 }
 
