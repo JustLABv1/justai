@@ -156,6 +156,85 @@ func (a *App) discoverAutomaticMCPTool(ctx context.Context, userID, organization
 	return findMCPBindingWithProviderName(discovery.Bindings, serverID, toolName)
 }
 
+// discoverHistoricalAutomaticMCPTool restores an ephemeral automatic binding
+// when a provider repeats a tool from the active conversation branch in a later
+// turn. The persisted event supplies the exact server/tool identity; the normal
+// single-tool discovery path then revalidates current scope, enablement, and the
+// allowlist before the binding can be used again.
+func (a *App) discoverHistoricalAutomaticMCPTool(ctx context.Context, userID, organizationID, conversationID, headID uuid.UUID, requestedName string) voiceToolDiscovery {
+	result := voiceToolDiscovery{Definitions: []provider.ToolDefinition{}, Bindings: map[string]voiceToolBinding{}}
+	if headID == uuid.Nil || strings.TrimSpace(requestedName) == "" {
+		return result
+	}
+	stored, err := a.conversationBranchMessages(ctx, conversationID, headID)
+	if err != nil {
+		result.Errors = []string{"automatic MCP history could not be loaded: " + err.Error()}
+		return result
+	}
+	event, ok := historicalAutomaticMCPToolEvent(stored, requestedName)
+	if !ok {
+		return result
+	}
+	providerName, binding, ok := a.discoverAutomaticMCPTool(ctx, userID, organizationID, event.ServerID, event.ToolName)
+	if !ok {
+		return result
+	}
+	// A collision may have added a numeric suffix to the provider-safe name.
+	// Preserve the exact historical name so both the replayed call and the next
+	// provider round see the same definition that appeared in tool history.
+	if event.ProviderToolName == requestedName && assistantUIProviderToolNameMatches(requestedName, assistantUIToolDisplayBinding{ServerID: event.ServerID, ToolName: event.ToolName}) {
+		providerName = requestedName
+		binding.Definition.Name = requestedName
+	}
+	result.Definitions = append(result.Definitions, binding.Definition)
+	result.Bindings[providerName] = binding
+	return result
+}
+
+func historicalAutomaticMCPToolEvent(stored []storedChatMessage, requestedName string) (chatToolEvent, bool) {
+	requestedName = strings.TrimSpace(requestedName)
+	if requestedName == "" {
+		return chatToolEvent{}, false
+	}
+	for index := len(stored) - 1; index >= 0; index-- {
+		event, ok := parseChatToolEvent(stored[index].Content)
+		if ok && event.Automatic && event.ServerID != uuid.Nil && event.ProviderToolName == requestedName {
+			return event, true
+		}
+	}
+
+	var match *chatToolEvent
+	for index := len(stored) - 1; index >= 0; index-- {
+		event, ok := parseChatToolEvent(stored[index].Content)
+		if !ok || !event.Automatic || event.ServerID == uuid.Nil || event.ToolName != requestedName {
+			continue
+		}
+		if match != nil && (match.ServerID != event.ServerID || match.ToolName != event.ToolName) {
+			return chatToolEvent{}, false
+		}
+		copy := event
+		match = &copy
+	}
+	if match == nil {
+		normalizedName := normalizeVoiceToolPart(requestedName)
+		for index := len(stored) - 1; index >= 0; index-- {
+			event, ok := parseChatToolEvent(stored[index].Content)
+			if !ok || !event.Automatic || event.ServerID == uuid.Nil || normalizeVoiceToolPart(event.ToolName) != normalizedName {
+				continue
+			}
+			if match != nil && (match.ServerID != event.ServerID || match.ToolName != event.ToolName) {
+				return chatToolEvent{}, false
+			}
+			copy := event
+			match = &copy
+		}
+		if match == nil {
+			return chatToolEvent{}, false
+		}
+	}
+	return *match, true
+}
+
 func automaticMCPDiscoveryResult(discovery voiceToolDiscovery) json.RawMessage {
 	tools := make([]map[string]any, 0, len(discovery.Definitions))
 	for _, definition := range discovery.Definitions {

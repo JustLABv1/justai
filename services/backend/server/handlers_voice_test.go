@@ -9,6 +9,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 
+	"justai-backend/mcp"
 	"justai-backend/provider"
 )
 
@@ -156,5 +157,19 @@ func TestCacheMCPToolsDoesNotMarkEmptyDiscoveryFresh(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMCPToolsAfterRefreshKeepsStaleSnapshotOnEmptySuccess(t *testing.T) {
+	stale := []mcp.Tool{{Name: "List Watchlists"}}
+	tools, usingStale := mcpToolsAfterRefresh(stale, nil)
+	if !usingStale || len(tools) != 1 || tools[0].Name != "List Watchlists" {
+		t.Fatalf("expected the stale snapshot to remain available, got %+v (usingStale=%v)", tools, usingStale)
+	}
+
+	fresh := []mcp.Tool{{Name: "List Scans"}}
+	tools, usingStale = mcpToolsAfterRefresh(stale, fresh)
+	if usingStale || len(tools) != 1 || tools[0].Name != "List Scans" {
+		t.Fatalf("expected a non-empty refresh to replace the snapshot, got %+v (usingStale=%v)", tools, usingStale)
 	}
 }

@@ -55,6 +55,13 @@
 {{- $proxyNoProxyKey := include "justai.secretRefKey" (dict "root" . "ref" "pyannoteNoProxy") -}}
 {{- $noProxy := .Values.pyannote.proxy.noProxy -}}
 {{- if kindIs "slice" $noProxy }}{{- $noProxy = join "," $noProxy -}}{{- end }}
+{{- $trustedCAConfigMap := .Values.pyannote.trustedCA.existingConfigMap | default "" -}}
+{{- $trustedCASecret := .Values.pyannote.trustedCA.existingSecret | default "" -}}
+{{- $trustedCAKey := .Values.pyannote.trustedCA.key | default "ca.crt" -}}
+{{- if and $trustedCAConfigMap $trustedCASecret }}
+{{- fail "pyannote.trustedCA accepts either existingConfigMap or existingSecret, not both" }}
+{{- end }}
+{{- $trustedCAEnabled := or $trustedCAConfigMap $trustedCASecret -}}
 {{- $imageTag := .Values.pyannote.image.tag | default (printf "pyannote-%s" .Chart.AppVersion) -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -92,6 +99,27 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- end }}
+      {{- if $trustedCAEnabled }}
+      initContainers:
+        - name: trusted-ca-bundle
+          image: "{{ .Values.pyannote.image.repository }}:{{ $imageTag }}"
+          imagePullPolicy: {{ .Values.pyannote.image.pullPolicy }}
+          command: ["/opt/venv/bin/python", "-c"]
+          args:
+            - >-
+              from pathlib import Path;
+              Path("/output-ca/ca-certificates.crt").write_bytes(
+                Path("/etc/ssl/certs/ca-certificates.crt").read_bytes()
+                + b"\n"
+                + Path("/input-ca/corporate-ca.crt").read_bytes()
+              )
+          volumeMounts:
+            - name: trusted-ca-input
+              mountPath: /input-ca
+              readOnly: true
+            - name: trusted-ca-bundle
+              mountPath: /output-ca
       {{- end }}
       containers:
         - name: pyannote
@@ -131,6 +159,12 @@ spec:
               value: /tmp/huggingface
             - name: HUGGINGFACE_HUB_CACHE
               value: /tmp/huggingface/hub
+            {{- if $trustedCAEnabled }}
+            - name: SSL_CERT_FILE
+              value: /tmp/trusted-ca/ca-certificates.crt
+            - name: REQUESTS_CA_BUNDLE
+              value: /tmp/trusted-ca/ca-certificates.crt
+            {{- end }}
             {{- if .Values.pyannote.proxy.http }}
             - name: HTTP_PROXY
               value: {{ .Values.pyannote.proxy.http | quote }}
@@ -186,6 +220,16 @@ spec:
           volumeMounts:
             - name: huggingface-cache
               mountPath: /tmp/huggingface
+            {{- if $trustedCAEnabled }}
+            - name: trusted-ca-bundle
+              mountPath: /tmp/trusted-ca
+              readOnly: true
+            {{- end }}
+          {{- else if $trustedCAEnabled }}
+          volumeMounts:
+            - name: trusted-ca-bundle
+              mountPath: /tmp/trusted-ca
+              readOnly: true
           {{- end }}
           startupProbe:
             httpGet:
@@ -212,11 +256,31 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if .Values.pyannote.cache.persistence.enabled }}
+      {{- if or .Values.pyannote.cache.persistence.enabled $trustedCAEnabled }}
       volumes:
+        {{- if .Values.pyannote.cache.persistence.enabled }}
         - name: huggingface-cache
           persistentVolumeClaim:
             claimName: {{ include "justai.fullname" . }}-pyannote-cache
+        {{- end }}
+        {{- if $trustedCAEnabled }}
+        - name: trusted-ca-input
+          {{- if $trustedCAConfigMap }}
+          configMap:
+            name: {{ $trustedCAConfigMap | quote }}
+            items:
+              - key: {{ $trustedCAKey | quote }}
+                path: corporate-ca.crt
+          {{- else }}
+          secret:
+            secretName: {{ $trustedCASecret | quote }}
+            items:
+              - key: {{ $trustedCAKey | quote }}
+                path: corporate-ca.crt
+          {{- end }}
+        - name: trusted-ca-bundle
+          emptyDir: {}
+        {{- end }}
       {{- end }}
       {{- with .Values.pyannote.nodeSelector }}
       nodeSelector:
