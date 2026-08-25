@@ -122,6 +122,34 @@ pyannote:
         name: pyannote-runtime-env
 ```
 
+If an HTTPS-inspecting proxy presents certificates signed by an internal CA,
+mount that CA from a ConfigMap or Secret. The chart combines it with the
+image's system trust bundle, preserving the public CA roots:
+
+```bash
+kubectl -n justai-dev create configmap corporate-proxy-ca \
+  --from-file=ca.crt=corporate-proxy-root-ca.pem
+```
+
+```yaml
+pyannote:
+  trustedCA:
+    existingConfigMap: corporate-proxy-ca
+    key: ca.crt
+```
+
+For a Secret-managed CA, use `existingSecret` instead (not both sources):
+
+```yaml
+pyannote:
+  trustedCA:
+    existingSecret: corporate-proxy-ca
+    key: ca.crt
+```
+
+Do not disable TLS verification or set `SSL_CERT_FILE` manually when using
+this option; the chart sets it to the generated combined bundle.
+
 The generated Kubernetes Service is reachable inside the namespace at:
 
 ```text

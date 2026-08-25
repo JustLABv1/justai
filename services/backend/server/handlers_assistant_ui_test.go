@@ -1,15 +1,127 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 
 	"justai-backend/models"
 	"justai-backend/provider"
 )
+
+func TestStreamAssistantUIWithToolsRestoresHistoricalAutomaticBinding(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	userID := uuid.New()
+	organizationID := uuid.New()
+	conversationID := uuid.New()
+	headID := uuid.New()
+	serverID := uuid.New()
+	providerName := voiceToolName(serverID, "List Watchlists", nil)
+	previousEvent, err := json.Marshal(chatToolEvent{
+		Kind:             "mcp_tool",
+		Status:           "completed",
+		ServerID:         serverID,
+		ToolName:         "List Watchlists",
+		ProviderToolName: providerName,
+		CallID:           "call-previous-turn",
+		Automatic:        true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mock.ExpectQuery("FROM conversation_mcp_servers cms").
+		WithArgs(conversationID, userID, organizationID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "icon"}))
+	mock.ExpectQuery("WITH RECURSIVE branch AS").
+		WithArgs(conversationID, headID).
+		WillReturnRows(sqlmock.NewRows([]string{"role", "content", "ui_message"}).
+			AddRow("tool", string(previousEvent), []byte(`{}`)).
+			AddRow("user", "Do that again", []byte(`{}`)))
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE ms.id = $1 AND mst.name = $2")).
+		WithArgs(serverID, "List Watchlists", userID, organizationID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "icon", "allowed_tools", "tool_name", "description", "input_schema", "annotations", "metadata"}).
+			AddRow(serverID, "MCP", "", []byte(`[]`), "List Watchlists", "List saved watchlists", []byte(`{"type":"object"}`), []byte(`{}`), []byte(`{}`)))
+	mock.ExpectExec("INSERT INTO messages").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE messages").WillReturnResult(sqlmock.NewResult(0, 1))
+
+	providerServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		payload, marshalErr := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{
+				"index": 0,
+				"id":    "call-later-turn",
+				"function": map[string]any{
+					"name":      providerName,
+					"arguments": `{}`,
+				},
+			}}}}},
+		})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		_, _ = fmt.Fprintf(writer, "data: %s\n\ndata: [DONE]\n\n", payload)
+	}))
+	defer providerServer.Close()
+
+	discovery := automaticMCPRouterDiscovery()
+	definitions := append([]provider.ToolDefinition(nil), discovery.Definitions...)
+	bindings := discovery.Bindings
+	parent := any(headID)
+	var response strings.Builder
+	toolParts := []map[string]any{}
+	chunks := []map[string]any{}
+	requiresAction, err := (&App{DB: database}).streamAssistantUIWithTools(
+		context.Background(), userID, organizationID, conversationID, uuid.Nil, &parent,
+		provider.Endpoint{ProviderType: "openai-compatible", BaseURL: providerServer.URL + "/v1", AllowPrivate: true, Capabilities: map[string]bool{"tool-calling": true}},
+		[]provider.ToolMessage{{Role: "user", Content: "Do that again"}}, definitions, bindings,
+		&assistantUserMessage{Text: "Do that again"},
+		func(value any) error {
+			if chunk, ok := value.(map[string]any); ok {
+				chunks = append(chunks, chunk)
+			}
+			return nil
+		},
+		&response, uuid.NewString(), uuid.NewString(), &toolParts, 0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !requiresAction {
+		t.Fatal("expected the restored automatic tool to reach the approval path")
+	}
+	seenInput, seenApproval := false, false
+	for _, chunk := range chunks {
+		if chunk["type"] == "tool-input-error" {
+			t.Fatalf("did not expect the historical tool to be rejected: %+v", chunk)
+		}
+		if chunk["type"] == "tool-input-available" && chunk["toolName"] == providerName {
+			seenInput = true
+		}
+		if chunk["type"] == "tool-approval-request" {
+			seenApproval = true
+		}
+	}
+	if !seenInput || !seenApproval {
+		t.Fatalf("expected restored input and approval chunks, got %+v", chunks)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestFindAssistantUIApprovalReadsV7ResponsePart(t *testing.T) {
 	approved := true

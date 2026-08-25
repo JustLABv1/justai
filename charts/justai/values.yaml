@@ -173,6 +173,14 @@ pyannote:
     http: ""
     https: ""
     noProxy: []
+  # Optional ConfigMap or Secret containing the CA certificate used by an
+  # HTTPS-inspecting egress proxy. The chart combines this certificate with
+  # the image's system trust store, so public certificate authorities continue
+  # to work as well. Set exactly one source.
+  trustedCA:
+    existingConfigMap: ""
+    existingSecret: ""
+    key: ca.crt
   env: []
   envFrom: []
   cache:

@@ -1701,6 +1701,13 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 				binding, exists = findVoiceToolBinding(bindings, call.Name)
 			}
 			if !exists {
+				if historyHead, ok := assistantUIParentUUID(*parentID); ok {
+					historical := a.discoverHistoricalAutomaticMCPTool(ctx, userID, organizationID, conversationID, historyHead, call.Name)
+					definitions = mergeVoiceToolDiscovery(definitions, bindings, historical)
+					binding, exists = findVoiceToolBinding(bindings, call.Name)
+				}
+			}
+			if !exists {
 				errorText := "The requested tool is not available."
 				event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, ProviderToolName: call.Name, CallID: call.ID, Arguments: arguments, Error: errorText}
 				messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"justai-backend/mcp"
 	"justai-backend/middleware"
 	"justai-backend/models"
 	"justai-backend/provider"
@@ -706,7 +707,11 @@ func (a *App) discoverConversationToolsWithRefresh(ctx context.Context, userID, 
 				// "tool is not available" chat failure.
 				result.Errors = append(result.Errors, fmt.Sprintf("%s tool discovery failed; using stale tools: %v", serverName, refreshErr))
 			} else {
-				tools = freshTools
+				var usingStale bool
+				tools, usingStale = mcpToolsAfterRefresh(tools, freshTools)
+				if usingStale {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s tool discovery returned no tools; using stale tools", serverName))
+				}
 			}
 		}
 		for _, tool := range tools {
@@ -737,6 +742,13 @@ func (a *App) discoverConversationToolsWithRefresh(ctx context.Context, userID, 
 		result.Errors = append(result.Errors, "could not finish MCP server discovery: "+err.Error())
 	}
 	return result
+}
+
+func mcpToolsAfterRefresh(stale, fresh []mcp.Tool) ([]mcp.Tool, bool) {
+	if len(fresh) == 0 && len(stale) > 0 {
+		return stale, true
+	}
+	return fresh, false
 }
 
 func mcpToolAllowed(allowed map[string]bool, toolName string) bool {
