@@ -32,11 +32,11 @@ func RequestLog(db *sql.DB) gin.HandlerFunc {
 		}
 		method := c.Request.Method
 		status := c.Writer.Status()
-		durationMS := float64(time.Since(started).Microseconds()) / 1000
+		duration := time.Since(started)
 		requestID := GetRequestID(c)
 		userID := nullableUUID(principal.UserID)
 		organizationIDValue := nullableUUID(organizationID)
-		slog.Info("http_request", "requestId", requestID, "method", method, "path", path, "status", status, "durationMs", durationMS)
+		logRequest(status, method, path, requestID, duration)
 		if db != nil {
 			select {
 			case writeSlots <- struct{}{}:
@@ -44,7 +44,7 @@ func RequestLog(db *sql.DB) gin.HandlerFunc {
 					defer func() { <-writeSlots }()
 					ctx, cancel := context.WithTimeout(context.Background(), requestLogWriteTimeout)
 					defer cancel()
-					if _, err := db.ExecContext(ctx, `INSERT INTO api_request_logs (user_id, organization_id, method, path, status_code, duration_ms) VALUES ($1, $2, $3, $4, $5, $6)`, userID, organizationIDValue, method, path, status, durationMS); err != nil {
+					if _, err := db.ExecContext(ctx, `INSERT INTO api_request_logs (user_id, organization_id, method, path, status_code, duration_ms) VALUES ($1, $2, $3, $4, $5, $6)`, userID, organizationIDValue, method, path, status, float64(duration.Microseconds())/1000); err != nil {
 						slog.Warn("api_request_log_write_failed", "requestId", requestID, "error", err)
 					}
 				}()
@@ -52,6 +52,26 @@ func RequestLog(db *sql.DB) gin.HandlerFunc {
 				slog.Warn("api_request_log_dropped", "requestId", requestID, "reason", "writer capacity exhausted")
 			}
 		}
+	}
+}
+
+func logRequest(status int, method, path, requestID string, duration time.Duration) {
+	attrs := []any{
+		"method", method,
+		"route", path,
+		"status", status,
+		"duration", duration,
+	}
+	if requestID != "" {
+		attrs = append(attrs, "requestId", requestID)
+	}
+	switch {
+	case status >= 500:
+		slog.Error("HTTP request", attrs...)
+	case status >= 400:
+		slog.Warn("HTTP request", attrs...)
+	default:
+		slog.Info("HTTP request", attrs...)
 	}
 }
 

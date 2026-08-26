@@ -12,6 +12,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.12.3
+	github.com/lmittmann/tint v1.1.2
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/signintech/gopdf v0.38.0
 	golang.org/x/crypto v0.55.0
