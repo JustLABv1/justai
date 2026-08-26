@@ -5,11 +5,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 )
+
+// ErrNoChatContentOrToolCalls is returned when a provider successfully ends a
+// request but emits neither visible text nor a function call. Callers can
+// distinguish this protocol-level empty completion from transport failures.
+var ErrNoChatContentOrToolCalls = errors.New("provider returned no chat content or tool calls")
 
 // ToolDefinition is the provider-neutral tool shape used by the voice turn
 // runner. Parameters must be a JSON Schema object supplied by MCP.
@@ -235,7 +241,7 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 	}
 	if len(accumulators) == 0 {
 		if !seenContent {
-			return fmt.Errorf("provider returned no chat content or tool calls")
+			return ErrNoChatContentOrToolCalls
 		}
 		return nil
 	}

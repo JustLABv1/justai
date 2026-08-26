@@ -7,6 +7,8 @@ import {
   ChevronDown,
   CircleAlert,
   Download,
+  ExternalLink,
+  FileText,
   LoaderCircle,
   Shield,
 } from "lucide-react"
@@ -17,6 +19,12 @@ import type {
 
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
+import {
+  formatFileSize,
+  hasFileResultShape,
+  parseGeneratedFileResult,
+  parseToolResult,
+} from "@/lib/file-result-logic"
 import { cn } from "@/lib/utils"
 
 function formatValue(value: unknown) {
@@ -25,15 +33,6 @@ function formatValue(value: unknown) {
     return JSON.stringify(value, null, 2)
   } catch {
     return String(value)
-  }
-}
-
-function parseResult(value: unknown): unknown {
-  if (typeof value !== "string") return value
-  try {
-    return JSON.parse(value) as unknown
-  } catch {
-    return value
   }
 }
 
@@ -47,6 +46,8 @@ function toolLabel(toolName: string) {
       return "Generate image"
     case "edit_image":
       return "Edit image"
+    case "create_pdf":
+      return "Create PDF"
     default:
       return toolName
   }
@@ -64,7 +65,7 @@ function compactValue(value: unknown) {
 }
 
 function StructuredToolResult({ value }: { value: unknown }) {
-  const parsed = parseResult(value)
+  const parsed = parseToolResult(value)
   const records = Array.isArray(parsed)
     ? parsed.filter(
         (item): item is Record<string, unknown> =>
@@ -156,7 +157,7 @@ type ImageToolResult = {
 }
 
 function GeneratedImageResult({ value }: { value: unknown }) {
-  const parsed = parseResult(value) as ImageToolResult | null
+  const parsed = parseToolResult(value) as ImageToolResult | null
   const image = parsed?.image
   const imageURL = typeof image?.url === "string" ? image.url : ""
   const prompt =
@@ -168,6 +169,7 @@ function GeneratedImageResult({ value }: { value: unknown }) {
 
   useEffect(() => {
     let active = true
+    const controller = new AbortController()
     if (previewRef.current) {
       URL.revokeObjectURL(previewRef.current)
       previewRef.current = ""
@@ -175,7 +177,7 @@ function GeneratedImageResult({ value }: { value: unknown }) {
     if (!imageURL) return () => undefined
 
     void api
-      .getBlob(imageURL)
+      .getBlob(imageURL, { signal: controller.signal })
       .then((blob) => {
         const nextURL = URL.createObjectURL(blob)
         if (!active) {
@@ -199,6 +201,7 @@ function GeneratedImageResult({ value }: { value: unknown }) {
 
     return () => {
       active = false
+      controller.abort()
     }
   }, [imageURL])
 
@@ -249,6 +252,159 @@ function GeneratedImageResult({ value }: { value: unknown }) {
   )
 }
 
+function GeneratedFileResult({ value }: { value: unknown }) {
+  const file = parseGeneratedFileResult(value)
+  const fileURL = file?.url ?? ""
+  const [preview, setPreview] = useState({ source: "", url: "" })
+  const [loadError, setLoadError] = useState({ source: "", message: "" })
+  const previewRef = useRef("")
+
+  useEffect(() => {
+    let active = true
+    const controller = new AbortController()
+    if (previewRef.current) {
+      URL.revokeObjectURL(previewRef.current)
+      previewRef.current = ""
+    }
+    if (!fileURL) return () => undefined
+
+    void api
+      .getBlob(fileURL, { signal: controller.signal })
+      .then((blob) => {
+        const nextURL = URL.createObjectURL(blob)
+        if (!active) {
+          URL.revokeObjectURL(nextURL)
+          return
+        }
+        previewRef.current = nextURL
+        setPreview({ source: fileURL, url: nextURL })
+      })
+      .catch((caught) => {
+        if (active) {
+          setLoadError({
+            source: fileURL,
+            message:
+              caught instanceof Error
+                ? caught.message
+                : "The PDF could not be loaded.",
+          })
+        }
+      })
+
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [fileURL])
+
+  useEffect(() => {
+    return () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current)
+    }
+  }, [])
+
+  if (!file) {
+    if (!hasFileResultShape(value))
+      return <StructuredToolResult value={value} />
+    return (
+      <div className="space-y-2">
+        <p
+          aria-live="polite"
+          className="rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive"
+          role="alert"
+        >
+          The PDF result is incomplete and does not include a valid download
+          URL.
+        </p>
+        <StructuredToolResult value={value} />
+      </div>
+    )
+  }
+
+  if (loadError.source === fileURL && loadError.message) {
+    return (
+      <p
+        aria-live="polite"
+        className="rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive"
+        role="alert"
+      >
+        Unable to load this PDF: {loadError.message}
+      </p>
+    )
+  }
+
+  if (preview.source !== fileURL || !preview.url) {
+    return (
+      <div
+        aria-live="polite"
+        className="inline-flex items-center gap-2 rounded-lg border bg-background/60 px-2 py-1.5 text-muted-foreground"
+        role="status"
+      >
+        <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+        Loading PDF…
+      </div>
+    )
+  }
+
+  const sizeLabel = formatFileSize(file.size) ?? "Size unavailable"
+  const canOpen =
+    file.mimeType.toLowerCase() === "application/pdf" ||
+    file.filename.toLowerCase().endsWith(".pdf")
+
+  return (
+    <div className="overflow-hidden rounded-lg border bg-background/60">
+      <div className="flex items-start gap-3 p-3">
+        <div
+          aria-hidden="true"
+          className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive"
+        >
+          <FileText className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p
+            className="truncate font-medium text-foreground"
+            title={file.title}
+          >
+            {file.title}
+          </p>
+          <p className="truncate text-muted-foreground" title={file.filename}>
+            {file.filename}
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            {sizeLabel} · {file.mimeType}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
+        <span className="text-muted-foreground">Generated PDF</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {canOpen && (
+            <a
+              aria-label={`Open ${file.filename} in a new tab`}
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+              href={preview.url}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <ExternalLink className="size-3" aria-hidden="true" />
+              Open
+            </a>
+          )}
+          <a
+            aria-label={`Download ${file.filename}`}
+            className="inline-flex items-center gap-1 rounded-md border bg-primary px-2 py-1 font-medium text-primary-foreground hover:bg-primary/80 focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+            download={file.filename}
+            href={preview.url}
+          >
+            <Download className="size-3" aria-hidden="true" />
+            Download
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 type WebSearchToolResult = {
   query?: unknown
   url?: unknown
@@ -261,7 +417,7 @@ type WebSearchToolResult = {
 }
 
 function WebSearchResult({ value }: { value: unknown }) {
-  const parsed = parseResult(value) as WebSearchToolResult | null
+  const parsed = parseToolResult(value) as WebSearchToolResult | null
   const results = Array.isArray(parsed?.results) ? parsed.results : []
   if (results.length === 0) {
     if (typeof parsed?.content === "string") {
@@ -316,6 +472,9 @@ export function ToolResultContent({
   if (toolName === "generate_image" || toolName === "edit_image") {
     return <GeneratedImageResult value={value} />
   }
+  if (toolName === "create_pdf") {
+    return <GeneratedFileResult value={value} />
+  }
   if (toolName === "web_search" || toolName === "browse_url") {
     return <WebSearchResult value={value} />
   }
@@ -346,6 +505,10 @@ export const ToolFallback: ToolCallMessagePartComponent = (
     (status === "incomplete" && !isCancelled) ||
     props.isError === true
   const hasResult = props.result !== undefined
+  const argsText =
+    props.toolName === "create_pdf" && (props.argsText?.length ?? 0) > 4_000
+      ? `${props.argsText?.slice(0, 4_000)}\n… PDF content truncated in this preview.`
+      : props.argsText
 
   return (
     <div className="my-2 w-full max-w-xl overflow-hidden rounded-xl border bg-muted/30 text-sm">
@@ -399,16 +562,16 @@ export const ToolFallback: ToolCallMessagePartComponent = (
       </button>
       {open && (
         <div className="space-y-2 border-t px-3 py-3 text-xs">
-          {props.argsText && (
+          {argsText && (
             <details
-              open
+              open={props.toolName !== "create_pdf"}
               className="rounded-lg border bg-background/60 px-2 py-1.5"
             >
               <summary className="cursor-pointer font-medium">
                 Arguments
               </summary>
               <pre className="mt-2 max-h-40 overflow-auto break-all whitespace-pre-wrap text-muted-foreground">
-                {props.argsText}
+                {argsText}
               </pre>
             </details>
           )}
@@ -439,16 +602,9 @@ export const ToolFallback: ToolCallMessagePartComponent = (
               {errorText}
             </p>
           )}
-          {hasResult &&
-            (props.toolName === "generate_image" ||
-            props.toolName === "edit_image" ? (
-              <GeneratedImageResult value={props.result} />
-            ) : props.toolName === "web_search" ||
-              props.toolName === "browse_url" ? (
-              <WebSearchResult value={props.result} />
-            ) : (
-              <StructuredToolResult value={props.result} />
-            ))}
+          {hasResult && (
+            <ToolResultContent toolName={props.toolName} value={props.result} />
+          )}
         </div>
       )}
     </div>

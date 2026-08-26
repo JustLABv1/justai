@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -1659,6 +1660,28 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			return writeChunk(map[string]any{"type": "text-delta", "id": textID, "delta": event.Delta})
 		})
 		if err != nil {
+			// Some OpenAI-compatible gateways execute the tool correctly but emit
+			// an empty completion for the mandatory follow-up request. The tool
+			// result is already visible and persisted, so finish the turn with a
+			// stable acknowledgement instead of marking a successful action as an
+			// error. An empty first response remains a real provider error.
+			if assistantUIEmptyToolFollowup(round, roundOffset, err) {
+				const fallback = "\n\nDer Tool-Schritt wurde abgeschlossen. Das Ergebnis findest du oben im Tool-Abschnitt."
+				if !textStarted {
+					if err := writeChunk(map[string]any{"type": "text-start", "id": textID}); err != nil {
+						return false, err
+					}
+					textStarted = true
+				}
+				response.WriteString(fallback)
+				if err := writeChunk(map[string]any{"type": "text-delta", "id": textID, "delta": fallback}); err != nil {
+					return false, err
+				}
+				if err := writeChunk(map[string]any{"type": "text-end", "id": textID}); err != nil {
+					return false, err
+				}
+				return false, nil
+			}
 			return false, err
 		}
 		if len(calls) == 0 {
@@ -1817,6 +1840,10 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 		}
 	}
 	return false, nil
+}
+
+func assistantUIEmptyToolFollowup(round, roundOffset int, streamErr error) bool {
+	return errors.Is(streamErr, provider.ErrNoChatContentOrToolCalls) && (round > roundOffset+1 || roundOffset > 0)
 }
 
 func (a *App) listAssistantUIMessages(c *gin.Context) {

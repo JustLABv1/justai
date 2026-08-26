@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -131,6 +132,22 @@ func TestStreamChatWithToolsAcceptsNonStreamingMessageShape(t *testing.T) {
 	}
 	if response.String() != "The scan is clear." {
 		t.Fatalf("unexpected non-streaming response: %q", response.String())
+	}
+}
+
+func TestStreamChatWithToolsReturnsTypedErrorForAnEmptyCompletion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(writer, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	err := StreamChatWithTools(context.Background(), Endpoint{ProviderType: "openai-compatible", BaseURL: server.URL + "/v1", AllowPrivate: true, Capabilities: map[string]bool{"tool-calling": true}}, ToolChatOptions{
+		Messages: []ToolMessage{{Role: "user", Content: "Create a report."}},
+		Tools:    []ToolDefinition{{Name: "create_pdf", Parameters: []byte(`{"type":"object"}`)}},
+	}, func(ToolChatEvent) error { return nil })
+	if !errors.Is(err, ErrNoChatContentOrToolCalls) {
+		t.Fatalf("expected typed empty-completion error, got %v", err)
 	}
 }
 

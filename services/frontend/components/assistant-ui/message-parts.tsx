@@ -145,6 +145,7 @@ const toolLabels: Record<string, string> = {
   browse_url: "Browse URL",
   generate_image: "Generate image",
   edit_image: "Edit image",
+  create_pdf: "Create PDF",
 }
 
 function toolCategory(toolName: string) {
@@ -152,6 +153,7 @@ function toolCategory(toolName: string) {
   if (toolName === "browse_url") return "browse_url"
   if (toolName === "generate_image") return "generate_image"
   if (toolName === "edit_image") return "edit_image"
+  if (toolName === "create_pdf") return "documents"
   if (toolName.toLowerCase().includes("memory")) return "memory"
   return "integrations"
 }

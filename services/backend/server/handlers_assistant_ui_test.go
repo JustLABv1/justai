@@ -206,6 +206,21 @@ func TestAssistantUIRunStatusForTool(t *testing.T) {
 	}
 }
 
+func TestAssistantUIEmptyToolFollowupOnlyHandlesPostToolEmptyCompletions(t *testing.T) {
+	if assistantUIEmptyToolFollowup(1, 0, provider.ErrNoChatContentOrToolCalls) {
+		t.Fatal("the first provider response must remain an error when it is empty")
+	}
+	if !assistantUIEmptyToolFollowup(2, 0, provider.ErrNoChatContentOrToolCalls) {
+		t.Fatal("expected an empty follow-up after a tool result to be handled")
+	}
+	if !assistantUIEmptyToolFollowup(3, 2, provider.ErrNoChatContentOrToolCalls) {
+		t.Fatal("expected a resumed tool result to be handled")
+	}
+	if assistantUIEmptyToolFollowup(2, 0, fmt.Errorf("provider unavailable")) {
+		t.Fatal("transport and provider errors must not be suppressed")
+	}
+}
+
 func TestAssistantUIRetrievalMode(t *testing.T) {
 	if got := assistantUIRetrievalMode(true); got != "deep-context" {
 		t.Fatalf("expected deep-context mode, got %q", got)

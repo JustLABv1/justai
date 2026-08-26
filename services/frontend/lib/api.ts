@@ -250,7 +250,7 @@ export const api = {
     }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
-  getBlob: (path: string) => requestBlob(path),
+  getBlob: (path: string, init?: RequestInit) => requestBlob(path, init),
   patch: <T>(path: string, body: unknown, init?: RequestInit) =>
     request<T>(path, {
       ...init,

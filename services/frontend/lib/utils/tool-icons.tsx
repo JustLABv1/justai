@@ -69,6 +69,7 @@ const normalizeCategoryName = (name: string): string => {
 // Alias mapping for backwards compatibility
 const iconAliases: Record<string, string> = {
   calendar: "google_calendar",
+  create_pdf: "documents",
 }
 
 // Tool category icon configs - matches gaia repo pattern
@@ -385,6 +386,15 @@ export const getToolCategoryIcon = (
 
 // Format tool names from snake_case to Title Case
 export const formatToolName = (name: string): string => {
+  const builtInLabels: Record<string, string> = {
+    browse_url: "Browse URL",
+    create_pdf: "Create PDF",
+    edit_image: "Edit image",
+    generate_image: "Generate image",
+    web_search: "Web search",
+  }
+  if (builtInLabels[name]) return builtInLabels[name]
+
   return name
     .split("_")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())

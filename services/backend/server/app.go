@@ -70,12 +70,13 @@ func (a *App) Router() *gin.Engine {
 		}
 		var repositoryStorageReady bool
 		if err := a.DB.QueryRowContext(c, `
-			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '032_transcription_insight_language.sql')
+			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '036_generated_pdfs.sql')
 			   AND to_regclass('public.repository_contexts') IS NOT NULL
 			   AND to_regclass('public.repository_context_files') IS NOT NULL
 			   AND to_regclass('public.conversation_repository_contexts') IS NOT NULL
 			   AND to_regclass('public.saved_assistants') IS NOT NULL
-			   AND to_regclass('public.saved_assistant_versions') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
+			   AND to_regclass('public.saved_assistant_versions') IS NOT NULL
+			   AND to_regclass('public.generated_pdfs') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
@@ -254,6 +255,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/images/generate", a.generateImage)
 	org.POST("/images/edit", a.editImage)
 	org.GET("/images/:id", a.serveGeneratedImage)
+	org.GET("/pdfs/:id", a.serveGeneratedPDF)
 	org.GET("/conversations/:id/context", a.getConversationContext)
 	org.POST("/conversations/:id/repositories", a.platformFeature("knowledge"), a.createRepositoryContext)
 	org.DELETE("/conversations/:id/context/repositories/:repositoryId", a.platformFeature("knowledge"), a.deleteRepositoryContext)

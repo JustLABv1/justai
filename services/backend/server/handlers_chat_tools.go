@@ -46,6 +46,11 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 			Description: "Edit the image attached to the user's message according to the prompt. Use this whenever the user asks to change, retouch, transform, or edit an attached image. Do not return dalle/action JSON as text; call this tool.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The requested edit."}},"required":["prompt"],"additionalProperties":false}`),
 		},
+		{
+			Name:        "create_pdf",
+			Description: "Create a downloadable PDF containing the requested document. Use this whenever the user asks for a PDF, report, handout, letter, summary, or other document file. Put the complete desired document content in content, including headings, paragraphs, and list lines; do not put only an outline or a description there. Markdown-like headings and lists are supported. Optionally provide a concise title and a simple filename.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"content":{"type":"string","description":"The complete document text to place in the PDF. Include all requested wording, headings, paragraphs, and list items; do not summarize the requested document in this field.","minLength":1,"maxLength":524288},"title":{"type":"string","description":"Optional document title shown in the PDF and file metadata."},"filename":{"type":"string","description":"Optional download filename. It will be sanitized and .pdf will be appended when needed."}},"required":["content"],"additionalProperties":false}`),
+		},
 	}
 	bindings := make(map[string]voiceToolBinding, len(definitions))
 	for _, definition := range definitions {
@@ -60,7 +65,7 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 
 func isAssistantBuiltInToolName(name string) bool {
 	switch name {
-	case "web_search", "browse_url", "generate_image", "edit_image", "discover_mcp_tools":
+	case "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "discover_mcp_tools":
 		return true
 	default:
 		return false
@@ -68,7 +73,7 @@ func isAssistantBuiltInToolName(name string) bool {
 }
 
 func chatBuiltInFallbackInstructions() string {
-	return "This endpoint cannot send native function calls, but JustAI still supports built-in web and image actions. When the user's request clearly requires public web search, output only a JSON object with action \"web_search\" and action_input {\"query\":\"...\"}. For a specific URL use action \"browse_url\" and action_input {\"url\":\"...\"}. For image creation use action \"generate_image\" and action_input {\"prompt\":\"...\"}; for editing an attached image use action \"edit_image\" and action_input {\"prompt\":\"...\"}. Do not output action JSON for ordinary questions, and never mention or explain the action protocol."
+	return "This endpoint cannot send native function calls, but JustAI still supports built-in web, image, and PDF actions. When the user's request clearly requires public web search, output only a JSON object with action \"web_search\" and action_input {\"query\":\"...\"}. For a specific URL use action \"browse_url\" and action_input {\"url\":\"...\"}. For image creation use action \"generate_image\" and action_input {\"prompt\":\"...\"}; for editing an attached image use action \"edit_image\" and action_input {\"prompt\":\"...\"}. For a PDF or document file use action \"create_pdf\" and action_input {\"content\":\"the complete document content\",\"title\":\"optional title\",\"filename\":\"optional-name.pdf\"}; put the full desired wording in content, not an outline or description. Do not output action JSON for ordinary questions, and never mention or explain the action protocol."
 }
 
 func chatToolEventKindForName(name string) string {
@@ -116,6 +121,12 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 			return nil, err
 		}
 		return json.Marshal(map[string]any{"image": item})
+	case "create_pdf":
+		item, err := a.createPDFForChat(ctx, userID, organizationID, arguments)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(map[string]any{"file": item})
 	default:
 		return nil, fmt.Errorf("unknown built-in tool %q", toolName)
 	}
@@ -130,7 +141,8 @@ func (a *App) streamAssistantUIWithoutTools(ctx context.Context, userID, organiz
 	var buffered strings.Builder
 	textStarted := false
 	flushed := false
-	const maxActionBuffer = 16 * 1024
+	const maxActionBuffer = maxGeneratedPDFFallbackActionBytes
+	oversizedPDFAction := false
 
 	emitText := func(delta string) error {
 		if delta == "" {
@@ -161,12 +173,30 @@ func (a *App) streamAssistantUIWithoutTools(ctx context.Context, userID, organiz
 			_ = a.recordChatRunUsage(context.Background(), runID, usage)
 		},
 	}, func(delta string) error {
+		if oversizedPDFAction {
+			return nil
+		}
 		if flushed {
 			return emitText(delta)
 		}
+		remaining := maxActionBuffer - buffered.Len()
+		if len(delta) > remaining {
+			if remaining > 0 {
+				buffered.WriteString(delta[:remaining])
+			}
+			if looksLikeCreatePDFAction(buffered.String()) {
+				oversizedPDFAction = true
+				buffered.Reset()
+				return nil
+			}
+			if err := flushBuffered(); err != nil {
+				return err
+			}
+			return emitText(delta[remaining:])
+		}
 		buffered.WriteString(delta)
 		trimmed := strings.TrimLeft(buffered.String(), " \t\r\n")
-		if !strings.HasPrefix(trimmed, "{") || buffered.Len() > maxActionBuffer {
+		if !strings.HasPrefix(trimmed, "{") {
 			return flushBuffered()
 		}
 		return nil
@@ -175,6 +205,9 @@ func (a *App) streamAssistantUIWithoutTools(ctx context.Context, userID, organiz
 		return err
 	}
 
+	if oversizedPDFAction {
+		return emitFallbackText(writeChunk, response, textID, "I couldn't create that PDF because its document content exceeded the supported limit.")
+	}
 	if !flushed {
 		if toolName, arguments, ok := parseAssistantBuiltinAction(buffered.String()); ok {
 			if textStarted {
@@ -192,6 +225,11 @@ func (a *App) streamAssistantUIWithoutTools(ctx context.Context, userID, organiz
 		return writeChunk(map[string]any{"type": "text-end", "id": textID})
 	}
 	return nil
+}
+
+func looksLikeCreatePDFAction(raw string) bool {
+	raw = strings.ToLower(raw)
+	return strings.Contains(raw, `"create_pdf"`) || strings.Contains(raw, `"create-pdf"`) || strings.Contains(raw, "create pdf")
 }
 
 func parseAssistantBuiltinAction(raw string) (string, map[string]any, bool) {
@@ -216,6 +254,8 @@ func parseAssistantBuiltinAction(raw string) (string, map[string]any, bool) {
 		toolName = "generate_image"
 	case strings.Contains(action, "dalle.edit"), strings.Contains(action, "edit_image"), strings.Contains(action, "image_edit"):
 		toolName = "edit_image"
+	case strings.Contains(action, "create_pdf"), strings.Contains(action, "create-pdf"), strings.Contains(action, "create pdf"):
+		toolName = "create_pdf"
 	case strings.Contains(action, "browse"), strings.Contains(action, "open_url"), strings.Contains(action, "fetch_url"):
 		toolName = "browse_url"
 	case strings.Contains(action, "web_search"), strings.Contains(action, "web.search"), strings.HasSuffix(action, ".search"), action == "search":
@@ -233,7 +273,7 @@ func parseAssistantBuiltinAction(raw string) (string, map[string]any, bool) {
 		}
 	}
 	if len(arguments) == 0 {
-		for _, key := range []string{"prompt", "description", "query", "q", "search_query", "url", "input"} {
+		for _, key := range []string{"prompt", "description", "content", "text", "query", "q", "search_query", "url", "filename", "title", "input"} {
 			if value := looseActionStringField(raw, key); value != "" {
 				arguments[key] = value
 			}
@@ -256,6 +296,14 @@ func parseAssistantBuiltinAction(raw string) (string, map[string]any, bool) {
 	if toolName == "browse_url" && stringToolArgument(arguments, "url") == "" {
 		if value, ok := arguments["input"].(string); ok {
 			arguments["url"] = value
+		}
+	}
+	if toolName == "create_pdf" && stringToolArgument(arguments, "content") == "" {
+		for _, key := range []string{"text", "description", "input", "prompt"} {
+			if value, ok := arguments[key].(string); ok && strings.TrimSpace(value) != "" {
+				arguments["content"] = value
+				break
+			}
 		}
 	}
 	return toolName, arguments, true
@@ -343,6 +391,8 @@ func (a *App) executeAssistantBuiltinFallback(ctx context.Context, userID, organ
 		message = "Here is the generated image."
 	case "edit_image":
 		message = "Here is the edited image."
+	case "create_pdf":
+		message = "The PDF is ready to download."
 	}
 	return emitFallbackText(writeChunk, response, textID, message)
 }
