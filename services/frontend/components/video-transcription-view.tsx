@@ -89,9 +89,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { api } from "@/lib/api"
+import { api, resolveAPIURL } from "@/lib/api"
 import { groupTranscriptionSegments } from "@/lib/transcription"
 import { cn } from "@/lib/utils"
+import {
+  uploadVideoParts as uploadVideoFileParts,
+  VideoUploadError,
+} from "@/lib/video-upload"
 import { VideoTranscriptWorkspace } from "@/components/video-transcript-workspace"
 import type {
   Endpoint,
@@ -120,6 +124,14 @@ type VideoSnapshot = {
 type VideoSessionResponse = VideoSnapshot & {
   sources?: unknown[]
   recordings?: unknown[]
+}
+
+type VideoUploadInitialization = {
+  upload: TranscriptionVideoUpload
+  // Kept for compatibility while backends migrate. Part transfer uses the
+  // deterministic same-origin endpoint from video-upload.ts instead.
+  partUrls?: { partNumber: number; url: string }[]
+  uploadedParts?: { partNumber: number; etag: string; sizeBytes?: number }[]
 }
 
 type VideoSpeakerSummary = {
@@ -194,6 +206,7 @@ export function VideoTranscriptionView({
   const [videoPlaybackError, setVideoPlaybackError] = useState("")
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoStarting, setVideoStarting] = useState(false)
+  const [videoCancelInFlight, setVideoCancelInFlight] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [skipSpeakerOpen, setSkipSpeakerOpen] = useState(false)
   const [skipSpeakerInFlight, setSkipSpeakerInFlight] = useState(false)
@@ -210,6 +223,7 @@ export function VideoTranscriptionView({
   >(null)
   const requestRef = useRef(0)
   const videoUploadAbortRef = useRef<AbortController | null>(null)
+  const videoCancelRequestedRef = useRef(false)
   const videoUploadInFlightRef = useRef(false)
   const videoUploadRef = useRef<TranscriptionVideoUpload | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -524,62 +538,35 @@ export function VideoTranscriptionView({
   const uploadVideoParts = async (
     file: File,
     upload: TranscriptionVideoUpload,
-    partUrls: { partNumber: number; url: string }[]
+    uploadedParts?: { partNumber: number; etag: string; sizeBytes?: number }[]
   ) => {
     const abortController = new AbortController()
     videoUploadAbortRef.current = abortController
-    const parts: { partNumber: number; etag: string }[] = []
     try {
-      for (const part of partUrls) {
-        if (abortController.signal.aborted) throw new Error("Upload cancelled.")
-        const start = (part.partNumber - 1) * upload.partSize
-        const end = Math.min(file.size, start + upload.partSize)
-        let response: Response | null = null
-        let lastError: Error | null = null
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          try {
-            response = await fetch(part.url, {
-              method: "PUT",
-              body: file.slice(start, end),
-              signal: abortController.signal,
-            })
-            if (response.ok) break
-            lastError = new Error(
-              `Storage rejected upload part ${part.partNumber} (${response.status}).`
-            )
-          } catch (caught) {
-            if (abortController.signal.aborted) throw caught
-            lastError =
-              caught instanceof Error
-                ? caught
-                : new Error("Video upload failed.")
-          }
-          await new Promise((resolve) =>
-            window.setTimeout(resolve, 500 * (attempt + 1))
-          )
-        }
-        if (!response?.ok) throw lastError ?? new Error("Video upload failed.")
-        const etag = response.headers.get("ETag")
-        if (!etag) {
-          throw new Error(
-            "Storage did not expose the uploaded part ETag. Configure S3 CORS to expose the ETag header."
-          )
-        }
-        parts.push({ partNumber: part.partNumber, etag })
-        setSnapshot((current) =>
-          current?.videoUpload?.id === upload.id
-            ? {
-                ...current,
-                videoUpload: {
-                  ...current.videoUpload,
-                  progress: Math.round((parts.length / partUrls.length) * 100),
-                  stage: "uploading",
-                },
-              }
-            : current
-        )
-      }
-      return parts
+      return await uploadVideoFileParts({
+        uploadId: upload.id,
+        file,
+        partSize: upload.partSize,
+        partCount: upload.partCount,
+        contentType: upload.mimeType,
+        signal: abortController.signal,
+        organizationId: api.getOrganizationId() ?? undefined,
+        uploadedParts,
+        resolvePartURL: resolveAPIURL,
+        onProgress: ({ percent }) =>
+          setSnapshot((current) =>
+            current?.videoUpload?.id === upload.id
+              ? {
+                  ...current,
+                  videoUpload: {
+                    ...current.videoUpload,
+                    progress: Math.max(current.videoUpload.progress, percent),
+                    stage: "uploading",
+                  },
+                }
+              : current
+          ),
+      })
     } finally {
       if (videoUploadAbortRef.current === abortController) {
         videoUploadAbortRef.current = null
@@ -621,14 +608,14 @@ export function VideoTranscriptionView({
         ...result.session,
         kind: "video",
       }
-      const initialized = await api.post<{
-        upload: TranscriptionVideoUpload
-        partUrls: { partNumber: number; url: string }[]
-      }>(`/api/v1/transcription/sessions/${createdSession.id}/video-uploads`, {
-        fileName: file.name,
-        mimeType: file.type || "application/octet-stream",
-        fileBytes: file.size,
-      })
+      const initialized = await api.post<VideoUploadInitialization>(
+        `/api/v1/transcription/sessions/${createdSession.id}/video-uploads`,
+        {
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          fileBytes: file.size,
+        }
+      )
       setSnapshot({
         session: createdSession,
         segments: [],
@@ -640,7 +627,7 @@ export function VideoTranscriptionView({
       const parts = await uploadVideoParts(
         file,
         initialized.upload,
-        initialized.partUrls
+        initialized.uploadedParts
       )
       const completed = await api.post<{
         upload: TranscriptionVideoUpload
@@ -663,9 +650,11 @@ export function VideoTranscriptionView({
       setVideoFile(null)
       onSessionsChanged()
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "The video upload failed."
-      )
+      if (!videoUploadWasCancelled(caught, videoCancelRequestedRef.current)) {
+        setError(
+          caught instanceof Error ? caught.message : "The video upload failed."
+        )
+      }
     } finally {
       videoUploadInFlightRef.current = false
       setVideoStarting(false)
@@ -709,10 +698,9 @@ export function VideoTranscriptionView({
         onSessionsChanged()
         return
       }
-      const initialized = await api.get<{
-        upload: TranscriptionVideoUpload
-        partUrls: { partNumber: number; url: string }[]
-      }>(`/api/v1/transcription/video-uploads/${currentUpload.id}`)
+      const initialized = await api.get<VideoUploadInitialization>(
+        `/api/v1/transcription/video-uploads/${currentUpload.id}`
+      )
       if (initialized.upload.status === "uploaded") {
         const completed = await api.post<{
           upload: TranscriptionVideoUpload
@@ -742,7 +730,7 @@ export function VideoTranscriptionView({
       const parts = await uploadVideoParts(
         file,
         initialized.upload,
-        initialized.partUrls
+        initialized.uploadedParts
       )
       const completed = await api.post<{
         upload: TranscriptionVideoUpload
@@ -762,9 +750,11 @@ export function VideoTranscriptionView({
       setVideoFile(null)
       onSessionsChanged()
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "The video upload failed."
-      )
+      if (!videoUploadWasCancelled(caught, videoCancelRequestedRef.current)) {
+        setError(
+          caught instanceof Error ? caught.message : "The video upload failed."
+        )
+      }
     } finally {
       videoUploadInFlightRef.current = false
       setVideoStarting(false)
@@ -772,7 +762,9 @@ export function VideoTranscriptionView({
   }
 
   const cancelVideoUpload = async () => {
-    if (!snapshot?.videoUpload) return
+    if (!snapshot?.videoUpload || videoCancelInFlight) return
+    videoCancelRequestedRef.current = true
+    setVideoCancelInFlight(true)
     videoUploadAbortRef.current?.abort()
     try {
       const result = await api.post<{ upload: TranscriptionVideoUpload }>(
@@ -782,11 +774,11 @@ export function VideoTranscriptionView({
         current
           ? {
               ...current,
-              session: { ...current.session, status: "failed" },
               videoUpload: result.upload,
             }
           : current
       )
+      setError("")
       onSessionsChanged()
     } catch (caught) {
       setError(
@@ -794,6 +786,9 @@ export function VideoTranscriptionView({
           ? caught.message
           : "The video upload could not be cancelled."
       )
+    } finally {
+      videoCancelRequestedRef.current = false
+      setVideoCancelInFlight(false)
     }
   }
 
@@ -1154,6 +1149,7 @@ export function VideoTranscriptionView({
               {canCancelVideo ? (
                 <Button
                   aria-label={cancelLabel}
+                  disabled={videoCancelInFlight}
                   onClick={() => setCancelOpen(true)}
                   size="sm"
                   variant="destructive"
@@ -2081,6 +2077,7 @@ export function VideoTranscriptionView({
           <AlertDialogFooter>
             <AlertDialogCancel>Keep processing</AlertDialogCancel>
             <AlertDialogAction
+              disabled={videoCancelInFlight}
               onClick={() => {
                 setCancelOpen(false)
                 void cancelVideoUpload()
@@ -2397,6 +2394,11 @@ function VideoPipeline({
               <span className="whitespace-nowrap">
                 Run time · {formatPipelineStepDuration(runTimeMs)}
               </span>
+              {upload.status === "uploading" ? (
+                <span className="font-medium whitespace-nowrap text-foreground tabular-nums">
+                  {upload.progress}% uploaded
+                </span>
+              ) : null}
               <CollapsibleTrigger
                 aria-label={
                   open
@@ -3654,6 +3656,14 @@ function mergeVideoUploadSnapshot(
       ? current.playbackUrl || next.playbackUrl
       : undefined,
   }
+}
+
+function videoUploadWasCancelled(caught: unknown, cancelRequested: boolean) {
+  return (
+    cancelRequested ||
+    (caught instanceof VideoUploadError &&
+      caught.code === "video_upload_cancelled")
+  )
 }
 
 function transcriptionModeLabel(endpoint: Endpoint) {

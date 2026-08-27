@@ -26,7 +26,18 @@ func RequestID() gin.HandlerFunc {
 // entire backend process. Attachment handlers apply their stricter per-type
 // limits after multipart parsing.
 func MaxBodyBytes(limit int64) gin.HandlerFunc {
+	return MaxBodyBytesExcept(limit, nil)
+}
+
+// MaxBodyBytesExcept applies the default request limit unless skip returns
+// true. Large streaming endpoints should opt out and enforce their own
+// protocol-specific limit while forwarding the body to the upstream service.
+func MaxBodyBytesExcept(limit int64, skip func(*gin.Context) bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if skip != nil && skip(c) {
+			c.Next()
+			return
+		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		c.Next()
 	}

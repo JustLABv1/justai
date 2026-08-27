@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +30,7 @@ type videoUploadInitRequest struct {
 type videoUploadPart struct {
 	PartNumber int    `json:"partNumber"`
 	ETag       string `json:"etag"`
+	SizeBytes  int64  `json:"sizeBytes,omitempty"`
 }
 
 type videoUploadCompleteRequest struct {
@@ -39,9 +43,10 @@ type videoUploadPartURL struct {
 }
 
 type videoUploadResponse struct {
-	Upload   models.TranscriptionVideoUpload `json:"upload"`
-	PartURLs []videoUploadPartURL            `json:"partUrls,omitempty"`
-	JobID    *uuid.UUID                      `json:"jobId,omitempty"`
+	Upload        models.TranscriptionVideoUpload `json:"upload"`
+	PartURLs      []videoUploadPartURL            `json:"partUrls,omitempty"`
+	UploadedParts []videoUploadPart               `json:"uploadedParts,omitempty"`
+	JobID         *uuid.UUID                      `json:"jobId,omitempty"`
 }
 
 const videoPlaybackURLLifetime = 24 * time.Hour
@@ -126,7 +131,7 @@ func (a *App) initVideoTranscriptionUpload(c *gin.Context) {
 		return
 	}
 	upload.Pipeline = decodeVideoPipeline(pipelineRaw)
-	c.JSON(http.StatusCreated, videoUploadResponse{Upload: upload, PartURLs: a.videoUploadPartURLs(storage, storageKey, multipartID, partCount, request.FileBytes, partSize)})
+	c.JSON(http.StatusCreated, videoUploadResponse{Upload: upload, PartURLs: a.videoUploadPartURLs(uploadID, partCount)})
 }
 
 func (a *App) getVideoTranscriptionUpload(c *gin.Context) {
@@ -143,12 +148,105 @@ func (a *App) getVideoTranscriptionUpload(c *gin.Context) {
 	response := videoUploadResponse{Upload: upload.model}
 	a.attachVideoPlaybackURL(c, &response.Upload)
 	if upload.model.Status == "uploading" {
-		storage, storageErr := newS3Storage(a.Config)
-		if storageErr == nil {
-			response.PartURLs = a.videoUploadPartURLs(storage, upload.storageKey, upload.multipartID, upload.model.PartCount, upload.model.ExpectedBytes, upload.model.PartSize)
+		response.PartURLs = a.videoUploadPartURLs(upload.model.ID, upload.model.PartCount)
+		response.UploadedParts, err = a.loadPersistedVideoUploadParts(c, upload.model.ID)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
 		}
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+var errVideoUploadNotWritable = errors.New("video upload is no longer accepting parts")
+
+// uploadVideoTranscriptionPart receives one raw video part on the same origin
+// as the API and forwards it directly to S3. It intentionally requires a
+// Content-Length so both the API and S3 can enforce the exact part boundary
+// without buffering or accepting an ambiguous chunked request.
+func (a *App) uploadVideoTranscriptionPart(c *gin.Context) {
+	uploadID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid video upload id"))
+		return
+	}
+	partNumber, err := strconv.Atoi(c.Param("partNumber"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid video upload part number"))
+		return
+	}
+	record, err := a.authorizedVideoUpload(c, uploadID)
+	if err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	if record.model.Status != "uploading" {
+		writeError(c, http.StatusConflict, fmt.Errorf("video upload is %s", record.model.Status))
+		return
+	}
+	if record.model.ExpiresAt != nil && !record.model.ExpiresAt.After(time.Now()) {
+		writeError(c, http.StatusGone, fmt.Errorf("video upload has expired"))
+		return
+	}
+	expectedBytes, ok := expectedVideoUploadPartBytes(record.model.ExpectedBytes, record.model.PartSize, record.model.PartCount, partNumber)
+	if !ok {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("part number must be between 1 and %d", record.model.PartCount))
+		return
+	}
+	if c.Request.ContentLength < 0 {
+		writeError(c, http.StatusLengthRequired, fmt.Errorf("Content-Length is required for video upload parts"))
+		return
+	}
+	if c.Request.ContentLength != expectedBytes {
+		if c.Request.ContentLength > record.model.PartSize {
+			writeError(c, http.StatusRequestEntityTooLarge, fmt.Errorf("video upload part is limited to %s", formatBytes(record.model.PartSize)))
+			return
+		}
+		writeError(c, http.StatusBadRequest, fmt.Errorf("part %d must contain exactly %d bytes", partNumber, expectedBytes))
+		return
+	}
+	contentType := strings.TrimSpace(c.GetHeader("Content-Type"))
+	if !validVideoPartContentType(record.model.MimeType, contentType) {
+		writeError(c, http.StatusUnsupportedMediaType, fmt.Errorf("video upload part has an invalid content type"))
+		return
+	}
+	storage, err := newS3Storage(a.Config)
+	if err != nil {
+		writeError(c, http.StatusServiceUnavailable, err)
+		return
+	}
+	partResult, err := storage.uploadMultipartPart(c.Request.Context(), record.storageKey, record.multipartID, partNumber, c.Request.Body, expectedBytes, contentType)
+	if err != nil {
+		// A disconnected client cancels the S3 request through the shared
+		// request context. There is no response to write and no DB state to
+		// roll back because the part is only recorded after S3 acknowledges it.
+		if c.Request.Context().Err() != nil {
+			return
+		}
+		status := videoUploadS3ErrorStatus(err)
+		writeError(c, status, fmt.Errorf("could not upload video part: %w", err))
+		return
+	}
+	updated, err := a.persistVideoUploadPart(c.Request.Context(), record, partResult)
+	if err != nil {
+		if errors.Is(err, errVideoUploadNotWritable) {
+			writeError(c, http.StatusConflict, err)
+			return
+		}
+		// S3 has already accepted this part. The DB write is deliberately
+		// idempotent, so the client can retry the same request safely and
+		// recover the part metadata without uploading the whole video again.
+		c.Header("Retry-After", "1")
+		writeError(c, http.StatusServiceUnavailable, fmt.Errorf("video part was stored but could not be recorded; retry this part: %w", err))
+		return
+	}
+	c.Header("ETag", partResult.ETag)
+	c.JSON(http.StatusOK, gin.H{
+		"partNumber": partResult.PartNumber,
+		"etag":       partResult.ETag,
+		"sizeBytes":  partResult.SizeBytes,
+		"upload":     updated,
+	})
 }
 
 func (a *App) getVideoTranscriptionPlayback(c *gin.Context) {
@@ -203,9 +301,13 @@ func (a *App) completeVideoTranscriptionUpload(c *gin.Context) {
 		return
 	}
 	if upload.model.Status == "uploading" {
-		parts, err := normalizeVideoUploadParts(request.Parts, upload.model.PartCount)
+		parts, err := a.videoUploadPartsForCompletion(c, upload, request.Parts)
 		if err != nil {
-			writeError(c, http.StatusBadRequest, err)
+			if errors.Is(err, errVideoUploadPartsIncomplete) {
+				writeError(c, http.StatusBadRequest, err)
+			} else {
+				writeError(c, http.StatusInternalServerError, err)
+			}
 			return
 		}
 		storage, err := newS3Storage(a.Config)
@@ -221,11 +323,34 @@ func (a *App) completeVideoTranscriptionUpload(c *gin.Context) {
 			writeError(c, http.StatusBadGateway, fmt.Errorf("could not complete video upload: %w", err))
 			return
 		}
-		if _, err := a.DB.ExecContext(c, `UPDATE transcription_video_uploads SET status = 'uploaded', bytes = expected_bytes, progress = 100, stage = 'uploaded', updated_at = now() WHERE id = $1 AND status = 'uploading'`, uploadID); err != nil {
+		result, err := a.DB.ExecContext(c, `UPDATE transcription_video_uploads SET status = 'uploaded', bytes = expected_bytes, progress = 100, stage = 'uploaded', updated_at = now() WHERE id = $1 AND status = 'uploading'`, uploadID)
+		if err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
-		_ = a.Live.advanceVideoPipeline(c, uploadID, "uploaded", "")
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if rowsAffected == 0 {
+			current, loadErr := loadVideoUpload(c, a.DB, uploadID)
+			if loadErr != nil {
+				writeError(c, http.StatusInternalServerError, loadErr)
+				return
+			}
+			if current.Status == "cancelled" {
+				_ = storage.delete(c, upload.storageKey)
+				writeError(c, http.StatusConflict, fmt.Errorf("video upload was cancelled while completion was in progress"))
+				return
+			}
+			if current.Status != "uploaded" && current.Status != "queued" && current.Status != "processing" && current.Status != "completed" {
+				writeError(c, http.StatusConflict, fmt.Errorf("video upload is %s", current.Status))
+				return
+			}
+		} else {
+			_ = a.Live.advanceVideoPipeline(c, uploadID, "uploaded", "")
+		}
 	}
 	jobID, updated, err := a.Live.queueVideoTranscription(c, uploadID)
 	if err != nil {
@@ -361,16 +486,157 @@ func (a *App) videoPlaybackURL(ctx context.Context, record videoUploadRecord) (s
 	return storage.presignURL(http.MethodGet, record.storageKey, nil, videoPlaybackURLLifetime), expiresAt, nil
 }
 
-func (a *App) videoUploadPartURLs(storage *s3Storage, storageKey, multipartID string, partCount int, expectedBytes, partSize int64) []videoUploadPartURL {
+func (a *App) videoUploadPartURLs(uploadID uuid.UUID, partCount int) []videoUploadPartURL {
 	result := make([]videoUploadPartURL, 0, partCount)
 	for part := 1; part <= partCount; part++ {
-		partBytes := partSize
-		if remaining := expectedBytes - int64(part-1)*partSize; remaining < partBytes {
-			partBytes = remaining
-		}
-		result = append(result, videoUploadPartURL{PartNumber: part, URL: storage.presignMultipartPart(storageKey, multipartID, part, 24*time.Hour, partBytes)})
+		result = append(result, videoUploadPartURL{
+			PartNumber: part,
+			URL:        fmt.Sprintf("/api/v1/transcription/video-uploads/%s/parts/%d", uploadID, part),
+		})
 	}
 	return result
+}
+
+func expectedVideoUploadPartBytes(expectedBytes, partSize int64, partCount, partNumber int) (int64, bool) {
+	if expectedBytes <= 0 || partSize <= 0 || partCount <= 0 || partNumber < 1 || partNumber > partCount {
+		return 0, false
+	}
+	partBytes := partSize
+	if remaining := expectedBytes - int64(partNumber-1)*partSize; remaining < partBytes {
+		partBytes = remaining
+	}
+	return partBytes, partBytes > 0
+}
+
+func validVideoPartContentType(expected, actual string) bool {
+	actual = strings.TrimSpace(actual)
+	if actual == "" {
+		return false
+	}
+	actualMediaType, _, err := mime.ParseMediaType(actual)
+	if err != nil {
+		return false
+	}
+	actualMediaType = strings.ToLower(actualMediaType)
+	expectedMediaType, _, err := mime.ParseMediaType(strings.TrimSpace(expected))
+	if err != nil {
+		expectedMediaType = strings.ToLower(strings.TrimSpace(strings.SplitN(expected, ";", 2)[0]))
+	}
+	if actualMediaType == "application/octet-stream" {
+		return true
+	}
+	if expectedMediaType == "" || expectedMediaType == "application/octet-stream" {
+		return strings.HasPrefix(actualMediaType, "video/")
+	}
+	return actualMediaType == strings.ToLower(expectedMediaType)
+}
+
+func (a *App) persistVideoUploadPart(ctx context.Context, record videoUploadRecord, part s3MultipartUploadResult) (models.TranscriptionVideoUpload, error) {
+	transaction, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	defer transaction.Rollback()
+	var status string
+	var expiresAt sql.NullTime
+	if err := transaction.QueryRowContext(ctx, `SELECT status, expires_at FROM transcription_video_uploads WHERE id = $1 FOR UPDATE`, record.model.ID).Scan(&status, &expiresAt); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	if status != "uploading" || (expiresAt.Valid && !expiresAt.Time.After(time.Now())) {
+		return models.TranscriptionVideoUpload{}, fmt.Errorf("%w: upload is %s", errVideoUploadNotWritable, status)
+	}
+	if _, err := transaction.ExecContext(ctx, `
+		INSERT INTO transcription_video_upload_parts (upload_id, part_number, etag, size_bytes)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (upload_id, part_number) DO UPDATE SET etag = EXCLUDED.etag, size_bytes = EXCLUDED.size_bytes, updated_at = now()`,
+		record.model.ID, part.PartNumber, part.ETag, part.SizeBytes); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	var bytesUploaded int64
+	var progress int
+	var updatedAt time.Time
+	if err := transaction.QueryRowContext(ctx, `
+		UPDATE transcription_video_uploads
+		SET bytes = COALESCE((SELECT SUM(size_bytes) FROM transcription_video_upload_parts WHERE upload_id = $1), 0),
+		    progress = LEAST(99, (COALESCE((SELECT SUM(size_bytes) FROM transcription_video_upload_parts WHERE upload_id = $1), 0) * 100 / expected_bytes)::INTEGER),
+		    updated_at = now()
+		WHERE id = $1 AND status = 'uploading'
+		RETURNING bytes, progress, updated_at`, record.model.ID).Scan(&bytesUploaded, &progress, &updatedAt); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	if err := transaction.Commit(); err != nil {
+		return models.TranscriptionVideoUpload{}, err
+	}
+	updated := record.model
+	updated.Bytes = bytesUploaded
+	updated.Progress = progress
+	updated.UpdatedAt = updatedAt
+	return updated, nil
+}
+
+var errVideoUploadPartsIncomplete = errors.New("video upload parts are incomplete")
+
+func (a *App) loadPersistedVideoUploadParts(ctx context.Context, uploadID uuid.UUID) ([]videoUploadPart, error) {
+	rows, err := a.DB.QueryContext(ctx, `SELECT part_number, etag, size_bytes FROM transcription_video_upload_parts WHERE upload_id = $1 ORDER BY part_number`, uploadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	parts := make([]videoUploadPart, 0)
+	for rows.Next() {
+		var part videoUploadPart
+		if err := rows.Scan(&part.PartNumber, &part.ETag, &part.SizeBytes); err != nil {
+			return nil, err
+		}
+		parts = append(parts, part)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return parts, nil
+}
+
+func (a *App) videoUploadPartsForCompletion(ctx context.Context, record videoUploadRecord, requested []videoUploadPart) ([]videoUploadPart, error) {
+	parts, err := a.loadPersistedVideoUploadParts(ctx, record.model.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(parts) == 0 {
+		normalized, normalizeErr := normalizeVideoUploadParts(requested, record.model.PartCount)
+		if normalizeErr != nil {
+			return nil, fmt.Errorf("%w: %v", errVideoUploadPartsIncomplete, normalizeErr)
+		}
+		return normalized, nil
+	}
+	var total int64
+	for _, part := range parts {
+		total += part.SizeBytes
+	}
+	if len(parts) != record.model.PartCount || total != record.model.ExpectedBytes {
+		return nil, fmt.Errorf("%w: all uploaded parts must be present with the declared total size", errVideoUploadPartsIncomplete)
+	}
+	normalized, normalizeErr := normalizeVideoUploadParts(parts, record.model.PartCount)
+	if normalizeErr != nil {
+		return nil, fmt.Errorf("%w: %v", errVideoUploadPartsIncomplete, normalizeErr)
+	}
+	return normalized, nil
+}
+
+func videoUploadS3ErrorStatus(err error) int {
+	var storageErr *s3ResponseError
+	if !errors.As(err, &storageErr) {
+		return http.StatusBadGateway
+	}
+	switch storageErr.status {
+	case http.StatusBadRequest, http.StatusNotFound, http.StatusConflict:
+		return http.StatusConflict
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return http.StatusFailedDependency
+	case http.StatusTooManyRequests:
+		return http.StatusTooManyRequests
+	default:
+		return http.StatusBadGateway
+	}
 }
 
 func normalizeVideoUploadParts(parts []videoUploadPart, partCount int) ([]videoUploadPart, error) {

@@ -66,9 +66,12 @@ func main() {
 		Addr:              cfg.Address(),
 		Handler:           application.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      0,
-		IdleTimeout:       120 * time.Second,
+		// Video parts are streamed through this server and the browser allows a
+		// part up to ten minutes on constrained links. Keep a finite body-read
+		// deadline with enough margin for that client contract.
+		ReadTimeout:  11 * time.Minute,
+		WriteTimeout: 0,
+		IdleTimeout:  120 * time.Second,
 	}
 	slog.Info("JustAI backend listening", "address", cfg.Address(), "ginMode", gin.Mode())
 	serverErr := make(chan error, 1)

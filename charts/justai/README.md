@@ -208,10 +208,10 @@ Override `pyannote.image.repository` and `pyannote.image.tag` when using a
 private image registry. The release workflow publishes the default image as a
 `pyannote-*` tag alongside the backend and frontend images.
 
-Prerecorded video transcription uses direct S3-compatible multipart uploads.
-Set `config.transcription.storageDriver: s3`, configure the browser-facing
-`s3Endpoint`, `s3Region`, and `s3Bucket`, and put the S3 access and secret keys
-in the shared Secret reference fields:
+Prerecorded video transcription uses S3-compatible multipart uploads streamed
+through the JustAI backend. Set `config.transcription.storageDriver: s3`,
+configure the backend-reachable `s3Endpoint`, `s3Region`, and `s3Bucket`, and
+put the S3 access and secret keys in the shared Secret reference fields:
 
 ```yaml
 config:
@@ -234,15 +234,19 @@ secrets:
 ```
 
 `s3ProcessingEndpoint` is optional and is used for worker-side playback and
-processing URLs when the browser-facing endpoint is not reachable from the
-cluster. The access and secret key values can instead be supplied in a private
+processing URLs when workers need a different endpoint from the backend. The
+access and secret key values can instead be supplied in a private
 values file under `secrets.data.s3AccessKey` and `secrets.data.s3SecretKey`
 with `secrets.create=true`. The chart injects them as
 `JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY` and
 `JUSTAI_TRANSCRIPTION_S3_SECRET_KEY` into the backend (and monolith) only when
 S3 storage is enabled.
 
-Configure bucket CORS for the public frontend origin with `PUT`,
-`Content-Type`, and exposed `ETag`. The configured `s3Endpoint` must be
-reachable by browsers; internal cluster DNS names will not work for upload
-URLs.
+Video parts are uploaded to the same-origin JustAI backend, which streams each
+part into the S3 multipart upload. The bucket therefore does not need browser
+CORS rules and `s3Endpoint` only needs to be reachable by the backend. Use
+`s3ProcessingEndpoint` when media workers need a different in-cluster address.
+Ingresses and reverse proxies must allow request bodies at least as large as
+`videoUploadPartBytes` (16 MiB by default) and should permit slow request-body
+streaming for clients on constrained connections. Configure their request
+timeout to at least ten minutes so it matches the browser's per-part timeout.

@@ -35,6 +35,12 @@ type App struct {
 	passwordHashSlots     chan struct{}
 }
 
+const videoUploadPartRoutePattern = "/api/v1/transcription/video-uploads/:id/parts/:partNumber"
+
+func isVideoUploadPartRequest(c *gin.Context) bool {
+	return c.Request.Method == http.MethodPut && c.FullPath() == videoUploadPartRoutePattern
+}
+
 func New(cfg config.Config, db *sql.DB) *App {
 	application := &App{
 		Config:                cfg,
@@ -52,7 +58,11 @@ func New(cfg config.Config, db *sql.DB) *App {
 
 func (a *App) Router() *gin.Engine {
 	router := gin.New()
-	router.Use(gin.Recovery(), middleware.RequestID(), middleware.MaxBodyBytes(26*1024*1024), middleware.CORS(a.Config.FrontendOrigins), middleware.RequestLog(a.DB))
+	router.Use(gin.Recovery(), middleware.RequestID(), middleware.MaxBodyBytesExcept(26*1024*1024, func(c *gin.Context) bool {
+		// Video parts are streamed and enforce their exact per-part size in the
+		// route handler. Do not wrap them in the small general API limit.
+		return isVideoUploadPartRequest(c)
+	}), middleware.CORS(a.Config.FrontendOrigins), middleware.RequestLog(a.DB))
 	healthHandler := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "justai-backend"})
 	}
@@ -70,13 +80,14 @@ func (a *App) Router() *gin.Engine {
 		}
 		var repositoryStorageReady bool
 		if err := a.DB.QueryRowContext(c, `
-			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '036_generated_pdfs.sql')
+			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '037_video_upload_parts.sql')
 			   AND to_regclass('public.repository_contexts') IS NOT NULL
 			   AND to_regclass('public.repository_context_files') IS NOT NULL
 			   AND to_regclass('public.conversation_repository_contexts') IS NOT NULL
 			   AND to_regclass('public.saved_assistants') IS NOT NULL
 			   AND to_regclass('public.saved_assistant_versions') IS NOT NULL
-			   AND to_regclass('public.generated_pdfs') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
+			   AND to_regclass('public.generated_pdfs') IS NOT NULL
+			   AND to_regclass('public.transcription_video_upload_parts') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
@@ -185,6 +196,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/sessions/:id/stop", a.platformFeature("transcription"), a.stopTranscriptionSession)
 	org.POST("/transcription/sessions/:id/video-uploads", a.platformFeature("transcription"), a.initVideoTranscriptionUpload)
 	org.GET("/transcription/video-uploads/:id", a.platformFeature("transcription"), a.getVideoTranscriptionUpload)
+	org.PUT("/transcription/video-uploads/:id/parts/:partNumber", a.platformFeature("transcription"), a.uploadVideoTranscriptionPart)
 	org.POST("/transcription/video-uploads/:id/complete", a.platformFeature("transcription"), a.completeVideoTranscriptionUpload)
 	org.POST("/transcription/video-uploads/:id/retry", a.platformFeature("transcription"), a.retryVideoTranscription)
 	org.POST("/transcription/video-uploads/:id/skip", a.platformFeature("transcription"), a.skipVideoTranscription)
