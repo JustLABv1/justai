@@ -243,6 +243,8 @@ spec:
               value: /models/pyannote--speaker-diarization-3.1
             - name: PYANNOTE_SEGMENTATION_MODEL_PATH
               value: /models/pyannote--segmentation-3.0
+            - name: PYANNOTE_EMBEDDING_MODEL_PATH
+              value: /models/pyannote--wespeaker-voxceleb-resnet34-LM
             - name: HF_HUB_OFFLINE
               value: "1"
             {{- end }}

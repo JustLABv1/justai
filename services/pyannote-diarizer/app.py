@@ -40,6 +40,7 @@ warnings.filterwarnings(
     module=r"pyannote\.audio\.core\.io",
 )
 from pyannote.audio import Pipeline
+from pyannote.audio.pipelines import speaker_diarization
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ MODEL_ID = os.getenv(
 )
 MODEL_PATH = os.getenv("PYANNOTE_MODEL_PATH", "").strip()
 SEGMENTATION_MODEL_PATH = os.getenv("PYANNOTE_SEGMENTATION_MODEL_PATH", "").strip()
+EMBEDDING_MODEL_PATH = os.getenv("PYANNOTE_EMBEDDING_MODEL_PATH", "").strip()
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
 SERVICE_TOKEN = os.getenv("PYANNOTE_SERVICE_TOKEN", "").strip()
 DEVICE_NAME = os.getenv("PYANNOTE_DEVICE", "auto").strip().lower()
@@ -103,6 +105,7 @@ if TORCH_THREADS > 0:
 
 def load_pipeline() -> Pipeline:
     model_source: str | Path = MODEL_ID
+    skip_unused_plda = False
     if MODEL_PATH:
         source_directory = Path(MODEL_PATH)
         if not source_directory.is_dir():
@@ -110,32 +113,47 @@ def load_pipeline() -> Pipeline:
         if not (source_directory / "config.yaml").is_file():
             raise RuntimeError(f"PYANNOTE_MODEL_PATH has no config.yaml: {source_directory}")
 
-        # speaker-diarization-3.1 references segmentation-3.0 by its Hub ID.
-        # Replace that reference in a per-process copy so an S3-mounted model
-        # bundle works with HF_HUB_OFFLINE=1 and the mounted source files stay
-        # unchanged.
-        if SEGMENTATION_MODEL_PATH:
-            segmentation_directory = Path(SEGMENTATION_MODEL_PATH)
-            if not segmentation_directory.is_dir():
+        local_references = {
+            "pyannote/segmentation-3.0": (
+                "PYANNOTE_SEGMENTATION_MODEL_PATH", SEGMENTATION_MODEL_PATH
+            ),
+            "pyannote/wespeaker-voxceleb-resnet34-LM": (
+                "PYANNOTE_EMBEDDING_MODEL_PATH", EMBEDDING_MODEL_PATH
+            ),
+        }
+        resolved_references: dict[str, Path] = {}
+        for remote_reference, (environment_name, local_path) in local_references.items():
+            if not local_path:
                 raise RuntimeError(
-                    "PYANNOTE_SEGMENTATION_MODEL_PATH does not exist: "
-                    f"{segmentation_directory}"
+                    f"{environment_name} is required with PYANNOTE_MODEL_PATH"
                 )
-            model_source = Path(tempfile.mkdtemp(prefix="pyannote-pipeline-")) / "pipeline"
-            copytree(source_directory, model_source)
-            config_path = model_source / "config.yaml"
-            config = config_path.read_text(encoding="utf-8")
-            remote_reference = "pyannote/segmentation-3.0"
+            local_directory = Path(local_path)
+            if not local_directory.is_dir():
+                raise RuntimeError(f"{environment_name} does not exist: {local_directory}")
+            resolved_references[remote_reference] = local_directory.resolve()
+
+        # speaker-diarization-3.1 references segmentation and embedding models
+        # by Hub ID. Replace them in a per-process copy so an S3-mounted bundle
+        # remains fully offline.
+        model_source = Path(tempfile.mkdtemp(prefix="pyannote-pipeline-")) / "pipeline"
+        copytree(source_directory, model_source)
+        config_path = model_source / "config.yaml"
+        config = config_path.read_text(encoding="utf-8")
+        for remote_reference, local_directory in resolved_references.items():
             if remote_reference not in config:
                 raise RuntimeError(
                     f"PYANNOTE_MODEL_PATH config does not reference {remote_reference}"
                 )
-            config_path.write_text(
-                config.replace(remote_reference, str(segmentation_directory.resolve())),
-                encoding="utf-8",
-            )
-        else:
-            model_source = source_directory
+            config = config.replace(remote_reference, str(local_directory))
+
+        params_marker = "  params:\n"
+        if params_marker not in config:
+            raise RuntimeError("PYANNOTE_MODEL_PATH config has no pipeline params section")
+        # pyannote.audio 4.x eagerly downloads the PLDA default even though
+        # speaker-diarization-3.1 explicitly uses AgglomerativeClustering and
+        # therefore never consumes it. Avoid that unrelated, gated download.
+        skip_unused_plda = "clustering: AgglomerativeClustering" in config
+        config_path.write_text(config, encoding="utf-8")
 
     if not HF_TOKEN and not MODEL_PATH:
         raise RuntimeError(
@@ -157,7 +175,13 @@ def load_pipeline() -> Pipeline:
                 "installed pyannote.audio exposes neither token nor use_auth_token"
             )
         kwargs[auth_keyword] = HF_TOKEN
-    pipeline = Pipeline.from_pretrained(model_source, **kwargs)
+    original_get_plda = speaker_diarization.get_plda
+    if skip_unused_plda:
+        speaker_diarization.get_plda = lambda *args, **kwargs: None
+    try:
+        pipeline = Pipeline.from_pretrained(model_source, **kwargs)
+    finally:
+        speaker_diarization.get_plda = original_get_plda
     if pipeline is None:
         raise RuntimeError(f"could not load pyannote pipeline {MODEL_ID}")
     pipeline.to(DEVICE)

@@ -157,12 +157,13 @@ repositories into S3 and enable `pyannote.modelStore`. The init container
 downloads them into an `emptyDir` before the diarizer starts; the diarizer then
 runs with `HF_HUB_OFFLINE=1` and receives no Hugging Face token.
 
-The object layout must preserve the two directories produced by
+The object layout must preserve the three directories produced by
 `snapshot_download`:
 
 ```text
 s3://<bucket>/pyannote/pyannote--speaker-diarization-3.1/...
 s3://<bucket>/pyannote/pyannote--segmentation-3.0/...
+s3://<bucket>/pyannote/pyannote--wespeaker-voxceleb-resnet34-LM/...
 ```
 
 Use the existing S3 secret references. The credentials only go to the init

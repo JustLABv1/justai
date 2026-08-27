@@ -189,8 +189,9 @@ pyannote:
       storageClassName: ""
       size: 20Gi
   # Load an internally mirrored model bundle from S3 before the service starts.
-  # The expected layout is <prefix>/pyannote--speaker-diarization-3.1 and
-  # <prefix>/pyannote--segmentation-3.0, as produced by snapshot_download.
+  # The expected layout contains the three directories produced by
+  # snapshot_download: speaker-diarization-3.1, segmentation-3.0, and
+  # wespeaker-voxceleb-resnet34-LM.
   modelStore:
     enabled: false
     endpoint: ""
