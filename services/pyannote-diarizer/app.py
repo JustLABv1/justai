@@ -20,6 +20,7 @@ import time
 import wave
 import warnings
 from pathlib import Path
+from shutil import copytree
 from threading import Lock
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -46,6 +47,8 @@ logger = logging.getLogger(__name__)
 MODEL_ID = os.getenv(
     "PYANNOTE_MODEL_ID", "pyannote/speaker-diarization-3.1"
 )
+MODEL_PATH = os.getenv("PYANNOTE_MODEL_PATH", "").strip()
+SEGMENTATION_MODEL_PATH = os.getenv("PYANNOTE_SEGMENTATION_MODEL_PATH", "").strip()
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
 SERVICE_TOKEN = os.getenv("PYANNOTE_SERVICE_TOKEN", "").strip()
 DEVICE_NAME = os.getenv("PYANNOTE_DEVICE", "auto").strip().lower()
@@ -99,26 +102,62 @@ if TORCH_THREADS > 0:
 
 
 def load_pipeline() -> Pipeline:
-    if not HF_TOKEN:
+    model_source: str | Path = MODEL_ID
+    if MODEL_PATH:
+        source_directory = Path(MODEL_PATH)
+        if not source_directory.is_dir():
+            raise RuntimeError(f"PYANNOTE_MODEL_PATH does not exist: {source_directory}")
+        if not (source_directory / "config.yaml").is_file():
+            raise RuntimeError(f"PYANNOTE_MODEL_PATH has no config.yaml: {source_directory}")
+
+        # speaker-diarization-3.1 references segmentation-3.0 by its Hub ID.
+        # Replace that reference in a per-process copy so an S3-mounted model
+        # bundle works with HF_HUB_OFFLINE=1 and the mounted source files stay
+        # unchanged.
+        if SEGMENTATION_MODEL_PATH:
+            segmentation_directory = Path(SEGMENTATION_MODEL_PATH)
+            if not segmentation_directory.is_dir():
+                raise RuntimeError(
+                    "PYANNOTE_SEGMENTATION_MODEL_PATH does not exist: "
+                    f"{segmentation_directory}"
+                )
+            model_source = Path(tempfile.mkdtemp(prefix="pyannote-pipeline-")) / "pipeline"
+            copytree(source_directory, model_source)
+            config_path = model_source / "config.yaml"
+            config = config_path.read_text(encoding="utf-8")
+            remote_reference = "pyannote/segmentation-3.0"
+            if remote_reference not in config:
+                raise RuntimeError(
+                    f"PYANNOTE_MODEL_PATH config does not reference {remote_reference}"
+                )
+            config_path.write_text(
+                config.replace(remote_reference, str(segmentation_directory.resolve())),
+                encoding="utf-8",
+            )
+        else:
+            model_source = source_directory
+
+    if not HF_TOKEN and not MODEL_PATH:
         raise RuntimeError(
-            "HF_TOKEN is required to download the gated pyannote pipeline"
+            "HF_TOKEN is required unless PYANNOTE_MODEL_PATH points to a local pipeline"
         )
 
-    parameters = inspect.signature(Pipeline.from_pretrained).parameters
-    if "token" in parameters:
-        auth_keyword = "token"
-    elif "use_auth_token" in parameters:
-        # pyannote.audio 3.x uses the legacy keyword. The requirements pin a
-        # pre-1.0 huggingface_hub release because that loader still forwards
-        # use_auth_token to hf_hub_download.
-        auth_keyword = "use_auth_token"
-    else:
-        raise RuntimeError(
-            "installed pyannote.audio exposes neither token nor use_auth_token"
-        )
-    pipeline = Pipeline.from_pretrained(
-        MODEL_ID, **{auth_keyword: HF_TOKEN}
-    )
+    kwargs: dict[str, str] = {}
+    if HF_TOKEN:
+        parameters = inspect.signature(Pipeline.from_pretrained).parameters
+        if "token" in parameters:
+            auth_keyword = "token"
+        elif "use_auth_token" in parameters:
+            # pyannote.audio 3.x uses the legacy keyword. The requirements pin a
+            # pre-1.0 huggingface_hub release because that loader still forwards
+            # use_auth_token to hf_hub_download.
+            auth_keyword = "use_auth_token"
+        else:
+            raise RuntimeError(
+                "installed pyannote.audio exposes neither token nor use_auth_token"
+            )
+        kwargs[auth_keyword] = HF_TOKEN
+    pipeline = Pipeline.from_pretrained(model_source, **kwargs)
     if pipeline is None:
         raise RuntimeError(f"could not load pyannote pipeline {MODEL_ID}")
     pipeline.to(DEVICE)

@@ -188,6 +188,16 @@ pyannote:
       enabled: false
       storageClassName: ""
       size: 20Gi
+  # Load an internally mirrored model bundle from S3 before the service starts.
+  # The expected layout is <prefix>/pyannote--speaker-diarization-3.1 and
+  # <prefix>/pyannote--segmentation-3.0, as produced by snapshot_download.
+  modelStore:
+    enabled: false
+    endpoint: ""
+    region: ""
+    bucket: ""
+    prefix: pyannote
+    forcePathStyle: false
   podAnnotations: {}
   # Minimus Python runs as UID/GID 1000. fsGroup makes an optional persistent
   # Hugging Face cache writable without weakening the non-root runtime.
