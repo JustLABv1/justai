@@ -259,13 +259,99 @@ func TestCompleteMultipartReconcilesAnAlreadyCompletedObject(t *testing.T) {
 	}
 }
 
+func TestCompleteMultipartAcceptsSuccessfulCompletionWithoutObjectProbe(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			t.Fatalf("successful multipart completion must not require %s, got %s", http.MethodHead, request.Method)
+		}
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	storage, err := newS3Storage(config.Config{Transcription: config.TranscriptionConfig{
+		S3Endpoint: server.URL, S3Region: "us-east-1", S3Bucket: "videos",
+		S3AccessKey: "access", S3SecretKey: "secret",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.completeMultipartAndVerify(context.Background(), "video.mp4", "upload", []s3MultipartPart{{PartNumber: 1, ETag: `"etag"`}}, 1234); err != nil {
+		t.Fatalf("successful completion should not depend on HEAD permissions: %v", err)
+	}
+}
+
+func TestCompleteMultipartReconciliationUsesRangeGETWhenHeadIsForbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.Method {
+		case http.MethodPost:
+			http.Error(response, "upload is already finalized", http.StatusNotFound)
+		case http.MethodHead:
+			http.Error(response, "HEAD is not allowed", http.StatusForbidden)
+		case http.MethodGet:
+			if request.Header.Get("Range") != "bytes=0-0" {
+				t.Fatalf("expected a bounded range probe, got %q", request.Header.Get("Range"))
+			}
+			response.Header().Set("Content-Range", "bytes 0-0/1234")
+			response.WriteHeader(http.StatusPartialContent)
+			_, _ = response.Write([]byte("x"))
+		default:
+			t.Fatalf("unexpected reconciliation request: %s", request.Method)
+		}
+	}))
+	defer server.Close()
+
+	storage, err := newS3Storage(config.Config{Transcription: config.TranscriptionConfig{
+		S3Endpoint: server.URL, S3Region: "us-east-1", S3Bucket: "videos",
+		S3AccessKey: "access", S3SecretKey: "secret",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.completeMultipartAndVerify(context.Background(), "video.mp4", "finished-upload", []s3MultipartPart{{PartNumber: 1, ETag: `"etag"`}}, 1234); err != nil {
+		t.Fatalf("expected ranged reconciliation to succeed: %v", err)
+	}
+}
+
+func TestCompleteMultipartReconciliationUsesProcessingEndpointFallback(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.Method {
+		case http.MethodPost:
+			http.Error(response, "upload is already finalized", http.StatusNotFound)
+		case http.MethodHead, http.MethodGet:
+			http.Error(response, "read denied on browser endpoint", http.StatusForbidden)
+		default:
+			t.Fatalf("unexpected primary request: %s", request.Method)
+		}
+	}))
+	defer primary.Close()
+	processing := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodHead {
+			t.Fatalf("expected processing endpoint HEAD fallback, got %s", request.Method)
+		}
+		response.Header().Set("Content-Length", "1234")
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer processing.Close()
+
+	storage, err := newS3Storage(config.Config{Transcription: config.TranscriptionConfig{
+		S3Endpoint: primary.URL, S3ProcessingEndpoint: processing.URL, S3Region: "us-east-1", S3Bucket: "videos",
+		S3AccessKey: "access", S3SecretKey: "secret",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.completeMultipartAndVerify(context.Background(), "video.mp4", "finished-upload", []s3MultipartPart{{PartNumber: 1, ETag: `"etag"`}}, 1234); err != nil {
+		t.Fatalf("expected processing endpoint reconciliation to succeed: %v", err)
+	}
+}
+
 func TestCompleteMultipartDoesNotDeleteOnTransientVerificationFailure(t *testing.T) {
 	deleteRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.Method {
 		case http.MethodPost:
-			response.WriteHeader(http.StatusOK)
-		case http.MethodHead:
+			http.Error(response, "gateway timeout", http.StatusGatewayTimeout)
+		case http.MethodHead, http.MethodGet:
 			http.Error(response, "temporarily unavailable", http.StatusServiceUnavailable)
 		case http.MethodDelete:
 			deleteRequests++
@@ -288,6 +374,31 @@ func TestCompleteMultipartDoesNotDeleteOnTransientVerificationFailure(t *testing
 	}
 	if deleteRequests != 0 {
 		t.Fatalf("transient verification failure deleted the completed object %d time(s)", deleteRequests)
+	}
+}
+
+func TestObjectSizeReportsActionableReadPermissionError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodHead && request.Method != http.MethodGet {
+			t.Fatalf("unexpected object probe: %s", request.Method)
+		}
+		http.Error(response, "access denied", http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	storage, err := newS3Storage(config.Config{Transcription: config.TranscriptionConfig{
+		S3Endpoint: server.URL, S3Region: "us-east-1", S3Bucket: "videos",
+		S3AccessKey: "access", S3SecretKey: "secret",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = storage.objectSize(context.Background(), "video.mp4")
+	if err == nil || !strings.Contains(err.Error(), "s3:GetObject") {
+		t.Fatalf("expected actionable read permission error, got %v", err)
+	}
+	if got := videoUploadCompletionErrorStatus(err); got != http.StatusFailedDependency {
+		t.Fatalf("expected read permission failure status %d, got %d", http.StatusFailedDependency, got)
 	}
 }
 
