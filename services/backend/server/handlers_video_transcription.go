@@ -320,7 +320,7 @@ func (a *App) completeVideoTranscriptionUpload(c *gin.Context) {
 			s3Parts = append(s3Parts, s3MultipartPart{PartNumber: part.PartNumber, ETag: part.ETag})
 		}
 		if err := storage.completeMultipartAndVerify(c, upload.storageKey, upload.multipartID, s3Parts, upload.model.ExpectedBytes); err != nil {
-			writeError(c, http.StatusBadGateway, fmt.Errorf("could not complete video upload: %w", err))
+			writeError(c, videoUploadCompletionErrorStatus(err), fmt.Errorf("could not complete video upload: %w", err))
 			return
 		}
 		result, err := a.DB.ExecContext(c, `UPDATE transcription_video_uploads SET status = 'uploaded', bytes = expected_bytes, progress = 100, stage = 'uploaded', updated_at = now() WHERE id = $1 AND status = 'uploading'`, uploadID)
@@ -637,6 +637,20 @@ func videoUploadS3ErrorStatus(err error) int {
 	default:
 		return http.StatusBadGateway
 	}
+}
+
+func videoUploadCompletionErrorStatus(err error) int {
+	var verificationErr *s3ObjectVerificationError
+	if errors.As(err, &verificationErr) {
+		if verificationErr.permissionDenied {
+			return http.StatusFailedDependency
+		}
+		if verificationErr.notFound {
+			return http.StatusConflict
+		}
+		return http.StatusBadGateway
+	}
+	return videoUploadS3ErrorStatus(err)
 }
 
 func normalizeVideoUploadParts(parts []videoUploadPart, partCount int) ([]videoUploadPart, error) {

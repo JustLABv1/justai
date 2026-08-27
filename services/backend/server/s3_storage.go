@@ -106,18 +106,27 @@ func (s *s3Storage) objectURLAt(endpoint *url.URL, key string) *url.URL {
 }
 
 func (s *s3Storage) request(ctx context.Context, method, key string, query url.Values, body []byte, contentType string) (*http.Response, error) {
-	return s.requestReader(ctx, method, key, query, bytes.NewReader(body), int64(len(body)), contentType, hashBytes(body))
+	return s.requestReaderAt(ctx, s.endpoint, method, key, query, nil, bytes.NewReader(body), int64(len(body)), contentType, hashBytes(body))
 }
 
 // requestReader signs and sends a request without materializing its body in
 // memory. UNSIGNED-PAYLOAD is supported by S3-compatible services and avoids
 // buffering a multi-megabyte upload just to calculate the SigV4 payload hash.
 func (s *s3Storage) requestReader(ctx context.Context, method, key string, query url.Values, body io.Reader, contentLength int64, contentType, payloadHash string) (*http.Response, error) {
-	object := s.objectURL(key)
+	return s.requestReaderAt(ctx, s.endpoint, method, key, query, nil, body, contentLength, contentType, payloadHash)
+}
+
+func (s *s3Storage) requestReaderAt(ctx context.Context, endpoint *url.URL, method, key string, query url.Values, headers http.Header, body io.Reader, contentLength int64, contentType, payloadHash string) (*http.Response, error) {
+	object := s.objectURLAt(endpoint, key)
 	object.RawQuery = canonicalQuery(query)
 	request, err := http.NewRequestWithContext(ctx, method, object.String(), body)
 	if err != nil {
 		return nil, err
+	}
+	if headers == nil {
+		request.Header = make(http.Header)
+	} else {
+		request.Header = headers.Clone()
 	}
 	request.Header.Set("Host", object.Host)
 	request.Header.Set("x-amz-content-sha256", payloadHash)
@@ -306,18 +315,129 @@ func (s *s3Storage) completeMultipart(ctx context.Context, key, uploadID string,
 		return err
 	}
 	defer response.Body.Close()
-	if err := readS3Response(response); err != nil {
+	if response.StatusCode >= http.StatusMultipleChoices {
+		return s3ErrorFromResponse(response)
+	}
+	return readS3CompletionResponse(response)
+}
+
+func readS3CompletionResponse(response *http.Response) error {
+	body, err := io.ReadAll(io.LimitReader(response.Body, 64*1024))
+	if err != nil {
 		return err
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		// Empty successful responses are used by several S3-compatible gateways.
+		return nil
+	}
+	var result struct {
+		XMLName xml.Name
+		Code    string `xml:"Code"`
+		Message string `xml:"Message"`
+	}
+	if err := xml.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("S3 completion returned invalid XML: %w", err)
+	}
+	if result.XMLName.Local == "Error" || strings.TrimSpace(result.Code) != "" {
+		message := strings.TrimSpace(result.Message)
+		if message == "" {
+			message = strings.TrimSpace(result.Code)
+		}
+		if message == "" {
+			message = "multipart completion returned an embedded error"
+		}
+		return &s3ResponseError{status: http.StatusBadGateway, message: message}
 	}
 	return nil
 }
 
-// objectSize reads the authoritative object length after multipart
-// completion. The client-provided expected size is only metadata; S3 HEAD is
-// the source of truth before a completed upload can enter the processing
-// queue.
+type s3ObjectVerificationError struct {
+	attempts         []string
+	cause            error
+	permissionDenied bool
+	notFound         bool
+}
+
+func (e *s3ObjectVerificationError) Error() string {
+	detail := strings.Join(e.attempts, "; ")
+	message := "could not verify S3 object size"
+	switch {
+	case e.permissionDenied:
+		message += ": object-read access was denied by the configured S3 endpoint(s); grant the backend credentials s3:GetObject/read permission or configure a readable s3_processing_endpoint"
+	case e.notFound:
+		message += ": the completed object was not found; check the bucket, object key, and S3 gateway routing"
+	default:
+		message += ": all configured S3 object-size probes failed; retry after the gateway recovers or configure a readable s3_processing_endpoint"
+	}
+	if detail != "" {
+		message += " (" + detail + ")"
+	}
+	return message
+}
+
+func (e *s3ObjectVerificationError) Unwrap() error {
+	return e.cause
+}
+
+// objectSize verifies an already-created object without downloading it. Some
+// S3-compatible gateways reject HEAD even when GET is allowed, so every
+// endpoint is tried with HEAD first and a one-byte ranged GET second.
 func (s *s3Storage) objectSize(ctx context.Context, key string) (int64, error) {
-	response, err := s.request(ctx, http.MethodHead, key, nil, nil, "")
+	endpoints := []*url.URL{s.endpoint}
+	if s.processingEndpoint != nil && !sameS3Endpoint(s.endpoint, s.processingEndpoint) {
+		endpoints = append(endpoints, s.processingEndpoint)
+	}
+	attempts := make([]string, 0, len(endpoints)*2)
+	errorsSeen := make([]error, 0, len(endpoints)*2)
+	verification := &s3ObjectVerificationError{}
+	for _, endpoint := range endpoints {
+		size, err := s.objectSizeHead(ctx, endpoint, key)
+		if err == nil {
+			return size, nil
+		}
+		attempts = append(attempts, fmt.Sprintf("HEAD %s: %v", endpoint.Host, err))
+		errorsSeen = append(errorsSeen, err)
+		verification.record(err, http.MethodHead)
+
+		size, err = s.objectSizeRangeGet(ctx, endpoint, key)
+		if err == nil {
+			return size, nil
+		}
+		attempts = append(attempts, fmt.Sprintf("GET range %s: %v", endpoint.Host, err))
+		errorsSeen = append(errorsSeen, err)
+		verification.record(err, http.MethodGet)
+	}
+	verification.attempts = attempts
+	verification.cause = errors.Join(errorsSeen...)
+	return 0, verification
+}
+
+func (e *s3ObjectVerificationError) record(err error, method string) {
+	var responseErr *s3ResponseError
+	if !errors.As(err, &responseErr) {
+		return
+	}
+	switch responseErr.status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		// A gateway-specific HEAD policy is the reason for this fallback. Only
+		// a denied GET proves that the credentials cannot read the object.
+		if method == http.MethodGet {
+			e.permissionDenied = true
+		}
+	case http.StatusNotFound:
+		e.notFound = true
+	}
+}
+
+func sameS3Endpoint(left, right *url.URL) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Scheme == right.Scheme && left.Host == right.Host && strings.TrimRight(left.Path, "/") == strings.TrimRight(right.Path, "/")
+}
+
+func (s *s3Storage) objectSizeHead(ctx context.Context, endpoint *url.URL, key string) (int64, error) {
+	response, err := s.requestReaderAt(ctx, endpoint, http.MethodHead, key, nil, nil, nil, -1, "", hashBytes(nil))
 	if err != nil {
 		return 0, err
 	}
@@ -326,35 +446,126 @@ func (s *s3Storage) objectSize(ctx context.Context, key string) (int64, error) {
 		return 0, s3ErrorFromResponse(response)
 	}
 	if response.ContentLength < 0 {
-		return 0, fmt.Errorf("s3 HEAD response omitted object size")
+		return 0, fmt.Errorf("S3 HEAD response omitted object size")
 	}
 	return response.ContentLength, nil
 }
 
+func (s *s3Storage) objectSizeRangeGet(ctx context.Context, endpoint *url.URL, key string) (int64, error) {
+	headers := make(http.Header)
+	headers.Set("Range", "bytes=0-0")
+	response, err := s.requestReaderAt(ctx, endpoint, http.MethodGet, key, nil, headers, nil, -1, "", hashBytes(nil))
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= http.StatusMultipleChoices {
+		if response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+			if size, ok := parseS3UnsatisfiedContentRange(response.Header.Get("Content-Range")); ok {
+				return size, nil
+			}
+		}
+		return 0, s3ErrorFromResponse(response)
+	}
+	if response.StatusCode == http.StatusPartialContent {
+		start, end, size, ok := parseS3ContentRange(response.Header.Get("Content-Range"))
+		if !ok || start != 0 || end != 0 || size <= 0 {
+			return 0, fmt.Errorf("S3 ranged GET returned an invalid Content-Range")
+		}
+		if _, err := io.CopyN(io.Discard, response.Body, 1); err != nil {
+			return 0, fmt.Errorf("S3 ranged GET returned no object data: %w", err)
+		}
+		return size, nil
+	}
+	if response.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("S3 ranged GET returned unexpected status %s", response.Status)
+	}
+	if _, _, size, ok := parseS3ContentRange(response.Header.Get("Content-Range")); ok {
+		return size, nil
+	}
+	if response.ContentLength < 0 {
+		return 0, fmt.Errorf("S3 ranged GET response omitted object size")
+	}
+	return response.ContentLength, nil
+}
+
+func parseS3ContentRange(value string) (start, end, size int64, ok bool) {
+	parts := strings.Fields(strings.TrimSpace(value))
+	if len(parts) != 2 || strings.ToLower(parts[0]) != "bytes" {
+		return 0, 0, 0, false
+	}
+	rangeAndSize := strings.SplitN(parts[1], "/", 2)
+	if len(rangeAndSize) != 2 || rangeAndSize[0] == "*" || rangeAndSize[1] == "*" {
+		return 0, 0, 0, false
+	}
+	bounds := strings.SplitN(rangeAndSize[0], "-", 2)
+	if len(bounds) != 2 {
+		return 0, 0, 0, false
+	}
+	start, err := strconv.ParseInt(bounds[0], 10, 64)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	end, err = strconv.ParseInt(bounds[1], 10, 64)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	size, err = strconv.ParseInt(rangeAndSize[1], 10, 64)
+	if err != nil || start < 0 || end < start || size <= end {
+		return 0, 0, 0, false
+	}
+	return start, end, size, true
+}
+
+func parseS3UnsatisfiedContentRange(value string) (int64, bool) {
+	parts := strings.Fields(strings.TrimSpace(value))
+	if len(parts) != 2 || strings.ToLower(parts[0]) != "bytes" {
+		return 0, false
+	}
+	rangeAndSize := strings.SplitN(parts[1], "/", 2)
+	if len(rangeAndSize) != 2 || rangeAndSize[0] != "*" {
+		return 0, false
+	}
+	size, err := strconv.ParseInt(rangeAndSize[1], 10, 64)
+	return size, err == nil && size >= 0
+}
+
 func (s *s3Storage) completeMultipartAndVerify(ctx context.Context, key, uploadID string, parts []s3MultipartPart, expectedBytes int64) error {
 	if err := s.completeMultipart(ctx, key, uploadID, parts); err != nil {
-		// Completion may have succeeded even when its response was lost, and a
-		// concurrent/retried request will see NoSuchUpload after the first one
-		// finalized it. Reconcile against the authoritative object before
-		// declaring the upload failed.
-		actualBytes, reconcileErr := s.objectSize(ctx, key)
-		if reconcileErr != nil || actualBytes != expectedBytes {
+		// A successful CompleteMultipartUpload response is authoritative and
+		// does not require a follow-up HEAD. Only an ambiguous response (for
+		// example a lost response, NoSuchUpload on a retry, or an S3 5xx) needs
+		// object reconciliation. This is important for gateways that allow
+		// multipart completion but reject HEAD.
+		if !ambiguousMultipartCompletionError(ctx, err) {
 			return err
+		}
+		actualBytes, reconcileErr := s.objectSize(ctx, key)
+		if reconcileErr != nil {
+			return fmt.Errorf("multipart completion response was ambiguous: %w; object reconciliation failed: %v", err, reconcileErr)
+		}
+		if actualBytes != expectedBytes {
+			return fmt.Errorf("multipart completion response was ambiguous: %w; reconciled object size %d bytes does not match declared size %d bytes", err, actualBytes, expectedBytes)
 		}
 		return nil
 	}
-	actualBytes, err := s.objectSize(ctx, key)
-	if err != nil {
-		// A transient HEAD failure must not destroy a successfully completed
-		// object. The caller can retry and reconcile it by size.
-		return fmt.Errorf("could not verify completed upload size: %w", err)
-	}
-	if actualBytes != expectedBytes {
-		_ = s.delete(ctx, key)
-		_ = s.abortMultipart(ctx, key, uploadID)
-		return fmt.Errorf("uploaded object size %d bytes does not match declared size %d bytes", actualBytes, expectedBytes)
-	}
 	return nil
+}
+
+func ambiguousMultipartCompletionError(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	var responseErr *s3ResponseError
+	if !errors.As(err, &responseErr) {
+		return true
+	}
+	switch responseErr.status {
+	case http.StatusNotFound, http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
+		return true
+	default:
+		return responseErr.status >= http.StatusInternalServerError
+	}
 }
 
 func (s *s3Storage) abortMultipart(ctx context.Context, key, uploadID string) error {
