@@ -12,12 +12,27 @@
 {{- $proxyHTTPRefName := .Values.secrets.refs.pyannoteHttpProxy.name | default "" -}}
 {{- $proxyHTTPSRefName := .Values.secrets.refs.pyannoteHttpsProxy.name | default "" -}}
 {{- $proxyNoProxyRefName := .Values.secrets.refs.pyannoteNoProxy.name | default "" -}}
+{{- $s3AccessKeyValue := .Values.secrets.data.s3AccessKey | default "" -}}
+{{- $s3SecretKeyValue := .Values.secrets.data.s3SecretKey | default "" -}}
+{{- $s3AccessKeyRefName := .Values.secrets.refs.s3AccessKey.name | default "" -}}
+{{- $s3SecretKeyRefName := .Values.secrets.refs.s3SecretKey.name | default "" -}}
 {{- $maxSourceBytes := int64 .Values.pyannote.maxSourceBytes -}}
 {{- if or (lt $maxSourceBytes 1) (gt $maxSourceBytes 21474836480) }}
 {{- fail "pyannote.maxSourceBytes must be an integer between 1 and 21474836480" }}
 {{- end }}
-{{- if and (not $hfTokenRefName) (not $hfToken) (not $externalSecretStore) }}
+{{- if and (not .Values.pyannote.modelStore.enabled) (not $hfTokenRefName) (not $hfToken) (not $externalSecretStore) }}
 {{- fail "pyannote.enabled requires a Hugging Face token through secrets.refs.pyannoteHfToken, secrets.data.pyannoteHfToken with secrets.create=true, or an existing Secret/Vault Secret" }}
+{{- end }}
+{{- if .Values.pyannote.modelStore.enabled }}
+{{- if not (.Values.pyannote.modelStore.bucket | default .Values.config.transcription.s3Bucket) }}
+{{- fail "pyannote.modelStore.enabled requires pyannote.modelStore.bucket or config.transcription.s3Bucket" }}
+{{- end }}
+{{- if and (not $s3AccessKeyValue) (not $s3AccessKeyRefName) (not $externalSecretStore) }}
+{{- fail "pyannote.modelStore.enabled requires S3 access credentials through secrets.refs.s3AccessKey or secrets.data.s3AccessKey" }}
+{{- end }}
+{{- if and (not $s3SecretKeyValue) (not $s3SecretKeyRefName) (not $externalSecretStore) }}
+{{- fail "pyannote.modelStore.enabled requires S3 secret credentials through secrets.refs.s3SecretKey or secrets.data.s3SecretKey" }}
+{{- end }}
 {{- end }}
 {{- if not (gt (len .Values.pyannote.allowedMediaOrigins) 0) }}
 {{- fail "pyannote.enabled requires pyannote.allowedMediaOrigins to contain exact media URL origins" }}
@@ -44,6 +59,10 @@
 {{- $sharedHfKey := include "justai.secretRefKey" (dict "root" . "ref" "pyannoteHfToken") -}}
 {{- $sharedServiceSecret := include "justai.secretRefName" (dict "root" . "ref" "pyannoteServiceToken") -}}
 {{- $sharedServiceKey := include "justai.secretRefKey" (dict "root" . "ref" "pyannoteServiceToken") -}}
+{{- $s3AccessKeyName := include "justai.secretRefName" (dict "root" . "ref" "s3AccessKey") -}}
+{{- $s3AccessKeyKey := include "justai.secretRefKey" (dict "root" . "ref" "s3AccessKey") -}}
+{{- $s3SecretKeyName := include "justai.secretRefName" (dict "root" . "ref" "s3SecretKey") -}}
+{{- $s3SecretKeyKey := include "justai.secretRefKey" (dict "root" . "ref" "s3SecretKey") -}}
 {{- $proxyHTTPConfigured := or $proxyHTTPValue $proxyHTTPRefName -}}
 {{- $proxyHTTPSConfigured := or $proxyHTTPSValue $proxyHTTPSRefName -}}
 {{- $proxyNoProxyConfigured := or $proxyNoProxyValue $proxyNoProxyRefName -}}
@@ -63,6 +82,9 @@
 {{- end }}
 {{- $trustedCAEnabled := or $trustedCAConfigMap $trustedCASecret -}}
 {{- $imageTag := .Values.pyannote.image.tag | default (printf "pyannote-%s" .Chart.AppVersion) -}}
+{{- $modelStoreEndpoint := .Values.pyannote.modelStore.endpoint | default .Values.config.transcription.s3ProcessingEndpoint | default .Values.config.transcription.s3Endpoint -}}
+{{- $modelStoreRegion := .Values.pyannote.modelStore.region | default .Values.config.transcription.s3Region -}}
+{{- $modelStoreBucket := .Values.pyannote.modelStore.bucket | default .Values.config.transcription.s3Bucket -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -121,6 +143,63 @@ spec:
             - name: trusted-ca-bundle
               mountPath: /output-ca
       {{- end }}
+      {{- if .Values.pyannote.modelStore.enabled }}
+      {{- if not $trustedCAEnabled }}
+      initContainers:
+      {{- end }}
+        - name: fetch-pyannote-models
+          image: "{{ .Values.pyannote.image.repository }}:{{ $imageTag }}"
+          imagePullPolicy: {{ .Values.pyannote.image.pullPolicy }}
+          {{- with .Values.pyannote.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- else }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- end }}
+          command: ["/opt/venv/bin/python", "/app/model_sync.py"]
+          env:
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3AccessKeyName | quote }}
+                  key: {{ $s3AccessKeyKey | quote }}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3SecretKeyName | quote }}
+                  key: {{ $s3SecretKeyKey | quote }}
+            - name: PYANNOTE_MODEL_S3_BUCKET
+              value: {{ $modelStoreBucket | quote }}
+            - name: PYANNOTE_MODEL_S3_PREFIX
+              value: {{ .Values.pyannote.modelStore.prefix | quote }}
+            - name: PYANNOTE_MODEL_S3_ENDPOINT
+              value: {{ $modelStoreEndpoint | quote }}
+            - name: PYANNOTE_MODEL_S3_REGION
+              value: {{ $modelStoreRegion | quote }}
+            - name: PYANNOTE_MODEL_S3_FORCE_PATH_STYLE
+              value: {{ .Values.pyannote.modelStore.forcePathStyle | quote }}
+            - name: PYANNOTE_MODEL_DESTINATION
+              value: /models
+            {{- if $trustedCAEnabled }}
+            - name: SSL_CERT_FILE
+              value: /tmp/trusted-ca/ca-certificates.crt
+            - name: REQUESTS_CA_BUNDLE
+              value: /tmp/trusted-ca/ca-certificates.crt
+            {{- end }}
+          volumeMounts:
+            - name: pyannote-models
+              mountPath: /models
+            {{- if $trustedCAEnabled }}
+            - name: trusted-ca-bundle
+              mountPath: /tmp/trusted-ca
+              readOnly: true
+            {{- end }}
+      {{- end }}
       containers:
         - name: pyannote
           image: "{{ .Values.pyannote.image.repository }}:{{ $imageTag }}"
@@ -159,6 +238,14 @@ spec:
               value: /tmp/huggingface
             - name: HUGGINGFACE_HUB_CACHE
               value: /tmp/huggingface/hub
+            {{- if .Values.pyannote.modelStore.enabled }}
+            - name: PYANNOTE_MODEL_PATH
+              value: /models/pyannote--speaker-diarization-3.1
+            - name: PYANNOTE_SEGMENTATION_MODEL_PATH
+              value: /models/pyannote--segmentation-3.0
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            {{- end }}
             {{- if $trustedCAEnabled }}
             - name: SSL_CERT_FILE
               value: /tmp/trusted-ca/ca-certificates.crt
@@ -195,7 +282,7 @@ spec:
                   name: {{ $proxyNoProxySecret | quote }}
                   key: {{ $proxyNoProxyKey | quote }}
             {{- end }}
-            {{- if or $globalSecretStore $hfTokenRefName }}
+            {{- if and (not .Values.pyannote.modelStore.enabled) (or $globalSecretStore $hfTokenRefName) }}
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -216,10 +303,17 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if .Values.pyannote.cache.persistence.enabled }}
+          {{- if or .Values.pyannote.cache.persistence.enabled .Values.pyannote.modelStore.enabled }}
           volumeMounts:
+            {{- if .Values.pyannote.modelStore.enabled }}
+            - name: pyannote-models
+              mountPath: /models
+              readOnly: true
+            {{- end }}
+            {{- if .Values.pyannote.cache.persistence.enabled }}
             - name: huggingface-cache
               mountPath: /tmp/huggingface
+            {{- end }}
             {{- if $trustedCAEnabled }}
             - name: trusted-ca-bundle
               mountPath: /tmp/trusted-ca
@@ -256,8 +350,12 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if or .Values.pyannote.cache.persistence.enabled $trustedCAEnabled }}
+      {{- if or .Values.pyannote.cache.persistence.enabled .Values.pyannote.modelStore.enabled $trustedCAEnabled }}
       volumes:
+        {{- if .Values.pyannote.modelStore.enabled }}
+        - name: pyannote-models
+          emptyDir: {}
+        {{- end }}
         {{- if .Values.pyannote.cache.persistence.enabled }}
         - name: huggingface-cache
           persistentVolumeClaim:

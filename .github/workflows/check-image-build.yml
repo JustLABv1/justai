@@ -54,6 +54,7 @@ jobs:
               - 'services/pyannote-diarizer/Dockerfile'
               - 'services/pyannote-diarizer/requirements.txt'
               - 'services/pyannote-diarizer/app.py'
+              - 'services/pyannote-diarizer/model_sync.py'
 
   frontend-compile:
     name: Frontend — Compile Check
@@ -219,7 +220,7 @@ jobs:
         with:
           python-version: '3.14.7'
       - name: Compile service
-        run: python -m py_compile services/pyannote-diarizer/app.py
+        run: python -m py_compile services/pyannote-diarizer/app.py services/pyannote-diarizer/model_sync.py
 
   pyannote-image-build:
     name: Pyannote — Docker Build Check

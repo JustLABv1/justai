@@ -150,6 +150,51 @@ pyannote:
 Do not disable TLS verification or set `SSL_CERT_FILE` manually when using
 this option; the chart sets it to the generated combined bundle.
 
+### Offline pyannote models from S3
+
+When cluster egress to Hugging Face is blocked, mirror the accepted model
+repositories into S3 and enable `pyannote.modelStore`. The init container
+downloads them into an `emptyDir` before the diarizer starts; the diarizer then
+runs with `HF_HUB_OFFLINE=1` and receives no Hugging Face token.
+
+The object layout must preserve the two directories produced by
+`snapshot_download`:
+
+```text
+s3://<bucket>/pyannote/pyannote--speaker-diarization-3.1/...
+s3://<bucket>/pyannote/pyannote--segmentation-3.0/...
+```
+
+Use the existing S3 secret references. The credentials only go to the init
+container, not to the running pyannote service:
+
+```yaml
+pyannote:
+  enabled: true
+  modelStore:
+    enabled: true
+    endpoint: https://s3.example.com
+    region: eu-central-1
+    bucket: justai-models
+    prefix: pyannote
+    # Required by many MinIO and other S3-compatible installations.
+    forcePathStyle: true
+
+secrets:
+  refs:
+    s3AccessKey:
+      name: justai-s3-credentials
+      key: s3-access-key
+    s3SecretKey:
+      name: justai-s3-credentials
+      key: s3-secret-key
+```
+
+When `endpoint`, `region`, or `bucket` are omitted, the chart falls back to
+the respective `config.transcription.s3ProcessingEndpoint` (then
+`s3Endpoint`), `s3Region`, and `s3Bucket` values. The S3 identity must be able
+to list the configured prefix and read its objects.
+
 The generated Kubernetes Service is reachable inside the namespace at:
 
 ```text

@@ -36,6 +36,17 @@ The Hugging Face client honors the standard `HTTP_PROXY`, `HTTPS_PROXY`, and
 proxy to reach Hugging Face; include the S3/media host in `NO_PROXY` when that
 traffic must stay on the internal network.
 
+## Offline model bundle
+
+For restricted production networks, the Helm chart can synchronize an internal
+S3 mirror into `/models` before this service starts. The bundle must contain
+both `pyannote--speaker-diarization-3.1` and `pyannote--segmentation-3.0`, as
+created by `huggingface_hub.snapshot_download`. Set
+`PYANNOTE_MODEL_PATH=/models/pyannote--speaker-diarization-3.1` and
+`PYANNOTE_SEGMENTATION_MODEL_PATH=/models/pyannote--segmentation-3.0`; in this
+mode the service patches the local pipeline configuration to use the local
+segmentation model and does not require `HF_TOKEN`.
+
 ## Run locally
 
 ```bash
