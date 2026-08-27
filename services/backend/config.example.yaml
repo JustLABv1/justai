@@ -28,8 +28,8 @@ transcription:
   local_storage_path: "./data/transcription"
   s3_endpoint: ""
   # Optional endpoint used only in presigned URLs sent to worker containers.
-  # Keep s3_endpoint browser-reachable; for Podman with MinIO on the host,
-  # use http://host.containers.internal:9000 here.
+  # s3_endpoint must be backend-reachable; for Podman with MinIO on the host,
+  # use http://host.containers.internal:9000 here when workers need it.
   s3_processing_endpoint: ""
   s3_region: "us-east-1"
   s3_bucket: ""

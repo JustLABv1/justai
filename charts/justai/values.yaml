@@ -52,9 +52,9 @@ config:
   transcription:
     storageDriver: local
     localStoragePath: /app/data/transcription
-    # The browser-facing endpoint must be reachable by clients for presigned
-    # multipart uploads. Use s3ProcessingEndpoint for a worker-only address
-    # when the backend/worker network differs from the browser network.
+    # The S3 endpoint must be reachable by the backend, which streams browser
+    # multipart uploads to it. Use s3ProcessingEndpoint when media workers
+    # require a different in-cluster address.
     s3Endpoint: ""
     s3ProcessingEndpoint: ""
     s3Region: us-east-1

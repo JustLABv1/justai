@@ -1789,6 +1789,19 @@ func (m *TranscriptionManager) expireVideoUploads(ctx context.Context) {
 			if err := storage.abortMultipart(ctx, item.key, item.multipartID); err != nil {
 				continue
 			}
+		} else if item.status == "cancelled" {
+			// Cancellation can race with multipart completion. Abort first so
+			// fully uploaded-but-uncommitted parts are not leaked. A missing
+			// multipart ID means completion or an earlier abort already won; in
+			// that case remove any completed object as well.
+			if err := storage.abortMultipart(ctx, item.key, item.multipartID); err != nil {
+				if !s3ErrorHasStatus(err, http.StatusNotFound) {
+					continue
+				}
+				if err := storage.delete(ctx, item.key); err != nil {
+					continue
+				}
+			}
 		} else if err := storage.delete(ctx, item.key); err != nil {
 			continue
 		}

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +37,11 @@ type s3ResponseError struct {
 
 func (e *s3ResponseError) Error() string {
 	return fmt.Sprintf("s3 request failed with status %d: %s", e.status, e.message)
+}
+
+func s3ErrorHasStatus(err error, status int) bool {
+	var responseErr *s3ResponseError
+	return errors.As(err, &responseErr) && responseErr.status == status
 }
 
 func newS3Storage(cfg config.Config) (*s3Storage, error) {
@@ -100,15 +106,25 @@ func (s *s3Storage) objectURLAt(endpoint *url.URL, key string) *url.URL {
 }
 
 func (s *s3Storage) request(ctx context.Context, method, key string, query url.Values, body []byte, contentType string) (*http.Response, error) {
+	return s.requestReader(ctx, method, key, query, bytes.NewReader(body), int64(len(body)), contentType, hashBytes(body))
+}
+
+// requestReader signs and sends a request without materializing its body in
+// memory. UNSIGNED-PAYLOAD is supported by S3-compatible services and avoids
+// buffering a multi-megabyte upload just to calculate the SigV4 payload hash.
+func (s *s3Storage) requestReader(ctx context.Context, method, key string, query url.Values, body io.Reader, contentLength int64, contentType, payloadHash string) (*http.Response, error) {
 	object := s.objectURL(key)
 	object.RawQuery = canonicalQuery(query)
-	payloadHash := hashBytes(body)
-	request, err := http.NewRequestWithContext(ctx, method, object.String(), bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, method, object.String(), body)
 	if err != nil {
 		return nil, err
 	}
 	request.Header.Set("Host", object.Host)
 	request.Header.Set("x-amz-content-sha256", payloadHash)
+	if contentLength >= 0 {
+		request.ContentLength = contentLength
+		request.Header.Set("Content-Length", strconv.FormatInt(contentLength, 10))
+	}
 	amzTime := time.Now().UTC()
 	request.Header.Set("x-amz-date", amzTime.Format("20060102T150405Z"))
 	if contentType != "" {
@@ -247,6 +263,37 @@ func (s *s3Storage) presignMultipartPart(key, uploadID string, partNumber int, l
 	return s.presignURL(http.MethodPut, key, query, lifetime)
 }
 
+type s3MultipartUploadResult struct {
+	PartNumber int
+	ETag       string
+	SizeBytes  int64
+}
+
+// uploadMultipartPart forwards exactly one video part to S3. The caller must
+// validate the part size before calling this method; Content-Length is signed
+// so the upstream cannot silently receive a different part size.
+func (s *s3Storage) uploadMultipartPart(ctx context.Context, key, uploadID string, partNumber int, body io.Reader, contentLength int64, contentType string) (s3MultipartUploadResult, error) {
+	query := url.Values{}
+	query.Set("partNumber", strconv.Itoa(partNumber))
+	query.Set("uploadId", uploadID)
+	response, err := s.requestReader(ctx, http.MethodPut, key, query, body, contentLength, contentType, "UNSIGNED-PAYLOAD")
+	if err != nil {
+		return s3MultipartUploadResult{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= http.StatusMultipleChoices {
+		return s3MultipartUploadResult{}, s3ErrorFromResponse(response)
+	}
+	if err := readS3Response(response); err != nil {
+		return s3MultipartUploadResult{}, err
+	}
+	etag := strings.TrimSpace(response.Header.Get("ETag"))
+	if etag == "" || len(etag) > 256 || strings.ContainsAny(etag, "\r\n") {
+		return s3MultipartUploadResult{}, fmt.Errorf("s3 multipart upload returned no valid ETag")
+	}
+	return s3MultipartUploadResult{PartNumber: partNumber, ETag: etag, SizeBytes: contentLength}, nil
+}
+
 func (s *s3Storage) completeMultipart(ctx context.Context, key, uploadID string, parts []s3MultipartPart) error {
 	payload, err := xml.Marshal(s3MultipartCompletion{Parts: parts})
 	if err != nil {
@@ -286,11 +333,20 @@ func (s *s3Storage) objectSize(ctx context.Context, key string) (int64, error) {
 
 func (s *s3Storage) completeMultipartAndVerify(ctx context.Context, key, uploadID string, parts []s3MultipartPart, expectedBytes int64) error {
 	if err := s.completeMultipart(ctx, key, uploadID, parts); err != nil {
-		return err
+		// Completion may have succeeded even when its response was lost, and a
+		// concurrent/retried request will see NoSuchUpload after the first one
+		// finalized it. Reconcile against the authoritative object before
+		// declaring the upload failed.
+		actualBytes, reconcileErr := s.objectSize(ctx, key)
+		if reconcileErr != nil || actualBytes != expectedBytes {
+			return err
+		}
+		return nil
 	}
 	actualBytes, err := s.objectSize(ctx, key)
 	if err != nil {
-		_ = s.delete(ctx, key)
+		// A transient HEAD failure must not destroy a successfully completed
+		// object. The caller can retry and reconcile it by size.
 		return fmt.Errorf("could not verify completed upload size: %w", err)
 	}
 	if actualBytes != expectedBytes {
