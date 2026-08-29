@@ -18,6 +18,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Plus,
+  Plug,
   RotateCcw,
   Search,
   Settings2,
@@ -106,6 +107,13 @@ const railNavigation: Array<{
     label: "Memory",
     hint: "Persistent preferences",
     icon: Brain,
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    hint: "GitHub, GitLab, and more",
+    icon: Plug,
+    feature: "mcp",
   },
 ]
 

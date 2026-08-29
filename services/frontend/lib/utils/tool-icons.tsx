@@ -13,6 +13,7 @@ import {
   FigmaIcon,
   Globe02Icon,
   GithubIcon,
+  GitlabIcon,
   Image02Icon,
   InformationCircleIcon,
   Link01Icon,
@@ -89,6 +90,12 @@ const iconConfigs: Record<string, IconConfig> = {
   },
   github: {
     icon: GithubIcon,
+    bgColor: "bg-zinc-700",
+    bgColorLight: "bg-zinc-200 dark:bg-zinc-700",
+    iconColor: "text-zinc-700 dark:text-zinc-200",
+  },
+  gitlab: {
+    icon: GitlabIcon,
     bgColor: "bg-zinc-700",
     bgColorLight: "bg-zinc-200 dark:bg-zinc-700",
     iconColor: "text-zinc-700 dark:text-zinc-200",
