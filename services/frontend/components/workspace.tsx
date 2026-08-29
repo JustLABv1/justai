@@ -12,6 +12,7 @@ import { ProfileView } from "@/components/profile-view"
 import { PlatformAdminShell } from "@/components/platform-admin-shell"
 import { SettingsShell } from "@/components/settings-shell"
 import { IntegrationsView } from "@/components/integrations-view"
+import { AutomationsView } from "@/components/automations-view"
 import { VideoTranscriptionView } from "@/components/video-transcription-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { AssistantsView } from "@/components/assistants-view"
@@ -39,6 +40,7 @@ import type {
   TranscriptionSession,
   Note,
   SavedAssistant,
+  Automation,
   WorkspaceProject,
 } from "@/lib/types"
 import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
@@ -89,6 +91,7 @@ export function Workspace() {
   const [servers, setServers] = useState<MCPServer[]>([])
   const [notes, setNotes] = useState<Note[]>([])
   const [savedAssistants, setSavedAssistants] = useState<SavedAssistant[]>([])
+  const [automations, setAutomations] = useState<Automation[]>([])
   const [projects, setProjects] = useState<WorkspaceProject[]>([])
   const [draftAssistantId, setDraftAssistantId] = useState<string | null>(null)
   const [actionError, setActionError] = useState("")
@@ -297,6 +300,7 @@ export function Workspace() {
                 api.get<{ notes: Note[] }>("/api/v1/notes"),
                 api.get<{ assistants: SavedAssistant[] }>("/api/v1/assistants"),
                 api.get<{ projects: WorkspaceProject[] }>("/api/v1/projects"),
+                api.get<{ automations: Automation[] }>("/api/v1/automations"),
               ])
         if (cancelled) return
 
@@ -367,6 +371,7 @@ export function Workspace() {
           9,
           "projects"
         )
+        const automationResult = valueAt<{ automations: Automation[] }>(10, "automations")
         if (conversationResult)
           setConversations(conversationResult.conversations)
         if (archivedConversationResult)
@@ -381,6 +386,7 @@ export function Workspace() {
         if (notesResult) setNotes(notesResult.notes)
         if (assistantResult) setSavedAssistants(assistantResult.assistants)
         if (projectResult) setProjects(projectResult.projects)
+        if (automationResult) setAutomations(automationResult.automations)
         setFeatureErrors(errors)
         setDisabledFeatures(disabled)
         setStatus("ready")
@@ -1244,6 +1250,14 @@ export function Workspace() {
                 onChange={setServers}
                 organization={activeOrganization}
                 user={user}
+              />
+            )}
+            {activeView === "automations" && (
+              <AutomationsView
+                automations={automations}
+                assistants={savedAssistants}
+                servers={servers}
+                onChange={setAutomations}
               />
             )}
             {activeView === "admin" && (
