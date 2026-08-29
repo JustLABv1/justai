@@ -350,6 +350,71 @@
   }
 }
 
+.justai-chat-mark {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  color: var(--primary);
+  transition: transform 180ms var(--motion-ease-out), filter 180ms ease, color 180ms ease;
+}
+
+.justai-chat-mark::after {
+  position: absolute;
+  inset: -12%;
+  border: 1px solid color-mix(in oklab, var(--primary) 42%, transparent);
+  border-radius: 50%;
+  content: "";
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+.justai-chat-mark[data-state="thinking"] {
+  filter: drop-shadow(0 0 8px color-mix(in oklab, var(--primary) 40%, transparent));
+  animation: justai-mark-focus 1.35s var(--motion-ease-in-out) infinite;
+}
+
+.justai-chat-mark[data-state="thinking"]::after {
+  animation: justai-mark-ring 1.35s var(--motion-ease-out) infinite;
+}
+
+.justai-chat-mark[data-state="complete"] {
+  color: var(--secondary-foreground);
+  animation: justai-mark-complete 240ms var(--motion-ease-out) 2;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .justai-chat-mark[data-state="idle"]:hover {
+    transform: translateY(-1px) rotate(-3deg);
+  }
+}
+
+@keyframes justai-mark-focus { 50% { transform: scale(1.055); } }
+@keyframes justai-mark-ring { 45% { opacity: 0.72; transform: scale(1.18); } 100% { opacity: 0; transform: scale(1.32); } }
+@keyframes justai-mark-complete { 50% { transform: translateY(-2px) scale(1.08); } }
+
+.chat-ambient {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.chat-ambient__orb {
+  position: absolute;
+  width: 22rem;
+  height: 22rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in oklab, var(--primary) 16%, transparent) 0%, transparent 68%);
+  filter: blur(2px);
+  will-change: transform;
+}
+
+.chat-ambient__orb--one { top: 12%; left: 14%; animation: chat-ambient-drift-one 14s var(--motion-ease-in-out) infinite alternate; }
+.chat-ambient__orb--two { right: 10%; bottom: 9%; width: 18rem; height: 18rem; background: radial-gradient(circle, color-mix(in oklab, var(--secondary) 19%, transparent) 0%, transparent 68%); animation: chat-ambient-drift-two 17s var(--motion-ease-in-out) infinite alternate; }
+.chat-ambient__orb--three { top: 50%; left: 49%; width: 13rem; height: 13rem; opacity: 0.7; animation: chat-ambient-drift-three 12s var(--motion-ease-in-out) infinite alternate; }
+
+@keyframes chat-ambient-drift-one { to { transform: translate3d(3rem, 1.5rem, 0) scale(1.1); } }
+@keyframes chat-ambient-drift-two { to { transform: translate3d(-2rem, -2rem, 0) scale(1.16); } }
+@keyframes chat-ambient-drift-three { to { transform: translate3d(-1rem, 2rem, 0) scale(0.85); } }
+
 @keyframes mcp-approval-border-shimmer {
   from {
     background-position: 0 0;
@@ -377,6 +442,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mcp-approval-shimmer {
+    animation: none;
+  }
+
+  .justai-chat-mark,
+  .justai-chat-mark::after,
+  .chat-ambient__orb {
     animation: none;
   }
 }

@@ -83,6 +83,7 @@ import {
 } from "@/components/assistant-ui/mcp-approval-context"
 import { createJustAIVoiceAdapter } from "@/components/assistant-ui/voice-adapter"
 import { BrandMark } from "@/components/brand-mark"
+import { ChatBrandMark } from "@/components/chat-brand-mark"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -1220,10 +1221,17 @@ function UserMessage() {
   )
 }
 
-function AssistantMessage() {
+function AssistantMessage({ isLatest }: { isLatest: boolean }) {
+  const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+
   return (
     <MessagePrimitive.Root className="group/message px-1 py-4 sm:px-4">
-      <div className="mx-auto flex w-full max-w-4xl flex-col items-start">
+      <div className="mx-auto flex w-full max-w-4xl items-start gap-3">
+        <ChatBrandMark
+          className="mt-1 size-5 shrink-0"
+          isActive={isLatest && isThreadRunning}
+        />
+        <div className="min-w-0 flex-1">
         <div className="w-full text-sm leading-7 text-foreground">
           <AssistantMessageParts />
         </div>
@@ -1240,8 +1248,31 @@ function AssistantMessage() {
           </div>
           <MessageTiming />
         </div>
+        </div>
       </div>
     </MessagePrimitive.Root>
+  )
+}
+
+function ChatAmbient() {
+  return (
+    <div aria-hidden="true" className="chat-ambient absolute inset-0 overflow-hidden">
+      <span className="chat-ambient__orb chat-ambient__orb--one" />
+      <span className="chat-ambient__orb chat-ambient__orb--two" />
+      <span className="chat-ambient__orb chat-ambient__orb--three" />
+    </div>
+  )
+}
+
+function ChatResponseActivity() {
+  const isRunning = useAuiState((state) => state.thread.isRunning)
+  if (!isRunning) return null
+
+  return (
+    <div aria-live="polite" className="mx-auto flex w-full max-w-4xl items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="status">
+      <ChatBrandMark className="size-5" />
+      <span>JustAI is thinking…</span>
+    </div>
   )
 }
 
@@ -1500,10 +1531,11 @@ function FollowStreamingResponse() {
 function EmptyThread({ children }: { children?: ReactNode }) {
   return (
     <ThreadPrimitive.Empty>
-      <div className="flex min-h-[calc(100svh-8rem)] w-full flex-col items-center justify-center px-5 py-12 text-center">
-        <div className="flex w-full max-w-3xl flex-col items-center">
+      <div className="relative flex min-h-[calc(100svh-8rem)] w-full flex-col items-center justify-center px-5 py-12 text-center">
+        <ChatAmbient />
+        <div className="z-10 flex w-full max-w-3xl flex-col items-center">
           <div className="mb-3 flex w-full items-center justify-center gap-3">
-            <BrandMark className="size-12 rounded-full" />
+            <ChatBrandMark className="size-12" />
             <span className="text-2xl font-semibold tracking-[-0.04em]">
               JustAI
             </span>
@@ -2430,6 +2462,13 @@ function AssistantThreadLayout({
   onVoiceErrorDismiss,
 }: AssistantThreadLayoutProps) {
   const isEmpty = useAuiState((state) => state.thread.messages.length === 0)
+  const latestAssistantMessageId = useAuiState((state) => {
+    for (let index = state.thread.messages.length - 1; index >= 0; index -= 1) {
+      const message = state.thread.messages[index]
+      if (message?.role === "assistant") return message.id
+    }
+    return null
+  })
   const voiceState = useVoiceState()
   const voiceActive =
     voiceState?.status.type === "starting" ||
@@ -2480,10 +2519,13 @@ function AssistantThreadLayout({
                     return message.role === "user" ? (
                       <UserMessage />
                     ) : (
-                      <AssistantMessage />
+                      <AssistantMessage
+                        isLatest={message.id === latestAssistantMessageId}
+                      />
                     )
                   }}
                 </ThreadPrimitive.Messages>
+                <ChatResponseActivity />
               </div>
             )}
           </div>
