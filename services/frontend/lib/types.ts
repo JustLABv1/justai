@@ -5,6 +5,7 @@ export type ViewId =
   | "endpoints"
   | "knowledge"
   | "integrations"
+  | "automations"
   | "mcp"
   | "notes"
   | "memory"
@@ -388,6 +389,31 @@ export type SavedAssistant = {
   deepContext: boolean
   createdAt: string
   updatedAt: string
+}
+
+export type Automation = {
+  id: string
+  name: string
+  prompt: string
+  assistantId?: string | null
+  schedule: string
+  timezone: string
+  mcpServerIds: string[]
+  approvalMode: "review" | "read_only_auto"
+  enabled: boolean
+  lastRunAt?: string | null
+  nextRunAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type AutomationRun = {
+  id: string
+  automationId: string
+  status: "queued" | "needs_review" | "completed" | "failed" | string
+  summary: string
+  startedAt: string
+  finishedAt?: string | null
 }
 
 export type Memory = {

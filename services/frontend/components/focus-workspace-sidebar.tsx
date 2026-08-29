@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   Archive,
+  CalendarClock,
   Bot,
   Brain,
   ChevronDown,
@@ -113,6 +114,13 @@ const railNavigation: Array<{
     label: "Integrations",
     hint: "GitHub, GitLab, and more",
     icon: Plug,
+    feature: "mcp",
+  },
+  {
+    id: "automations",
+    label: "Automations",
+    hint: "Scheduled assistant work",
+    icon: CalendarClock,
     feature: "mcp",
   },
 ]

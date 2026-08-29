@@ -7,6 +7,7 @@ const validViews: ViewId[] = [
   "endpoints",
   "knowledge",
   "integrations",
+  "automations",
   "mcp",
   "notes",
   "memory",

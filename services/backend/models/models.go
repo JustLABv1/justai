@@ -65,6 +65,34 @@ type SavedAssistant struct {
 	UpdatedAt    time.Time  `json:"updatedAt"`
 }
 
+// Automation is a persisted, user-owned instruction that can be run on a
+// schedule. MCP access is deliberately scoped per automation rather than
+// inheriting every connection available in a workspace.
+type Automation struct {
+	ID           uuid.UUID  `json:"id"`
+	Name         string     `json:"name"`
+	Prompt       string     `json:"prompt"`
+	AssistantID  *uuid.UUID `json:"assistantId,omitempty"`
+	Schedule     string     `json:"schedule"`
+	Timezone     string     `json:"timezone"`
+	MCPServerIDs []string   `json:"mcpServerIds"`
+	ApprovalMode string     `json:"approvalMode"`
+	Enabled      bool       `json:"enabled"`
+	LastRunAt    *time.Time `json:"lastRunAt,omitempty"`
+	NextRunAt    *time.Time `json:"nextRunAt,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+type AutomationRun struct {
+	ID           uuid.UUID  `json:"id"`
+	AutomationID uuid.UUID  `json:"automationId"`
+	Status       string     `json:"status"`
+	Summary      string     `json:"summary"`
+	StartedAt    time.Time  `json:"startedAt"`
+	FinishedAt   *time.Time `json:"finishedAt,omitempty"`
+}
+
 type ConversationFolder struct {
 	ID             uuid.UUID `json:"id"`
 	Name           string    `json:"name"`
