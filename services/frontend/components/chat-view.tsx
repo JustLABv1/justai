@@ -83,6 +83,7 @@ import {
 } from "@/components/assistant-ui/mcp-approval-context"
 import { createJustAIVoiceAdapter } from "@/components/assistant-ui/voice-adapter"
 import { BrandMark } from "@/components/brand-mark"
+import { ChatBrandMark } from "@/components/chat-brand-mark"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -1223,7 +1224,9 @@ function UserMessage() {
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group/message px-1 py-4 sm:px-4">
-      <div className="mx-auto flex w-full max-w-4xl flex-col items-start">
+      <div className="mx-auto flex w-full max-w-4xl items-start gap-3">
+        <BrandMark className="mt-1 size-5 shrink-0 text-primary/70" />
+        <div className="min-w-0 flex-1">
         <div className="w-full text-sm leading-7 text-foreground">
           <AssistantMessageParts />
         </div>
@@ -1240,8 +1243,21 @@ function AssistantMessage() {
           </div>
           <MessageTiming />
         </div>
+        </div>
       </div>
     </MessagePrimitive.Root>
+  )
+}
+
+function ChatResponseActivity() {
+  const isRunning = useAuiState((state) => state.thread.isRunning)
+  if (!isRunning) return null
+
+  return (
+    <div aria-live="polite" className="mx-auto flex w-full max-w-4xl items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="status">
+      <ChatBrandMark className="size-5" />
+      <span>JustAI is thinking…</span>
+    </div>
   )
 }
 
@@ -1503,7 +1519,7 @@ function EmptyThread({ children }: { children?: ReactNode }) {
       <div className="flex min-h-[calc(100svh-8rem)] w-full flex-col items-center justify-center px-5 py-12 text-center">
         <div className="flex w-full max-w-3xl flex-col items-center">
           <div className="mb-3 flex w-full items-center justify-center gap-3">
-            <BrandMark className="size-12 rounded-full" />
+            <ChatBrandMark className="size-12" />
             <span className="text-2xl font-semibold tracking-[-0.04em]">
               JustAI
             </span>
@@ -2484,6 +2500,7 @@ function AssistantThreadLayout({
                     )
                   }}
                 </ThreadPrimitive.Messages>
+                <ChatResponseActivity />
               </div>
             )}
           </div>
