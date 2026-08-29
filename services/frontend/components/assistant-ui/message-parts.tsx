@@ -461,7 +461,7 @@ export function AssistantMessageParts() {
   return (
     <MessagePrimitive.GroupedParts
       groupBy={groupAssistantParts}
-      indicator="no-text"
+      indicator="never"
     >
       {({ part, children }) => {
         if (part.type === "group-reasoning") {

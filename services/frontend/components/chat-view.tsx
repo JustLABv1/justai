@@ -1223,15 +1223,15 @@ function UserMessage() {
 
 function AssistantMessage({ isLatest }: { isLatest: boolean }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+  const isStreamingMessage = isLatest && isThreadRunning
 
   return (
     <MessagePrimitive.Root className="group/message px-1 py-4 sm:px-4">
       <div className="mx-auto flex w-full max-w-4xl items-start gap-3">
-        <ChatBrandMark
-          className="mt-1 size-5 shrink-0"
-          isActive={isLatest && isThreadRunning}
-        />
-        <div className="min-w-0 flex-1">
+        {!isStreamingMessage ? (
+          <ChatBrandMark className="mt-1 size-5 shrink-0" />
+        ) : null}
+        <div className={cn("min-w-0 flex-1", isStreamingMessage && "pl-8")}>
         <div className="w-full text-sm leading-7 text-foreground">
           <AssistantMessageParts />
         </div>
@@ -1241,13 +1241,16 @@ function AssistantMessage({ isLatest }: { isLatest: boolean }) {
             <ErrorPrimitive.Message />
           </ErrorPrimitive.Root>
         </MessagePrimitive.Error>
-        <div className="flex w-full items-center gap-2">
-          <div className="flex items-center gap-2">
-            <MessageActions assistant />
-            <BranchPicker />
+        {!isStreamingMessage ? (
+          <div className="flex w-full items-center gap-2">
+            <div className="flex items-center gap-2">
+              <MessageActions assistant />
+              <BranchPicker />
+            </div>
+            <MessageTiming />
           </div>
-          <MessageTiming />
-        </div>
+        ) : null}
+        <ChatResponseActivity isLatest={isLatest} />
         </div>
       </div>
     </MessagePrimitive.Root>
@@ -1264,14 +1267,75 @@ function ChatAmbient() {
   )
 }
 
-function ChatResponseActivity() {
+function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
   const isRunning = useAuiState((state) => state.thread.isRunning)
-  if (!isRunning) return null
+  const latestAssistantMessage = useAuiState((state) => {
+    for (let index = state.thread.messages.length - 1; index >= 0; index -= 1) {
+      const message = state.thread.messages[index]
+      if (message?.role === "assistant") return message
+    }
+    return undefined
+  })
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+
+  useEffect(() => {
+    if (!isRunning) return
+
+    const startedAt = Date.now()
+    const updateElapsedTime = () => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+    }
+    const initialUpdate = window.setTimeout(updateElapsedTime, 0)
+    const interval = window.setInterval(() => {
+      updateElapsedTime()
+    }, 750)
+
+    return () => {
+      window.clearTimeout(initialUpdate)
+      window.clearInterval(interval)
+    }
+  }, [isRunning])
+
+  const status = useMemo(() => {
+    const toolCall = latestAssistantMessage?.parts.find(
+      (part) => part.type === "tool-call"
+    )
+
+    if (toolCall?.type === "tool-call") {
+      if (["web_search", "browse_url"].includes(toolCall.toolName)) {
+        return "Searching sources"
+      }
+      if (["generate_image", "edit_image"].includes(toolCall.toolName)) {
+        return "Creating image"
+      }
+      if (toolCall.toolName === "create_pdf") return "Creating document"
+      return `Using ${toolCall.toolName.replaceAll("_", " ")}`
+    }
+
+    const streamedText = latestAssistantMessage?.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("")
+      .trim()
+
+    if (streamedText) return "Writing answer"
+    if (elapsedSeconds >= 3) return "Planning a helpful answer"
+    return "Understanding your request"
+  }, [elapsedSeconds, latestAssistantMessage])
+
+  if (!isRunning || !isLatest) return null
 
   return (
-    <div aria-live="polite" className="mx-auto flex w-full max-w-4xl items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="status">
-      <ChatBrandMark className="size-5" />
-      <span>JustAI is thinking…</span>
+    <div aria-live="polite" className="-ml-8 mt-2 flex min-h-5 items-center gap-2 text-xs text-muted-foreground" role="status">
+      <ChatBrandMark className="size-5 shrink-0" isActive />
+      <span className="flex items-center gap-1.5">
+        <span>{status}</span>
+        <span aria-hidden="true" className="flex items-center gap-0.5">
+          <i className="size-1 animate-pulse rounded-full bg-primary" />
+          <i className="size-1 animate-pulse rounded-full bg-primary [animation-delay:150ms]" />
+          <i className="size-1 animate-pulse rounded-full bg-primary [animation-delay:300ms]" />
+        </span>
+      </span>
     </div>
   )
 }
@@ -2603,7 +2667,6 @@ function AssistantThreadLayout({
                     )
                   }}
                 </ThreadPrimitive.Messages>
-                <ChatResponseActivity />
               </div>
             )}
           </div>
