@@ -1276,6 +1276,84 @@ function ChatResponseActivity() {
   )
 }
 
+function ConversationRail() {
+  const messages = useAuiState((state) => state.thread.messages)
+  const [previewMessageId, setPreviewMessageId] = useState<string | null>(null)
+
+  if (messages.length < 2) return null
+
+  const jumpTo = (id: string) => {
+    const target = document.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(id)}"]`
+    )
+    target?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }
+
+  return (
+    <nav
+      aria-label="Conversation navigation"
+      className="absolute inset-y-20 left-3 z-20 hidden w-5 lg:flex lg:items-center"
+    >
+      <div className="relative h-[min(36vh,15rem)] w-full">
+        <span
+          aria-hidden="true"
+          className="absolute top-0 bottom-0 left-1/2 w-px -translate-x-1/2 bg-border"
+        />
+        {messages.map((message, index) => {
+          const position = `${((index + 0.5) / messages.length) * 100}%`
+          const assistant = message.role === "assistant"
+          const preview = message.parts
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim()
+          const previewExcerpt =
+            preview.length > 140 ? `${preview.slice(0, 137).trimEnd()}…` : preview
+          return (
+            <button
+              aria-label={`Jump to ${assistant ? "assistant response" : "your message"} ${index + 1}`}
+              aria-describedby={previewMessageId === message.id ? `conversation-preview-${message.id}` : undefined}
+              className="group absolute left-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              key={message.id}
+              onClick={() => jumpTo(message.id)}
+              onBlur={() => setPreviewMessageId(null)}
+              onFocus={() => setPreviewMessageId(message.id)}
+              onMouseEnter={() => setPreviewMessageId(message.id)}
+              onMouseLeave={() => setPreviewMessageId(null)}
+              style={{ top: position }}
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "h-px transition-colors group-hover:bg-foreground",
+                  assistant ? "w-3 bg-primary/80" : "w-2 bg-muted-foreground/60"
+                )}
+              />
+              {previewMessageId === message.id ? (
+                <span
+                  className="pointer-events-none absolute left-full top-1/2 z-30 ml-2 w-52 -translate-y-1/2 rounded-lg border border-border/80 bg-popover px-3 py-2 text-left shadow-lg"
+                  id={`conversation-preview-${message.id}`}
+                  role="tooltip"
+                >
+                  <span className="block text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                    {assistant ? "JustAI" : "You"}
+                  </span>
+                  <span className="mt-1 block line-clamp-3 text-xs leading-5 text-popover-foreground">
+                    {previewExcerpt ||
+                      (assistant ? "Response with context or tools" : "Message")}
+                  </span>
+                </span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+    </nav>
+  )
+}
+
 function MessageAttachments() {
   return (
     <MessagePrimitive.Attachments>
@@ -2489,7 +2567,7 @@ function AssistantThreadLayout({
 
   return (
     <MCPApprovalProvider>
-      <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
         <SelectionToolbarPrimitive.Root className="z-50 flex items-center gap-1 rounded-lg border bg-background/95 p-1 text-xs text-foreground shadow-lg backdrop-blur">
           <SelectionToolbarPrimitive.Quote className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
             <Quote className="size-3.5" aria-hidden="true" />
@@ -2539,6 +2617,7 @@ function AssistantThreadLayout({
             </ThreadPrimitive.ViewportFooter>
           )}
         </ThreadPrimitive.Viewport>
+        <ConversationRail />
       </ThreadPrimitive.Root>
     </MCPApprovalProvider>
   )
