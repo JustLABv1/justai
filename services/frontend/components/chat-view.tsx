@@ -1221,11 +1221,16 @@ function UserMessage() {
   )
 }
 
-function AssistantMessage() {
+function AssistantMessage({ isLatest }: { isLatest: boolean }) {
+  const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+
   return (
     <MessagePrimitive.Root className="group/message px-1 py-4 sm:px-4">
       <div className="mx-auto flex w-full max-w-4xl items-start gap-3">
-        <BrandMark className="mt-1 size-5 shrink-0 text-primary/70" />
+        <ChatBrandMark
+          className="mt-1 size-5 shrink-0"
+          isActive={isLatest && isThreadRunning}
+        />
         <div className="min-w-0 flex-1">
         <div className="w-full text-sm leading-7 text-foreground">
           <AssistantMessageParts />
@@ -1246,6 +1251,16 @@ function AssistantMessage() {
         </div>
       </div>
     </MessagePrimitive.Root>
+  )
+}
+
+function ChatAmbient() {
+  return (
+    <div aria-hidden="true" className="chat-ambient absolute inset-0 overflow-hidden">
+      <span className="chat-ambient__orb chat-ambient__orb--one" />
+      <span className="chat-ambient__orb chat-ambient__orb--two" />
+      <span className="chat-ambient__orb chat-ambient__orb--three" />
+    </div>
   )
 }
 
@@ -1516,8 +1531,9 @@ function FollowStreamingResponse() {
 function EmptyThread({ children }: { children?: ReactNode }) {
   return (
     <ThreadPrimitive.Empty>
-      <div className="flex min-h-[calc(100svh-8rem)] w-full flex-col items-center justify-center px-5 py-12 text-center">
-        <div className="flex w-full max-w-3xl flex-col items-center">
+      <div className="relative flex min-h-[calc(100svh-8rem)] w-full flex-col items-center justify-center px-5 py-12 text-center">
+        <ChatAmbient />
+        <div className="z-10 flex w-full max-w-3xl flex-col items-center">
           <div className="mb-3 flex w-full items-center justify-center gap-3">
             <ChatBrandMark className="size-12" />
             <span className="text-2xl font-semibold tracking-[-0.04em]">
@@ -2446,6 +2462,13 @@ function AssistantThreadLayout({
   onVoiceErrorDismiss,
 }: AssistantThreadLayoutProps) {
   const isEmpty = useAuiState((state) => state.thread.messages.length === 0)
+  const latestAssistantMessageId = useAuiState((state) => {
+    for (let index = state.thread.messages.length - 1; index >= 0; index -= 1) {
+      const message = state.thread.messages[index]
+      if (message?.role === "assistant") return message.id
+    }
+    return null
+  })
   const voiceState = useVoiceState()
   const voiceActive =
     voiceState?.status.type === "starting" ||
@@ -2496,7 +2519,9 @@ function AssistantThreadLayout({
                     return message.role === "user" ? (
                       <UserMessage />
                     ) : (
-                      <AssistantMessage />
+                      <AssistantMessage
+                        isLatest={message.id === latestAssistantMessageId}
+                      />
                     )
                   }}
                 </ThreadPrimitive.Messages>

@@ -8,19 +8,24 @@ import { cn } from "@/lib/utils"
 
 type ChatBrandMarkProps = {
   className?: string
+  isActive?: boolean
 }
 
 /** The JustAI mark doubles as a quiet, contextual chat-status indicator. */
-export function ChatBrandMark({ className }: ChatBrandMarkProps) {
-  const isRunning = useAuiState((state) => state.thread.isRunning)
+export function ChatBrandMark({
+  className,
+  isActive,
+}: ChatBrandMarkProps) {
+  const threadIsRunning = useAuiState((state) => state.thread.isRunning)
+  const active = isActive ?? threadIsRunning
   const wasRunning = useRef(false)
   const timer = useRef<number | null>(null)
   const [celebrating, setCelebrating] = useState(false)
 
   useEffect(() => {
     if (timer.current) window.clearTimeout(timer.current)
-    const completed = wasRunning.current && !isRunning
-    wasRunning.current = isRunning
+    const completed = wasRunning.current && !active
+    wasRunning.current = active
 
     if (completed) {
       timer.current = window.setTimeout(() => {
@@ -32,9 +37,9 @@ export function ChatBrandMark({ className }: ChatBrandMarkProps) {
     return () => {
       if (timer.current) window.clearTimeout(timer.current)
     }
-  }, [isRunning])
+  }, [active])
 
-  const state = isRunning ? "thinking" : celebrating ? "complete" : "idle"
+  const state = active ? "thinking" : celebrating ? "complete" : "idle"
   const label =
     state === "thinking"
       ? "JustAI is working"

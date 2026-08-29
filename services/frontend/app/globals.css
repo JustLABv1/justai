@@ -392,6 +392,29 @@
 @keyframes justai-mark-ring { 45% { opacity: 0.72; transform: scale(1.18); } 100% { opacity: 0; transform: scale(1.32); } }
 @keyframes justai-mark-complete { 50% { transform: translateY(-2px) scale(1.08); } }
 
+.chat-ambient {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.chat-ambient__orb {
+  position: absolute;
+  width: 22rem;
+  height: 22rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in oklab, var(--primary) 16%, transparent) 0%, transparent 68%);
+  filter: blur(2px);
+  will-change: transform;
+}
+
+.chat-ambient__orb--one { top: 12%; left: 14%; animation: chat-ambient-drift-one 14s var(--motion-ease-in-out) infinite alternate; }
+.chat-ambient__orb--two { right: 10%; bottom: 9%; width: 18rem; height: 18rem; background: radial-gradient(circle, color-mix(in oklab, var(--secondary) 19%, transparent) 0%, transparent 68%); animation: chat-ambient-drift-two 17s var(--motion-ease-in-out) infinite alternate; }
+.chat-ambient__orb--three { top: 50%; left: 49%; width: 13rem; height: 13rem; opacity: 0.7; animation: chat-ambient-drift-three 12s var(--motion-ease-in-out) infinite alternate; }
+
+@keyframes chat-ambient-drift-one { to { transform: translate3d(3rem, 1.5rem, 0) scale(1.1); } }
+@keyframes chat-ambient-drift-two { to { transform: translate3d(-2rem, -2rem, 0) scale(1.16); } }
+@keyframes chat-ambient-drift-three { to { transform: translate3d(-1rem, 2rem, 0) scale(0.85); } }
+
 @keyframes mcp-approval-border-shimmer {
   from {
     background-position: 0 0;
@@ -423,7 +446,8 @@
   }
 
   .justai-chat-mark,
-  .justai-chat-mark::after {
+  .justai-chat-mark::after,
+  .chat-ambient__orb {
     animation: none;
   }
 }
