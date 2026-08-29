@@ -148,7 +148,10 @@ const toolLabels: Record<string, string> = {
   create_pdf: "Create PDF",
 }
 
-function toolCategory(toolName: string) {
+function toolCategory(toolName: string, serverName?: string) {
+  const provider = `${serverName ?? ""} ${toolName}`.toLowerCase()
+  if (provider.includes("github")) return "github"
+  if (provider.includes("gitlab")) return "gitlab"
   if (toolName === "web_search") return "web_search"
   if (toolName === "browse_url") return "browse_url"
   if (toolName === "generate_image") return "generate_image"
@@ -282,7 +285,7 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
         return [
           {
             tool_name: part.toolName,
-            tool_category: toolCategory(part.toolName),
+            tool_category: toolCategory(part.toolName, displayMetadata.serverName),
             message: toolLabel(part.toolName, displayMetadata.toolName),
             show_category: true,
             tool_call_id: part.toolCallId,
@@ -461,7 +464,7 @@ export function AssistantMessageParts() {
   return (
     <MessagePrimitive.GroupedParts
       groupBy={groupAssistantParts}
-      indicator="no-text"
+      indicator="never"
     >
       {({ part, children }) => {
         if (part.type === "group-reasoning") {

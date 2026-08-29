@@ -4,6 +4,7 @@ export type ViewId =
   | "video-transcription"
   | "endpoints"
   | "knowledge"
+  | "integrations"
   | "mcp"
   | "notes"
   | "memory"

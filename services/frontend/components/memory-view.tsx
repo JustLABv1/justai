@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Brain, Plus, Trash2 } from "lucide-react"
+import { Brain, Plus, Power, Trash2 } from "lucide-react"
 
 import { api } from "@/lib/api"
 import type { Memory } from "@/lib/types"
@@ -90,6 +90,32 @@ export function MemoryView() {
     }
   }
 
+  async function setAllMemories(enabled: boolean) {
+    const targets = memories.filter((memory) => memory.enabled !== enabled)
+    if (targets.length === 0) return
+    setSaving(true)
+    try {
+      const updated = await Promise.all(
+        targets.map((memory) =>
+          api.patch<{ memory: Memory }>(`/api/v1/memories/${memory.id}`, {
+            enabled,
+          })
+        )
+      )
+      const byId = new Map(updated.map(({ memory }) => [memory.id, memory]))
+      setMemories((current) =>
+        current.map((memory) => byId.get(memory.id) ?? memory)
+      )
+      setError("")
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Memories could not be updated.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const enabledCount = memories.filter((memory) => memory.enabled).length
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <div>
@@ -101,6 +127,31 @@ export function MemoryView() {
           Save stable preferences and facts you want JustAI to use in future chats.
           You can disable or remove any memory at any time.
         </p>
+        {!loading && memories.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">
+              {enabledCount} of {memories.length} active
+            </Badge>
+            <Button
+              disabled={saving || enabledCount === memories.length}
+              onClick={() => void setAllMemories(true)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Power data-icon="inline-start" /> Enable all
+            </Button>
+            <Button
+              disabled={saving || enabledCount === 0}
+              onClick={() => void setAllMemories(false)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Disable all
+            </Button>
+          </div>
+        )}
       </div>
 
       {error && (

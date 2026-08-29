@@ -11,6 +11,7 @@ import { NotesView } from "@/components/notes-view"
 import { ProfileView } from "@/components/profile-view"
 import { PlatformAdminShell } from "@/components/platform-admin-shell"
 import { SettingsShell } from "@/components/settings-shell"
+import { IntegrationsView } from "@/components/integrations-view"
 import { VideoTranscriptionView } from "@/components/video-transcription-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { AssistantsView } from "@/components/assistants-view"
@@ -1235,6 +1236,14 @@ export function Workspace() {
                 assistants={savedAssistants}
                 endpoints={endpoints}
                 onChange={setSavedAssistants}
+              />
+            )}
+            {activeView === "integrations" && (
+              <IntegrationsView
+                servers={servers}
+                onChange={setServers}
+                organization={activeOrganization}
+                user={user}
               />
             )}
             {activeView === "admin" && (

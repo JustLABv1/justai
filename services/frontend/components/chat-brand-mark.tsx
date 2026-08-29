@@ -24,8 +24,8 @@ export function ChatBrandMark({
 
   useEffect(() => {
     if (timer.current) window.clearTimeout(timer.current)
-    const completed = wasRunning.current && !active
-    wasRunning.current = active
+  const completed = wasRunning.current && !active
+  wasRunning.current = active
 
     if (completed) {
       timer.current = window.setTimeout(() => {

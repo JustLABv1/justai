@@ -1223,15 +1223,15 @@ function UserMessage() {
 
 function AssistantMessage({ isLatest }: { isLatest: boolean }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+  const isStreamingMessage = isLatest && isThreadRunning
 
   return (
     <MessagePrimitive.Root className="group/message px-1 py-4 sm:px-4">
       <div className="mx-auto flex w-full max-w-4xl items-start gap-3">
-        <ChatBrandMark
-          className="mt-1 size-5 shrink-0"
-          isActive={isLatest && isThreadRunning}
-        />
-        <div className="min-w-0 flex-1">
+        {!isStreamingMessage ? (
+          <ChatBrandMark className="mt-1 size-5 shrink-0" />
+        ) : null}
+        <div className={cn("min-w-0 flex-1", isStreamingMessage && "pl-8")}>
         <div className="w-full text-sm leading-7 text-foreground">
           <AssistantMessageParts />
         </div>
@@ -1241,13 +1241,16 @@ function AssistantMessage({ isLatest }: { isLatest: boolean }) {
             <ErrorPrimitive.Message />
           </ErrorPrimitive.Root>
         </MessagePrimitive.Error>
-        <div className="flex w-full items-center gap-2">
-          <div className="flex items-center gap-2">
-            <MessageActions assistant />
-            <BranchPicker />
+        {!isStreamingMessage ? (
+          <div className="flex w-full items-center gap-2">
+            <div className="flex items-center gap-2">
+              <MessageActions assistant />
+              <BranchPicker />
+            </div>
+            <MessageTiming />
           </div>
-          <MessageTiming />
-        </div>
+        ) : null}
+        <ChatResponseActivity isLatest={isLatest} />
         </div>
       </div>
     </MessagePrimitive.Root>
@@ -1264,15 +1267,154 @@ function ChatAmbient() {
   )
 }
 
-function ChatResponseActivity() {
+function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
   const isRunning = useAuiState((state) => state.thread.isRunning)
-  if (!isRunning) return null
+  const latestAssistantMessage = useAuiState((state) => {
+    for (let index = state.thread.messages.length - 1; index >= 0; index -= 1) {
+      const message = state.thread.messages[index]
+      if (message?.role === "assistant") return message
+    }
+    return undefined
+  })
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+
+  useEffect(() => {
+    if (!isRunning) return
+
+    const startedAt = Date.now()
+    const updateElapsedTime = () => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+    }
+    const initialUpdate = window.setTimeout(updateElapsedTime, 0)
+    const interval = window.setInterval(() => {
+      updateElapsedTime()
+    }, 750)
+
+    return () => {
+      window.clearTimeout(initialUpdate)
+      window.clearInterval(interval)
+    }
+  }, [isRunning])
+
+  const status = useMemo(() => {
+    const toolCall = latestAssistantMessage?.parts.find(
+      (part) => part.type === "tool-call"
+    )
+
+    if (toolCall?.type === "tool-call") {
+      if (["web_search", "browse_url"].includes(toolCall.toolName)) {
+        return "Searching sources"
+      }
+      if (["generate_image", "edit_image"].includes(toolCall.toolName)) {
+        return "Creating image"
+      }
+      if (toolCall.toolName === "create_pdf") return "Creating document"
+      return `Using ${toolCall.toolName.replaceAll("_", " ")}`
+    }
+
+    const streamedText = latestAssistantMessage?.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("")
+      .trim()
+
+    if (streamedText) return "Writing answer"
+    if (elapsedSeconds >= 3) return "Planning a helpful answer"
+    return "Understanding your request"
+  }, [elapsedSeconds, latestAssistantMessage])
+
+  if (!isRunning || !isLatest) return null
 
   return (
-    <div aria-live="polite" className="mx-auto flex w-full max-w-4xl items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="status">
-      <ChatBrandMark className="size-5" />
-      <span>JustAI is thinking…</span>
+    <div aria-live="polite" className="-ml-8 mt-2 flex min-h-5 items-center gap-2 text-xs text-muted-foreground" role="status">
+      <ChatBrandMark className="size-5 shrink-0" isActive />
+      <span className="flex items-center gap-1.5">
+        <span>{status}</span>
+        <span aria-hidden="true" className="flex items-center gap-0.5">
+          <i className="size-1 animate-pulse rounded-full bg-primary" />
+          <i className="size-1 animate-pulse rounded-full bg-primary [animation-delay:150ms]" />
+          <i className="size-1 animate-pulse rounded-full bg-primary [animation-delay:300ms]" />
+        </span>
+      </span>
     </div>
+  )
+}
+
+function ConversationRail() {
+  const messages = useAuiState((state) => state.thread.messages)
+  const [previewMessageId, setPreviewMessageId] = useState<string | null>(null)
+
+  if (messages.length < 2) return null
+
+  const jumpTo = (id: string) => {
+    const target = document.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(id)}"]`
+    )
+    target?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }
+
+  return (
+    <nav
+      aria-label="Conversation navigation"
+      className="absolute inset-y-20 left-3 z-20 hidden w-5 lg:flex lg:items-center"
+    >
+      <div className="relative h-[min(36vh,15rem)] w-full">
+        <span
+          aria-hidden="true"
+          className="absolute top-0 bottom-0 left-1/2 w-px -translate-x-1/2 bg-border"
+        />
+        {messages.map((message, index) => {
+          const position = `${((index + 0.5) / messages.length) * 100}%`
+          const assistant = message.role === "assistant"
+          const preview = message.parts
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim()
+          const previewExcerpt =
+            preview.length > 140 ? `${preview.slice(0, 137).trimEnd()}…` : preview
+          return (
+            <button
+              aria-label={`Jump to ${assistant ? "assistant response" : "your message"} ${index + 1}`}
+              aria-describedby={previewMessageId === message.id ? `conversation-preview-${message.id}` : undefined}
+              className="group absolute left-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              key={message.id}
+              onClick={() => jumpTo(message.id)}
+              onBlur={() => setPreviewMessageId(null)}
+              onFocus={() => setPreviewMessageId(message.id)}
+              onMouseEnter={() => setPreviewMessageId(message.id)}
+              onMouseLeave={() => setPreviewMessageId(null)}
+              style={{ top: position }}
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "h-px transition-colors group-hover:bg-foreground",
+                  assistant ? "w-3 bg-primary/80" : "w-2 bg-muted-foreground/60"
+                )}
+              />
+              {previewMessageId === message.id ? (
+                <span
+                  className="pointer-events-none absolute left-full top-1/2 z-30 ml-2 w-52 -translate-y-1/2 rounded-lg border border-border/80 bg-popover px-3 py-2 text-left shadow-lg"
+                  id={`conversation-preview-${message.id}`}
+                  role="tooltip"
+                >
+                  <span className="block text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                    {assistant ? "JustAI" : "You"}
+                  </span>
+                  <span className="mt-1 block line-clamp-3 text-xs leading-5 text-popover-foreground">
+                    {previewExcerpt ||
+                      (assistant ? "Response with context or tools" : "Message")}
+                  </span>
+                </span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+    </nav>
   )
 }
 
@@ -2489,7 +2631,7 @@ function AssistantThreadLayout({
 
   return (
     <MCPApprovalProvider>
-      <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
         <SelectionToolbarPrimitive.Root className="z-50 flex items-center gap-1 rounded-lg border bg-background/95 p-1 text-xs text-foreground shadow-lg backdrop-blur">
           <SelectionToolbarPrimitive.Quote className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
             <Quote className="size-3.5" aria-hidden="true" />
@@ -2525,7 +2667,6 @@ function AssistantThreadLayout({
                     )
                   }}
                 </ThreadPrimitive.Messages>
-                <ChatResponseActivity />
               </div>
             )}
           </div>
@@ -2539,6 +2680,7 @@ function AssistantThreadLayout({
             </ThreadPrimitive.ViewportFooter>
           )}
         </ThreadPrimitive.Viewport>
+        <ConversationRail />
       </ThreadPrimitive.Root>
     </MCPApprovalProvider>
   )

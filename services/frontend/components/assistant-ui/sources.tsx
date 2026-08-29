@@ -1,6 +1,6 @@
 "use client"
 
-import { FileText } from "lucide-react"
+import { Database, ExternalLink, FileText, ShieldCheck } from "lucide-react"
 import {
   useAui,
   useAuiState,
@@ -23,6 +23,9 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
   const chunkIndex =
     typeof metadata?.chunkIndex === "number" ? metadata.chunkIndex : undefined
   const quoteText = snippet || part.title || part.id
+  const isExternal = Boolean(part.url)
+  const provenance = isExternal ? "External source" : "Workspace source"
+  const trustLabel = isExternal ? "Linked source" : "Attached context"
 
   return (
     <details className="my-2 max-w-xl rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs">
@@ -32,8 +35,20 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
           aria-hidden="true"
         />
         <span className="truncate">{part.title ?? "Source"}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] font-normal text-muted-foreground">
+          <ShieldCheck className="size-3 text-primary" aria-hidden="true" />
+          {trustLabel}
+        </span>
       </summary>
       <div className="mt-2 space-y-1 whitespace-pre-wrap text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-[11px]">
+          {isExternal ? (
+            <ExternalLink className="size-3" aria-hidden="true" />
+          ) : (
+            <Database className="size-3" aria-hidden="true" />
+          )}
+          <span>{provenance}</span>
+        </div>
         {part.url && (
           <a
             className="break-all text-primary underline-offset-2 hover:underline"
