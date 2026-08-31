@@ -536,16 +536,19 @@ export function FocusWorkspaceSidebar({
             const beginsGroup = index === 0 || navigation[index - 1]?.group !== item.group
             return (
               <Fragment key={item.id}>
-                {railExpanded && beginsGroup && (
-                  <p
-                    className={cn(
-                      "px-3 text-[10px] font-medium tracking-[0.14em] text-muted-foreground/80 uppercase",
-                      index > 0 && "mt-3"
-                    )}
-                  >
-                    {item.group}
-                  </p>
-                )}
+                {beginsGroup &&
+                  (railExpanded ? (
+                    <p
+                      className={cn(
+                        "px-3 text-[10px] font-medium tracking-[0.14em] text-muted-foreground/80 uppercase",
+                        index > 0 && "mt-3"
+                      )}
+                    >
+                      {item.group}
+                    </p>
+                  ) : (
+                    index > 0 && <Separator className="my-1 w-5" />
+                  ))}
               <Button
                 aria-current={active ? "page" : undefined}
                 aria-label={item.label}
