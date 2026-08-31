@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type Dispatch,
@@ -36,6 +37,7 @@ import {
   providerDetails,
   providerSupports,
   providersForKind,
+  timeoutForProvider,
   type DiscoveredChatModel,
   type EndpointForm,
   type SupportedProvider,
@@ -247,6 +249,12 @@ export function EndpointCreationWizard({
   const [verifiedSignature, setVerifiedSignature] = useState("")
   const [verificationOverride, setVerificationOverride] = useState(false)
 
+  useEffect(() => {
+    if (form.providerType === "pyannote") {
+      setRuntimeOpen(true)
+    }
+  }, [form.providerType])
+
   const isEditing = Boolean(editingEndpoint)
   const availableProviders = useMemo(() => {
     const matching = providersForKind(providers, form.endpointKind)
@@ -289,10 +297,7 @@ export function EndpointCreationWizard({
       baseUrl: provider?.baseUrl ?? current.baseUrl,
       useForChat: endpointKind === "llm",
       diarization: endpointKind === "diarization" || current.diarization,
-      timeoutSeconds:
-        endpointKind === "diarization" && providerType === "pyannote"
-          ? 1800
-          : current.timeoutSeconds,
+      timeoutSeconds: timeoutForProvider(providerType, current.timeoutSeconds),
       isDefault: endpointKind === "llm" ? current.isDefault : false,
     }))
   }
@@ -1298,11 +1303,19 @@ function ConfigureStep({
                   id="endpoint-timeout"
                   type="number"
                   min={1}
+                  step={1}
                   value={form.timeoutSeconds}
                   onChange={(event) =>
                     update("timeoutSeconds", Number(event.target.value))
                   }
                 />
+                {form.providerType === "pyannote" && (
+                  <FieldDescription>
+                    Maximum time JustAI waits for one full-video diarization.
+                    The default is 30 minutes; increase it for long videos or
+                    CPU-only deployments.
+                  </FieldDescription>
+                )}
               </Field>
               <Field>
                 <FieldLabel htmlFor="endpoint-max-tokens">

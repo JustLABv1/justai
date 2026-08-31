@@ -83,6 +83,24 @@ export const defaults: EndpointForm = {
   isDefault: false,
 }
 
+// Diarizing a complete video can take far longer than a regular model request.
+// Keep the conservative default, while never replacing a timeout an admin has
+// deliberately chosen when switching the endpoint to Pyannote.
+export const pyannoteTimeoutDefaultSeconds = 30 * 60
+
+export function timeoutForProvider(
+  providerType: string,
+  currentTimeoutSeconds: number
+) {
+  if (
+    providerType === "pyannote" &&
+    currentTimeoutSeconds === defaults.timeoutSeconds
+  ) {
+    return pyannoteTimeoutDefaultSeconds
+  }
+  return currentTimeoutSeconds
+}
+
 export const providerDetails: Record<string, ProviderDetails> = {
   openai: {
     label: "OpenAI",

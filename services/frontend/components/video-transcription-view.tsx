@@ -210,6 +210,9 @@ export function VideoTranscriptionView({
   const [cancelOpen, setCancelOpen] = useState(false)
   const [skipSpeakerOpen, setSkipSpeakerOpen] = useState(false)
   const [skipSpeakerInFlight, setSkipSpeakerInFlight] = useState(false)
+  const [retryingVideoStep, setRetryingVideoStep] = useState<string | null>(
+    null
+  )
   const [speakerToRename, setSpeakerToRename] =
     useState<TranscriptionSpeaker | null>(null)
   const [speakerName, setSpeakerName] = useState("")
@@ -792,6 +795,39 @@ export function VideoTranscriptionView({
     }
   }
 
+  const retryVideoPipelineStep = async (step: string) => {
+    const uploadID = snapshot?.videoUpload?.id
+    if (!uploadID) return
+    setRetryingVideoStep(step)
+    setError("")
+    try {
+      const result = await api.post<{
+        upload: TranscriptionVideoUpload
+        jobId?: string
+      }>(
+        `/api/v1/transcription/video-uploads/${uploadID}/retry?step=${encodeURIComponent(step)}`
+      )
+      setSnapshot((current) =>
+        current
+          ? {
+              ...current,
+              session: { ...current.session, status: "processing" },
+              videoUpload: result.upload,
+            }
+          : current
+      )
+      onSessionsChanged()
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "This processing step could not be retried."
+      )
+    } finally {
+      setRetryingVideoStep(null)
+    }
+  }
+
   const skipSpeakerSeparation = async () => {
     const uploadID = snapshot?.videoUpload?.id
     if (!uploadID) return
@@ -1203,7 +1239,9 @@ export function VideoTranscriptionView({
               hasDiarizedSpeakers={snapshot.speakers.some((speaker) =>
                 /^speaker[_ -]?\d+$/i.test(speaker.label)
               )}
+              onRetryFailedStep={retryVideoPipelineStep}
               onRequestSkipSpeakerSeparation={() => setSkipSpeakerOpen(true)}
+              retryingStep={retryingVideoStep}
               skipSpeakerInFlight={skipSpeakerInFlight}
               session={snapshot.session}
               upload={snapshot.videoUpload}
@@ -2241,13 +2279,17 @@ function videoModelLabel(model: DiscoveredVideoModel) {
 
 function VideoPipeline({
   hasDiarizedSpeakers,
+  onRetryFailedStep,
   onRequestSkipSpeakerSeparation,
+  retryingStep,
   skipSpeakerInFlight,
   upload,
   session,
 }: {
   hasDiarizedSpeakers: boolean
+  onRetryFailedStep: (step: string) => void
   onRequestSkipSpeakerSeparation: () => void
+  retryingStep: string | null
   skipSpeakerInFlight: boolean
   upload: TranscriptionVideoUpload
   session: TranscriptionSession
@@ -2256,7 +2298,12 @@ function VideoPipeline({
   const pipelineStorageKey = `justai.video-transcription.pipeline.collapsed:${upload.sessionId}`
   const [open, setOpen] = useState(true)
   const isActive = ["uploading", "queued", "processing"].includes(upload.status)
-  const shouldAutoCollapse = ["completed", "cancelled"].includes(upload.status)
+  const hasFailedStoredStep = Boolean(
+    upload.pipeline?.some((step) => step.status === "failed")
+  )
+  const shouldAutoCollapse =
+    ["completed", "cancelled"].includes(upload.status) &&
+    !hasFailedStoredStep
 
   useEffect(() => {
     if (!isActive) return
@@ -2511,6 +2558,28 @@ function VideoPipeline({
                         <p className="mt-2 line-clamp-2 text-[11px] text-destructive">
                           {step.error}
                         </p>
+                      ) : null}
+                      {step.status === "failed" && step.key !== "upload" ? (
+                        <Button
+                          className="mt-2 w-full justify-center"
+                          disabled={Boolean(retryingStep)}
+                          onClick={() => onRetryFailedStep(step.key)}
+                          size="xs"
+                          type="button"
+                          variant="outline"
+                        >
+                          {retryingStep === step.key ? (
+                            <LoaderCircle
+                              className="animate-spin"
+                              data-icon="inline-start"
+                            />
+                          ) : (
+                            <RefreshCw data-icon="inline-start" />
+                          )}
+                          {retryingStep === step.key
+                            ? "Retrying…"
+                            : "Retry this step"}
+                        </Button>
                       ) : null}
                       {step.key === "diarization" && showSpeakerSkipAction ? (
                         <Button
