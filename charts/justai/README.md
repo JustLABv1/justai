@@ -52,6 +52,28 @@ https://justai.example.com/api/v1/auth/oidc/callback
 
 Override `config.oidc.redirectUrl` when the backend uses another public host.
 
+## Custom CA for backend connections
+
+When S3, a proxy, or another backend dependency presents a certificate signed
+by an internal CA, mount the PEM certificate through `trustedCA`. This shared
+setting is used by the backend and, when enabled, Pyannote. The chart mounts
+the certificate and sets `SSL_CERT_FILE` for the backend, which is honored by
+FFmpeg/FFprobe and the backend's TLS clients.
+
+```bash
+kubectl -n justai-dev create secret generic justai-s3-ca \
+  --from-file=ca.crt=internal-root-ca.pem
+```
+
+```yaml
+trustedCA:
+  existingSecret: justai-s3-ca
+```
+
+Use `existingConfigMap` instead for a ConfigMap. The mounted object must
+expose its PEM certificate under the key `ca.crt` (or set `trustedCA.key`).
+Redeploy the release after rotating the certificate.
+
 ## Optional pyannote diarization
 
 The Helm chart includes the self-hosted pyannote service, disabled by default
@@ -132,19 +154,17 @@ kubectl -n justai-dev create configmap corporate-proxy-ca \
 ```
 
 ```yaml
-pyannote:
-  trustedCA:
-    existingConfigMap: corporate-proxy-ca
-    key: ca.crt
+trustedCA:
+  existingConfigMap: corporate-proxy-ca
+  key: ca.crt
 ```
 
 For a Secret-managed CA, use `existingSecret` instead (not both sources):
 
 ```yaml
-pyannote:
-  trustedCA:
-    existingSecret: corporate-proxy-ca
-    key: ca.crt
+trustedCA:
+  existingSecret: corporate-proxy-ca
+  key: ca.crt
 ```
 
 Do not disable TLS verification or set `SSL_CERT_FILE` manually when using

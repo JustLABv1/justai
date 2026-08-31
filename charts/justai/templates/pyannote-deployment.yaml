@@ -74,11 +74,11 @@
 {{- $proxyNoProxyKey := include "justai.secretRefKey" (dict "root" . "ref" "pyannoteNoProxy") -}}
 {{- $noProxy := .Values.pyannote.proxy.noProxy -}}
 {{- if kindIs "slice" $noProxy }}{{- $noProxy = join "," $noProxy -}}{{- end }}
-{{- $trustedCAConfigMap := .Values.pyannote.trustedCA.existingConfigMap | default "" -}}
-{{- $trustedCASecret := .Values.pyannote.trustedCA.existingSecret | default "" -}}
-{{- $trustedCAKey := .Values.pyannote.trustedCA.key | default "ca.crt" -}}
+{{- $trustedCAConfigMap := .Values.trustedCA.existingConfigMap | default "" -}}
+{{- $trustedCASecret := .Values.trustedCA.existingSecret | default "" -}}
+{{- $trustedCAKey := .Values.trustedCA.key | default "ca.crt" -}}
 {{- if and $trustedCAConfigMap $trustedCASecret }}
-{{- fail "pyannote.trustedCA accepts either existingConfigMap or existingSecret, not both" }}
+{{- fail "trustedCA accepts either existingConfigMap or existingSecret, not both" }}
 {{- end }}
 {{- $trustedCAEnabled := or $trustedCAConfigMap $trustedCASecret -}}
 {{- $imageTag := .Values.pyannote.image.tag | default (printf "pyannote-%s" .Chart.AppVersion) -}}
