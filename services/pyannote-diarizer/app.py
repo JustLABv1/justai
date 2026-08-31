@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import socket
+import ssl
 import subprocess
 import tempfile
 import time
@@ -277,6 +278,14 @@ def pinned_media_url(url: str, address: str) -> str:
     )
 
 
+def media_ssl_context() -> ssl.SSLContext:
+    # httpx disables SSL_CERT_FILE together with proxy environment variables
+    # when trust_env=False. Keep proxy handling disabled for SSRF protection,
+    # but explicitly load the chart-provided CA bundle for media downloads.
+    certificate_file = os.getenv("SSL_CERT_FILE", "").strip()
+    return ssl.create_default_context(cafile=certificate_file or None)
+
+
 def download_source(url: str, destination: Path) -> None:
     current_url = url
     current_origin, _ = validate_media_url(current_url)
@@ -285,6 +294,7 @@ def download_source(url: str, destination: Path) -> None:
     try:
         with httpx.Client(
             follow_redirects=False,
+            verify=media_ssl_context(),
             timeout=httpx.Timeout(
                 inactivity_timeout, connect=min(15.0, inactivity_timeout)
             ),
