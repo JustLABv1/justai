@@ -173,14 +173,6 @@ pyannote:
     http: ""
     https: ""
     noProxy: []
-  # Optional ConfigMap or Secret containing the CA certificate used by an
-  # HTTPS-inspecting egress proxy. The chart combines this certificate with
-  # the image's system trust store, so public certificate authorities continue
-  # to work as well. Set exactly one source.
-  trustedCA:
-    existingConfigMap: ""
-    existingSecret: ""
-    key: ca.crt
   env: []
   envFrom: []
   cache:
@@ -358,11 +350,12 @@ secrets:
       name: ""
       key: s3-secret-key
 
-customCA:
-  enabled: false
-  name: ""
-  secret: true
-  mountPath: /etc/ssl/certs/extra-ca.crt
+# Shared PEM CA certificate for backend S3/proxy access and optional Pyannote
+# egress. Set exactly one source. The selected object's key must be a PEM file.
+trustedCA:
+  existingConfigMap: ""
+  existingSecret: ""
+  key: ca.crt
 
 nodeSelector: {}
 tolerations: []

@@ -30,6 +30,13 @@
 {{- $s3AccessKeyKey := include "justai.secretRefKey" (dict "root" . "ref" "s3AccessKey") -}}
 {{- $s3SecretKeyName := include "justai.secretRefName" (dict "root" . "ref" "s3SecretKey") -}}
 {{- $s3SecretKeyKey := include "justai.secretRefKey" (dict "root" . "ref" "s3SecretKey") -}}
+{{- $trustedCAConfigMap := .Values.trustedCA.existingConfigMap | default "" -}}
+{{- $trustedCASecret := .Values.trustedCA.existingSecret | default "" -}}
+{{- $trustedCAKey := .Values.trustedCA.key | default "ca.crt" -}}
+{{- if and $trustedCAConfigMap $trustedCASecret }}
+{{- fail "trustedCA accepts either existingConfigMap or existingSecret, not both" }}
+{{- end }}
+{{- $trustedCAEnabled := or $trustedCAConfigMap $trustedCASecret -}}
 {{- $configName := printf "%s-backend-config" (include "justai.fullname" .) -}}
 {{- $uploadsName := printf "%s-uploads" (include "justai.fullname" .) -}}
 {{- if eq .Values.deploymentMode "monolith" }}
@@ -98,6 +105,10 @@ spec:
                 secretKeyRef:
                   name: {{ $encryptionKeyName | quote }}
                   key: {{ $encryptionKeyKey | quote }}
+            {{- if $trustedCAEnabled }}
+            - name: SSL_CERT_FILE
+              value: "/etc/ssl/certs/extra-ca.crt"
+            {{- end }}
             {{- if $s3Enabled }}
             - name: JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY
               valueFrom:
@@ -124,9 +135,9 @@ spec:
               readOnly: true
             - name: uploads
               mountPath: /app/data
-            {{- if .Values.customCA.enabled }}
-            - name: custom-ca
-              mountPath: {{ .Values.customCA.mountPath }}
+            {{- if $trustedCAEnabled }}
+            - name: trusted-ca
+              mountPath: /etc/ssl/certs/extra-ca.crt
               subPath: ca.crt
               readOnly: true
             {{- end }}
@@ -159,14 +170,20 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        {{- if .Values.customCA.enabled }}
-        - name: custom-ca
-          {{- if .Values.customCA.secret }}
-          secret:
-            secretName: {{ .Values.customCA.name }}
-          {{- else }}
+        {{- if $trustedCAEnabled }}
+        - name: trusted-ca
+          {{- if $trustedCAConfigMap }}
           configMap:
-            name: {{ .Values.customCA.name }}
+            name: {{ $trustedCAConfigMap | quote }}
+            items:
+              - key: {{ $trustedCAKey | quote }}
+                path: ca.crt
+          {{- else }}
+          secret:
+            secretName: {{ $trustedCASecret | quote }}
+            items:
+              - key: {{ $trustedCAKey | quote }}
+                path: ca.crt
           {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
@@ -245,6 +262,10 @@ spec:
                 secretKeyRef:
                   name: {{ $encryptionKeyName | quote }}
                   key: {{ $encryptionKeyKey | quote }}
+            {{- if $trustedCAEnabled }}
+            - name: SSL_CERT_FILE
+              value: "/etc/ssl/certs/extra-ca.crt"
+            {{- end }}
             {{- if $s3Enabled }}
             - name: JUSTAI_TRANSCRIPTION_S3_ACCESS_KEY
               valueFrom:
@@ -271,9 +292,9 @@ spec:
               readOnly: true
             - name: uploads
               mountPath: /app/data
-            {{- if .Values.customCA.enabled }}
-            - name: custom-ca
-              mountPath: {{ .Values.customCA.mountPath }}
+            {{- if $trustedCAEnabled }}
+            - name: trusted-ca
+              mountPath: /etc/ssl/certs/extra-ca.crt
               subPath: ca.crt
               readOnly: true
             {{- end }}
@@ -306,14 +327,20 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        {{- if .Values.customCA.enabled }}
-        - name: custom-ca
-          {{- if .Values.customCA.secret }}
-          secret:
-            secretName: {{ .Values.customCA.name }}
-          {{- else }}
+        {{- if $trustedCAEnabled }}
+        - name: trusted-ca
+          {{- if $trustedCAConfigMap }}
           configMap:
-            name: {{ .Values.customCA.name }}
+            name: {{ $trustedCAConfigMap | quote }}
+            items:
+              - key: {{ $trustedCAKey | quote }}
+                path: ca.crt
+          {{- else }}
+          secret:
+            secretName: {{ $trustedCASecret | quote }}
+            items:
+              - key: {{ $trustedCAKey | quote }}
+                path: ca.crt
           {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
@@ -383,10 +410,10 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if .Values.customCA.enabled }}
+          {{- if $trustedCAEnabled }}
           volumeMounts:
-            - name: custom-ca
-              mountPath: {{ .Values.customCA.mountPath }}
+            - name: trusted-ca
+              mountPath: /etc/ssl/certs/extra-ca.crt
               subPath: ca.crt
               readOnly: true
           {{- end }}
@@ -408,15 +435,21 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if .Values.customCA.enabled }}
+      {{- if $trustedCAEnabled }}
       volumes:
-        - name: custom-ca
-          {{- if .Values.customCA.secret }}
-          secret:
-            secretName: {{ .Values.customCA.name }}
-          {{- else }}
+        - name: trusted-ca
+          {{- if $trustedCAConfigMap }}
           configMap:
-            name: {{ .Values.customCA.name }}
+            name: {{ $trustedCAConfigMap | quote }}
+            items:
+              - key: {{ $trustedCAKey | quote }}
+                path: ca.crt
+          {{- else }}
+          secret:
+            secretName: {{ $trustedCASecret | quote }}
+            items:
+              - key: {{ $trustedCAKey | quote }}
+                path: ca.crt
           {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
