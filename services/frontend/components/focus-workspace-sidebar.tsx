@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import {
   Archive,
   CalendarClock,
@@ -32,7 +32,7 @@ import type { LucideIcon } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
-import { ThemeSwitcher } from "@/components/theme-switcher"
+import { ThemeMenu } from "@/components/theme-switcher"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -74,20 +74,23 @@ const railNavigation: Array<{
   label: string
   hint: string
   icon: LucideIcon
+  group: string
   feature?: string
 }> = [
-  { id: "chat", label: "Chat", hint: "Conversations", icon: MessageSquare },
+  { id: "chat", label: "Chat", hint: "Conversations", icon: MessageSquare, group: "Create" },
   {
     id: "assistants",
     label: "Assistants",
     hint: "Reusable chat roles",
     icon: Bot,
+    group: "Create",
   },
   {
     id: "transcription",
     label: "Live transcription",
     hint: "Rooms and transcripts",
     icon: Headphones,
+    group: "Capture",
     feature: "transcription",
   },
   {
@@ -95,6 +98,7 @@ const railNavigation: Array<{
     label: "Video transcription",
     hint: "Upload and transcribe videos",
     icon: FileVideo,
+    group: "Capture",
     feature: "transcription",
   },
   {
@@ -102,18 +106,21 @@ const railNavigation: Array<{
     label: "Notes",
     hint: "Your notes workspace",
     icon: NotebookPen,
+    group: "Knowledge",
   },
   {
     id: "memory",
     label: "Memory",
     hint: "Persistent preferences",
     icon: Brain,
+    group: "Knowledge",
   },
   {
     id: "integrations",
     label: "Integrations",
     hint: "GitHub, GitLab, and more",
     icon: Plug,
+    group: "Connect",
     feature: "mcp",
   },
   {
@@ -121,6 +128,7 @@ const railNavigation: Array<{
     label: "Automations",
     hint: "Scheduled assistant work",
     icon: CalendarClock,
+    group: "Connect",
     feature: "mcp",
   },
 ]
@@ -469,7 +477,7 @@ export function FocusWorkspaceSidebar({
           aria-label="Search workspace"
           aria-keyshortcuts="Meta+K Control+K"
           className={cn(
-            "rounded-xl text-muted-foreground",
+            "rounded-xl border border-border/70 bg-muted/20 text-muted-foreground hover:border-border hover:bg-muted/45",
             railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
           )}
           onClick={() => setSearchOpen(true)}
@@ -511,26 +519,36 @@ export function FocusWorkspaceSidebar({
         )}
 
         <Separator className="my-1" />
-        {railExpanded && (
-          <p className="px-3 text-[10px] font-medium tracking-[0.16em] text-muted-foreground uppercase">
-            Navigate
-          </p>
-        )}
-
         <nav
           aria-label="Workspace navigation"
           className={cn(
+            "min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1",
             "flex flex-col gap-1",
             railExpanded ? "w-full items-stretch" : "items-center"
           )}
         >
-          {navigation.map((item) => {
+          {navigation.map((item, index) => {
             const Icon = item.icon
             const active = activeView === item.id
             const disabled = Boolean(
               item.feature && disabledFeatures[item.feature]
             )
+            const beginsGroup = index === 0 || navigation[index - 1]?.group !== item.group
             return (
+              <Fragment key={item.id}>
+                {beginsGroup &&
+                  (railExpanded ? (
+                    <p
+                      className={cn(
+                        "px-3 text-[10px] font-medium tracking-[0.14em] text-muted-foreground/80 uppercase",
+                        index > 0 && "mt-3"
+                      )}
+                    >
+                      {item.group}
+                    </p>
+                  ) : (
+                    index > 0 && <Separator className="my-1 w-5" />
+                  ))}
               <Button
                 aria-current={active ? "page" : undefined}
                 aria-label={item.label}
@@ -542,7 +560,6 @@ export function FocusWorkspaceSidebar({
                   active && "bg-accent text-accent-foreground"
                 )}
                 disabled={disabled}
-                key={item.id}
                 onClick={() => navigateFromRail(item.id)}
                 size="icon"
                 title={
@@ -553,8 +570,10 @@ export function FocusWorkspaceSidebar({
                 <Icon data-icon="inline-start" />
                 {railExpanded && <span className="truncate">{item.label}</span>}
               </Button>
+              </Fragment>
             )
           })}
+          {railExpanded && <Separator className="my-2" />}
           <Button
             aria-current={activeView === "settings" ? "page" : undefined}
             aria-label="Settings"
@@ -573,7 +592,6 @@ export function FocusWorkspaceSidebar({
           </Button>
         </nav>
 
-        <div className="min-h-0 flex-1" />
         {user.platformAdmin && (
           <Button
             aria-current={activeView === "admin" ? "page" : undefined}
@@ -608,7 +626,6 @@ export function FocusWorkspaceSidebar({
             {railExpanded && <span>Chat history</span>}
           </Button>
         )}
-        <ThemeSwitcher expanded={railExpanded} />
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -645,6 +662,8 @@ export function FocusWorkspaceSidebar({
                 </span>
               </DropdownMenuLabel>
             </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <ThemeMenu />
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => onNavigate("profile")}>
               <UserRound data-icon="inline-start" />

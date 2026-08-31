@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"sort"
@@ -1654,15 +1655,40 @@ func (m *TranscriptionManager) renewVideoJobLease(ctx context.Context, jobID uui
 
 func probeVideoDuration(ctx context.Context, videoURL string) (float64, error) {
 	command := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", "-i", videoURL)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
 	output, err := command.Output()
 	if err != nil {
-		return 0, fmt.Errorf("ffprobe could not inspect the video: %w", err)
+		return 0, fmt.Errorf("ffprobe could not inspect the video: %w%s", err, ffprobeDiagnostic(stderr.String(), videoURL))
 	}
 	duration, err := strconv.ParseFloat(strings.TrimSpace(string(output)), 64)
 	if err != nil || duration <= 0 {
 		return 0, fmt.Errorf("video duration could not be determined")
 	}
 	return duration, nil
+}
+
+func ffprobeDiagnostic(stderr, videoURL string) string {
+	detail := strings.TrimSpace(stderr)
+	if detail == "" {
+		return ""
+	}
+	detail = strings.ReplaceAll(detail, videoURL, redactVideoProcessingURL(videoURL))
+	const maxDiagnosticLength = 2_000
+	if len(detail) > maxDiagnosticLength {
+		detail = detail[:maxDiagnosticLength] + "…"
+	}
+	return ": " + detail
+}
+
+func redactVideoProcessingURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" {
+		return "[video URL redacted]"
+	}
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	return parsed.String()
 }
 
 func ffmpegVideoAudioArgs(videoURL string) []string {

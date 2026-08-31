@@ -10,6 +10,9 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -74,4 +77,35 @@ function ThemeSwitcher({ expanded = false }: { expanded?: boolean }) {
   )
 }
 
-export { ThemeSwitcher }
+function ThemeMenu() {
+  const { theme, setTheme } = useThemeTransition()
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    getClientSnapshot,
+    getServerSnapshot
+  )
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <Sun data-icon="inline-start" />
+        Appearance
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        {themes.map((item) => {
+          const Icon = item.icon
+          const active = mounted && theme === item.value
+          return (
+            <DropdownMenuItem key={item.value} onClick={() => setTheme(item.value)}>
+              <Icon data-icon="inline-start" />
+              {item.label}
+              {active && <Check className="ml-auto" data-icon="inline-end" />}
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  )
+}
+
+export { ThemeMenu, ThemeSwitcher }

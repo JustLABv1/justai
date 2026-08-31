@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,21 @@ import (
 )
 
 type videoPipelineStatusMatcher map[string]string
+
+func TestFFprobeDiagnosticRedactsSignedURL(t *testing.T) {
+	videoURL := "https://storage.example.test/videos/recording.mp4?X-Amz-Signature=secret-signature&X-Amz-Credential=access-key"
+	diagnostic := ffprobeDiagnostic("https request failed for "+videoURL+": 403 Forbidden", videoURL)
+
+	if strings.Contains(diagnostic, "secret-signature") || strings.Contains(diagnostic, "access-key") {
+		t.Fatalf("diagnostic leaked signed URL credentials: %q", diagnostic)
+	}
+	if !strings.Contains(diagnostic, "https://storage.example.test/videos/recording.mp4") {
+		t.Fatalf("diagnostic did not retain the safe video location: %q", diagnostic)
+	}
+	if !strings.Contains(diagnostic, "403 Forbidden") {
+		t.Fatalf("diagnostic did not retain ffprobe stderr: %q", diagnostic)
+	}
+}
 
 func (matcher videoPipelineStatusMatcher) Match(value driver.Value) bool {
 	raw, ok := value.([]byte)
