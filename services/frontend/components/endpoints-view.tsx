@@ -27,6 +27,7 @@ import {
   isWhisperGateway,
   providerDetails,
   providerSupports,
+  timeoutForProvider,
   type EndpointForm,
   type SupportedProvider,
 } from "@/lib/endpoint-logic"
@@ -192,7 +193,7 @@ export function EndpointsView({
       diarizationModel: pyannote
         ? current.diarizationModel || "pyannote/speaker-diarization-3.1"
         : current.diarizationModel,
-      timeoutSeconds: pyannote ? 1800 : current.timeoutSeconds,
+      timeoutSeconds: timeoutForProvider(provider, current.timeoutSeconds),
       toolCalling: provider === "openai",
     }))
   }
