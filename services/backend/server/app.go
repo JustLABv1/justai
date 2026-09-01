@@ -28,6 +28,10 @@ type App struct {
 	Secrets *security.SecretBox
 	RAG     *rag.Worker
 	Live    *TranscriptionManager
+	// AgentWorker owns durable workflow execution and scheduling. Keeping the
+	// engine on App lets HTTP handlers, chat delegation, and the lifecycle all
+	// share the same leases, snapshots, and executor adapters.
+	AgentWorker *AgentEngine
 
 	repositoryImportSlots chan struct{}
 	authProtectionMu      sync.Mutex
@@ -53,6 +57,7 @@ func New(cfg config.Config, db *sql.DB) *App {
 	application.RAG.SetSecretBox(application.Secrets)
 	application.Live = NewTranscriptionManager(cfg, db, application.Secrets)
 	application.Live.SetApp(application)
+	application.AgentWorker = NewAgentEngine(application)
 	return application
 }
 
@@ -86,12 +91,15 @@ func (a *App) Router() *gin.Engine {
 			   AND to_regclass('public.conversation_repository_contexts') IS NOT NULL
 			   AND to_regclass('public.saved_assistants') IS NOT NULL
 			   AND to_regclass('public.saved_assistant_versions') IS NOT NULL
+			   AND to_regclass('public.agent_connections') IS NOT NULL
+			   AND to_regclass('public.agent_workflows') IS NOT NULL
+			   AND to_regclass('public.agent_runs') IS NOT NULL
 			   AND to_regclass('public.generated_pdfs') IS NOT NULL
 			   AND to_regclass('public.transcription_video_upload_parts') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
-		if a.RAG == nil || a.Live == nil {
+		if a.RAG == nil || a.Live == nil || a.AgentWorker == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "background workers are unavailable"})
 			return
 		}
@@ -237,12 +245,42 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/assistants/:id", a.getSavedAssistant)
 	org.PATCH("/assistants/:id", a.updateSavedAssistant)
 	org.DELETE("/assistants/:id", a.deleteSavedAssistant)
+	org.GET("/agents", a.listAgents)
+	org.POST("/agents", a.createAgent)
+	org.GET("/agents/:id", a.getAgent)
+	org.PATCH("/agents/:id", a.updateAgent)
+	org.DELETE("/agents/:id", a.deleteAgent)
+	org.GET("/agent-connections", a.listAgentConnections)
+	org.POST("/agent-connections", a.createAgentConnection)
+	org.PATCH("/agent-connections/:id", a.updateAgentConnection)
+	org.DELETE("/agent-connections/:id", a.deleteAgentConnection)
+	org.POST("/agent-connections/discover", a.discoverAgentConnection)
+	org.POST("/agent-connections/:id/test", a.testAgentConnection)
+	org.GET("/agent-connections/:id/oauth/start", a.startAgentConnectionOAuth)
+	org.GET("/agent-connections/:id/oauth/callback", a.finishAgentConnectionOAuth)
+	org.POST("/agent-connections/:id/mtls", a.configureAgentConnectionMTLS)
+	org.GET("/agent-workflows", a.listAgentWorkflows)
+	org.POST("/agent-workflows", a.createAgentWorkflow)
+	org.GET("/agent-workflows/:id", a.getAgentWorkflow)
+	org.PATCH("/agent-workflows/:id", a.updateAgentWorkflow)
+	org.DELETE("/agent-workflows/:id", a.deleteAgentWorkflow)
+	org.POST("/agent-workflows/:id/validate", a.validateAgentWorkflow)
+	org.GET("/agent-workflows/:id/runs", a.listWorkflowRuns)
+	org.POST("/agent-workflows/:id/runs", a.createWorkflowRun)
+	org.GET("/agent-runs", a.listAgentRuns)
+	org.GET("/agent-runs/:id", a.getAgentRun)
+	org.GET("/agent-runs/:id/events", a.streamAgentRunEvents)
+	org.POST("/agent-runs/:id/cancel", a.cancelAgentRun)
+	org.POST("/agent-runs/:id/retry", a.retryAgentRun)
+	org.POST("/agent-runs/:id/approvals/:approvalId", a.decideAgentApproval)
+	org.POST("/agent-runs/:id/approvals/:approvalId/decision", a.decideAgentApproval)
+	org.GET("/agent-runs/:id/artifacts/:artifactId", a.downloadAgentArtifact)
 	org.GET("/automations", a.listAutomations)
 	org.POST("/automations", a.createAutomation)
 	org.PATCH("/automations/:id", a.updateAutomation)
 	org.DELETE("/automations/:id", a.deleteAutomation)
 	org.GET("/automations/:id/runs", a.listAutomationRuns)
-	org.POST("/automations/:id/runs", a.runAutomation)
+	org.POST("/automations/:id/runs", a.platformFeature("agents"), a.runAutomation)
 	org.GET("/conversation-folders", a.listConversationFolders)
 	org.POST("/conversation-folders", a.createConversationFolder)
 	org.PATCH("/conversation-folders/:id", a.updateConversationFolder)

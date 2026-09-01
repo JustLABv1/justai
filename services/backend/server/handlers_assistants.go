@@ -57,6 +57,7 @@ func (a *App) listSavedAssistants(c *gin.Context) {
 		JOIN saved_assistant_versions v
 		  ON v.assistant_id = a.id AND v.version = a.current_version
 		WHERE a.organization_id = $1
+		  AND a.agent_kind = 'native'
 		  AND a.deleted_at IS NULL
 		  AND (a.visibility = 'workspace' OR a.user_id = $2)
 		ORDER BY a.updated_at DESC, a.name`, organizationID, principal.UserID)
@@ -274,6 +275,7 @@ func loadSavedAssistant(ctx context.Context, queryer savedAssistantQueryer, id, 
 		JOIN saved_assistant_versions v
 		  ON v.assistant_id = a.id AND v.version = a.current_version
 		WHERE a.id = $1 AND a.organization_id = $2
+		  AND a.agent_kind = 'native'
 		  AND a.deleted_at IS NULL
 		  AND (a.visibility = 'workspace' OR a.user_id = $3)`, id, organizationID, userID))
 }
@@ -287,7 +289,24 @@ func loadSavedAssistantForMutation(ctx context.Context, queryer savedAssistantQu
 		JOIN saved_assistant_versions v
 		  ON v.assistant_id = a.id AND v.version = a.current_version
 		WHERE a.id = $1 AND a.organization_id = $2 AND a.user_id = $3
+		  AND a.agent_kind = 'native'
 		  AND a.deleted_at IS NULL`, id, organizationID, userID))
+}
+
+// loadCanonicalSavedAssistant is used by conversation routing. The public
+// /assistants compatibility adapter intentionally filters to native agents,
+// but a conversation may be pinned to a remote first-class agent.
+func loadCanonicalSavedAssistant(ctx context.Context, queryer savedAssistantQueryer, id, userID, organizationID uuid.UUID) (models.SavedAssistant, error) {
+	return scanSavedAssistant(queryer.QueryRowContext(ctx, `
+		SELECT a.id, v.id, v.version, a.name, a.description, a.icon, a.visibility,
+		       v.instructions, COALESCE(v.endpoint_id::text, ''), v.model,
+		       v.use_memory, v.deep_context, a.created_at, a.updated_at
+		FROM saved_assistants a
+		JOIN saved_assistant_versions v
+		  ON v.assistant_id = a.id AND v.version = a.current_version
+		WHERE a.id = $1 AND a.organization_id = $2
+		  AND a.deleted_at IS NULL
+		  AND (a.visibility = 'workspace' OR a.user_id = $3)`, id, organizationID, userID))
 }
 
 func scanSavedAssistant(scanner interface{ Scan(...any) error }) (models.SavedAssistant, error) {

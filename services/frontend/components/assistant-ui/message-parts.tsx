@@ -1,16 +1,21 @@
 "use client"
 
 import Image from "next/image"
-import { Children, useMemo } from "react"
+import Link from "next/link"
+import { Children, useMemo, useState } from "react"
 import {
+  Check,
   ChevronDown,
   CircleAlert,
   BrainCircuit,
+  ExternalLink,
   FileText,
   Files,
   LoaderCircle,
   Quote,
+  ShieldCheck,
   Sparkles,
+  X,
 } from "lucide-react"
 import {
   groupPartByType,
@@ -34,6 +39,7 @@ import {
 import { cn } from "@/lib/utils"
 import { formatToolName } from "@/lib/utils/tool-icons"
 import { RegisterMCPApprovals } from "@/components/assistant-ui/mcp-approval-context"
+import { api } from "@/lib/api"
 
 type RetrievalStatus = {
   status?: string
@@ -123,6 +129,124 @@ function AssistantErrorPart({ data }: { data: unknown }) {
         {message}
       </AlertDescription>
     </Alert>
+  )
+}
+
+type AgentRunPartData = {
+  runId?: unknown
+  status?: unknown
+  approvalId?: unknown
+  action?: unknown
+  argumentHash?: unknown
+  expiresAt?: unknown
+}
+
+function AgentRunPart({ data }: { data: unknown }) {
+  const value = (data ?? {}) as AgentRunPartData
+  const runId = typeof value.runId === "string" ? value.runId : ""
+  const status = typeof value.status === "string" ? value.status : "running"
+  const approvalId =
+    typeof value.approvalId === "string" ? value.approvalId : ""
+  const argumentHash =
+    typeof value.argumentHash === "string" ? value.argumentHash : ""
+  const [decision, setDecision] = useState<"approved" | "rejected" | null>(
+    null
+  )
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+  const action = value.action
+  const actionText =
+    action === undefined
+      ? ""
+      : typeof action === "string"
+        ? action
+        : JSON.stringify(action, null, 2)
+
+  async function decide(next: "approved" | "rejected") {
+    if (!runId || !approvalId || busy) return
+    setBusy(true)
+    setError("")
+    try {
+      await api.post(
+        `/api/v1/agent-runs/${runId}/approvals/${approvalId}/decision`,
+        { decision: next, argumentHash }
+      )
+      setDecision(next)
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The approval decision could not be saved."
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="my-2 w-full max-w-2xl rounded-xl border border-primary/30 bg-primary/[0.03] p-3 text-xs">
+      <div className="flex items-start gap-2">
+        <ShieldCheck className="mt-0.5 size-4 text-primary" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-foreground">
+            {status === "waiting_approval"
+              ? "Agent action needs approval"
+              : "Agent run"}
+          </p>
+          <p className="mt-0.5 text-muted-foreground">
+            {status.replaceAll("_", " ")}
+            {typeof value.expiresAt === "string"
+              ? ` · expires ${new Date(value.expiresAt).toLocaleString()}`
+              : ""}
+          </p>
+        </div>
+        {runId && (
+          <Link
+            className="inline-flex items-center gap-1 text-primary hover:underline"
+            href="/agents?tab=runs"
+          >
+            Open run <ExternalLink className="size-3" aria-hidden="true" />
+          </Link>
+        )}
+      </div>
+      {actionText && (
+        <pre className="mt-3 max-h-32 overflow-auto rounded-lg bg-muted/60 p-2 whitespace-pre-wrap">
+          {actionText}
+        </pre>
+      )}
+      {argumentHash && (
+        <p className="mt-2 break-all text-[10px] text-muted-foreground">
+          Exact action hash: {argumentHash}
+        </p>
+      )}
+      {approvalId && !decision && status === "waiting_approval" && (
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 hover:bg-muted disabled:opacity-60"
+            disabled={busy}
+            onClick={() => void decide("rejected")}
+            type="button"
+          >
+            <X className="size-3.5" aria-hidden="true" /> Reject
+          </button>
+          <button
+            className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            disabled={busy}
+            onClick={() => void decide("approved")}
+            type="button"
+          >
+            <Check className="size-3.5" aria-hidden="true" /> Approve exact action
+          </button>
+        </div>
+      )}
+      {decision && (
+        <p className="mt-2 text-primary">
+          {decision === "approved" ? "Approved" : "Rejected"}. The durable run
+          will continue or close accordingly.
+        </p>
+      )}
+      {error && <p className="mt-2 text-destructive">{error}</p>}
+    </div>
   )
 }
 
@@ -440,7 +564,9 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
     case "data":
       return (
         part.dataRendererUI ??
-        (part.name === "retrieval-status" ? (
+        (part.name === "agent-run" ? (
+          <AgentRunPart data={part.data} />
+        ) : part.name === "retrieval-status" ? (
           <RetrievalStatusPart data={part.data} />
         ) : part.name === "justai-error" ? (
           <AssistantErrorPart data={part.data} />

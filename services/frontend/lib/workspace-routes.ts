@@ -1,4 +1,4 @@
-import type { AdminTab, SettingsTab, ViewId } from "@/lib/types"
+import type { AdminTab, AgentTab, SettingsTab, ViewId } from "@/lib/types"
 
 const validViews: ViewId[] = [
   "chat",
@@ -8,6 +8,7 @@ const validViews: ViewId[] = [
   "knowledge",
   "integrations",
   "automations",
+  "agents",
   "mcp",
   "notes",
   "memory",
@@ -27,6 +28,8 @@ export type WorkspaceRoute = {
   sessionId: string | null
   settingsTab: SettingsTab
   adminTab: AdminTab
+  agentTab: AgentTab
+  legacyRedirect?: string
 }
 
 const settingsTabs: SettingsTab[] = [
@@ -53,6 +56,8 @@ const adminTabs: AdminTab[] = [
   "audit",
 ]
 
+const agentTabs: AgentTab[] = ["agents", "workflows", "runs"]
+
 function isUUID(value: string | null): value is string {
   return Boolean(
     value &&
@@ -74,6 +79,12 @@ function parseAdminTab(value: string | null | undefined): AdminTab {
     : "overview"
 }
 
+function parseAgentTab(value: string | null | undefined): AgentTab {
+  return value && agentTabs.includes(value as AgentTab)
+    ? (value as AgentTab)
+    : "agents"
+}
+
 function decodeSegment(value: string | undefined) {
   if (!value) return null
 
@@ -89,7 +100,8 @@ export function workspacePath(
   conversationId: string | null = null,
   sessionId: string | null = null,
   settingsTab: SettingsTab = "workspace",
-  adminTab: AdminTab = "overview"
+  adminTab: AdminTab = "overview",
+  agentTab: AgentTab = "agents"
 ) {
   if (view === "chat") {
     return conversationId ? `/${encodeURIComponent(conversationId)}` : "/"
@@ -109,6 +121,12 @@ export function workspacePath(
     return adminTab === "overview"
       ? "/admin"
       : `/admin?tab=${encodeURIComponent(adminTab)}`
+  }
+
+  if (view === "agents") {
+    return agentTab === "agents"
+      ? "/agents"
+      : `/agents?tab=${encodeURIComponent(agentTab)}`
   }
 
   if (view === "endpoints" || view === "knowledge" || view === "mcp") {
@@ -132,6 +150,7 @@ export function parseWorkspaceRoute(
       sessionId: null,
       settingsTab: "workspace",
       adminTab: "overview",
+      agentTab: "agents",
     }
   }
 
@@ -142,6 +161,7 @@ export function parseWorkspaceRoute(
       sessionId: decodeSegment(segments[1]),
       settingsTab: "workspace",
       adminTab: "overview",
+      agentTab: "agents",
     }
   }
 
@@ -152,6 +172,7 @@ export function parseWorkspaceRoute(
       sessionId: decodeSegment(segments[1]),
       settingsTab: "workspace",
       adminTab: "overview",
+      agentTab: "agents",
     }
   }
 
@@ -162,6 +183,7 @@ export function parseWorkspaceRoute(
       sessionId: null,
       settingsTab: parseSettingsTab(searchParams.get("tab")),
       adminTab: "overview",
+      agentTab: "agents",
     }
   }
 
@@ -172,6 +194,7 @@ export function parseWorkspaceRoute(
       sessionId: null,
       settingsTab: "workspace",
       adminTab: parseAdminTab(searchParams.get("tab")),
+      agentTab: "agents",
     }
   }
 
@@ -182,6 +205,7 @@ export function parseWorkspaceRoute(
       sessionId: null,
       settingsTab: "workspace",
       adminTab: "overview",
+      agentTab: "agents",
     }
   }
 
@@ -192,6 +216,7 @@ export function parseWorkspaceRoute(
       sessionId: null,
       settingsTab: section,
       adminTab: "overview",
+      agentTab: "agents",
     }
   }
 
@@ -202,6 +227,42 @@ export function parseWorkspaceRoute(
       sessionId: null,
       settingsTab: "workspace",
       adminTab: "overview",
+      agentTab: "agents",
+    }
+  }
+
+  if (section === "assistants") {
+    return {
+      view: "agents",
+      conversationId: null,
+      sessionId: null,
+      settingsTab: "workspace",
+      adminTab: "overview",
+      agentTab: "agents",
+      legacyRedirect: "/agents",
+    }
+  }
+
+  if (section === "automations") {
+    return {
+      view: "agents",
+      conversationId: null,
+      sessionId: null,
+      settingsTab: "workspace",
+      adminTab: "overview",
+      agentTab: "workflows",
+      legacyRedirect: "/agents?tab=workflows",
+    }
+  }
+
+  if (section === "agents") {
+    return {
+      view: "agents",
+      conversationId: null,
+      sessionId: null,
+      settingsTab: "workspace",
+      adminTab: "overview",
+      agentTab: parseAgentTab(searchParams.get("tab")),
     }
   }
 
@@ -212,6 +273,7 @@ export function parseWorkspaceRoute(
       sessionId: null,
       settingsTab: "workspace",
       adminTab: "overview",
+      agentTab: "agents",
     }
   }
 
@@ -227,5 +289,6 @@ export function parseWorkspaceRoute(
         : null,
     settingsTab: parseSettingsTab(searchParams.get("tab")),
     adminTab: parseAdminTab(searchParams.get("tab")),
+    agentTab: parseAgentTab(searchParams.get("tab")),
   }
 }

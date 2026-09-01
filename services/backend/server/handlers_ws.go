@@ -702,7 +702,7 @@ func (a *App) ensureConversation(ctx context.Context, userID, organizationID uui
 		if parseErr != nil {
 			return uuid.Nil, fmt.Errorf("invalid assistant id")
 		}
-		assistant, assistantErr := loadSavedAssistant(ctx, transaction, parsedAssistantID, userID, organizationID)
+		assistant, assistantErr := loadCanonicalSavedAssistant(ctx, transaction, parsedAssistantID, userID, organizationID)
 		if errors.Is(assistantErr, sql.ErrNoRows) {
 			return uuid.Nil, fmt.Errorf("assistant is not available")
 		}
@@ -759,7 +759,7 @@ func (a *App) updateEmptyConversationAssistant(ctx context.Context, conversation
 		if parseErr != nil {
 			return fmt.Errorf("invalid assistant id")
 		}
-		assistant, assistantErr := loadSavedAssistant(ctx, transaction, parsedAssistantID, userID, organizationID)
+		assistant, assistantErr := loadCanonicalSavedAssistant(ctx, transaction, parsedAssistantID, userID, organizationID)
 		if errors.Is(assistantErr, sql.ErrNoRows) {
 			return fmt.Errorf("assistant is not available")
 		}

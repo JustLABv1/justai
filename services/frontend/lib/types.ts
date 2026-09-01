@@ -6,6 +6,7 @@ export type ViewId =
   | "knowledge"
   | "integrations"
   | "automations"
+  | "agents"
   | "mcp"
   | "notes"
   | "memory"
@@ -36,6 +37,8 @@ export type AdminTab =
   | "analytics"
   | "audit"
 
+export type AgentTab = "agents" | "workflows" | "runs"
+
 export type PlatformSettings = {
   loginEnabled: boolean
   localAuthEnabled: boolean
@@ -44,6 +47,7 @@ export type PlatformSettings = {
   voiceEnabled: boolean
   transcriptionEnabled: boolean
   mcpEnabled: boolean
+  agentsEnabled: boolean
   knowledgeEnabled: boolean
   attachmentsEnabled: boolean
   maintenanceMessage: string
@@ -123,7 +127,7 @@ export type AdminAnalyticsResponse = {
 
 export type PlatformHealth = {
   database: { ok: boolean }
-  workers: { rag: boolean; transcription: boolean }
+  workers: { rag: boolean; transcription: boolean; agents: boolean }
   providers: {
     ok: boolean
     total: number
@@ -131,6 +135,13 @@ export type PlatformHealth = {
     recentFailures: number
   }
   mcp: { ok: boolean; total: number; enabled: number; failures: number }
+  agents: {
+    ok: boolean
+    total: number
+    enabled: number
+    activeRuns: number
+    pendingApprovals: number
+  }
   checkedAt: string
 }
 
@@ -389,6 +400,182 @@ export type SavedAssistant = {
   deepContext: boolean
   createdAt: string
   updatedAt: string
+  /** First-class agent fields are optional for compatibility with old callers. */
+  kind?: "native" | "remote" | string
+  connectionId?: string | null
+  status?: string
+  credentialConfigured?: boolean
+  capabilities?: Record<string, unknown>
+  skills?: unknown[]
+  delegationAgentIds?: string[]
+  agentCard?: Record<string, unknown>
+}
+
+export type Agent = {
+  id: string
+  kind: "native" | "remote" | string
+  name: string
+  description: string
+  icon: string
+  visibility: "private" | "workspace" | string
+  versionId?: string | null
+  version?: number
+  instructions?: string
+  endpointId?: string | null
+  model?: string
+  useMemory: boolean
+  deepContext: boolean
+  connectionId?: string | null
+  delegationAgentIds: string[]
+  agentCard?: Record<string, unknown>
+  capabilities?: Record<string, unknown>
+  skills?: unknown[]
+  status: string
+  credentialConfigured: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type AgentConnection = {
+  id: string
+  scopeType: "organization" | "user" | string
+  scopeId: string
+  name: string
+  protocol: "a2a" | string
+  endpointUrl: string
+  authType: "none" | "api_key" | "http" | "oauth2" | "oidc" | "mtls" | string
+  credentialConfigured: boolean
+  agentCard: Record<string, unknown>
+  enabled: boolean
+  trustedReadOnly: boolean
+  lastTestedAt?: string | null
+  lastError?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type AgentInputBinding = {
+  name: string
+  source: "input" | "node" | string
+  nodeId?: string
+  path?: string
+}
+
+export type AgentContextScope = {
+  knowledgeSourceIds?: string[]
+  repositoryIds?: string[]
+  noteIds?: string[]
+  transcriptionSessionIds?: string[]
+  mcpServerIds?: string[]
+  mcpTools?: string[]
+}
+
+export type AgentWorkflowNode = {
+  id: string
+  type: "agent" | string
+  agentId?: string | null
+  instruction: string
+  inputBindings?: AgentInputBinding[]
+  context?: AgentContextScope
+  delegationAgentIds?: string[]
+  approvalMode: "review" | "read_only_auto" | string
+  retry?: { maxAttempts?: number }
+  timeoutSeconds?: number
+}
+
+export type AgentWorkflowEdge = { from: string; to: string }
+
+export type AgentWorkflowDefinition = {
+  nodes: AgentWorkflowNode[]
+  edges: AgentWorkflowEdge[]
+}
+
+export type AgentSchedule = {
+  kind: "manual" | "daily" | "weekly" | "monthly" | string
+  unit?: string
+  interval?: number
+  weekday?: number
+  time?: string
+  display?: string
+}
+
+export type AgentWorkflow = {
+  id: string
+  name: string
+  description: string
+  visibility: "private" | "workspace" | string
+  definition: AgentWorkflowDefinition
+  schedule: AgentSchedule
+  timezone: string
+  enabled: boolean
+  lastRunAt?: string | null
+  nextRunAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type AgentRunNode = {
+  id: string
+  runId: string
+  nodeKey: string
+  agentId?: string | null
+  agentVersionId?: string | null
+  status: string
+  attempt: number
+  input: Record<string, unknown>
+  output: Record<string, unknown>
+  error?: string
+  providerTaskId?: string
+  startedAt?: string | null
+  finishedAt?: string | null
+  updatedAt: string
+}
+
+export type AgentApproval = {
+  id: string
+  runId: string
+  nodeId?: string | null
+  actionType: string
+  action: Record<string, unknown>
+  status: "pending" | "approved" | "rejected" | "expired" | string
+  reason?: string
+  argumentHash: string
+  expiresAt: string
+  decidedAt?: string | null
+  createdAt: string
+}
+
+export type AgentArtifact = {
+  id: string
+  runId: string
+  nodeId?: string | null
+  name: string
+  kind: string
+  mimeType: string
+  metadata: Record<string, unknown>
+  sizeBytes: number
+  sha256?: string
+  createdAt: string
+}
+
+export type AgentRun = {
+  id: string
+  workflowId?: string | null
+  rootAgentId?: string | null
+  parentRunId?: string | null
+  conversationId?: string | null
+  sourceType: "manual" | "schedule" | "chat" | "delegation" | string
+  status: string
+  input: Record<string, unknown>
+  summary: string
+  error?: string
+  startedAt: string
+  finishedAt?: string | null
+  createdAt: string
+  updatedAt: string
+  nodes?: AgentRunNode[]
+  approvals?: AgentApproval[]
+  artifacts?: AgentArtifact[]
 }
 
 export type Automation = {
@@ -396,6 +583,7 @@ export type Automation = {
   name: string
   prompt: string
   assistantId?: string | null
+  workflowId?: string | null
   schedule: string
   timezone: string
   mcpServerIds: string[]
@@ -410,6 +598,7 @@ export type Automation = {
 export type AutomationRun = {
   id: string
   automationId: string
+  agentRunId?: string | null
   status: "queued" | "needs_review" | "completed" | "failed" | string
   summary: string
   startedAt: string

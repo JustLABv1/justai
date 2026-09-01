@@ -152,6 +152,7 @@ const emptySettings: PlatformSettings = {
   voiceEnabled: true,
   transcriptionEnabled: true,
   mcpEnabled: true,
+  agentsEnabled: true,
   knowledgeEnabled: true,
   attachmentsEnabled: true,
   maintenanceMessage: "",
@@ -668,6 +669,11 @@ function ControlsView({
     ],
     ["signupEnabled", "Signup", "Allow new password and OIDC provisioning."],
     ["aiEnabled", "AI chat", "Allow model requests and text chat."],
+    [
+      "agentsEnabled",
+      "Agents",
+      "Allow agent runs, delegation, and workflow scheduling.",
+    ],
     ["voiceEnabled", "Voice", "Allow realtime voice and speech synthesis."],
     [
       "transcriptionEnabled",
@@ -2538,6 +2544,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
   const database = health?.database ?? {}
   const providers = health?.providers ?? {}
   const mcp = health?.mcp ?? {}
+  const agents = health?.agents ?? {}
   const workers = health?.workers ?? {}
   const providerFailures = Number(providers.recentFailures ?? 0)
   const mcpFailures = Number(mcp.failures ?? 0)
@@ -2545,6 +2552,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
     healthState(database),
     healthState(providers),
     healthState(mcp),
+    healthState(agents),
     healthState(workers),
   ]
   const overallState = states.includes("down")
@@ -2567,6 +2575,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
   const workerEntries = [
     ["RAG worker", workers.rag],
     ["Transcription worker", workers.transcription],
+    ["Agent worker", workers.agents],
   ] as const
 
   return (
@@ -2638,6 +2647,30 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
               detail="Across configured servers"
               label="Failures"
               value={String(mcpFailures)}
+            />
+          </div>
+        </HealthPanel>
+        <HealthPanel
+          description="Agent execution, durable runs, and approval backlog."
+          icon={Activity}
+          state={healthState(agents)}
+          title="Agents"
+        >
+          <div className="grid gap-2 sm:grid-cols-3">
+            <HealthMetric
+              detail="Native and remote"
+              label="Configured"
+              value={String(agents.total ?? 0)}
+            />
+            <HealthMetric
+              detail="Currently active"
+              label="Runs"
+              value={String(agents.activeRuns ?? 0)}
+            />
+            <HealthMetric
+              detail="Awaiting a decision"
+              label="Approvals"
+              value={String(agents.pendingApprovals ?? 0)}
             />
           </div>
         </HealthPanel>

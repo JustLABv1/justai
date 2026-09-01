@@ -44,6 +44,7 @@ func (a *App) listAutomations(c *gin.Context) {
 			writeError(c, http.StatusInternalServerError, scanErr)
 			return
 		}
+		item.WorkflowID, _ = a.automationWorkflowID(c, item.ID)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -71,6 +72,10 @@ func (a *App) createAutomation(c *gin.Context) {
 	var id uuid.UUID
 	err = a.DB.QueryRowContext(c, `INSERT INTO automations (user_id, organization_id, assistant_id, name, prompt, schedule, timezone, mcp_server_ids, approval_mode, enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, principal.UserID, organizationID, assistantID, name, prompt, schedule, timezone, jsonRaw(request.MCPServerIDs), approval, boolValue(request.Enabled, true)).Scan(&id)
 	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if _, err := a.ensureAutomationWorkflow(c, id, principal.UserID, organizationID); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -129,6 +134,9 @@ func (a *App) updateAutomation(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	if workflowID, workflowErr := a.ensureAutomationWorkflow(c, id, principal.UserID, organizationID); workflowErr == nil {
+		_ = a.syncAutomationWorkflow(c, workflowID, item)
+	}
 	c.JSON(http.StatusOK, gin.H{"automation": item})
 }
 
@@ -167,7 +175,7 @@ func (a *App) listAutomationRuns(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid automation id"))
 		return
 	}
-	rows, err := a.DB.QueryContext(c, `SELECT r.id,r.automation_id,r.status,r.summary,r.started_at,r.finished_at FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.automation_id=$1 AND a.user_id=$2 AND a.organization_id=$3 ORDER BY r.started_at DESC LIMIT 20`, id, principal.UserID, organizationID)
+	rows, err := a.DB.QueryContext(c, `SELECT r.id,r.automation_id,r.agent_run_id,r.status,r.summary,r.started_at,r.finished_at FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.automation_id=$1 AND a.user_id=$2 AND a.organization_id=$3 ORDER BY r.started_at DESC LIMIT 20`, id, principal.UserID, organizationID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -176,7 +184,7 @@ func (a *App) listAutomationRuns(c *gin.Context) {
 	runs := []models.AutomationRun{}
 	for rows.Next() {
 		var run models.AutomationRun
-		if err := rows.Scan(&run.ID, &run.AutomationID, &run.Status, &run.Summary, &run.StartedAt, &run.FinishedAt); err != nil {
+		if err := rows.Scan(&run.ID, &run.AutomationID, &run.AgentRunID, &run.Status, &run.Summary, &run.StartedAt, &run.FinishedAt); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
@@ -205,19 +213,27 @@ func (a *App) runAutomation(c *gin.Context) {
 		}
 		return
 	}
-	status, summary := "needs_review", "Run queued for review before any connected integration can make changes."
-	if item.ApprovalMode == "read_only_auto" {
-		status = "queued"
-		summary = "Read-only run queued with the selected MCP access."
+	workflowID, err := a.ensureAutomationWorkflow(c, id, principal.UserID, organizationID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
 	}
+	definition := automationWorkflowDefinition(item)
+	rootAgentID := item.AssistantID
+	agentRun, err := a.AgentWorker.createRun(agentRunCreateOptions{UserID: principal.UserID, OrganizationID: organizationID, WorkflowID: &workflowID, RootAgentID: rootAgentID, SourceType: "manual", Input: json.RawMessage(`{"prompt":""}`), Definition: definition})
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	status, summary := "queued", "Run queued in the agent execution engine."
 	var run models.AutomationRun
-	err = a.DB.QueryRowContext(c, `INSERT INTO automation_runs (automation_id,status,summary) VALUES ($1,$2,$3) RETURNING id,automation_id,status,summary,started_at,finished_at`, id, status, summary).Scan(&run.ID, &run.AutomationID, &run.Status, &run.Summary, &run.StartedAt, &run.FinishedAt)
+	err = a.DB.QueryRowContext(c, `INSERT INTO automation_runs (automation_id,agent_run_id,status,summary) VALUES ($1,$2,$3,$4) RETURNING id,automation_id,agent_run_id,status,summary,started_at,finished_at`, id, agentRun.ID, status, summary).Scan(&run.ID, &run.AutomationID, &run.AgentRunID, &run.Status, &run.Summary, &run.StartedAt, &run.FinishedAt)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	_, _ = a.DB.ExecContext(c, `UPDATE automations SET last_run_at=now(),updated_at=now() WHERE id=$1`, id)
-	c.JSON(http.StatusCreated, gin.H{"run": run})
+	c.JSON(http.StatusCreated, gin.H{"run": run, "agentRun": agentRun})
 }
 
 func (a *App) loadAutomation(c *gin.Context, id, userID, organizationID uuid.UUID) (models.Automation, error) {
@@ -234,6 +250,79 @@ func scanAutomation(scanner interface{ Scan(...any) error }) (models.Automation,
 		return item, err
 	}
 	return item, nil
+}
+
+func (a *App) automationWorkflowID(c *gin.Context, id uuid.UUID) (*uuid.UUID, error) {
+	var raw sql.NullString
+	err := a.DB.QueryRowContext(c, `SELECT workflow_id FROM automations WHERE id=$1`, id).Scan(&raw)
+	if err != nil || !raw.Valid {
+		return nil, err
+	}
+	return parseOptionalUUIDString(raw.String), nil
+}
+
+func automationWorkflowDefinition(item models.Automation) models.AgentWorkflowDefinition {
+	var mcpIDs []uuid.UUID
+	for _, raw := range item.MCPServerIDs {
+		if id, err := uuid.Parse(strings.TrimSpace(raw)); err == nil {
+			mcpIDs = append(mcpIDs, id)
+		}
+	}
+	return models.AgentWorkflowDefinition{Nodes: []models.AgentWorkflowNode{{ID: "agent-1", Type: "agent", AgentID: item.AssistantID, Instruction: item.Prompt, Context: models.AgentContextScope{MCPServerIDs: mcpIDs}, ApprovalMode: item.ApprovalMode, Retry: models.AgentRetryPolicy{MaxAttempts: maxAgentAttempts}, TimeoutSeconds: int(maxAgentNodeTimeout / time.Second)}}}
+}
+
+func (a *App) ensureAutomationWorkflow(c *gin.Context, automationID, userID, organizationID uuid.UUID) (uuid.UUID, error) {
+	if existing, err := a.automationWorkflowID(c, automationID); err == nil && existing != nil {
+		return *existing, nil
+	}
+	item, err := a.loadAutomation(c, automationID, userID, organizationID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	definition := automationWorkflowDefinition(item)
+	if err := ValidateAgentWorkflowDefinition(definition); err != nil {
+		return uuid.Nil, err
+	}
+	schedule, scheduleErr := ParseAgentSchedule(item.Schedule)
+	if scheduleErr != nil {
+		// Keep compatibility records inspectable even if an old client wrote a
+		// non-builder string. The canonical scheduler will leave that row paused
+		// until the user normalizes it in Workflows.
+		schedule = models.AgentSchedule{Kind: "legacy", Display: item.Schedule}
+	}
+	definitionRaw, _ := json.Marshal(definition)
+	scheduleRaw, _ := json.Marshal(schedule)
+	nextRun, _ := NextAgentScheduleTime(schedule, item.Timezone, time.Now().UTC())
+	var workflowID uuid.UUID
+	err = a.DB.QueryRowContext(c, `INSERT INTO agent_workflows (user_id,organization_id,name,description,visibility,definition,schedule,timezone,enabled,next_run_at,legacy_automation_id) VALUES ($1,$2,$3,$4,'private',$5,$6,$7,$8,$9,$10) RETURNING id`, userID, organizationID, item.Name, "Compatibility workflow for automation "+item.ID.String(), definitionRaw, scheduleRaw, item.Timezone, item.Enabled, nullableTime(nextRun), item.ID).Scan(&workflowID)
+	if err != nil {
+		// Another request may have created the projection between the initial
+		// read and insert. Return that canonical id when possible.
+		if existing, lookupErr := a.automationWorkflowID(c, automationID); lookupErr == nil && existing != nil {
+			return *existing, nil
+		}
+		return uuid.Nil, err
+	}
+	if _, err := a.DB.ExecContext(c, `UPDATE automations SET workflow_id=$2,next_run_at=$3,updated_at=now() WHERE id=$1`, automationID, workflowID, nullableTime(nextRun)); err != nil {
+		return uuid.Nil, err
+	}
+	return workflowID, nil
+}
+
+func (a *App) syncAutomationWorkflow(c *gin.Context, workflowID uuid.UUID, item models.Automation) error {
+	definition := automationWorkflowDefinition(item)
+	if err := ValidateAgentWorkflowDefinition(definition); err != nil {
+		return err
+	}
+	schedule, err := ParseAgentSchedule(item.Schedule)
+	if err != nil {
+		schedule = models.AgentSchedule{Kind: "legacy", Display: item.Schedule}
+	}
+	definitionRaw, _ := json.Marshal(definition)
+	scheduleRaw, _ := json.Marshal(schedule)
+	nextRun, _ := NextAgentScheduleTime(schedule, item.Timezone, time.Now().UTC())
+	_, err = a.DB.ExecContext(c, `UPDATE agent_workflows SET name=$2,definition=$3,schedule=$4,timezone=$5,enabled=$6,next_run_at=$7,updated_at=now() WHERE id=$1`, workflowID, item.Name, definitionRaw, scheduleRaw, item.Timezone, item.Enabled, nullableTime(nextRun))
+	return err
 }
 func automationValues(request automationRequest, current *models.Automation) (string, string, string, string, string, *uuid.UUID, error) {
 	name, prompt, schedule, timezone, approval := "", "", "", "", ""

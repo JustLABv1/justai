@@ -61,6 +61,7 @@ func main() {
 	application.RAG.Start(workerContext)
 	application.StartRepositoryWorker(workerContext)
 	application.StartLifecycleWorker(workerContext)
+	application.StartAgentWorker(workerContext)
 	application.Live.Start(workerContext)
 	server := &http.Server{
 		Addr:              cfg.Address(),

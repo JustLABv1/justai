@@ -81,12 +81,12 @@ const navigationItems: NavigationItem[] = [
     view: "chat",
   },
   {
-    id: "assistants",
-    label: "Assistants",
-    hint: "Reusable chat roles",
-    keywords: ["assistant", "agent", "role"],
+    id: "agents",
+    label: "Agents",
+    hint: "Native and connected agents",
+    keywords: ["assistant", "agent", "role", "a2a", "workflow", "run"],
     icon: Bot,
-    view: "assistants",
+    view: "agents",
   },
   {
     id: "live-transcription",

@@ -16,6 +16,7 @@ import { AutomationsView } from "@/components/automations-view"
 import { VideoTranscriptionView } from "@/components/video-transcription-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { AssistantsView } from "@/components/assistants-view"
+import { AgentsView } from "@/components/agents-view"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +41,8 @@ import type {
   TranscriptionSession,
   Note,
   SavedAssistant,
+  Agent,
+  AgentTab,
   Automation,
   WorkspaceProject,
 } from "@/lib/types"
@@ -91,6 +94,7 @@ export function Workspace() {
   const [servers, setServers] = useState<MCPServer[]>([])
   const [notes, setNotes] = useState<Note[]>([])
   const [savedAssistants, setSavedAssistants] = useState<SavedAssistant[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
   const [automations, setAutomations] = useState<Automation[]>([])
   const [projects, setProjects] = useState<WorkspaceProject[]>([])
   const [draftAssistantId, setDraftAssistantId] = useState<string | null>(null)
@@ -268,6 +272,7 @@ export function Workspace() {
         setServers([])
         setNotes([])
         setSavedAssistants([])
+        setAgents([])
         setProjects([])
 
         // The platform-admin shell is intentionally independent from the
@@ -301,6 +306,9 @@ export function Workspace() {
                 api.get<{ assistants: SavedAssistant[] }>("/api/v1/assistants"),
                 api.get<{ projects: WorkspaceProject[] }>("/api/v1/projects"),
                 api.get<{ automations: Automation[] }>("/api/v1/automations"),
+                api.get<{ agents: Agent[]; agentsEnabled?: boolean }>(
+                  "/api/v1/agents"
+                ),
               ])
         if (cancelled) return
 
@@ -371,7 +379,14 @@ export function Workspace() {
           9,
           "projects"
         )
-        const automationResult = valueAt<{ automations: Automation[] }>(10, "automations")
+        const automationResult = valueAt<{ automations: Automation[] }>(
+          10,
+          "automations"
+        )
+        const agentResult = valueAt<{
+          agents: Agent[]
+          agentsEnabled?: boolean
+        }>(11, "agents")
         if (conversationResult)
           setConversations(conversationResult.conversations)
         if (archivedConversationResult)
@@ -387,6 +402,13 @@ export function Workspace() {
         if (assistantResult) setSavedAssistants(assistantResult.assistants)
         if (projectResult) setProjects(projectResult.projects)
         if (automationResult) setAutomations(automationResult.automations)
+        if (agentResult) {
+          setAgents(agentResult.agents)
+          if (agentResult.agentsEnabled === false) {
+            disabled.agents =
+              "Agents are disabled by the platform administrator. Existing records remain inspectable."
+          }
+        }
         setFeatureErrors(errors)
         setDisabledFeatures(disabled)
         setStatus("ready")
@@ -580,7 +602,42 @@ export function Workspace() {
       ? `${activeView}:${route.settingsTab}`
       : activeView === "admin"
         ? `${activeView}:${route.adminTab}`
-        : activeView
+        : activeView === "agents"
+          ? `${activeView}:${route.agentTab}`
+          : activeView
+
+  const chatAgents = useMemo<SavedAssistant[]>(
+    () => [
+      ...agents.map((agent) => ({
+        id: agent.id,
+        versionId: agent.versionId ?? "",
+        version: agent.version ?? 1,
+        name: agent.name,
+        description: agent.description,
+        icon: agent.icon,
+        visibility: agent.visibility,
+        instructions: agent.instructions ?? "",
+        endpointId: agent.endpointId,
+        model: agent.model,
+        useMemory: agent.useMemory,
+        deepContext: agent.deepContext,
+        kind: agent.kind,
+        connectionId: agent.connectionId,
+        status: agent.status,
+        credentialConfigured: agent.credentialConfigured,
+        capabilities: agent.capabilities,
+        skills: agent.skills,
+        delegationAgentIds: agent.delegationAgentIds,
+        agentCard: agent.agentCard,
+        createdAt: agent.createdAt,
+        updatedAt: agent.updatedAt,
+      })),
+      ...savedAssistants.filter(
+        (assistant) => !agents.some((agent) => agent.id === assistant.id)
+      ),
+    ],
+    [agents, savedAssistants]
+  )
 
   const navigate = useCallback(
     (
@@ -589,7 +646,8 @@ export function Workspace() {
       replace = false,
       sessionId: string | null = null,
       settingsTab: import("@/lib/types").SettingsTab = "workspace",
-      adminTab: AdminTab = "overview"
+      adminTab: AdminTab = "overview",
+      agentTab: AgentTab = "agents"
     ) => {
       if (view !== "chat") {
         setContextOpen(false)
@@ -614,7 +672,8 @@ export function Workspace() {
         conversationId,
         sessionId,
         settingsTab,
-        adminTab
+        adminTab,
+        agentTab
       )
 
       // A newly-created chat is already mounted in the current Assistant UI
@@ -641,6 +700,12 @@ export function Workspace() {
     },
     [router]
   )
+
+  useEffect(() => {
+    if (route.legacyRedirect && pathname !== route.legacyRedirect) {
+      router.replace(route.legacyRedirect, { scroll: false })
+    }
+  }, [pathname, route.legacyRedirect, router])
 
   const promotePendingConversation = useCallback(
     (id: string) => {
@@ -1137,7 +1202,10 @@ export function Workspace() {
             {activeView === "chat" && (
               <ChatView
                 key={`chat:${activeOrganizationId ?? "none"}:${user.id}`}
-                assistants={savedAssistants}
+                // The picker is now fed by the canonical agent catalog. The
+                // compatibility assistant list remains available to the
+                // legacy editor below.
+                assistants={chatAgents}
                 cacheScope={`${activeOrganizationId ?? "none"}:${user.id}`}
                 conversationId={activeConversationId}
                 conversation={activeConversation}
@@ -1242,6 +1310,28 @@ export function Workspace() {
                 assistants={savedAssistants}
                 endpoints={endpoints}
                 onChange={setSavedAssistants}
+              />
+            )}
+            {activeView === "agents" && (
+              <AgentsView
+                activeTab={route.agentTab}
+                agents={agents}
+                endpoints={endpoints}
+                mcpServers={servers}
+                knowledgeSources={sources}
+                disabled={Boolean(disabledFeatures.agents)}
+                onAgentsChange={setAgents}
+                onTabChange={(tab) =>
+                  navigate(
+                    "agents",
+                    null,
+                    false,
+                    null,
+                    "workspace",
+                    "overview",
+                    tab
+                  )
+                }
               />
             )}
             {activeView === "integrations" && (

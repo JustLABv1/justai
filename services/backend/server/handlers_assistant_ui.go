@@ -30,6 +30,7 @@ import (
 // endpointId/model are host-owned routing fields added by AssistantChatTransport.
 type assistantUIRequest struct {
 	Messages            []json.RawMessage `json:"messages"`
+	AgentID             string            `json:"agentId"`
 	AssistantID         string            `json:"assistantId"`
 	ConversationID      string            `json:"conversationId"`
 	EndpointID          string            `json:"endpointId"`
@@ -214,7 +215,11 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("a non-empty user message is required"))
 		return
 	}
-	conversationID, err := a.ensureConversation(c, principal.UserID, organizationID, request.ConversationID, request.AssistantID, request.InheritRepositories)
+	selectedAgentID := strings.TrimSpace(request.AgentID)
+	if selectedAgentID == "" {
+		selectedAgentID = strings.TrimSpace(request.AssistantID)
+	}
+	conversationID, err := a.ensureConversation(c, principal.UserID, organizationID, request.ConversationID, selectedAgentID, request.InheritRepositories)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
@@ -236,6 +241,16 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		}
 		if strings.TrimSpace(request.Model) == "" {
 			request.Model = savedAssistant.Model
+		}
+	}
+	if savedAssistant != nil && a.AgentWorker != nil {
+		if agent, agentErr := a.AgentWorker.loadAgent(c, savedAssistant.ID, principal.UserID, organizationID, &savedAssistant.VersionID); agentErr == nil && agent.Kind == "remote" {
+			if !a.platformCapabilityEnabled(c, "agents") {
+				writeError(c, http.StatusServiceUnavailable, fmt.Errorf("agents are temporarily disabled by the platform administrator"))
+				return
+			}
+			a.assistantUIRemoteChat(c, principal.UserID, organizationID, conversationID, request, requestMessages, latestUser, agent)
+			return
 		}
 	}
 	endpointID, err := a.resolveEndpoint(c, principal.UserID, organizationID, request.EndpointID)
