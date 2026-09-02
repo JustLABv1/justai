@@ -208,6 +208,7 @@ type AgentRunNode struct {
 	NodeKey        string          `json:"nodeKey"`
 	AgentID        *uuid.UUID      `json:"agentId,omitempty"`
 	AgentVersionID *uuid.UUID      `json:"agentVersionId,omitempty"`
+	Definition     json.RawMessage `json:"definition,omitempty"`
 	Status         string          `json:"status"`
 	Attempt        int             `json:"attempt"`
 	Input          json.RawMessage `json:"input"`

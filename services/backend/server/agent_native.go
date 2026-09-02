@@ -18,7 +18,7 @@ const (
 	maxAgentContextTools      = 128
 	maxNativeContextRunes     = 48_000
 	maxNativeDeepContextRunes = 64_000
-	maxNativeToolRounds       = 4
+	maxNativeToolRounds       = maxChatToolRounds
 )
 
 // validateAgentWorkflowContext is the second authorization boundary for a
@@ -125,13 +125,25 @@ func (e *AgentEngine) validateAgentContextIDs(ctx context.Context, nodeID, label
 		default:
 			return fmt.Errorf("workflow node %q has an unsupported %s grant", nodeID, label)
 		}
-		args := []any{id, organizationID, userID}
-		if label == "knowledge source" && !shared {
-			conversation := uuid.Nil
-			if conversationID != nil {
-				conversation = *conversationID
+		var args []any
+		if shared {
+			switch label {
+			case "MCP server", "knowledge source", "repository", "note":
+				args = []any{id, organizationID}
+			case "transcription session":
+				// Workspace workflows cannot grant private transcription sessions;
+				// the query intentionally has no parameters and always returns false.
+				args = nil
 			}
-			args = append(args, conversation)
+		} else {
+			args = []any{id, organizationID, userID}
+			if label == "knowledge source" {
+				conversation := uuid.Nil
+				if conversationID != nil {
+					conversation = *conversationID
+				}
+				args = append(args, conversation)
+			}
 		}
 		var available bool
 		if err := e.app.DB.QueryRowContext(ctx, query, args...).Scan(&available); err != nil {
@@ -346,11 +358,18 @@ func (e *AgentEngine) nativeScopeRequiresApproval(ctx context.Context, userID, o
 	return false
 }
 
-func (e *AgentEngine) executeNativeMCPTool(ctx context.Context, userID, organizationID, runID uuid.UUID, binding voiceToolBinding, arguments map[string]any) (json.RawMessage, error) {
+func (e *AgentEngine) executeNativeMCPTool(ctx context.Context, userID, organizationID, runID, nodeID uuid.UUID, binding voiceToolBinding, arguments map[string]any) (json.RawMessage, error) {
 	server, err := e.app.loadMCPServer(ctx, binding.ServerID.String())
 	if err != nil {
 		return nil, err
 	}
+	toolEvent := map[string]any{
+		"serverId":     binding.ServerID,
+		"serverName":   binding.ServerName,
+		"tool":         binding.ToolName,
+		"argumentHash": agentArgumentHash(arguments),
+	}
+	e.emitEvent(ctx, runID, &nodeID, "tool.started", toolEvent)
 	audit := map[string]any{"runId": runID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments}
 	e.auditAgentEvent(ctx, userID, organizationID, "agent.mcp.execution", "mcp_server", binding.ServerID, audit)
 	result, callErr := server.CallTool(ctx, binding.ToolName, arguments)
@@ -367,8 +386,19 @@ func (e *AgentEngine) executeNativeMCPTool(ctx context.Context, userID, organiza
 	completed := map[string]any{"runId": runID, "serverId": binding.ServerID, "serverName": binding.ServerName, "tool": binding.ToolName, "arguments": arguments, "success": callErr == nil}
 	if callErr != nil {
 		completed["error"] = redactAgentError(callErr.Error())
+		e.emitEvent(ctx, runID, &nodeID, "tool.failed", map[string]any{
+			"serverName": binding.ServerName,
+			"tool":       binding.ToolName,
+			"error":      redactAgentError(callErr.Error()),
+		})
 	} else {
 		completed["resultPreview"] = toolResultPreview(result)
+		e.emitEvent(ctx, runID, &nodeID, "tool.completed", map[string]any{
+			"serverName":      binding.ServerName,
+			"tool":            binding.ToolName,
+			"resultAvailable": len(result) > 0,
+			"resultBytes":     len(result),
+		})
 	}
 	e.auditAgentEvent(ctx, userID, organizationID, "agent.mcp.completed", "mcp_server", binding.ServerID, completed)
 	return result, callErr
@@ -377,7 +407,18 @@ func (e *AgentEngine) executeNativeMCPTool(ctx context.Context, userID, organiza
 func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExecutionRequest, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding) (agentExecutionResult, error) {
 	messages := append([]provider.ToolMessage(nil), history...)
 	var response strings.Builder
+	toolLoopGuard := newChatToolLoopGuard(messages)
 	for round := 1; round <= maxNativeToolRounds; round++ {
+		if reason := toolLoopGuard.stopReason(); reason != chatToolLoopContinue {
+			message := chatToolLoopStopMessage(reason)
+			response.WriteString(message)
+			if request.OnProgress != nil {
+				if err := request.OnProgress(message); err != nil {
+					return agentExecutionResult{}, err
+				}
+			}
+			break
+		}
 		var roundResponse strings.Builder
 		calls := []provider.ToolCall{}
 		err := provider.StreamChatWithTools(ctx, endpoint, provider.ToolChatOptions{Messages: messages, Tools: definitions, Model: request.Agent.Model}, func(event provider.ToolChatEvent) error {
@@ -399,17 +440,22 @@ func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExec
 			break
 		}
 		messages = append(messages, provider.ToolMessage{Role: "assistant", ToolCalls: calls, Content: roundResponse.String()})
+		outcomes := make([]chatToolLoopOutcome, 0, len(calls))
 		for _, call := range calls {
 			arguments := map[string]any{}
 			if strings.TrimSpace(call.Arguments) != "" {
 				if err := json.Unmarshal([]byte(call.Arguments), &arguments); err != nil {
-					messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The MCP tool arguments were invalid JSON."})
+					errorText := "The MCP tool arguments were invalid JSON."
+					outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: errorText, failed: true})
+					messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: errorText})
 					continue
 				}
 			}
 			binding, ok := bindings[call.Name]
 			if !ok {
-				messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The requested MCP tool is not in this node's scope."})
+				errorText := "The requested MCP tool is not in this node's scope."
+				outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: errorText, failed: true})
+				messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: errorText})
 				continue
 			}
 			if binding.RequiresApproval {
@@ -435,11 +481,14 @@ func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExec
 					return agentExecutionResult{}, &agentApprovalRequiredError{}
 				}
 			}
-			result, callErr := e.executeNativeMCPTool(ctx, request.UserID, request.OrganizationID, request.RunID, binding, arguments)
+			result, callErr := e.executeNativeMCPTool(ctx, request.UserID, request.OrganizationID, request.RunID, request.NodeID, binding, arguments)
 			if callErr != nil {
-				messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The MCP tool failed: " + redactAgentError(callErr.Error())})
+				toolResult := "The MCP tool failed: " + redactAgentError(callErr.Error())
+				outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: toolResult, failed: true})
+				messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: toolResult})
 				continue
 			}
+			outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: string(result)})
 			messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: string(result)})
 			if request.OnProgress != nil {
 				if err := request.OnProgress("\n[MCP tool completed: " + binding.ToolName + "]\n"); err != nil {
@@ -447,8 +496,24 @@ func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExec
 				}
 			}
 		}
+		if stopReason := toolLoopGuard.observeRound(outcomes); stopReason != chatToolLoopContinue {
+			message := chatToolLoopStopMessage(stopReason)
+			response.WriteString(message)
+			if request.OnProgress != nil {
+				if err := request.OnProgress(message); err != nil {
+					return agentExecutionResult{}, err
+				}
+			}
+			break
+		}
 		if round == maxNativeToolRounds {
-			response.WriteString("\n\nI stopped after four MCP tool rounds to keep this run bounded.")
+			message := fmt.Sprintf("\n\nI stopped after %d MCP tool rounds to keep this run bounded.", maxNativeToolRounds)
+			response.WriteString(message)
+			if request.OnProgress != nil {
+				if err := request.OnProgress(message); err != nil {
+					return agentExecutionResult{}, err
+				}
+			}
 		}
 	}
 	if strings.TrimSpace(response.String()) == "" {

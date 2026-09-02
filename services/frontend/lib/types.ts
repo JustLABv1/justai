@@ -520,6 +520,7 @@ export type AgentRunNode = {
   nodeKey: string
   agentId?: string | null
   agentVersionId?: string | null
+  definition?: AgentWorkflowNode
   status: string
   attempt: number
   input: Record<string, unknown>
@@ -529,6 +530,15 @@ export type AgentRunNode = {
   startedAt?: string | null
   finishedAt?: string | null
   updatedAt: string
+}
+
+export type AgentRunEvent = {
+  id: number
+  runId: string
+  nodeId?: string | null
+  eventType: string
+  payload: unknown
+  createdAt: string
 }
 
 export type AgentApproval = {

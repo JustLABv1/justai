@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"regexp"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 
 	"justai-backend/models"
@@ -130,5 +133,27 @@ func TestNodeInputResolvesScopedBindings(t *testing.T) {
 	}
 	if value.Bindings["topic"] != "agents" || value.Bindings["answer"] != "hello" {
 		t.Fatalf("unexpected scoped bindings: %#v", value.Bindings)
+	}
+}
+
+func TestValidateAgentContextIDsUsesSharedScopeParameters(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	serverID := uuid.New()
+	organizationID := uuid.New()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM mcp_servers WHERE id=$1 AND scope_type='organization' AND scope_id=$2)`)).
+		WithArgs(serverID, organizationID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	engine := &AgentEngine{app: &App{DB: db}}
+	if err := engine.validateAgentContextIDs(context.Background(), "agent-1", "MCP server", []uuid.UUID{serverID}, uuid.New(), organizationID, nil, true); err != nil {
+		t.Fatalf("validate shared MCP grant: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

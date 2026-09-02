@@ -1268,7 +1268,7 @@ func (e *AgentEngine) loadAgentRun(ctx context.Context, runID uuid.UUID) (models
 }
 
 func (e *AgentEngine) loadAgentRunNodes(ctx context.Context, runID uuid.UUID) ([]models.AgentRunNode, error) {
-	rows, err := e.app.DB.QueryContext(ctx, `SELECT id,run_id,node_key,agent_id,agent_version_id,status,attempt,input,output,error,provider_task_id,started_at,finished_at,updated_at FROM agent_run_nodes WHERE run_id = $1 ORDER BY id`, runID)
+	rows, err := e.app.DB.QueryContext(ctx, `SELECT id,run_id,node_key,agent_id,agent_version_id,definition,status,attempt,input,output,error,provider_task_id,started_at,finished_at,updated_at FROM agent_run_nodes WHERE run_id = $1 ORDER BY id`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -1277,7 +1277,7 @@ func (e *AgentEngine) loadAgentRunNodes(ctx context.Context, runID uuid.UUID) ([
 	for rows.Next() {
 		var item models.AgentRunNode
 		var agentID, versionID sql.NullString
-		if err := rows.Scan(&item.ID, &item.RunID, &item.NodeKey, &agentID, &versionID, &item.Status, &item.Attempt, &item.Input, &item.Output, &item.Error, &item.ProviderTaskID, &item.StartedAt, &item.FinishedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.RunID, &item.NodeKey, &agentID, &versionID, &item.Definition, &item.Status, &item.Attempt, &item.Input, &item.Output, &item.Error, &item.ProviderTaskID, &item.StartedAt, &item.FinishedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		item.AgentID = parseOptionalUUIDString(agentID.String)

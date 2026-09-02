@@ -1,18 +1,12 @@
 "use client"
 
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Activity,
   Bot,
   Check,
   CheckCircle2,
+  ChevronDown,
   CircleAlert,
   Cloud,
   GitBranch,
@@ -20,6 +14,7 @@ import {
   Link2,
   ListChecks,
   Maximize2,
+  MessageSquare,
   Minimize2,
   LockKeyhole,
   Play,
@@ -27,6 +22,7 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Terminal,
   Trash2,
   UserRound,
   X,
@@ -55,6 +51,7 @@ import type {
   AgentConnection,
   AgentContextScope,
   AgentRun,
+  AgentRunEvent,
   AgentRunNode,
   AgentSchedule,
   AgentTab,
@@ -487,9 +484,7 @@ function WorkflowCanvas({
         nodesConnectable={!disabled}
         onlyRenderVisibleElements
         onNodeClick={(_, node) => onSelectNode(node.id)}
-        onNodeDragStop={(_, node) =>
-          onPositionChange(node.id, node.position)
-        }
+        onNodeDragStop={(_, node) => onPositionChange(node.id, node.position)}
         fitView
         proOptions={{ hideAttribution: true }}
       >
@@ -1264,9 +1259,9 @@ export function AgentsView({
                   <SelectTrigger>
                     <SelectValue>
                       {nativeForm.endpointId
-                        ? endpoints.find(
+                        ? (endpoints.find(
                             (endpoint) => endpoint.id === nativeForm.endpointId
-                          )?.name ?? "Selected endpoint"
+                          )?.name ?? "Selected endpoint")
                         : "Workspace default"}
                     </SelectValue>
                   </SelectTrigger>
@@ -1538,7 +1533,9 @@ export function AgentsView({
                 }
               >
                 <SelectTrigger>
-                  <SelectValue>{authTypeLabel(remoteForm.authType)}</SelectValue>
+                  <SelectValue>
+                    {authTypeLabel(remoteForm.authType)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -2163,7 +2160,12 @@ function WorkflowsPanel({
               "fixed inset-0 z-50 min-h-screen w-screen overflow-y-auto rounded-none bg-background py-6"
           )}
         >
-          <CardHeader>
+          <CardHeader
+            className={cn(
+              isFullscreen &&
+                "sticky top-0 z-10 border-b bg-background/95 backdrop-blur-sm"
+            )}
+          >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <CardTitle>
@@ -2176,6 +2178,7 @@ function WorkflowsPanel({
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
+                  type="button"
                   size="sm"
                   variant="outline"
                   onClick={() => void toggleFullscreen()}
@@ -2195,6 +2198,7 @@ function WorkflowsPanel({
                   </span>
                 </Button>
                 <Button
+                  type="button"
                   size="sm"
                   variant="outline"
                   onClick={onValidate}
@@ -2204,6 +2208,7 @@ function WorkflowsPanel({
                   {validating ? "Validating…" : "Validate"}
                 </Button>
                 <Button
+                  type="button"
                   size="sm"
                   variant="outline"
                   onClick={onSave}
@@ -2212,12 +2217,32 @@ function WorkflowsPanel({
                   <Check data-icon="inline-start" />
                   {saving ? "Saving…" : "Save"}
                 </Button>
-                <Button size="sm" onClick={onRun} disabled={disabled}>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={onRun}
+                  disabled={disabled}
+                >
                   <Play data-icon="inline-start" />
                   Run
                 </Button>
               </div>
             </div>
+            {validationMessage && (
+              <Alert
+                className="mt-3"
+                role="status"
+                variant={
+                  validationMessage.toLowerCase().includes("valid") ||
+                  validationMessage.toLowerCase().includes("saved")
+                    ? undefined
+                    : "destructive"
+                }
+              >
+                <ListChecks data-icon="inline-start" />
+                <AlertDescription>{validationMessage}</AlertDescription>
+              </Alert>
+            )}
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <div className="grid gap-4 md:grid-cols-3">
@@ -2241,10 +2266,12 @@ function WorkflowsPanel({
                       visibility: (value ??
                         "private") as WorkflowDraft["visibility"],
                     })
-                }
+                  }
                 >
                   <SelectTrigger>
-                    <SelectValue>{visibilityLabel(draft.visibility)}</SelectValue>
+                    <SelectValue>
+                      {visibilityLabel(draft.visibility)}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
@@ -2329,19 +2356,6 @@ function WorkflowsPanel({
               onEnabledChange={(enabled) => onUpdate({ enabled })}
               disabled={disabled}
             />
-            {validationMessage && (
-              <Alert
-                variant={
-                  validationMessage.toLowerCase().includes("valid") ||
-                  validationMessage.toLowerCase().includes("saved")
-                    ? undefined
-                    : "destructive"
-                }
-              >
-                <ListChecks data-icon="inline-start" />
-                <AlertDescription>{validationMessage}</AlertDescription>
-              </Alert>
-            )}
           </CardContent>
         </Card>
       ) : (
@@ -2355,7 +2369,11 @@ function WorkflowsPanel({
               Start with a node, add a second agent, connect them, and run a
               parallel or fan-in graph with durable progress.
             </p>
-            <Button className="mt-5" onClick={() => onOpen()} disabled={disabled}>
+            <Button
+              className="mt-5"
+              onClick={() => onOpen()}
+              disabled={disabled}
+            >
               <Plus data-icon="inline-start" />
               New workflow
             </Button>
@@ -2791,11 +2809,17 @@ function RunsPanel({
     runs[0]?.id ?? null
   )
   const [detail, setDetail] = useState<AgentRun | null>(null)
+  const [events, setEvents] = useState<AgentRunEvent[]>([])
   const [error, setError] = useState("")
   const runsRef = useRef(runs)
   const onRunsChangeRef = useRef(onRunsChange)
+  const runStatusRef = useRef<string | undefined>(undefined)
   const selectedSummary = runs.find((run) => run.id === selectedID)
-  const detailStatus = detail?.status
+  const selectedRunStatus = detail?.status ?? selectedSummary?.status
+
+  useEffect(() => {
+    runStatusRef.current = selectedRunStatus
+  }, [selectedRunStatus])
 
   useEffect(() => {
     runsRef.current = runs
@@ -2831,6 +2855,14 @@ function RunsPanel({
     }
   }, [])
 
+  const appendEvent = useCallback((event: AgentRunEvent) => {
+    if (!event.id || !event.eventType) return
+    setEvents((current) => {
+      if (current.some((item) => item.id === event.id)) return current
+      return [...current, event].sort((left, right) => left.id - right.id)
+    })
+  }, [])
+
   useEffect(() => {
     if (!selectedID) return
     const timer = window.setTimeout(() => void reload(selectedID), 0)
@@ -2838,12 +2870,7 @@ function RunsPanel({
   }, [reload, selectedID])
 
   useEffect(() => {
-    if (
-      !selectedID ||
-      !detailStatus ||
-      ["completed", "failed", "cancelled"].includes(detailStatus)
-    )
-      return
+    if (!selectedID) return
     let stopped = false
     let retryTimer: number | undefined
     let lastEventID = 0
@@ -2868,28 +2895,42 @@ function RunsPanel({
           const chunk = await reader.read()
           if (chunk.done) break
           buffer += decoder.decode(chunk.value, { stream: true })
-          const blocks = buffer.split("\n\n")
+          const blocks = buffer.split(/\r?\n\r?\n/)
           buffer = blocks.pop() ?? ""
           for (const block of blocks) {
             const idLine = block
-              .split("\n")
+              .split(/\r?\n/)
               .find((line) => line.startsWith("id:"))
             if (idLine)
               lastEventID = Number(idLine.slice(3).trim()) || lastEventID
             const data = block
-              .split("\n")
+              .split(/\r?\n/)
               .filter((line) => line.startsWith("data:"))
               .map((line) => line.slice(5).trim())
               .join("\n")
             if (data) {
               try {
-                JSON.parse(data)
+                const event = JSON.parse(data) as Partial<AgentRunEvent>
+                if (
+                  typeof event.id === "number" &&
+                  typeof event.eventType === "string"
+                ) {
+                  appendEvent(event as AgentRunEvent)
+                }
               } catch {
                 /* reconnectable event payload */
               }
               void reload(selectedID)
             }
           }
+        }
+        if (
+          !stopped &&
+          !["completed", "failed", "cancelled"].includes(
+            runStatusRef.current ?? ""
+          )
+        ) {
+          retryTimer = window.setTimeout(() => void connect(), 1200)
         }
       } catch {
         if (!stopped) retryTimer = window.setTimeout(() => void connect(), 1200)
@@ -2901,7 +2942,7 @@ function RunsPanel({
       controller.abort()
       if (retryTimer) window.clearTimeout(retryTimer)
     }
-  }, [detailStatus, reload, selectedID])
+  }, [appendEvent, reload, selectedID])
 
   async function cancelRun() {
     if (!selectedID) return
@@ -2927,7 +2968,7 @@ function RunsPanel({
         `/api/v1/agent-runs/${selectedID}/retry`
       )
       onRunsChange([result.run, ...runs])
-      setSelectedID(result.run.id)
+      selectRun(result.run.id)
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -2956,6 +2997,17 @@ function RunsPanel({
           : "The approval decision could not be saved."
       )
     }
+  }
+
+  const selectedWorkflow = workflows.find(
+    (workflow) => workflow.id === (detail ?? selectedSummary)?.workflowId
+  )
+
+  function selectRun(id: string) {
+    if (id === selectedID) return
+    setDetail(null)
+    setEvents([])
+    setSelectedID(id)
   }
 
   return (
@@ -2987,7 +3039,7 @@ function RunsPanel({
                   "rounded-lg border px-3 py-2 text-left hover:bg-muted/50",
                   selectedID === run.id && "border-primary bg-primary/[0.04]"
                 )}
-                onClick={() => setSelectedID(run.id)}
+                onClick={() => selectRun(run.id)}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-medium">
@@ -3019,6 +3071,8 @@ function RunsPanel({
         <RunDetail
           run={detail ?? selectedSummary!}
           agents={agents}
+          workflow={selectedWorkflow}
+          events={events}
           onCancel={() => void cancelRun()}
           onRetry={() => void retryRun()}
           onDecision={(approval, decision) => void decide(approval, decision)}
@@ -3052,6 +3106,8 @@ function EmptyRuns() {
 function RunDetail({
   run,
   agents,
+  workflow,
+  events,
   onCancel,
   onRetry,
   onDecision,
@@ -3059,6 +3115,8 @@ function RunDetail({
 }: {
   run: AgentRun
   agents: Agent[]
+  workflow?: AgentWorkflow
+  events: AgentRunEvent[]
   onCancel: () => void
   onRetry: () => void
   onDecision: (
@@ -3068,7 +3126,9 @@ function RunDetail({
   disabled?: boolean
 }) {
   const nodes = run.nodes ?? []
-  const completed = nodes.filter((node) => node.status === "completed").length
+  const completed = nodes.filter(
+    (node) => node.status === "completed" || node.status === "skipped"
+  ).length
   const pendingApprovals = (run.approvals ?? []).filter(
     (approval) => approval.status === "pending"
   )
@@ -3128,22 +3188,71 @@ function RunDetail({
             value={nodes.length ? (completed / nodes.length) * 100 : 0}
           />
         </div>
-        {run.summary && (
-          <Alert>
-            <CheckCircle2 data-icon="inline-start" />
-            <AlertDescription>{run.summary}</AlertDescription>
-          </Alert>
-        )}
-        {run.error && (
-          <Alert variant="destructive">
-            <CircleAlert data-icon="inline-start" />
-            <AlertDescription>{run.error}</AlertDescription>
-          </Alert>
-        )}
-        <div className="grid gap-3 md:grid-cols-2">
-          {nodes.map((node) => (
-            <RunNodeCard key={node.id} node={node} agents={agents} />
-          ))}
+        <section
+          className="flex flex-col gap-3"
+          aria-labelledby="run-chat-title"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3
+                id="run-chat-title"
+                className="flex items-center gap-2 font-medium"
+              >
+                <MessageSquare className="size-4 text-primary" />
+                Run conversation
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                The request, each agent response, and the final workflow result.
+              </p>
+            </div>
+            <Badge variant="outline" className="shrink-0">
+              {events.length} {events.length === 1 ? "event" : "events"}
+            </Badge>
+          </div>
+          <div className="flex flex-col gap-5 rounded-2xl border bg-muted/[0.12] p-3 sm:p-5">
+            <RunUserMessage input={run.input} />
+            {nodes.length ? (
+              nodes.map((node) => {
+                const workflowNode = workflow?.definition.nodes.find(
+                  (candidate) => candidate.id === node.nodeKey
+                )
+                return (
+                  <RunAgentMessage
+                    key={node.id}
+                    agent={agents.find((agent) => agent.id === node.agentId)}
+                    events={events.filter((event) => event.nodeId === node.id)}
+                    instruction={
+                      workflowNode?.instruction ?? node.definition?.instruction
+                    }
+                    node={node}
+                  />
+                )
+              })
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No agent node records have been created yet.
+              </p>
+            )}
+            {run.summary && (
+              <RunAssistantMessage
+                content={run.summary}
+                label="Workflow result"
+              />
+            )}
+            {run.error && <RunErrorMessage content={run.error} />}
+          </div>
+        </section>
+        <RunEventLog agents={agents} events={events} nodes={nodes} />
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <ListChecks className="size-4 text-muted-foreground" />
+            <h3 className="font-medium">Node overview</h3>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {nodes.map((node) => (
+              <RunNodeOverview key={node.id} node={node} agents={agents} />
+            ))}
+          </div>
         </div>
         {pendingApprovals.length > 0 && (
           <section className="flex flex-col gap-3">
@@ -3191,7 +3300,283 @@ function RunDetail({
   )
 }
 
-function RunNodeCard({
+function RunUserMessage({ input }: { input: unknown }) {
+  const content = runInputText(input)
+  if (!content) return null
+
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[min(44rem,92%)] rounded-[1.35rem] rounded-br-md border border-primary/15 bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-sm">
+        <div className="mb-1 flex items-center justify-end gap-1.5 text-[11px] font-medium text-primary-foreground/75">
+          <MessageSquare className="size-3.5" />
+          Run input
+        </div>
+        <p className="break-words whitespace-pre-wrap">{content}</p>
+      </div>
+    </div>
+  )
+}
+
+function RunAgentMessage({
+  node,
+  agent,
+  instruction,
+  events,
+}: {
+  node: AgentRunNode
+  agent?: Agent
+  instruction?: string
+  events: AgentRunEvent[]
+}) {
+  const progress = events
+    .filter((event) => event.eventType === "node.progress")
+    .map((event) => eventText(event))
+    .filter(Boolean)
+    .join("")
+  const output = runNodeOutputText(node.output)
+  const response = output || progress
+  const isWorking = ["queued", "running", "waiting_approval"].includes(
+    node.status
+  )
+
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background text-primary shadow-sm ring-1 ring-border">
+        <Bot className="size-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-medium">
+            {agent?.name ?? "Default native agent"}
+          </span>
+          <span className="text-xs text-muted-foreground">{node.nodeKey}</span>
+          <Badge variant={badgeVariant(node.status)}>
+            {statusLabel(node.status)}
+          </Badge>
+        </div>
+        <div className="rounded-2xl rounded-tl-md border bg-background px-4 py-3 shadow-sm">
+          {instruction && (
+            <div className="mb-3 border-b pb-3">
+              <p className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                Instruction
+              </p>
+              <p className="text-sm leading-6 break-words whitespace-pre-wrap">
+                {instruction}
+              </p>
+            </div>
+          )}
+          {response ? (
+            <div>
+              <p className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                {output ? "Response" : "Live response"}
+              </p>
+              <p className="text-sm leading-6 break-words whitespace-pre-wrap">
+                {response}
+              </p>
+            </div>
+          ) : isWorking ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Activity className="size-4 animate-pulse" />
+              Agent is working…
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              This agent did not return a response.
+            </p>
+          )}
+          {node.error && (
+            <p className="mt-3 flex items-start gap-2 border-t pt-3 text-sm text-destructive">
+              <CircleAlert className="mt-0.5 size-4 shrink-0" />
+              <span className="break-words whitespace-pre-wrap">
+                {node.error}
+              </span>
+            </p>
+          )}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <span>{events.length} activity events</span>
+          <span aria-hidden="true">·</span>
+          <span>attempt {node.attempt || 0}</span>
+          {node.providerTaskId && <span>· remote task attached</span>}
+        </div>
+        <details className="group mt-2 rounded-xl border bg-muted/[0.16] px-3 py-2 text-xs">
+          <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+            Execution details
+          </summary>
+          <div className="mt-3 flex flex-col gap-3 border-t pt-3">
+            <RunDetailValue label="Input" value={node.input} />
+            <RunDetailValue label="Output" value={node.output} />
+            {node.providerTaskId && (
+              <div>
+                <p className="mb-1 font-medium text-muted-foreground">
+                  Remote task
+                </p>
+                <p className="font-mono text-[11px] break-all">
+                  {node.providerTaskId}
+                </p>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+              {node.startedAt && (
+                <span>Started {new Date(node.startedAt).toLocaleString()}</span>
+              )}
+              {node.finishedAt && (
+                <span>
+                  Finished {new Date(node.finishedAt).toLocaleString()}
+                </span>
+              )}
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+  )
+}
+
+function RunAssistantMessage({
+  label,
+  content,
+}: {
+  label: string
+  content: string
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
+        <CheckCircle2 className="size-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="mb-1.5 text-sm font-medium">{label}</p>
+        <div className="rounded-2xl rounded-tl-md border border-primary/15 bg-primary/[0.04] px-4 py-3 text-sm leading-6">
+          <p className="break-words whitespace-pre-wrap">{content}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RunErrorMessage({ content }: { content: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive ring-1 ring-destructive/15">
+        <CircleAlert className="size-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="mb-1.5 text-sm font-medium text-destructive">Run error</p>
+        <div className="rounded-2xl rounded-tl-md border border-destructive/25 bg-destructive/[0.04] px-4 py-3 text-sm leading-6 text-destructive">
+          <p className="break-words whitespace-pre-wrap">{content}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RunEventLog({
+  events,
+  nodes,
+  agents,
+}: {
+  events: AgentRunEvent[]
+  nodes: AgentRunNode[]
+  agents: Agent[]
+}) {
+  return (
+    <section className="flex flex-col gap-3" aria-labelledby="run-events-title">
+      <Separator />
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3
+            id="run-events-title"
+            className="flex items-center gap-2 font-medium"
+          >
+            <Terminal className="size-4 text-muted-foreground" />
+            Agent activity
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Durable events replayed from this run, including progress and
+            failures.
+          </p>
+        </div>
+        <Badge variant="outline" className="shrink-0">
+          {events.length}
+        </Badge>
+      </div>
+      {events.length ? (
+        <div className="max-h-[28rem] overflow-y-auto rounded-xl border bg-muted/[0.12] p-3">
+          <div className="flex flex-col">
+            {events.map((event, index) => {
+              const node = event.nodeId
+                ? nodes.find((candidate) => candidate.id === event.nodeId)
+                : undefined
+              const agent = node
+                ? agents.find((candidate) => candidate.id === node.agentId)
+                : undefined
+              return (
+                <div
+                  key={event.id}
+                  className="flex gap-3 py-2 first:pt-0 last:pb-0"
+                >
+                  <div className="flex w-3 shrink-0 flex-col items-center">
+                    <span className="mt-1.5 size-2 rounded-full bg-primary" />
+                    {index < events.length - 1 && (
+                      <span className="mt-1 w-px flex-1 bg-border" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 pb-2">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="text-xs font-medium">
+                        {formatEventType(event.eventType)}
+                      </span>
+                      {agent && (
+                        <span className="text-[11px] text-muted-foreground">
+                          · {agent.name}
+                        </span>
+                      )}
+                      <time className="text-[11px] text-muted-foreground">
+                        {formatRunTime(event.createdAt)}
+                      </time>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+                      {eventText(event)}
+                    </p>
+                    <details className="group mt-1.5 text-[11px]">
+                      <summary className="flex cursor-pointer list-none items-center gap-1 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                        <ChevronDown className="size-3 transition-transform group-open:rotate-180" />
+                        View event payload
+                      </summary>
+                      <pre className="mt-2 max-h-48 overflow-auto rounded-lg border bg-background p-2 font-mono text-[10px] leading-4 whitespace-pre-wrap">
+                        {formatRunValue(event.payload)}
+                      </pre>
+                    </details>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">
+          No persisted activity events are available for this run yet.
+        </div>
+      )}
+    </section>
+  )
+}
+
+function RunDetailValue({ label, value }: { label: string; value: unknown }) {
+  if (!hasRunValue(value)) return null
+  return (
+    <div>
+      <p className="mb-1 font-medium text-muted-foreground">{label}</p>
+      <pre className="max-h-48 overflow-auto rounded-lg border bg-background p-2 font-mono text-[10px] leading-4 whitespace-pre-wrap">
+        {formatRunValue(value)}
+      </pre>
+    </div>
+  )
+}
+
+function RunNodeOverview({
   node,
   agents,
 }: {
@@ -3218,7 +3603,7 @@ function RunNodeCard({
           · attempt {node.attempt || 0}
         </p>
         {node.providerTaskId && (
-          <p className="break-all text-[11px] text-muted-foreground">
+          <p className="text-[11px] break-all text-muted-foreground">
             Remote task: {node.providerTaskId}
           </p>
         )}
@@ -3226,6 +3611,131 @@ function RunNodeCard({
       </CardContent>
     </Card>
   )
+}
+
+function runInputText(input: unknown): string {
+  const value = asRunRecord(input)
+  if (value) {
+    for (const key of ["text", "prompt", "task", "message", "request"]) {
+      if (typeof value[key] === "string" && value[key].trim()) {
+        return value[key].trim()
+      }
+    }
+  }
+  return hasRunValue(input) ? formatRunValue(input) : ""
+}
+
+function runNodeOutputText(output: unknown): string {
+  const value = asRunRecord(output)
+  if (!value || !Object.keys(value).length) return ""
+  if (typeof value.summary === "string" && value.summary.trim()) {
+    return value.summary.trim()
+  }
+  const visible = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== "providerTaskId")
+  )
+  return Object.keys(visible).length ? formatRunValue(visible) : ""
+}
+
+function eventText(event: AgentRunEvent): string {
+  const payload = asRunRecord(event.payload)
+  const stringValue = (...keys: string[]) => {
+    for (const key of keys) {
+      const candidate = payload?.[key]
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim()
+      }
+    }
+    return ""
+  }
+
+  switch (event.eventType) {
+    case "run.created":
+      return `Run created from ${stringValue("sourceType") || "request"}.`
+    case "run.started":
+      return "Worker claimed the run and started execution."
+    case "node.started":
+      return "Agent started processing this node."
+    case "node.progress":
+      return typeof payload?.delta === "string" && payload.delta
+        ? payload.delta
+        : "Agent sent a progress update."
+    case "tool.started":
+      return `Calling ${stringValue("tool") || "MCP tool"}${stringValue("serverName") ? ` on ${stringValue("serverName")}` : ""}.`
+    case "tool.completed":
+      return `${stringValue("tool") || "MCP tool"} completed successfully.`
+    case "tool.failed":
+      return `${stringValue("tool") || "MCP tool"} failed${stringValue("error") ? `: ${stringValue("error")}` : "."}`
+    case "node.completed":
+      return stringValue("summary") || "Agent completed this node."
+    case "node.retry":
+      return `Retrying attempt ${payload?.attempt ?? ""}${stringValue("error") ? `: ${stringValue("error")}` : "."}`
+    case "node.failed":
+      return stringValue("error") || "Agent node failed."
+    case "approval.requested":
+      return `Approval requested for ${stringValue("actionType") || "an agent action"}.`
+    case "approval.approved":
+      return "The exact requested action was approved."
+    case "approval.rejected":
+      return "The requested action was rejected."
+    case "approval.expired":
+      return "The approval expired before the action was approved."
+    case "run.completed":
+      return stringValue("summary") || "Workflow completed."
+    case "run.failed":
+      return stringValue("error") || "Workflow failed."
+    case "run.cancelled":
+      return stringValue("reason") || "Workflow was cancelled."
+    case "run.cancel_requested":
+      return "Cancellation was requested."
+    default:
+      return hasRunValue(event.payload)
+        ? formatRunValue(event.payload)
+        : "Event recorded."
+  }
+}
+
+function formatEventType(eventType: string): string {
+  return eventType
+    .split(".")
+    .map((part) =>
+      part
+        .replace(/[_-]/g, " ")
+        .replace(/\b\w/g, (character) => character.toUpperCase())
+    )
+    .join(" · ")
+}
+
+function formatRunTime(value?: string | null): string {
+  if (!value) return ""
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+}
+
+function asRunRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function hasRunValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false
+  if (typeof value === "string") return value.trim().length > 0
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === "object") return Object.keys(value).length > 0
+  return true
+}
+
+function formatRunValue(value: unknown): string {
+  if (typeof value === "string") return value
+  try {
+    const formatted = JSON.stringify(value, null, 2)
+    return formatted === undefined ? String(value) : formatted
+  } catch {
+    return String(value)
+  }
 }
 
 function ApprovalCard({

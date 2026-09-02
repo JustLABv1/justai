@@ -474,7 +474,14 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 			toolRounds := 0
 			lastHadTools := false
 			freshDiscoveryAttempted := false
-			for toolRounds < 4 {
+			toolLoopGuard := newChatToolLoopGuard(toolMessages)
+			for toolRounds < maxChatToolRounds {
+				if reason := toolLoopGuard.stopReason(); reason != chatToolLoopContinue {
+					message := chatToolLoopStopMessage(reason)
+					response.WriteString(message)
+					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
+					break
+				}
 				response.Reset()
 				calls := []provider.ToolCall{}
 				err = provider.StreamChatWithTools(ctx, endpoint, provider.ToolChatOptions{Messages: toolMessages, Tools: definitions, Model: endpoint.ChatModel}, func(event provider.ToolChatEvent) error {
@@ -500,6 +507,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 				lastHadTools = true
 				toolRounds++
 				toolMessages = append(toolMessages, provider.ToolMessage{Role: "assistant", Content: response.String(), ToolCalls: calls})
+				outcomes := make([]chatToolLoopOutcome, 0, len(calls))
 				for _, call := range calls {
 					binding, exists := findVoiceToolBinding(bindings, call.Name)
 					if !exists && !freshDiscoveryAttempted {
@@ -511,7 +519,9 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 					if !exists {
 						event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: toolRounds, ServerName: "MCP server", ToolName: call.Name, CallID: call.ID, Error: "The requested MCP tool is not available."}
 						messageID := a.persistChatToolEvent(ctx, conversationID, event)
-						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The requested tool is not allowlisted."})
+						toolResult := "The requested tool is not allowlisted."
+						outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: map[string]any{}, result: toolResult, failed: true})
+						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: toolResult})
 						if messageID != uuid.Nil {
 							_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
 						}
@@ -520,9 +530,11 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 					arguments := map[string]any{}
 					if strings.TrimSpace(call.Arguments) != "" {
 						if err := json.Unmarshal([]byte(call.Arguments), &arguments); err != nil {
-							event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, IconURL: binding.IconURL, ToolName: binding.ToolName, CallID: call.ID, Error: "The tool arguments were invalid JSON."}
+							errorText := "The tool arguments were invalid JSON."
+							outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: errorText, failed: true})
+							event := chatToolEvent{Kind: "mcp_tool", Status: "failed", Round: toolRounds, ServerID: binding.ServerID, ServerName: binding.ServerName, IconURL: binding.IconURL, ToolName: binding.ToolName, CallID: call.ID, Error: errorText}
 							messageID := a.persistChatToolEvent(ctx, conversationID, event)
-							toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The tool arguments were invalid JSON."})
+							toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: errorText})
 							if messageID != uuid.Nil {
 								_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
 							}
@@ -563,6 +575,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 						})
 					}
 					if !approved {
+						outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: "The user declined this MCP tool call.", failed: true})
 						event.Status = "declined"
 						event.ApprovalID = approvalID
 						event.Error = "declined by user"
@@ -589,13 +602,16 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 						result, callErr = a.executeVoiceTool(ctx, userID, organizationID, conversationID, binding, arguments)
 					}
 					if callErr != nil {
+						toolResult := "The MCP tool failed: " + callErr.Error()
+						outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: toolResult, failed: true})
 						event.Status = "failed"
 						event.Error = callErr.Error()
 						a.updateChatToolEvent(ctx, conversationID, messageID, event)
 						_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": callErr.Error()}})
-						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The MCP tool failed: " + callErr.Error()})
+						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: toolResult})
 						continue
 					}
+					outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: string(result)})
 					event.Status = "completed"
 					event.Result = string(result)
 					event.ResultPreview = toolResultPreview(result)
@@ -604,10 +620,17 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": true}})
 					toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: string(result)})
 				}
+				if stopReason := toolLoopGuard.observeRound(outcomes); stopReason != chatToolLoopContinue {
+					message := chatToolLoopStopMessage(stopReason)
+					response.WriteString(message)
+					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
+					break
+				}
 			}
-			if lastHadTools && strings.TrimSpace(response.String()) == "" {
-				response.WriteString("I stopped after four MCP tool rounds to keep this turn safe.")
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": response.String()}})
+			if lastHadTools && toolRounds >= maxChatToolRounds && strings.TrimSpace(response.String()) == "" {
+				message := fmt.Sprintf("I stopped after %d MCP tool rounds to keep this turn safe.", maxChatToolRounds)
+				response.WriteString(message)
+				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
 			}
 		} else {
 			err = a.streamVoiceWithoutTools(ctx, connection, state, requestID, endpoint, history, &response)
