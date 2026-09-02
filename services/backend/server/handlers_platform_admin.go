@@ -35,6 +35,7 @@ type platformSettingsRequest struct {
 	MCPEnabled           *bool   `json:"mcpEnabled"`
 	KnowledgeEnabled     *bool   `json:"knowledgeEnabled"`
 	AttachmentsEnabled   *bool   `json:"attachmentsEnabled"`
+	AgentsEnabled        *bool   `json:"agentsEnabled"`
 	MaintenanceMessage   *string `json:"maintenanceMessage"`
 }
 
@@ -43,6 +44,7 @@ type platformHealthSnapshot struct {
 	Workers   platformWorkerHealth   `json:"workers"`
 	Providers platformProviderHealth `json:"providers"`
 	MCP       platformMCPHealth      `json:"mcp"`
+	Agents    platformAgentHealth    `json:"agents"`
 	CheckedAt time.Time              `json:"checkedAt"`
 }
 
@@ -53,6 +55,15 @@ type platformDatabaseHealth struct {
 type platformWorkerHealth struct {
 	RAG           bool `json:"rag"`
 	Transcription bool `json:"transcription"`
+	Agents        bool `json:"agents"`
+}
+
+type platformAgentHealth struct {
+	OK               bool `json:"ok"`
+	Total            int  `json:"total"`
+	Enabled          int  `json:"enabled"`
+	ActiveRuns       int  `json:"activeRuns"`
+	PendingApprovals int  `json:"pendingApprovals"`
 }
 
 type platformProviderHealth struct {
@@ -144,11 +155,14 @@ func (a *App) putPlatformSettings(c *gin.Context) {
 	if request.AttachmentsEnabled != nil {
 		current.AttachmentsEnabled = *request.AttachmentsEnabled
 	}
+	if request.AgentsEnabled != nil {
+		current.AgentsEnabled = *request.AgentsEnabled
+	}
 	if request.MaintenanceMessage != nil {
 		current.MaintenanceMessage = strings.TrimSpace(*request.MaintenanceMessage)
 	}
 	principal, _ := middleware.GetPrincipal(c)
-	if _, err := a.DB.ExecContext(c, `UPDATE platform_settings SET login_enabled = $1, local_auth_enabled = $2, signup_enabled = $3, ai_enabled = $4, voice_enabled = $5, transcription_enabled = $6, mcp_enabled = $7, knowledge_enabled = $8, attachments_enabled = $9, maintenance_message = $10, updated_by = $11, updated_at = now() WHERE id = TRUE`, current.LoginEnabled, current.LocalAuthEnabled, current.SignupEnabled, current.AIEnabled, current.VoiceEnabled, current.TranscriptionEnabled, current.MCPEnabled, current.KnowledgeEnabled, current.AttachmentsEnabled, current.MaintenanceMessage, principal.UserID); err != nil {
+	if _, err := a.DB.ExecContext(c, `UPDATE platform_settings SET login_enabled = $1, local_auth_enabled = $2, signup_enabled = $3, ai_enabled = $4, voice_enabled = $5, transcription_enabled = $6, mcp_enabled = $7, knowledge_enabled = $8, attachments_enabled = $9, agents_enabled = $10, maintenance_message = $11, updated_by = $12, updated_at = now() WHERE id = TRUE`, current.LoginEnabled, current.LocalAuthEnabled, current.SignupEnabled, current.AIEnabled, current.VoiceEnabled, current.TranscriptionEnabled, current.MCPEnabled, current.KnowledgeEnabled, current.AttachmentsEnabled, current.AgentsEnabled, current.MaintenanceMessage, principal.UserID); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -182,6 +196,8 @@ func (a *App) readPlatformCounts(c *gin.Context) (map[string]int, error) {
 		"workspaces":     `SELECT COUNT(*) FROM organizations`,
 		"endpoints":      `SELECT COUNT(*) FROM endpoint_settings`,
 		"mcpServers":     `SELECT COUNT(*) FROM mcp_servers`,
+		"agents":         `SELECT COUNT(*) FROM saved_assistants WHERE deleted_at IS NULL`,
+		"agentWorkflows": `SELECT COUNT(*) FROM agent_workflows WHERE deleted_at IS NULL`,
 		"conversations":  `SELECT COUNT(*) FROM conversations`,
 		"transcriptions": `SELECT COUNT(*) FROM transcription_sessions`,
 		"recentErrors":   `SELECT COUNT(*) FROM api_request_logs WHERE status_code >= 400 AND created_at >= now() - interval '24 hours'`,
@@ -1002,6 +1018,7 @@ func (a *App) listPlatformAudit(c *gin.Context) {
 func (a *App) readPlatformHealth(c *gin.Context) (platformHealthSnapshot, error) {
 	databaseOK := a.DB != nil && a.DB.PingContext(c) == nil
 	var recentFailures, endpointTotal, endpointEnabled, mcpTotal, mcpEnabled, mcpFailures int
+	var agentTotal, agentEnabled, activeRuns, pendingApprovals int
 	if databaseOK {
 		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM api_request_logs WHERE status_code >= 500 AND created_at >= now() - interval '1 hour'`).Scan(&recentFailures); err != nil {
 			return platformHealthSnapshot{}, err
@@ -1012,12 +1029,22 @@ func (a *App) readPlatformHealth(c *gin.Context) (platformHealthSnapshot, error)
 		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE enabled = TRUE), COUNT(*) FILTER (WHERE last_error IS NOT NULL AND last_error <> '') FROM mcp_servers`).Scan(&mcpTotal, &mcpEnabled, &mcpFailures); err != nil {
 			return platformHealthSnapshot{}, err
 		}
+		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE agent_kind = 'native' OR connection_id IS NOT NULL) FROM saved_assistants WHERE deleted_at IS NULL`).Scan(&agentTotal, &agentEnabled); err != nil {
+			return platformHealthSnapshot{}, err
+		}
+		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM agent_runs WHERE status IN ('queued', 'running', 'waiting_approval')`).Scan(&activeRuns); err != nil {
+			return platformHealthSnapshot{}, err
+		}
+		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM agent_run_approvals WHERE status = 'pending' AND expires_at > now()`).Scan(&pendingApprovals); err != nil {
+			return platformHealthSnapshot{}, err
+		}
 	}
 	return platformHealthSnapshot{
 		Database:  platformDatabaseHealth{OK: databaseOK},
-		Workers:   platformWorkerHealth{RAG: a.RAG != nil, Transcription: a.Live != nil},
+		Workers:   platformWorkerHealth{RAG: a.RAG != nil, Transcription: a.Live != nil, Agents: a.AgentWorker != nil},
 		Providers: platformProviderHealth{OK: databaseOK && endpointEnabled > 0, Total: endpointTotal, Enabled: endpointEnabled, RecentFailures: recentFailures},
 		MCP:       platformMCPHealth{OK: databaseOK && mcpFailures == 0, Total: mcpTotal, Enabled: mcpEnabled, Failures: mcpFailures},
+		Agents:    platformAgentHealth{OK: databaseOK && a.AgentWorker != nil, Total: agentTotal, Enabled: agentEnabled, ActiveRuns: activeRuns, PendingApprovals: pendingApprovals},
 		CheckedAt: time.Now().UTC(),
 	}, nil
 }

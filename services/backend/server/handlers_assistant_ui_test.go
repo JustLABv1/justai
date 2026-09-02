@@ -221,6 +221,83 @@ func TestAssistantUIEmptyToolFollowupOnlyHandlesPostToolEmptyCompletions(t *test
 	}
 }
 
+func TestChatToolLoopGuardAllowsPaginationWithChangedArguments(t *testing.T) {
+	guard := newChatToolLoopGuard([]provider.ToolMessage{{Role: "user", Content: "list everything"}})
+	call := provider.ToolCall{Name: "mcp_history"}
+	for page := 0; page < maxChatToolRounds; page++ {
+		if reason := guard.observeRound([]chatToolLoopOutcome{{
+			call:      call,
+			arguments: map[string]any{"page": page},
+			result:    fmt.Sprintf(`{"page":%d}`, page),
+		}}); reason != chatToolLoopContinue {
+			t.Fatalf("pagination page %d unexpectedly stopped with reason %d", page, reason)
+		}
+	}
+}
+
+func TestChatToolLoopGuardAllowsStableInvocationWithChangedOutput(t *testing.T) {
+	guard := newChatToolLoopGuard([]provider.ToolMessage{{Role: "user", Content: "continue"}})
+	call := provider.ToolCall{Name: "mcp_history", Arguments: `{}`}
+	for page := 0; page < maxChatToolRounds; page++ {
+		if reason := guard.observeRound([]chatToolLoopOutcome{{
+			call:   call,
+			result: fmt.Sprintf(`{"page":%d}`, page),
+		}}); reason != chatToolLoopContinue {
+			t.Fatalf("changed result %d unexpectedly stopped with reason %d", page, reason)
+		}
+	}
+}
+
+func TestChatToolLoopGuardStopsRepeatedResultAndFailure(t *testing.T) {
+	call := provider.ToolCall{ID: "call-repeat", Name: "mcp_history", Arguments: `{}`}
+	history := []provider.ToolMessage{
+		{Role: "user", Content: "repeat"},
+		{Role: "assistant", ToolCalls: []provider.ToolCall{call}},
+		{Role: "tool", ToolCallID: call.ID, Content: `{"page":1}`},
+	}
+	guard := newChatToolLoopGuard(history)
+	for attempt := 0; attempt < maxChatToolStalledRounds-1; attempt++ {
+		if reason := guard.observeRound([]chatToolLoopOutcome{{call: call, result: `{"page":1}`}}); reason != chatToolLoopContinue {
+			t.Fatalf("expected one retry for an unchanged result, got reason %d", reason)
+		}
+	}
+	if reason := guard.observeRound([]chatToolLoopOutcome{{call: call, result: `{"page":1}`}}); reason != chatToolLoopStalled {
+		t.Fatalf("expected unchanged output to stop as stalled, got reason %d", reason)
+	}
+
+	call = provider.ToolCall{ID: "call-failure", Name: "mcp_history", Arguments: `{}`}
+	guard = newChatToolLoopGuard([]provider.ToolMessage{
+		{Role: "user", Content: "retry"},
+		{Role: "assistant", ToolCalls: []provider.ToolCall{call}},
+		{Role: "tool", ToolCallID: call.ID, Content: "The MCP tool failed: timeout"},
+	})
+	for attempt := 0; attempt < maxChatToolStalledRounds-1; attempt++ {
+		if reason := guard.observeRound([]chatToolLoopOutcome{{call: call, result: "The MCP tool failed: timeout", failed: true}}); reason != chatToolLoopContinue {
+			t.Fatalf("expected one retry for a failed call, got reason %d", reason)
+		}
+	}
+	if reason := guard.observeRound([]chatToolLoopOutcome{{call: call, result: "The MCP tool failed: timeout", failed: true}}); reason != chatToolLoopFailed {
+		t.Fatalf("expected repeated failure to stop as failed, got reason %d", reason)
+	}
+}
+
+func TestChatToolLoopGuardRestoresCurrentTurnHistoryOnly(t *testing.T) {
+	call := provider.ToolCall{ID: "call-1", Name: "mcp_history", Arguments: `{"page":1}`}
+	guard := newChatToolLoopGuard([]provider.ToolMessage{
+		{Role: "user", Content: "previous turn"},
+		{Role: "assistant", ToolCalls: []provider.ToolCall{call}},
+		{Role: "tool", ToolCallID: call.ID, Content: `{"page":1}`},
+		{Role: "user", Content: "current turn"},
+	})
+	if reason := guard.observeRound([]chatToolLoopOutcome{{
+		call:      provider.ToolCall{Name: call.Name},
+		arguments: map[string]any{"page": 1},
+		result:    `{"page":1}`,
+	}}); reason != chatToolLoopContinue {
+		t.Fatalf("a previous user turn should not seed the current guard, got reason %d", reason)
+	}
+}
+
 func TestAssistantUIRetrievalMode(t *testing.T) {
 	if got := assistantUIRetrievalMode(true); got != "deep-context" {
 		t.Fatalf("expected deep-context mode, got %q", got)

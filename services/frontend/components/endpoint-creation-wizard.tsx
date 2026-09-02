@@ -250,9 +250,9 @@ export function EndpointCreationWizard({
   const [verificationOverride, setVerificationOverride] = useState(false)
 
   useEffect(() => {
-    if (form.providerType === "pyannote") {
-      setRuntimeOpen(true)
-    }
+    if (form.providerType !== "pyannote") return
+    const timer = window.setTimeout(() => setRuntimeOpen(true), 0)
+    return () => window.clearTimeout(timer)
   }, [form.providerType])
 
   const isEditing = Boolean(editingEndpoint)

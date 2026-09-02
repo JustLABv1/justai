@@ -3,7 +3,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react"
 import {
   Archive,
-  CalendarClock,
   Bot,
   Brain,
   ChevronDown,
@@ -79,9 +78,9 @@ const railNavigation: Array<{
 }> = [
   { id: "chat", label: "Chat", hint: "Conversations", icon: MessageSquare, group: "Create" },
   {
-    id: "assistants",
-    label: "Assistants",
-    hint: "Reusable chat roles",
+    id: "agents",
+    label: "Agents",
+    hint: "Native and connected agents",
     icon: Bot,
     group: "Create",
   },
@@ -120,14 +119,6 @@ const railNavigation: Array<{
     label: "Integrations",
     hint: "GitHub, GitLab, and more",
     icon: Plug,
-    group: "Connect",
-    feature: "mcp",
-  },
-  {
-    id: "automations",
-    label: "Automations",
-    hint: "Scheduled assistant work",
-    icon: CalendarClock,
     group: "Connect",
     feature: "mcp",
   },

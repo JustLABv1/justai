@@ -51,6 +51,11 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 			Description: "Create a downloadable PDF containing the requested document. Use this whenever the user asks for a PDF, report, handout, letter, summary, or other document file. Put the complete desired document content in content, including headings, paragraphs, and list lines; do not put only an outline or a description there. Markdown-like headings and lists are supported. Optionally provide a concise title and a simple filename.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"content":{"type":"string","description":"The complete document text to place in the PDF. Include all requested wording, headings, paragraphs, and list items; do not summarize the requested document in this field.","minLength":1,"maxLength":524288},"title":{"type":"string","description":"Optional document title shown in the PDF and file metadata."},"filename":{"type":"string","description":"Optional download filename. It will be sanitized and .pdf will be appended when needed."}},"required":["content"],"additionalProperties":false}`),
 		},
+		{
+			Name:        "delegate_agent",
+			Description: "Delegate a bounded task to another configured JustAI agent. Only agents explicitly allowlisted by the coordinator can be selected. The child run and any approval request are durable and linked to this conversation.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"agentId":{"type":"string","description":"The allowlisted agent id to run."},"task":{"type":"string","description":"The self-contained task for the delegated agent.","minLength":1,"maxLength":30000},"input":{"type":"object","description":"Optional structured input for the delegated agent."}},"required":["agentId","task"],"additionalProperties":false}`),
+		},
 	}
 	bindings := make(map[string]voiceToolBinding, len(definitions))
 	for _, definition := range definitions {
@@ -65,7 +70,7 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 
 func isAssistantBuiltInToolName(name string) bool {
 	switch name {
-	case "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "discover_mcp_tools":
+	case "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "delegate_agent", "discover_mcp_tools":
 		return true
 	default:
 		return false
@@ -127,6 +132,38 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 			return nil, err
 		}
 		return json.Marshal(map[string]any{"file": item})
+	case "delegate_agent":
+		if !a.platformCapabilityEnabled(ctx, "agents") {
+			return nil, fmt.Errorf("agent delegation is temporarily disabled by the platform administrator")
+		}
+		if a.AgentWorker == nil {
+			return nil, fmt.Errorf("agent execution is unavailable")
+		}
+		targetID, err := uuid.Parse(strings.TrimSpace(stringToolArgument(arguments, "agentId")))
+		if err != nil {
+			return nil, fmt.Errorf("agentId must be a valid agent id")
+		}
+		task := strings.TrimSpace(stringToolArgument(arguments, "task"))
+		if task == "" || len([]rune(task)) > 30000 {
+			return nil, fmt.Errorf("delegated task must contain between 1 and 30000 characters")
+		}
+		coordinator, err := a.savedAssistantForConversation(ctx, conversationID, userID, organizationID)
+		if err != nil || coordinator == nil {
+			return nil, fmt.Errorf("the conversation has no coordinator agent")
+		}
+		input := json.RawMessage(`{}`)
+		if raw, exists := arguments["input"]; exists {
+			encoded, marshalErr := json.Marshal(raw)
+			if marshalErr != nil || len(encoded) > maxRunInputSize {
+				return nil, fmt.Errorf("delegated input is invalid or too large")
+			}
+			input = encoded
+		}
+		child, err := a.AgentWorker.DelegateAgent(ctx, userID, organizationID, conversationID, coordinator.ID, targetID, task, input)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(map[string]any{"runId": child.ID, "status": child.Status, "summary": child.Summary, "error": child.Error, "approvals": child.Approvals, "artifacts": child.Artifacts})
 	default:
 		return nil, fmt.Errorf("unknown built-in tool %q", toolName)
 	}

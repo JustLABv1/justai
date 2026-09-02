@@ -1232,25 +1232,25 @@ function AssistantMessage({ isLatest }: { isLatest: boolean }) {
           <ChatBrandMark className="mt-1 size-5 shrink-0" />
         ) : null}
         <div className={cn("min-w-0 flex-1", isStreamingMessage && "pl-8")}>
-        <div className="w-full text-sm leading-7 text-foreground">
-          <AssistantMessageParts />
-        </div>
-        <MessageAttachments />
-        <MessagePrimitive.Error>
-          <ErrorPrimitive.Root className="mt-2 flex max-w-4xl items-center rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-            <ErrorPrimitive.Message />
-          </ErrorPrimitive.Root>
-        </MessagePrimitive.Error>
-        {!isStreamingMessage ? (
-          <div className="flex w-full items-center gap-2">
-            <div className="flex items-center gap-2">
-              <MessageActions assistant />
-              <BranchPicker />
-            </div>
-            <MessageTiming />
+          <div className="w-full text-sm leading-7 text-foreground">
+            <AssistantMessageParts />
           </div>
-        ) : null}
-        <ChatResponseActivity isLatest={isLatest} />
+          <MessageAttachments />
+          <MessagePrimitive.Error>
+            <ErrorPrimitive.Root className="mt-2 flex max-w-4xl items-center rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              <ErrorPrimitive.Message />
+            </ErrorPrimitive.Root>
+          </MessagePrimitive.Error>
+          {!isStreamingMessage ? (
+            <div className="flex w-full items-center gap-2">
+              <div className="flex items-center gap-2">
+                <MessageActions assistant />
+                <BranchPicker />
+              </div>
+              <MessageTiming />
+            </div>
+          ) : null}
+          <ChatResponseActivity isLatest={isLatest} />
         </div>
       </div>
     </MessagePrimitive.Root>
@@ -1259,7 +1259,10 @@ function AssistantMessage({ isLatest }: { isLatest: boolean }) {
 
 function ChatAmbient() {
   return (
-    <div aria-hidden="true" className="chat-ambient absolute inset-0 overflow-hidden">
+    <div
+      aria-hidden="true"
+      className="chat-ambient absolute inset-0 overflow-hidden"
+    >
       <span className="chat-ambient__orb chat-ambient__orb--one" />
       <span className="chat-ambient__orb chat-ambient__orb--two" />
       <span className="chat-ambient__orb chat-ambient__orb--three" />
@@ -1326,7 +1329,11 @@ function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
   if (!isRunning || !isLatest) return null
 
   return (
-    <div aria-live="polite" className="-ml-8 mt-2 flex min-h-5 items-center gap-2 text-xs text-muted-foreground" role="status">
+    <div
+      aria-live="polite"
+      className="mt-2 -ml-8 flex min-h-5 items-center gap-2 text-xs text-muted-foreground"
+      role="status"
+    >
       <ChatBrandMark className="size-5 shrink-0" isActive />
       <span className="flex items-center gap-1.5">
         <span>{status}</span>
@@ -1373,12 +1380,18 @@ function ConversationRail() {
             .replace(/\s+/g, " ")
             .trim()
           const previewExcerpt =
-            preview.length > 140 ? `${preview.slice(0, 137).trimEnd()}…` : preview
+            preview.length > 140
+              ? `${preview.slice(0, 137).trimEnd()}…`
+              : preview
           return (
             <button
               aria-label={`Jump to ${assistant ? "assistant response" : "your message"} ${index + 1}`}
-              aria-describedby={previewMessageId === message.id ? `conversation-preview-${message.id}` : undefined}
-              className="group absolute left-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-describedby={
+                previewMessageId === message.id
+                  ? `conversation-preview-${message.id}`
+                  : undefined
+              }
+              className="group absolute left-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               key={message.id}
               onClick={() => jumpTo(message.id)}
               onBlur={() => setPreviewMessageId(null)}
@@ -1397,16 +1410,18 @@ function ConversationRail() {
               />
               {previewMessageId === message.id ? (
                 <span
-                  className="pointer-events-none absolute left-full top-1/2 z-30 ml-2 w-52 -translate-y-1/2 rounded-lg border border-border/80 bg-popover px-3 py-2 text-left shadow-lg"
+                  className="pointer-events-none absolute top-1/2 left-full z-30 ml-2 w-52 -translate-y-1/2 rounded-lg border border-border/80 bg-popover px-3 py-2 text-left shadow-lg"
                   id={`conversation-preview-${message.id}`}
                   role="tooltip"
                 >
-                  <span className="block text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                  <span className="block text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
                     {assistant ? "JustAI" : "You"}
                   </span>
-                  <span className="mt-1 block line-clamp-3 text-xs leading-5 text-popover-foreground">
+                  <span className="mt-1 line-clamp-3 block text-xs leading-5 text-popover-foreground">
                     {previewExcerpt ||
-                      (assistant ? "Response with context or tools" : "Message")}
+                      (assistant
+                        ? "Response with context or tools"
+                        : "Message")}
                   </span>
                 </span>
               ) : null}
@@ -1841,7 +1856,7 @@ function AssistantPicker({
         disabled={disabled}
         render={
           <Button
-            aria-label="Select saved assistant"
+            aria-label="Select agent"
             className={cn(
               "h-9 max-w-48 min-w-0 justify-start gap-1.5 rounded-full border-0 bg-transparent px-2 text-xs font-normal text-foreground hover:bg-muted/70",
               compact && "max-w-36 px-1.5"
@@ -1863,7 +1878,7 @@ function AssistantPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-80">
         <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-          Assistant
+          Agent
         </div>
         <DropdownMenuGroup>
           <DropdownMenuItem onClick={() => onAssistantChange("")}>
@@ -1896,7 +1911,10 @@ function AssistantPicker({
                     {assistant.name}
                   </span>
                   <span className="block truncate text-[11px] text-muted-foreground">
-                    {assistant.description || "Saved instructions and defaults"}
+                    {assistant.kind === "remote"
+                      ? "Remote A2A agent"
+                      : assistant.description ||
+                        "Saved instructions and defaults"}
                   </span>
                 </span>
                 <Check
@@ -2915,6 +2933,7 @@ function AssistantChatSurface({
         body: () => ({
           conversationId: "",
           assistantId: selectedAssistantId || undefined,
+          agentId: selectedAssistantId || undefined,
           endpointId: selectedEndpointId,
           model: selectedModel,
           useMemory: selectedAssistant?.useMemory ?? true,
@@ -2953,6 +2972,7 @@ function AssistantChatSurface({
               messages: requestMessages,
               conversationId: id,
               assistantId: selectedAssistantId || undefined,
+              agentId: selectedAssistantId || undefined,
               endpointId: selectedEndpointId,
               model: selectedModel,
               useMemory: selectedAssistant?.useMemory ?? true,

@@ -30,6 +30,7 @@ import (
 // endpointId/model are host-owned routing fields added by AssistantChatTransport.
 type assistantUIRequest struct {
 	Messages            []json.RawMessage `json:"messages"`
+	AgentID             string            `json:"agentId"`
 	AssistantID         string            `json:"assistantId"`
 	ConversationID      string            `json:"conversationId"`
 	EndpointID          string            `json:"endpointId"`
@@ -127,11 +128,6 @@ type assistantUIToolGroup struct {
 	headID string
 }
 
-// Keep the ceiling across approval continuations, not just inside one HTTP
-// request. Otherwise every approval can restart the local round counter and a
-// model that keeps proposing the same MCP call can run indefinitely.
-const maxAssistantUIToolRounds = 4
-
 func mergeAssistantUIToolMessage(target, source map[string]any) {
 	targetParts, _ := target["parts"].([]any)
 	sourceParts, _ := source["parts"].([]any)
@@ -214,7 +210,11 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("a non-empty user message is required"))
 		return
 	}
-	conversationID, err := a.ensureConversation(c, principal.UserID, organizationID, request.ConversationID, request.AssistantID, request.InheritRepositories)
+	selectedAgentID := strings.TrimSpace(request.AgentID)
+	if selectedAgentID == "" {
+		selectedAgentID = strings.TrimSpace(request.AssistantID)
+	}
+	conversationID, err := a.ensureConversation(c, principal.UserID, organizationID, request.ConversationID, selectedAgentID, request.InheritRepositories)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
@@ -236,6 +236,16 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		}
 		if strings.TrimSpace(request.Model) == "" {
 			request.Model = savedAssistant.Model
+		}
+	}
+	if savedAssistant != nil && a.AgentWorker != nil {
+		if agent, agentErr := a.AgentWorker.loadAgent(c, savedAssistant.ID, principal.UserID, organizationID, &savedAssistant.VersionID); agentErr == nil && agent.Kind == "remote" {
+			if !a.platformCapabilityEnabled(c, "agents") {
+				writeError(c, http.StatusServiceUnavailable, fmt.Errorf("agents are temporarily disabled by the platform administrator"))
+				return
+			}
+			a.assistantUIRemoteChat(c, principal.UserID, organizationID, conversationID, request, requestMessages, latestUser, agent)
+			return
 		}
 	}
 	endpointID, err := a.resolveEndpoint(c, principal.UserID, organizationID, request.EndpointID)
@@ -1615,21 +1625,25 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 	toolMessages := append([]provider.ToolMessage(nil), history...)
 	textStarted := false
 	freshDiscoveryAttempted := false
-	if roundOffset >= maxAssistantUIToolRounds {
-		message := "\n\nI stopped after four MCP tool rounds to keep this turn bounded."
+	toolLoopGuard := newChatToolLoopGuard(toolMessages)
+	writeStopMessage := func(message string) error {
 		if err := writeChunk(map[string]any{"type": "text-start", "id": textID}); err != nil {
-			return false, err
+			return err
 		}
 		response.WriteString(message)
 		if err := writeChunk(map[string]any{"type": "text-delta", "id": textID, "delta": message}); err != nil {
-			return false, err
+			return err
 		}
-		if err := writeChunk(map[string]any{"type": "text-end", "id": textID}); err != nil {
-			return false, err
-		}
-		return false, nil
+		return writeChunk(map[string]any{"type": "text-end", "id": textID})
 	}
-	for round := roundOffset + 1; round <= maxAssistantUIToolRounds; round++ {
+	if roundOffset >= maxChatToolRounds {
+		message := fmt.Sprintf("\n\nI stopped after %d MCP tool rounds to keep this turn bounded.", maxChatToolRounds)
+		return false, writeStopMessage(message)
+	}
+	if reason := toolLoopGuard.stopReason(); reason != chatToolLoopContinue {
+		return false, writeStopMessage(chatToolLoopStopMessage(reason))
+	}
+	for round := roundOffset + 1; round <= maxChatToolRounds; round++ {
 		if round > 1 {
 			if err := writeChunk(map[string]any{"type": "start-step"}); err != nil {
 				return false, err
@@ -1700,11 +1714,13 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			textStarted = false
 		}
 		toolMessages = append(toolMessages, provider.ToolMessage{Role: "assistant", Content: roundResponse.String(), ToolCalls: calls})
+		outcomes := make([]chatToolLoopOutcome, 0, len(calls))
 		for _, call := range calls {
 			arguments := map[string]any{}
 			if strings.TrimSpace(call.Arguments) != "" {
 				if err := json.Unmarshal([]byte(call.Arguments), &arguments); err != nil {
 					errorText := "The tool arguments were invalid JSON."
+					outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: errorText, failed: true})
 					event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, ProviderToolName: call.Name, CallID: call.ID, Error: errorText}
 					messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 					if messageRowID != uuid.Nil {
@@ -1732,6 +1748,7 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			}
 			if !exists {
 				errorText := "The requested tool is not available."
+				outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: errorText, failed: true})
 				event := chatToolEvent{Kind: chatToolEventKindForName(call.Name), Status: "failed", Round: round, ToolName: call.Name, ProviderToolName: call.Name, CallID: call.ID, Arguments: arguments, Error: errorText}
 				messageRowID := a.persistChatToolEventAt(ctx, conversationID, dereferenceAssistantUIParent(parentID), event)
 				if messageRowID != uuid.Nil {
@@ -1806,6 +1823,7 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 				result, callErr = a.executeChatMCPTool(ctx, userID, organizationID, conversationID, binding, arguments)
 			}
 			if callErr != nil {
+				outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: "The tool failed: " + callErr.Error(), failed: true})
 				event.Status = "failed"
 				event.Error = callErr.Error()
 				a.updateChatToolEvent(ctx, conversationID, messageRowID, event)
@@ -1814,6 +1832,7 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 				toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The tool failed: " + callErr.Error()})
 				continue
 			}
+			outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: string(result)})
 			event.Status = "completed"
 			event.Result = string(result)
 			event.ResultPreview = toolResultPreview(result)
@@ -1824,16 +1843,13 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 			}
 			toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: string(result)})
 		}
-		if round == maxAssistantUIToolRounds {
-			message := "\n\nI stopped after four tool rounds to keep this turn bounded."
-			if !textStarted {
-				textStarted = true
-				_ = writeChunk(map[string]any{"type": "text-start", "id": textID})
-			}
-			response.WriteString(message)
-			_ = writeChunk(map[string]any{"type": "text-delta", "id": textID, "delta": message})
-			_ = writeChunk(map[string]any{"type": "text-end", "id": textID})
-			return false, nil
+		if stopReason := toolLoopGuard.observeRound(outcomes); stopReason != chatToolLoopContinue {
+			message := chatToolLoopStopMessage(stopReason)
+			return false, writeStopMessage(message)
+		}
+		if round == maxChatToolRounds {
+			message := fmt.Sprintf("\n\nI stopped after %d tool rounds to keep this turn bounded.", maxChatToolRounds)
+			return false, writeStopMessage(message)
 		}
 		if err := writeChunk(map[string]any{"type": "finish-step"}); err != nil {
 			return false, err

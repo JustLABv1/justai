@@ -65,11 +65,203 @@ type SavedAssistant struct {
 	UpdatedAt    time.Time  `json:"updatedAt"`
 }
 
+// Agent is the public first-class representation of both native saved
+// assistants and remote A2A agents. Native agents continue to use the saved
+// assistant tables so existing conversation/version pins remain stable.
+type Agent struct {
+	ID                   uuid.UUID       `json:"id"`
+	Kind                 string          `json:"kind"`
+	Name                 string          `json:"name"`
+	Description          string          `json:"description"`
+	Icon                 string          `json:"icon"`
+	Visibility           string          `json:"visibility"`
+	VersionID            *uuid.UUID      `json:"versionId,omitempty"`
+	Version              int             `json:"version,omitempty"`
+	Instructions         string          `json:"instructions,omitempty"`
+	EndpointID           *uuid.UUID      `json:"endpointId,omitempty"`
+	Model                string          `json:"model,omitempty"`
+	UseMemory            bool            `json:"useMemory"`
+	DeepContext          bool            `json:"deepContext"`
+	ConnectionID         *uuid.UUID      `json:"connectionId,omitempty"`
+	DelegationAgentIDs   []uuid.UUID     `json:"delegationAgentIds,omitempty"`
+	AgentCard            json.RawMessage `json:"agentCard,omitempty"`
+	Capabilities         json.RawMessage `json:"capabilities,omitempty"`
+	Skills               json.RawMessage `json:"skills,omitempty"`
+	Status               string          `json:"status"`
+	CredentialConfigured bool            `json:"credentialConfigured"`
+	CreatedAt            time.Time       `json:"createdAt"`
+	UpdatedAt            time.Time       `json:"updatedAt"`
+}
+
+type AgentConnection struct {
+	ID                   uuid.UUID       `json:"id"`
+	OrganizationID       uuid.UUID       `json:"-"`
+	ScopeType            string          `json:"scopeType"`
+	ScopeID              uuid.UUID       `json:"scopeId"`
+	Name                 string          `json:"name"`
+	Protocol             string          `json:"protocol"`
+	EndpointURL          string          `json:"endpointUrl"`
+	AuthType             string          `json:"authType"`
+	CredentialConfigured bool            `json:"credentialConfigured"`
+	AgentCard            json.RawMessage `json:"agentCard"`
+	Enabled              bool            `json:"enabled"`
+	TrustedReadOnly      bool            `json:"trustedReadOnly"`
+	LastTestedAt         *time.Time      `json:"lastTestedAt,omitempty"`
+	LastError            string          `json:"lastError,omitempty"`
+	CreatedAt            time.Time       `json:"createdAt"`
+	UpdatedAt            time.Time       `json:"updatedAt"`
+}
+
+type AgentInputBinding struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	NodeID string `json:"nodeId,omitempty"`
+	Path   string `json:"path,omitempty"`
+}
+
+type AgentContextScope struct {
+	KnowledgeSourceIDs      []uuid.UUID `json:"knowledgeSourceIds,omitempty"`
+	RepositoryIDs           []uuid.UUID `json:"repositoryIds,omitempty"`
+	NoteIDs                 []uuid.UUID `json:"noteIds,omitempty"`
+	TranscriptionSessionIDs []uuid.UUID `json:"transcriptionSessionIds,omitempty"`
+	MCPServerIDs            []uuid.UUID `json:"mcpServerIds,omitempty"`
+	MCPTools                []string    `json:"mcpTools,omitempty"`
+}
+
+type AgentRetryPolicy struct {
+	MaxAttempts int `json:"maxAttempts"`
+}
+
+type AgentWorkflowNode struct {
+	ID                 string              `json:"id"`
+	Type               string              `json:"type"`
+	AgentID            *uuid.UUID          `json:"agentId,omitempty"`
+	Instruction        string              `json:"instruction"`
+	InputBindings      []AgentInputBinding `json:"inputBindings,omitempty"`
+	Context            AgentContextScope   `json:"context,omitempty"`
+	DelegationAgentIDs []uuid.UUID         `json:"delegationAgentIds,omitempty"`
+	ApprovalMode       string              `json:"approvalMode"`
+	Retry              AgentRetryPolicy    `json:"retry,omitempty"`
+	TimeoutSeconds     int                 `json:"timeoutSeconds,omitempty"`
+}
+
+type AgentWorkflowEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+type AgentWorkflowDefinition struct {
+	Nodes []AgentWorkflowNode `json:"nodes"`
+	Edges []AgentWorkflowEdge `json:"edges"`
+}
+
+type AgentSchedule struct {
+	Kind     string `json:"kind"`
+	Unit     string `json:"unit,omitempty"`
+	Interval int    `json:"interval,omitempty"`
+	Weekday  int    `json:"weekday,omitempty"`
+	Time     string `json:"time,omitempty"`
+	Display  string `json:"display,omitempty"`
+}
+
+type AgentWorkflow struct {
+	ID          uuid.UUID               `json:"id"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Visibility  string                  `json:"visibility"`
+	Definition  AgentWorkflowDefinition `json:"definition"`
+	Schedule    AgentSchedule           `json:"schedule"`
+	Timezone    string                  `json:"timezone"`
+	Enabled     bool                    `json:"enabled"`
+	LastRunAt   *time.Time              `json:"lastRunAt,omitempty"`
+	NextRunAt   *time.Time              `json:"nextRunAt,omitempty"`
+	CreatedAt   time.Time               `json:"createdAt"`
+	UpdatedAt   time.Time               `json:"updatedAt"`
+}
+
+type AgentRun struct {
+	UserID             uuid.UUID       `json:"-"`
+	OrganizationID     uuid.UUID       `json:"-"`
+	DefinitionSnapshot json.RawMessage `json:"-"`
+	ID                 uuid.UUID       `json:"id"`
+	WorkflowID         *uuid.UUID      `json:"workflowId,omitempty"`
+	RootAgentID        *uuid.UUID      `json:"rootAgentId,omitempty"`
+	ParentRunID        *uuid.UUID      `json:"parentRunId,omitempty"`
+	ConversationID     *uuid.UUID      `json:"conversationId,omitempty"`
+	SourceType         string          `json:"sourceType"`
+	Status             string          `json:"status"`
+	Input              json.RawMessage `json:"input"`
+	Summary            string          `json:"summary"`
+	Error              string          `json:"error,omitempty"`
+	StartedAt          time.Time       `json:"startedAt"`
+	FinishedAt         *time.Time      `json:"finishedAt,omitempty"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	UpdatedAt          time.Time       `json:"updatedAt"`
+	Nodes              []AgentRunNode  `json:"nodes,omitempty"`
+	Approvals          []AgentApproval `json:"approvals,omitempty"`
+	Artifacts          []AgentArtifact `json:"artifacts,omitempty"`
+}
+
+type AgentRunNode struct {
+	ID             uuid.UUID       `json:"id"`
+	RunID          uuid.UUID       `json:"runId"`
+	NodeKey        string          `json:"nodeKey"`
+	AgentID        *uuid.UUID      `json:"agentId,omitempty"`
+	AgentVersionID *uuid.UUID      `json:"agentVersionId,omitempty"`
+	Definition     json.RawMessage `json:"definition,omitempty"`
+	Status         string          `json:"status"`
+	Attempt        int             `json:"attempt"`
+	Input          json.RawMessage `json:"input"`
+	Output         json.RawMessage `json:"output"`
+	Error          string          `json:"error,omitempty"`
+	ProviderTaskID string          `json:"providerTaskId,omitempty"`
+	StartedAt      *time.Time      `json:"startedAt,omitempty"`
+	FinishedAt     *time.Time      `json:"finishedAt,omitempty"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
+}
+
+type AgentRunEvent struct {
+	ID        int64           `json:"id"`
+	RunID     uuid.UUID       `json:"runId"`
+	NodeID    *uuid.UUID      `json:"nodeId,omitempty"`
+	EventType string          `json:"eventType"`
+	Payload   json.RawMessage `json:"payload"`
+	CreatedAt time.Time       `json:"createdAt"`
+}
+
+type AgentApproval struct {
+	ID           uuid.UUID       `json:"id"`
+	RunID        uuid.UUID       `json:"runId"`
+	NodeID       *uuid.UUID      `json:"nodeId,omitempty"`
+	ActionType   string          `json:"actionType"`
+	Action       json.RawMessage `json:"action"`
+	ArgumentHash string          `json:"argumentHash"`
+	Status       string          `json:"status"`
+	Reason       string          `json:"reason,omitempty"`
+	ExpiresAt    time.Time       `json:"expiresAt"`
+	DecidedAt    *time.Time      `json:"decidedAt,omitempty"`
+	CreatedAt    time.Time       `json:"createdAt"`
+}
+
+type AgentArtifact struct {
+	ID        uuid.UUID       `json:"id"`
+	RunID     uuid.UUID       `json:"runId"`
+	NodeID    *uuid.UUID      `json:"nodeId,omitempty"`
+	Name      string          `json:"name"`
+	Kind      string          `json:"kind"`
+	MimeType  string          `json:"mimeType"`
+	Metadata  json.RawMessage `json:"metadata"`
+	SizeBytes int64           `json:"sizeBytes"`
+	SHA256    string          `json:"sha256,omitempty"`
+	CreatedAt time.Time       `json:"createdAt"`
+}
+
 // Automation is a persisted, user-owned instruction that can be run on a
 // schedule. MCP access is deliberately scoped per automation rather than
 // inheriting every connection available in a workspace.
 type Automation struct {
 	ID           uuid.UUID  `json:"id"`
+	WorkflowID   *uuid.UUID `json:"workflowId,omitempty"`
 	Name         string     `json:"name"`
 	Prompt       string     `json:"prompt"`
 	AssistantID  *uuid.UUID `json:"assistantId,omitempty"`
@@ -87,6 +279,7 @@ type Automation struct {
 type AutomationRun struct {
 	ID           uuid.UUID  `json:"id"`
 	AutomationID uuid.UUID  `json:"automationId"`
+	AgentRunID   *uuid.UUID `json:"agentRunId,omitempty"`
 	Status       string     `json:"status"`
 	Summary      string     `json:"summary"`
 	StartedAt    time.Time  `json:"startedAt"`
