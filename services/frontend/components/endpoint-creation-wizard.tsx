@@ -2,7 +2,6 @@
 
 import {
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type Dispatch,
@@ -23,6 +22,7 @@ import {
   Mic2,
   RefreshCw,
   Server,
+  Settings2,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -54,11 +54,6 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -80,10 +75,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Progress } from "@/components/ui/progress"
+import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 
-type WizardStep = "type" | "connection" | "configure" | "review"
+type WizardStep = "type" | "connection" | "configure" | "behavior" | "review"
 
 type PreflightState = "idle" | "checking" | "passed" | "failed"
 
@@ -141,6 +138,12 @@ const steps: Array<{
     icon: SlidersHorizontal,
   },
   {
+    id: "behavior",
+    label: "Set behavior",
+    description: "Choose runtime limits and routing defaults.",
+    icon: Settings2,
+  },
+  {
     id: "review",
     label: "Verify & review",
     description: "Check the provider before saving.",
@@ -178,7 +181,26 @@ function formSignature(form: EndpointForm) {
     credentialHash = Math.imul(credentialHash, 16777619)
   }
   return JSON.stringify({
-    ...form,
+    endpointKind: form.endpointKind,
+    providerType: form.providerType,
+    scopeType: form.scopeType,
+    scopeId: form.scopeId,
+    baseUrl: form.baseUrl,
+    apiPath: form.apiPath,
+    apiVersion: form.apiVersion,
+    chatModel: form.chatModel,
+    visionModel: form.visionModel,
+    embeddingModel: form.embeddingModel,
+    imageModel: form.imageModel,
+    transcriptionModel: form.transcriptionModel,
+    diarizationModel: form.diarizationModel,
+    speechModel: form.speechModel,
+    realtimeTranscription: form.realtimeTranscription,
+    chunkedTranscription: form.chunkedTranscription,
+    diarization: form.diarization,
+    useForChat: form.useForChat,
+    toolCalling: form.toolCalling,
+    vision: form.vision,
     credential: `${form.credential.length}:${credentialHash >>> 0}`,
   })
 }
@@ -237,23 +259,20 @@ export function EndpointCreationWizard({
   onSave,
   onClose,
 }: Props) {
-  const [step, setStep] = useState<WizardStep>("type")
-  const [maxVisitedStep, setMaxVisitedStep] = useState(0)
-  const [advancedConnectionOpen, setAdvancedConnectionOpen] = useState(false)
-  const [runtimeOpen, setRuntimeOpen] = useState(false)
+  const [step, setStep] = useState<WizardStep>(
+    editingEndpoint ? "connection" : "type"
+  )
+  const [maxVisitedStep, setMaxVisitedStep] = useState(() =>
+    editingEndpoint ? steps.length - 1 : 0
+  )
   const [preflightState, setPreflightState] = useState<PreflightState>("idle")
   const [preflightMessage, setPreflightMessage] = useState("")
+  const [validationMessage, setValidationMessage] = useState("")
   const [preflightModels, setPreflightModels] = useState<DiscoveredChatModel[]>(
     []
   )
   const [verifiedSignature, setVerifiedSignature] = useState("")
   const [verificationOverride, setVerificationOverride] = useState(false)
-
-  useEffect(() => {
-    if (form.providerType !== "pyannote") return
-    const timer = window.setTimeout(() => setRuntimeOpen(true), 0)
-    return () => window.clearTimeout(timer)
-  }, [form.providerType])
 
   const isEditing = Boolean(editingEndpoint)
   const availableProviders = useMemo(() => {
@@ -311,45 +330,81 @@ export function EndpointCreationWizard({
   function nextStep() {
     if (step === "type") return goTo("connection")
     if (step === "connection") return goTo("configure")
-    if (step === "configure") return goTo("review")
+    if (step === "configure") return goTo("behavior")
+    if (step === "behavior") return goTo("review")
   }
 
   function previousStep() {
     if (step === "connection") return goTo("type")
     if (step === "configure") return goTo("connection")
-    if (step === "review") return goTo("configure")
+    if (step === "behavior") return goTo("configure")
+    if (step === "review") return goTo("behavior")
   }
 
-  function validateBeforeNext() {
-    if (step === "connection") {
-      if (!form.name.trim()) {
-        setPreflightMessage(
-          "Give this endpoint a name so it is easy to find later."
-        )
-        return false
-      }
-      if (!form.baseUrl.trim()) {
-        setPreflightMessage("Add the provider base URL before continuing.")
-        return false
-      }
+  function validateConnectionStep() {
+    if (!form.name.trim()) {
+      setValidationMessage(
+        "Give this endpoint a name so it is easy to find later."
+      )
+      return false
     }
-    if (
-      step === "configure" &&
-      form.endpointKind === "diarization" &&
-      !capabilities.diarization
-    ) {
-      setPreflightMessage(
+    if (!form.baseUrl.trim()) {
+      setValidationMessage("Add the provider base URL before continuing.")
+      return false
+    }
+    return true
+  }
+
+  function validateConfigureStep() {
+    if (form.endpointKind === "diarization" && !capabilities.diarization) {
+      setValidationMessage(
         "Diarization needs a supported diarization capability."
       )
       return false
     }
-    setPreflightMessage("")
+    return true
+  }
+
+  function validateBehaviorStep() {
+    if (!Number.isFinite(form.timeoutSeconds) || form.timeoutSeconds < 1) {
+      setValidationMessage("Timeout must be at least 1 second.")
+      return false
+    }
+    if (!Number.isFinite(form.maxOutputTokens) || form.maxOutputTokens < 1) {
+      setValidationMessage("Max output tokens must be at least 1.")
+      return false
+    }
+    if (
+      !Number.isFinite(form.temperature) ||
+      form.temperature < 0 ||
+      form.temperature > 2
+    ) {
+      setValidationMessage("Temperature must be between 0 and 2.")
+      return false
+    }
+    return true
+  }
+
+  function validateBeforeNext() {
+    if (step === "connection" && !validateConnectionStep()) return false
+    if (step === "configure" && !validateConfigureStep()) return false
+    if (step === "behavior" && !validateBehaviorStep()) return false
+    setValidationMessage("")
+    return true
+  }
+
+  function validateBeforeSave() {
+    if (!validateConnectionStep()) return false
+    if (!validateConfigureStep()) return false
+    if (!validateBehaviorStep()) return false
+    setValidationMessage("")
     return true
   }
 
   async function checkConnection() {
     setPreflightState("checking")
     setPreflightMessage("")
+    setValidationMessage("")
     setVerificationOverride(false)
     try {
       const result = await api.post<PreflightResponse>(
@@ -409,6 +464,10 @@ export function EndpointCreationWizard({
       if (validateBeforeNext()) nextStep()
       return
     }
+    if (!validateBeforeSave()) {
+      event.preventDefault()
+      return
+    }
     if (!canSave) {
       event.preventDefault()
       setPreflightMessage(
@@ -446,8 +505,6 @@ export function EndpointCreationWizard({
         platformAdmin={platformAdmin}
         isPlatformCatalog={isPlatformCatalog}
         isEditing={isEditing}
-        advancedOpen={advancedConnectionOpen}
-        onAdvancedOpenChange={setAdvancedConnectionOpen}
         onSelectProvider={onSelectProvider}
       />
     ) : step === "configure" ? (
@@ -458,17 +515,19 @@ export function EndpointCreationWizard({
         supports={supports}
         preflightModels={preflightModels}
         options={options}
-        runtimeOpen={runtimeOpen}
-        onRuntimeOpenChange={setRuntimeOpen}
       />
+    ) : step === "behavior" ? (
+      <BehaviorStep form={form} update={update} />
     ) : (
       <ReviewStep
         form={form}
         endpointKind={form.endpointKind}
         providerLabel={selectedProvider.label}
+        isEditing={isEditing}
         capabilities={capabilities}
         preflightState={preflightState}
         preflightMessage={preflightMessage}
+        validationMessage={validationMessage}
         modelCount={preflightModels.length}
         verificationOverride={verificationOverride}
         verificationIsCurrent={verificationIsCurrent}
@@ -491,15 +550,35 @@ export function EndpointCreationWizard({
               )}
             </div>
             <div className="min-w-0">
-              <DialogTitle>
-                {isEditing ? "Edit endpoint" : "Add an endpoint"}
-              </DialogTitle>
+              <div className="flex flex-wrap items-center gap-2">
+                <DialogTitle>
+                  {isEditing ? "Edit endpoint" : "Add an endpoint"}
+                </DialogTitle>
+                <Badge variant={isEditing ? "outline" : "secondary"}>
+                  {isEditing ? "Editing existing" : "New endpoint"}
+                </Badge>
+              </div>
               <DialogDescription>
                 {isEditing
-                  ? "Review the same guided setup used when this endpoint was created. Its lane stays fixed."
-                  : "A short guided setup keeps chat models and diarization services easy to configure."}
+                  ? "Update the connection, model mappings, runtime behavior, or defaults. The endpoint lane and visibility stay fixed."
+                  : "Follow the setup from connection to verification. Every endpoint option is visible in the step where it belongs."}
               </DialogDescription>
             </div>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+            <Progress
+              aria-label={`Endpoint setup progress: step ${currentIndex + 1} of ${steps.length}`}
+              value={((currentIndex + 1) / steps.length) * 100}
+            />
+            <p className="text-xs text-muted-foreground sm:text-right">
+              <span className="font-medium text-foreground">
+                Step {currentIndex + 1} of {steps.length}
+              </span>
+              <span className="mx-1.5" aria-hidden="true">
+                ·
+              </span>
+              {steps[currentIndex]?.label}
+            </p>
           </div>
         </DialogHeader>
 
@@ -522,6 +601,7 @@ export function EndpointCreationWizard({
                     key={item.id}
                     type="button"
                     disabled={!available}
+                    autoFocus={active}
                     aria-current={active ? "step" : undefined}
                     onClick={() => available && goTo(item.id)}
                     className={cn(
@@ -561,7 +641,16 @@ export function EndpointCreationWizard({
           </nav>
 
           <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-            <div className="mx-auto w-full max-w-3xl">{stepContent}</div>
+            <div className="mx-auto w-full max-w-3xl">
+              {validationMessage && step !== "review" && (
+                <Alert variant="destructive" className="mb-5">
+                  <CircleAlert aria-hidden="true" />
+                  <AlertTitle>Check this step</AlertTitle>
+                  <AlertDescription>{validationMessage}</AlertDescription>
+                </Alert>
+              )}
+              {stepContent}
+            </div>
           </div>
         </form>
 
@@ -721,8 +810,6 @@ function ConnectionStep({
   platformAdmin,
   isPlatformCatalog,
   isEditing,
-  advancedOpen,
-  onAdvancedOpenChange,
   onSelectProvider,
 }: {
   form: EndpointForm
@@ -733,8 +820,6 @@ function ConnectionStep({
   platformAdmin: boolean
   isPlatformCatalog: boolean
   isEditing: boolean
-  advancedOpen: boolean
-  onAdvancedOpenChange: (open: boolean) => void
   onSelectProvider: (value: string | null) => void
 }) {
   return (
@@ -742,8 +827,8 @@ function ConnectionStep({
       <div>
         <p className="text-sm font-medium">Connect the provider</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Start with the few values that identify the service. Advanced route
-          overrides stay available below if your gateway needs them.
+          Add the service address, authentication, and visibility. Route
+          overrides are shown explicitly below for gateways and versioned APIs.
         </p>
       </div>
       <Card size="sm">
@@ -773,12 +858,12 @@ function ConnectionStep({
                 />
               </Field>
               <Field>
-                <FieldLabel>Provider</FieldLabel>
+                <FieldLabel htmlFor="endpoint-provider">Provider</FieldLabel>
                 <Select
                   value={form.providerType}
                   onValueChange={onSelectProvider}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="endpoint-provider" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -800,7 +885,7 @@ function ConnectionStep({
               </Field>
             </div>
             <Field>
-              <FieldLabel>Visibility</FieldLabel>
+              <FieldLabel htmlFor="endpoint-visibility">Visibility</FieldLabel>
               <Select
                 disabled={isEditing}
                 value={form.scopeType}
@@ -811,7 +896,7 @@ function ConnectionStep({
                   )
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="endpoint-visibility" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -889,30 +974,17 @@ function ConnectionStep({
         </CardContent>
       </Card>
 
-      <Collapsible
-        className="rounded-xl border"
-        open={advancedOpen}
-        onOpenChange={onAdvancedOpenChange}
-      >
-        <CollapsibleTrigger
-          render={
-            <Button
-              className="h-auto w-full justify-start rounded-xl px-4 py-3 text-left hover:bg-muted/50"
-              size="sm"
-              type="button"
-              variant="ghost"
-            />
-          }
-        >
-          <Server data-icon="inline-start" aria-hidden="true" />
-          <span>
-            <span className="block font-medium">Advanced connection</span>
-            <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">
-              Custom API path and version headers
-            </span>
-          </span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="border-t px-4 py-4">
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Server aria-hidden="true" /> API routing
+          </CardTitle>
+          <CardDescription>
+            Optional overrides for custom gateways, proxy paths, and providers
+            that require an API version.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="endpoint-api-path">
@@ -939,12 +1011,12 @@ function ConnectionStep({
                 placeholder="2024-06-20"
               />
               <FieldDescription>
-                Used by providers that require a version header.
+                Sent to providers that require a version header.
               </FieldDescription>
             </Field>
           </div>
-        </CollapsibleContent>
-      </Collapsible>
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -956,8 +1028,6 @@ function ConfigureStep({
   supports,
   preflightModels,
   options,
-  runtimeOpen,
-  onRuntimeOpenChange,
 }: {
   form: EndpointForm
   setForm: Dispatch<SetStateAction<EndpointForm>>
@@ -965,8 +1035,6 @@ function ConfigureStep({
   supports: (provider: string, capability: string) => boolean
   preflightModels: DiscoveredChatModel[]
   options: DiscoveredChatModel[]
-  runtimeOpen: boolean
-  onRuntimeOpenChange: (open: boolean) => void
 }) {
   const chatAvailable = form.endpointKind === "llm" || form.useForChat
   const transcriptionAvailable =
@@ -1033,7 +1101,13 @@ function ConfigureStep({
                   label="Also use this endpoint for chat"
                   description="Save it in both the diarization and LLM inventory views."
                   checked={form.useForChat}
-                  onCheckedChange={(checked) => update("useForChat", checked)}
+                  onCheckedChange={(checked) =>
+                    setForm((current) => ({
+                      ...current,
+                      useForChat: checked,
+                      isDefault: checked ? current.isDefault : false,
+                    }))
+                  }
                 />
               )}
               {chatAvailable && (
@@ -1268,31 +1342,50 @@ function ConfigureStep({
           </CardContent>
         </Card>
       )}
+      {form.endpointKind === "llm" && !hasOptionalModels && (
+        <Alert>
+          <Sparkles aria-hidden="true" />
+          <AlertTitle>No optional capabilities available</AlertTitle>
+          <AlertDescription>
+            This provider exposes chat only. You can still verify and save the
+            endpoint with its primary chat model.
+          </AlertDescription>
+        </Alert>
+      )}
+    </div>
+  )
+}
 
-      <Collapsible
-        className="rounded-xl border"
-        open={runtimeOpen}
-        onOpenChange={onRuntimeOpenChange}
-      >
-        <CollapsibleTrigger
-          render={
-            <Button
-              className="h-auto w-full justify-start rounded-xl px-4 py-3 text-left hover:bg-muted/50"
-              size="sm"
-              type="button"
-              variant="ghost"
-            />
-          }
-        >
-          <SlidersHorizontal data-icon="inline-start" aria-hidden="true" />
-          <span>
-            <span className="block font-medium">Runtime settings</span>
-            <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">
-              Timeout, output limits, availability, and defaults
-            </span>
-          </span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="border-t px-4 py-4">
+function BehaviorStep({
+  form,
+  update,
+}: {
+  form: EndpointForm
+  update: <K extends keyof EndpointForm>(key: K, value: EndpointForm[K]) => void
+}) {
+  const chatAvailable = form.endpointKind === "llm" || form.useForChat
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <p className="text-sm font-medium">Set runtime behavior</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Decide how long JustAI should wait, how chat requests behave, and
+          whether this endpoint participates in routing.
+        </p>
+      </div>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <SlidersHorizontal aria-hidden="true" /> Runtime limits
+          </CardTitle>
+          <CardDescription>
+            These values apply whenever JustAI routes a request to this
+            endpoint.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
           <FieldGroup>
             <div className="grid gap-4 sm:grid-cols-3">
               <Field>
@@ -1309,13 +1402,11 @@ function ConfigureStep({
                     update("timeoutSeconds", Number(event.target.value))
                   }
                 />
-                {form.providerType === "pyannote" && (
-                  <FieldDescription>
-                    Maximum time JustAI waits for one full-video diarization.
-                    The default is 30 minutes; increase it for long videos or
-                    CPU-only deployments.
-                  </FieldDescription>
-                )}
+                <FieldDescription>
+                  {form.providerType === "pyannote"
+                    ? "Maximum wait for one full-video diarization. 1,800 seconds is the default."
+                    : "Maximum wait for a single provider request."}
+                </FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="endpoint-max-tokens">
@@ -1325,11 +1416,15 @@ function ConfigureStep({
                   id="endpoint-max-tokens"
                   type="number"
                   min={1}
+                  step={1}
                   value={form.maxOutputTokens}
                   onChange={(event) =>
                     update("maxOutputTokens", Number(event.target.value))
                   }
                 />
+                <FieldDescription>
+                  Upper limit for generated chat output.
+                </FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="endpoint-temperature">
@@ -1346,30 +1441,63 @@ function ConfigureStep({
                     update("temperature", Number(event.target.value))
                   }
                 />
+                <FieldDescription>
+                  Lower values make chat responses more predictable.
+                </FieldDescription>
               </Field>
             </div>
+          </FieldGroup>
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Availability and defaults</CardTitle>
+          <CardDescription>
+            Control whether routing can use this endpoint and which chat
+            endpoint new sessions select by default. If no enabled chat endpoint
+            exists in this scope, JustAI promotes the first one automatically.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup>
             <div className="grid gap-3 sm:grid-cols-2">
               <CapabilitySwitch
                 label="Enabled"
                 description="Allow this endpoint to be selected by routing."
                 checked={form.enabled}
-                onCheckedChange={(checked) => update("enabled", checked)}
+                onCheckedChange={(checked) => {
+                  update("enabled", checked)
+                  if (!checked) update("isDefault", false)
+                }}
               />
               <CapabilitySwitch
                 label="Default chat endpoint"
                 description={
-                  form.endpointKind === "llm" || form.useForChat
-                    ? "Use for new chat sessions."
-                    : "Only chat-capable endpoints can be the default."
+                  !form.enabled
+                    ? "Enable this endpoint before making it the default."
+                    : chatAvailable
+                      ? "Use for new chat sessions."
+                      : "Enable chat in the previous step before making this the default."
                 }
                 checked={form.isDefault}
-                disabled={!chatAvailable}
+                disabled={!chatAvailable || !form.enabled}
                 onCheckedChange={(checked) => update("isDefault", checked)}
               />
             </div>
+            {!chatAvailable && (
+              <Alert>
+                <MessageSquare aria-hidden="true" />
+                <AlertTitle>Chat is not enabled</AlertTitle>
+                <AlertDescription>
+                  This endpoint can still serve its selected capabilities, but
+                  it will not be used for new chat sessions.
+                </AlertDescription>
+              </Alert>
+            )}
           </FieldGroup>
-        </CollapsibleContent>
-      </Collapsible>
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -1419,9 +1547,11 @@ function ReviewStep({
   form,
   endpointKind,
   providerLabel,
+  isEditing,
   capabilities,
   preflightState,
   preflightMessage,
+  validationMessage,
   modelCount,
   verificationOverride,
   verificationIsCurrent,
@@ -1432,9 +1562,11 @@ function ReviewStep({
   form: EndpointForm
   endpointKind: EndpointKind
   providerLabel: string
+  isEditing: boolean
   capabilities: Record<string, boolean>
   preflightState: PreflightState
   preflightMessage: string
+  validationMessage: string
   modelCount: number
   verificationOverride: boolean
   verificationIsCurrent: boolean
@@ -1445,10 +1577,18 @@ function ReviewStep({
   const enabledCapabilities = Object.entries(capabilities)
     .filter(([, enabled]) => enabled)
     .map(([capability]) => capability)
+  const chatAvailable = endpointKind === "llm" || form.useForChat
   const modelLabel =
     endpointKind === "diarization"
       ? form.diarizationModel || "Service-selected pipeline"
       : form.chatModel || "Selected at request time"
+  const credentialLabel = form.credential.trim()
+    ? isEditing
+      ? "Replace stored credential"
+      : "New credential entered"
+    : isEditing
+      ? "Keep stored credential"
+      : "No credential (local or no auth)"
 
   return (
     <div className="flex flex-col gap-5">
@@ -1468,6 +1608,14 @@ function ReviewStep({
         </Alert>
       )}
 
+      {validationMessage && (
+        <Alert variant="destructive">
+          <CircleAlert aria-hidden="true" />
+          <AlertTitle>Setup needs attention</AlertTitle>
+          <AlertDescription>{validationMessage}</AlertDescription>
+        </Alert>
+      )}
+
       <Card size="sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -1478,34 +1626,127 @@ function ReviewStep({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-            <SummaryItem
-              label="Lane"
-              value={endpointKind === "diarization" ? "Diarization" : "LLM"}
-            />
-            <SummaryItem label="Provider" value={providerLabel} />
-            <SummaryItem label="Name" value={form.name || "Unnamed endpoint"} />
-            <SummaryItem label="Model" value={modelLabel} />
-            <SummaryItem label="Base URL" value={form.baseUrl} wide />
-            <SummaryItem
-              label="Visibility"
-              value={scopeLabel(form.scopeType)}
-            />
-          </dl>
-          <div className="mt-4 border-t pt-4">
-            <p className="mb-2 text-xs font-medium">Enabled capabilities</p>
-            <div className="flex flex-wrap gap-1.5">
-              {enabledCapabilities.length > 0 ? (
-                enabledCapabilities.map((capability) => (
-                  <Badge key={capability} variant="secondary">
-                    {capabilityLabel(capability)}
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  No optional capabilities selected.
-                </span>
-              )}
+          <div className="grid gap-4">
+            <div>
+              <p className="mb-3 text-xs font-medium">Connection</p>
+              <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                <SummaryItem
+                  label="Lane"
+                  value={endpointKind === "diarization" ? "Diarization" : "LLM"}
+                />
+                <SummaryItem label="Provider" value={providerLabel} />
+                <SummaryItem
+                  label="Name"
+                  value={form.name || "Unnamed endpoint"}
+                />
+                <SummaryItem
+                  label="Visibility"
+                  value={scopeLabel(form.scopeType)}
+                />
+                <SummaryItem label="Base URL" value={form.baseUrl} wide />
+                <SummaryItem
+                  label="API path"
+                  value={form.apiPath || "Provider default"}
+                />
+                <SummaryItem
+                  label="API version"
+                  value={form.apiVersion || "Provider default"}
+                />
+                <SummaryItem label="Credential" value={credentialLabel} />
+              </dl>
+            </div>
+
+            <Separator />
+
+            <div>
+              <p className="mb-3 text-xs font-medium">
+                Models and capabilities
+              </p>
+              <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                <SummaryItem label="Primary model" value={modelLabel} />
+                <SummaryItem
+                  label="Chat model"
+                  value={form.chatModel || "Not configured"}
+                />
+                <SummaryItem
+                  label="Vision model"
+                  value={form.visionModel || "Not configured"}
+                />
+                <SummaryItem
+                  label="Embedding model"
+                  value={form.embeddingModel || "Not configured"}
+                />
+                <SummaryItem
+                  label="Image model"
+                  value={form.imageModel || "Not configured"}
+                />
+                <SummaryItem
+                  label="Transcription model"
+                  value={form.transcriptionModel || "Not configured"}
+                />
+                <SummaryItem
+                  label="Diarization model"
+                  value={form.diarizationModel || "Service-selected pipeline"}
+                />
+                <SummaryItem
+                  label="Speech model"
+                  value={form.speechModel || "Not configured"}
+                />
+              </dl>
+              <div className="mt-4">
+                <p className="mb-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                  Enabled capabilities
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {enabledCapabilities.length > 0 ? (
+                    enabledCapabilities.map((capability) => (
+                      <Badge key={capability} variant="secondary">
+                        {capabilityLabel(capability)}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      No capabilities selected.
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div>
+              <p className="mb-3 text-xs font-medium">Runtime and routing</p>
+              <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                <SummaryItem
+                  label="Timeout"
+                  value={`${form.timeoutSeconds} seconds`}
+                />
+                <SummaryItem
+                  label="Max output"
+                  value={`${form.maxOutputTokens} tokens`}
+                />
+                <SummaryItem
+                  label="Temperature"
+                  value={String(form.temperature)}
+                />
+                <SummaryItem
+                  label="Status"
+                  value={form.enabled ? "Enabled" : "Disabled"}
+                />
+                <SummaryItem
+                  label="Default chat endpoint"
+                  value={
+                    form.isDefault
+                      ? "Yes"
+                      : chatAvailable && form.enabled
+                        ? "No — may be auto-selected if none exists"
+                        : chatAvailable
+                          ? "No — endpoint is disabled"
+                          : "No — chat is disabled"
+                  }
+                />
+              </dl>
             </div>
           </div>
         </CardContent>

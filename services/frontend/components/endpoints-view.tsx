@@ -190,6 +190,7 @@ export function EndpointsView({
       useForChat: pyannote
         ? false
         : current.endpointKind === "llm" || current.useForChat,
+      isDefault: pyannote ? false : current.isDefault,
       diarizationModel: pyannote
         ? current.diarizationModel || "pyannote/speaker-diarization-3.1"
         : current.diarizationModel,
