@@ -1,6 +1,7 @@
 packages: []
 
 overrides:
+  assistant-cloud: 0.1.42
   nanoid@3.3.16: 6.0.1
 
 allowBuilds:
