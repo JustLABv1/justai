@@ -62,7 +62,7 @@ RUN apk add --no-cache \
     && /opt/ffmpeg/bin/ffmpeg -version \
     && /opt/ffmpeg/bin/ffprobe -version
 
-FROM reg.mini.dev/go:v1.27.0 AS builder
+FROM reg.mini.dev/go:v1.27.1 AS builder
 USER 0
 ARG APP_VERSION=dev
 # Define cache locations for Go build
