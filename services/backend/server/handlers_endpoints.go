@@ -190,6 +190,11 @@ func (a *App) createEndpoint(c *gin.Context) {
 	c.JSON(http.StatusCreated, item)
 }
 
+// The credential is optional during edits. When it is omitted, lib/pq sends a
+// nil parameter; the explicit bytea cast keeps PostgreSQL from treating $17 as
+// an untyped NULL and returning 42P08 (indeterminate_datatype).
+const updateEndpointSQL = `UPDATE endpoint_settings SET endpoint_kind = $2, provider_type = $3, name = $4, base_url = $5, api_path = NULLIF($6, ''), api_version = NULLIF($7, ''), chat_model = NULLIF($8, ''), vision_model = NULLIF($9, ''), image_model = NULLIF($10, ''), embedding_model = NULLIF($11, ''), transcription_model = NULLIF($12, ''), diarization_model = NULLIF($13, ''), speech_model = NULLIF($14, ''), capabilities = $15, credential_ciphertext = CASE WHEN $16 THEN NULL ELSE COALESCE($17::bytea, credential_ciphertext) END, enabled = $18, is_default = $19, timeout_seconds = $20, max_output_tokens = $21, temperature = $22, updated_at = now() WHERE id = $1`
+
 func (a *App) updateEndpoint(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -255,7 +260,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
-	var encrypted any
+	var encrypted []byte
 	if request.Credential != "" {
 		value, err := a.Secrets.Encrypt(request.Credential)
 		if err != nil {
@@ -315,7 +320,7 @@ func (a *App) updateEndpoint(c *gin.Context) {
 			return
 		}
 	}
-	_, err = transaction.ExecContext(c, `UPDATE endpoint_settings SET endpoint_kind = $2, provider_type = $3, name = $4, base_url = $5, api_path = NULLIF($6, ''), api_version = NULLIF($7, ''), chat_model = NULLIF($8, ''), vision_model = NULLIF($9, ''), image_model = NULLIF($10, ''), embedding_model = NULLIF($11, ''), transcription_model = NULLIF($12, ''), diarization_model = NULLIF($13, ''), speech_model = NULLIF($14, ''), capabilities = $15, credential_ciphertext = CASE WHEN $16 THEN NULL WHEN $17 IS NOT NULL THEN $17 ELSE credential_ciphertext END, enabled = $18, is_default = $19, timeout_seconds = $20, max_output_tokens = $21, temperature = $22, updated_at = now() WHERE id = $1`, id, request.EndpointKind, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.ImageModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, capabilities, clearCredential, encrypted, enabled, isDefault, intValue(request.TimeoutSeconds, current.TimeoutSeconds), intValue(request.MaxOutputTokens, current.MaxOutputTokens), floatValue(request.Temperature, current.Temperature))
+	_, err = transaction.ExecContext(c, updateEndpointSQL, id, request.EndpointKind, request.ProviderType, request.Name, request.BaseURL, request.APIPath, request.APIVersion, request.ChatModel, request.VisionModel, request.ImageModel, request.EmbeddingModel, request.TranscriptionModel, request.DiarizationModel, request.SpeechModel, capabilities, clearCredential, encrypted, enabled, isDefault, intValue(request.TimeoutSeconds, current.TimeoutSeconds), intValue(request.MaxOutputTokens, current.MaxOutputTokens), floatValue(request.Temperature, current.Temperature))
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
