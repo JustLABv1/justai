@@ -13,8 +13,9 @@ import {
   LogOut,
   MessageSquare,
   MoreHorizontal,
-  PanelRightClose,
   PanelRightOpen,
+  Pin,
+  PinOff,
   Plus,
   Plug,
   RotateCcw,
@@ -223,6 +224,7 @@ export function FocusWorkspaceSidebar({
   const [searchOpen, setSearchOpen] = useState(false)
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
   const [chatHistoryExpanded, setChatHistoryExpanded] = useState(false)
+  const [historyRailPinned, setHistoryRailPinned] = useState(false)
   const historyView =
     activeView === "chat" ||
     activeView === "transcription" ||
@@ -231,19 +233,20 @@ export function FocusWorkspaceSidebar({
   const historyVisible = historyView && historyOpen
   const isSecondaryHistoryRail = historyVisible
   const contextPanelOpen =
-    historyVisible && (!isSecondaryHistoryRail || chatHistoryExpanded)
+    historyVisible &&
+    (!isSecondaryHistoryRail || chatHistoryExpanded || historyRailPinned)
 
   const createAction: CreateAction | null =
     activeView === "chat"
       ? {
-          label: "New chat",
+          label: "New conversation",
           hint: "Start a new conversation",
           icon: Plus,
           onClick: () => onNavigate("chat"),
         }
       : activeView === "transcription"
         ? {
-            label: "New room",
+            label: "New live session",
             hint: "Create a live transcription room",
             icon: Headphones,
             onClick: onNewTranscriptionSession,
@@ -399,18 +402,12 @@ export function FocusWorkspaceSidebar({
       : activeView === "video-transcription"
         ? "Show video transcripts"
         : "Show chat history"
-  const hideContextLabel =
-    activeView === "transcription"
-      ? "Hide live sessions"
-      : activeView === "video-transcription"
-        ? "Hide video transcripts"
-        : "Hide chat history"
-
   return (
     <aside
       className={cn(
         "relative flex h-full min-h-0 w-14 shrink-0 overflow-visible border-r border-border bg-background",
-        isSecondaryHistoryRail && "w-[6.5rem]"
+        isSecondaryHistoryRail && "w-[6.5rem]",
+        historyRailPinned && "lg:w-[19.5rem]"
       )}
       aria-label="Workspace navigation"
       data-history-open={historyVisible}
@@ -600,11 +597,13 @@ export function FocusWorkspaceSidebar({
 
       <div
         className={cn(
-          isSecondaryHistoryRail ? "relative h-full w-12 shrink-0" : "contents"
+          isSecondaryHistoryRail ? "relative h-full w-12 shrink-0" : "contents",
+          historyRailPinned && "lg:contents"
         )}
         onBlurCapture={(event) => {
           if (
             isSecondaryHistoryRail &&
+            !historyRailPinned &&
             !event.currentTarget.contains(event.relatedTarget)
           ) {
             setChatHistoryExpanded(false)
@@ -617,11 +616,18 @@ export function FocusWorkspaceSidebar({
           if (isSecondaryHistoryRail) setChatHistoryExpanded(true)
         }}
         onMouseLeave={() => {
-          if (isSecondaryHistoryRail) setChatHistoryExpanded(false)
+          if (isSecondaryHistoryRail && !historyRailPinned) {
+            setChatHistoryExpanded(false)
+          }
         }}
       >
         {isSecondaryHistoryRail && (
-          <div className="flex h-full w-12 flex-col items-center gap-1 border-r border-border/70 py-3">
+          <div
+            className={cn(
+              "flex h-full w-12 flex-col items-center gap-1 border-r border-border/70 py-3",
+              historyRailPinned && "lg:hidden"
+            )}
+          >
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -736,6 +742,7 @@ export function FocusWorkspaceSidebar({
             isSecondaryHistoryRail
               ? "absolute inset-y-0 left-0 z-30 w-64"
               : "absolute inset-y-0 left-14 z-30 w-64 xl:static xl:z-auto xl:shadow-none",
+            historyRailPinned && "lg:static lg:z-auto lg:shadow-none",
             contextPanelOpen ? "flex" : "hidden",
             "max-md:fixed max-md:left-0 max-md:z-50 max-md:w-full"
           )}
@@ -747,47 +754,48 @@ export function FocusWorkspaceSidebar({
               </h2>
             </div>
             <div className="flex items-center gap-1">
-              {createAction && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        aria-label={createAction.label}
-                        className="size-7 rounded-lg"
-                        disabled={createAction.disabled}
-                        onClick={createAction.onClick}
-                        size="icon"
-                        variant="ghost"
-                      >
-                        <CreateIcon />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>
-                    {createAction.disabled
-                      ? "Disabled by platform administrator"
-                      : createAction.hint}
-                  </TooltipContent>
-                </Tooltip>
-              )}
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <Button
-                      aria-label={hideContextLabel}
+                      aria-label={
+                        historyRailPinned
+                          ? `Unpin ${secondaryHistoryLabel.toLocaleLowerCase()}`
+                          : `Keep ${secondaryHistoryLabel.toLocaleLowerCase()} open`
+                      }
+                      aria-pressed={historyRailPinned}
                       className="size-7 rounded-lg text-muted-foreground"
-                      onClick={() => onHistoryOpenChange(false)}
+                      onClick={() => {
+                        setHistoryRailPinned((pinned) => !pinned)
+                        setChatHistoryExpanded(true)
+                      }}
                       size="icon"
                       variant="ghost"
                     >
-                      <PanelRightClose />
+                      {historyRailPinned ? <PinOff /> : <Pin />}
                     </Button>
                   }
                 />
-                <TooltipContent>{hideContextLabel}</TooltipContent>
+                <TooltipContent>
+                  {historyRailPinned
+                    ? `Unpin ${secondaryHistoryLabel.toLocaleLowerCase()}`
+                    : `Keep ${secondaryHistoryLabel.toLocaleLowerCase()} open`}
+                </TooltipContent>
               </Tooltip>
             </div>
           </div>
+
+          {createAction && (
+            <Button
+              aria-label={createAction.label}
+              className="h-9 w-full justify-start gap-2"
+              disabled={createAction.disabled}
+              onClick={createAction.onClick}
+            >
+              <CreateIcon data-icon="inline-start" />
+              {createAction.label}
+            </Button>
+          )}
 
           {actionError && (
             <Alert className="shrink-0" variant="destructive">
