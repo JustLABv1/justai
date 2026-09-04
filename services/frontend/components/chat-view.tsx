@@ -25,6 +25,7 @@ import {
   Plug,
   RefreshCw,
   RotateCcw,
+  Star,
   Quote,
   ThumbsDown,
   ThumbsUp,
@@ -113,6 +114,22 @@ type EnsureConversationOptions = {
   activate?: boolean
   assistantId?: string | null
   inheritRepositories?: boolean
+}
+
+const FAVORITE_ENDPOINTS_STORAGE_KEY = "justai.favorite-endpoints"
+const FAVORITE_MODELS_STORAGE_KEY = "justai.favorite-models"
+
+function readStoredIds(key: string) {
+  if (typeof window === "undefined") return [] as string[]
+  try {
+    const stored = window.localStorage.getItem(key)
+    const parsed: unknown = stored ? JSON.parse(stored) : []
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : []
+  } catch {
+    return [] as string[]
+  }
 }
 
 type Props = {
@@ -2063,6 +2080,12 @@ function ResponseSetupPopover({
   deepContextTitle: string
 }) {
   const [view, setView] = useState<"main" | "agent" | "model">("main")
+  const [favoriteEndpointIds, setFavoriteEndpointIds] = useState<string[]>(() =>
+    readStoredIds(FAVORITE_ENDPOINTS_STORAGE_KEY)
+  )
+  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() =>
+    readStoredIds(FAVORITE_MODELS_STORAGE_KEY)
+  )
   const selectedAssistant = assistants.find(
     (assistant) => assistant.id === assistantId
   )
@@ -2071,6 +2094,50 @@ function ResponseSetupPopover({
   const assistantLabel = selectedAssistant?.name ?? "JustAI default"
   const modelLabel = selectedModel?.name || modelId || "Select model"
   const endpointLabel = endpoint?.name ?? "Select endpoint"
+  const setupLabel = `${modelLabel} · ${endpointLabel}`
+  const favoriteEndpointIdSet = new Set(favoriteEndpointIds)
+  const favoriteModelIdSet = new Set(favoriteModelIds)
+  const sortedEndpoints = [...endpoints].sort(
+    (left, right) =>
+      Number(favoriteEndpointIdSet.has(right.id)) -
+      Number(favoriteEndpointIdSet.has(left.id))
+  )
+  const sortedModels = [...models].sort(
+    (left, right) =>
+      Number(favoriteModelIdSet.has(right.id)) -
+      Number(favoriteModelIdSet.has(left.id))
+  )
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        FAVORITE_ENDPOINTS_STORAGE_KEY,
+        JSON.stringify(favoriteEndpointIds)
+      )
+    } catch {
+      // Preferences are optional; the popover still works without storage.
+    }
+  }, [favoriteEndpointIds])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        FAVORITE_MODELS_STORAGE_KEY,
+        JSON.stringify(favoriteModelIds)
+      )
+    } catch {
+      // Preferences are optional; the popover still works without storage.
+    }
+  }, [favoriteModelIds])
+
+  const toggleFavorite = (
+    id: string,
+    setFavoriteIds: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    setFavoriteIds((ids) =>
+      ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]
+    )
+  }
 
   const selectAgent = (id: string) => {
     onAssistantChange(id)
@@ -2088,15 +2155,21 @@ function ResponseSetupPopover({
         aria-label="Open response setup"
         render={
           <Button
-            className="h-8 min-w-0 max-w-44 justify-start gap-1.5 rounded-full px-2.5 text-xs font-medium text-foreground hover:bg-muted active:scale-[0.97]"
+            className="h-8 max-w-64 min-w-0 justify-start gap-1.5 rounded-full px-2.5 text-xs font-medium text-foreground hover:bg-muted active:scale-[0.97]"
             size="sm"
+            title={setupLabel}
             type="button"
             variant="ghost"
           />
         }
       >
-        <Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="truncate">{assistantLabel}</span>
+        <span
+          className="flex size-4 shrink-0 items-center justify-center rounded-md bg-muted text-[9px] font-semibold text-muted-foreground"
+          aria-hidden="true"
+        >
+          AI
+        </span>
+        <span className="truncate">{setupLabel}</span>
         {deepContext && (
           <span
             aria-label="Deep context enabled"
@@ -2169,7 +2242,9 @@ function ResponseSetupPopover({
                       <BrainCircuit className="size-3.5" aria-hidden="true" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-xs font-medium">Deep context</span>
+                      <span className="block text-xs font-medium">
+                        Deep context
+                      </span>
                       <span className="block truncate text-[11px] text-muted-foreground">
                         {deepContextAvailable
                           ? deepContext
@@ -2182,7 +2257,7 @@ function ResponseSetupPopover({
                       aria-checked={deepContext}
                       aria-label="Toggle deep context"
                       className={cn(
-                        "relative h-5 w-9 shrink-0 rounded-full bg-muted transition-colors duration-150 ease-out after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-background after:shadow-sm after:transition-transform after:duration-150 after:ease-out disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.97]",
+                        "relative h-5 w-9 shrink-0 rounded-full bg-muted transition-colors duration-150 ease-out after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-background after:shadow-sm after:transition-transform after:duration-150 after:ease-out active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50",
                         deepContext && "bg-primary after:translate-x-4"
                       )}
                       disabled={!deepContextAvailable}
@@ -2196,7 +2271,10 @@ function ResponseSetupPopover({
               </>
             ) : view === "agent" ? (
               <>
-                <SetupPopoverHeader label="Choose agent" onBack={() => setView("main")} />
+                <SetupPopoverHeader
+                  label="Choose agent"
+                  onBack={() => setView("main")}
+                />
                 <div className="max-h-72 overflow-y-auto p-1">
                   <SetupOption
                     description="Use the normal workspace behavior"
@@ -2210,7 +2288,8 @@ function ResponseSetupPopover({
                       description={
                         assistant.kind === "remote"
                           ? "Remote A2A agent"
-                          : assistant.description || "Saved instructions and defaults"
+                          : assistant.description ||
+                            "Saved instructions and defaults"
                       }
                       icon={<Bot className="size-3.5" aria-hidden="true" />}
                       key={assistant.id}
@@ -2223,36 +2302,51 @@ function ResponseSetupPopover({
               </>
             ) : (
               <>
-                <SetupPopoverHeader label="Choose model" onBack={() => setView("main")} />
-                <div className="border-b px-2.5 py-2">
-                  <label className="block text-[11px] font-medium text-muted-foreground">
-                    Endpoint
-                    <select
-                      aria-label="Select LLM endpoint"
-                      className="mt-1 block w-full rounded-lg border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                      onChange={(event) => onEndpointChange(event.target.value)}
-                      value={endpointId}
-                    >
-                      {endpoints.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                <SetupPopoverHeader
+                  label="Choose model"
+                  onBack={() => setView("main")}
+                />
                 <div className="max-h-64 overflow-y-auto p-1">
                   <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-medium text-muted-foreground">
+                    Endpoint
+                  </p>
+                  {sortedEndpoints.map((item) => (
+                    <SetupOption
+                      description={`${item.providerType} · ${item.chatModel || "No default model"}`}
+                      favorite={favoriteEndpointIdSet.has(item.id)}
+                      icon={
+                        <span className="text-[10px] font-semibold">↗</span>
+                      }
+                      key={item.id}
+                      label={item.name}
+                      onClick={() => onEndpointChange(item.id)}
+                      onFavoriteToggle={() =>
+                        toggleFavorite(item.id, setFavoriteEndpointIds)
+                      }
+                      selected={item.id === endpointId}
+                    />
+                  ))}
+                  <p className="px-2.5 pt-3 pb-1.5 text-[11px] font-medium text-muted-foreground">
                     Chat model{modelDiscoveryLoading ? " · Discovering…" : ""}
                   </p>
                   {models.length > 0 ? (
-                    models.map((model) => (
+                    sortedModels.map((model) => (
                       <SetupOption
-                        description={model.name && model.name !== model.id ? model.id : undefined}
-                        icon={<span className="text-[10px] font-semibold">AI</span>}
+                        description={
+                          model.name && model.name !== model.id
+                            ? model.id
+                            : undefined
+                        }
+                        favorite={favoriteModelIdSet.has(model.id)}
+                        icon={
+                          <span className="text-[10px] font-semibold">AI</span>
+                        }
                         key={model.id}
                         label={model.name || model.id}
                         onClick={() => selectModel(model.id)}
+                        onFavoriteToggle={() =>
+                          toggleFavorite(model.id, setFavoriteModelIds)
+                        }
                         selected={model.id === modelId}
                       />
                     ))
@@ -2301,37 +2395,63 @@ function SetupOption({
   description,
   selected,
   onClick,
+  favorite = false,
+  onFavoriteToggle,
 }: {
   icon: ReactNode
   label: string
   description?: string
   selected: boolean
   onClick: () => void
+  favorite?: boolean
+  onFavoriteToggle?: () => void
 }) {
   return (
-    <button
-      className="flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-muted active:scale-[0.99]"
-      onClick={onClick}
-      type="button"
-    >
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium">{label}</span>
-        {description && (
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-            {description}
-          </span>
-        )}
-      </span>
-      <Check
-        className={cn(
-          "mt-0.5 size-3.5 shrink-0 text-primary",
-          selected ? "opacity-100" : "opacity-0"
-        )}
-      />
-    </button>
+    <div className="group/setup-option flex items-center gap-1 rounded-xl pr-1 hover:bg-muted">
+      <button
+        className="flex min-w-0 flex-1 items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-transform active:scale-[0.99]"
+        onClick={onClick}
+        type="button"
+      >
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          {icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium">{label}</span>
+          {description && (
+            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+              {description}
+            </span>
+          )}
+        </span>
+        <Check
+          className={cn(
+            "mt-0.5 size-3.5 shrink-0 text-primary",
+            selected ? "opacity-100" : "opacity-0"
+          )}
+        />
+      </button>
+      {onFavoriteToggle && (
+        <button
+          aria-label={
+            favorite
+              ? `Remove ${label} from favorites`
+              : `Add ${label} to favorites`
+          }
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground active:scale-[0.97]"
+          onClick={onFavoriteToggle}
+          type="button"
+        >
+          <Star
+            className={cn(
+              "size-3.5",
+              favorite && "fill-amber-400 text-amber-500"
+            )}
+            aria-hidden="true"
+          />
+        </button>
+      )}
+    </div>
   )
 }
 
