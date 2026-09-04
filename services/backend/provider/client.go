@@ -627,6 +627,34 @@ func ValidateRequestURL(rawURL string, allowPrivate bool) error {
 	return validateRequestURL(rawURL, allowPrivate)
 }
 
+// ValidateMediaSourceURL validates a URL that will be passed to FFmpeg for
+// external audio ingestion. Live sources intentionally support network media
+// protocols rather than arbitrary FFmpeg input schemes. The host validation is
+// still applied to every supported protocol so a user cannot turn a public
+// ingestion feature into an internal-network fetch primitive.
+func ValidateMediaSourceURL(rawURL string, allowPrivate bool) error {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed == nil || parsed.Hostname() == "" || parsed.User != nil {
+		return fmt.Errorf("live stream URL must be an absolute http(s) or rtmp(s) URL without credentials")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "rtmp", "rtmps":
+	default:
+		return fmt.Errorf("live stream URL must use http, https, rtmp, or rtmps")
+	}
+	if parsed.Fragment != "" {
+		return fmt.Errorf("live stream URL must not include a fragment")
+	}
+	host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
+	if host == "youtube.com" || host == "m.youtube.com" || host == "youtu.be" || host == "youtube-nocookie.com" {
+		return fmt.Errorf("YouTube page URLs are not direct media sources; use browser tab audio capture")
+	}
+	if allowPrivate {
+		return nil
+	}
+	return validatePublicHost(parsed.Hostname())
+}
+
 // SafeHTTPClient returns the same redirect and connection-time egress policy
 // used for provider API calls. It is also used when a provider response points
 // at a second URL (for example an image-generation result), where a plain

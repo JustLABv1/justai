@@ -73,6 +73,7 @@ config:
     videoUploadMaxBytes: 5368709120
     videoUploadPartBytes: 16777216
     videoMaxDurationHours: 4
+    liveStreamReconnectSeconds: 5
 
 monolith:
   image:

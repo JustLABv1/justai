@@ -1018,6 +1018,9 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 		}
 	}
 	if info.Kind == "transcription-capture" {
+		// Capture clients are untrusted, including bearer-authenticated meeting
+		// bridges. Bound a single binary message before reading it into memory.
+		connection.SetReadLimit(2 * 1024 * 1024)
 		snapshot, err := a.transcriptionSnapshot(ctx, info.SessionID)
 		if err != nil {
 			_ = a.Live.send(client, "error", ginData{"message": err.Error()})
@@ -1847,7 +1850,17 @@ func scanTranscriptionSession(scanner interface{ Scan(dest ...any) error }) (mod
 }
 
 func loadTranscriptionSources(ctx context.Context, db *sql.DB, sessionID uuid.UUID) ([]models.TranscriptionSource, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, session_id, name, kind, device_label, status, clock_offset_ms, connected_at, last_seen_at FROM transcription_sources WHERE session_id = $1 ORDER BY created_at`, sessionID)
+	rows, err := db.QueryContext(ctx, `
+		SELECT source.id, source.session_id, source.name, source.kind, source.device_label,
+		       source.status, source.clock_offset_ms, source.connected_at, source.last_seen_at,
+		       COALESCE(stream.protocol, ''), COALESCE(stream.status, bot.status, ''),
+		       COALESCE(stream.reconnect_count, 0), COALESCE(stream.last_error, ''),
+		       COALESCE(bot.platform, '')
+		FROM transcription_sources source
+		LEFT JOIN transcription_stream_sources stream ON stream.source_id = source.id
+		LEFT JOIN transcription_bot_sources bot ON bot.source_id = source.id
+		WHERE source.session_id = $1
+		ORDER BY source.created_at`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1855,7 +1868,7 @@ func loadTranscriptionSources(ctx context.Context, db *sql.DB, sessionID uuid.UU
 	result := make([]models.TranscriptionSource, 0)
 	for rows.Next() {
 		var item models.TranscriptionSource
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.Name, &item.Kind, &item.DeviceLabel, &item.Status, &item.ClockOffsetMs, &item.ConnectedAt, &item.LastSeenAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.Name, &item.Kind, &item.DeviceLabel, &item.Status, &item.ClockOffsetMs, &item.ConnectedAt, &item.LastSeenAt, &item.Protocol, &item.TransportStatus, &item.ReconnectCount, &item.LastError, &item.Platform); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

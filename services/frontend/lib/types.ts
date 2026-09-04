@@ -715,6 +715,11 @@ export type TranscriptionSource = {
   name: string
   kind: string
   deviceLabel?: string
+  protocol?: string
+  platform?: string
+  transportStatus?: string
+  reconnectCount?: number
+  lastError?: string
   status: "pending" | "connected" | "paused" | "disconnected" | "stopped"
   clockOffsetMs: number
   connectedAt?: string | null

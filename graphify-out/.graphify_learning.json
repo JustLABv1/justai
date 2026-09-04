@@ -1,8 +1,184 @@
 {
-  "generated_at": "2026-08-20T08:24:30.282761+00:00",
+  "generated_at": "2026-09-04T09:48:01.783080+00:00",
   "nodes": {
+    "provider_realtimestream": {
+      "code_fingerprint": "b704e124042c6ab0f1efff5c5d2806d5c74f46c1edca01e343348fba0d4cb043",
+      "label": "RealtimeStream",
+      "last": "2026-09-04T09:45:31.941175+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-04T09:45:31.941175+00:00",
+          "outcome": "useful",
+          "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
+        }
+      ],
+      "score": 0.99995993,
+      "source_file": "services/backend/provider/transcription.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "rag_worker": {
+      "code_fingerprint": "5e4a78e584110ab2e67aa31211bcbffae6c578db34a056820ab5b06e03993a3c",
+      "label": "Worker",
+      "last": "2026-09-04T09:45:31.941175+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-04T09:45:31.941175+00:00",
+          "outcome": "useful",
+          "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
+        }
+      ],
+      "score": 0.99995993,
+      "source_file": "services/backend/rag/ingest.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "rag_worker_ingest": {
+      "code_fingerprint": "5e4a78e584110ab2e67aa31211bcbffae6c578db34a056820ab5b06e03993a3c",
+      "label": ".ingest()",
+      "last": "2026-08-20T08:35:02.297138+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-20T08:35:02.297138+00:00",
+          "outcome": "useful",
+          "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
+        }
+      ],
+      "score": 0.706279136,
+      "source_file": "services/backend/rag/ingest.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "server_app_createuploadedsource": {
+      "code_fingerprint": "ccba1b291dd1676d80f791846f8b90f71088a9a11a32314d9f640511e4df4609",
+      "label": ".createUploadedSource()",
+      "last": "2026-08-20T08:35:02.297138+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-20T08:35:02.297138+00:00",
+          "outcome": "useful",
+          "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
+        }
+      ],
+      "score": 0.706279136,
+      "source_file": "services/backend/server/handlers_knowledge.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "server_s3storage": {
+      "code_fingerprint": "f19507062ff64f8d0e62408110e6a53933447c1f6f2d0d8591d0f2c5392f4163",
+      "label": "s3Storage",
+      "last": "2026-08-23T22:30:22.886911+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-23T22:30:22.886911+00:00",
+          "outcome": "useful",
+          "q": "please now use again Luna Max agents to fix all of those issues at once"
+        }
+      ],
+      "score": 0.767185326,
+      "source_file": "services/backend/server/s3_storage.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "services_backend_middleware_auth": {
+      "code_fingerprint": "79caae789cee83f78d168d4499e7d527aa8780184709f0047124d0ef22dc93f9",
+      "label": "auth.go",
+      "last": "2026-08-23T22:30:22.886911+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-23T22:30:22.886911+00:00",
+          "outcome": "useful",
+          "q": "please now use again Luna Max agents to fix all of those issues at once"
+        }
+      ],
+      "score": 0.767185326,
+      "source_file": "services/backend/middleware/auth.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "services_backend_provider_transcription_openrealtime": {
+      "code_fingerprint": "b704e124042c6ab0f1efff5c5d2806d5c74f46c1edca01e343348fba0d4cb043",
+      "label": "OpenRealtime()",
+      "last": "2026-09-04T09:45:31.941175+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-04T09:45:31.941175+00:00",
+          "outcome": "useful",
+          "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
+        }
+      ],
+      "score": 0.99995993,
+      "source_file": "services/backend/provider/transcription.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "services_backend_rag_ingest_extractupload": {
+      "code_fingerprint": "5e4a78e584110ab2e67aa31211bcbffae6c578db34a056820ab5b06e03993a3c",
+      "label": "ExtractUpload()",
+      "last": "2026-08-20T08:35:02.297138+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-20T08:35:02.297138+00:00",
+          "outcome": "useful",
+          "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
+        }
+      ],
+      "score": 0.706279136,
+      "source_file": "services/backend/rag/ingest.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "services_backend_rag_ingest_splitchunks": {
+      "code_fingerprint": "5e4a78e584110ab2e67aa31211bcbffae6c578db34a056820ab5b06e03993a3c",
+      "label": "splitChunks()",
+      "last": "2026-08-20T08:35:02.297138+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-20T08:35:02.297138+00:00",
+          "outcome": "useful",
+          "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
+        }
+      ],
+      "score": 0.706279136,
+      "source_file": "services/backend/rag/ingest.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "services_backend_security_password": {
+      "code_fingerprint": "6c73826ce78d5ec11fe9a85d335219f5910f81cbfcad86e92943066e589a70d2",
+      "label": "password.go",
+      "last": "2026-08-23T22:30:22.886911+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-23T22:30:22.886911+00:00",
+          "outcome": "useful",
+          "q": "please now use again Luna Max agents to fix all of those issues at once"
+        }
+      ],
+      "score": 0.767185326,
+      "source_file": "services/backend/security/password.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "services_backend_server_handlers_ws_citationprompt": {
+      "code_fingerprint": "af9442594e8351b97dc9f43c02eeba53bf120f6b3ff94b6b2e080bec726941fc",
+      "label": "citationPrompt()",
+      "last": "2026-08-20T08:35:02.297138+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-20T08:35:02.297138+00:00",
+          "outcome": "useful",
+          "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
+        }
+      ],
+      "score": 0.706279136,
+      "source_file": "services/backend/server/handlers_ws.go",
+      "status": "tentative",
+      "uses": 1
+    },
     "services_frontend_components_chat_view_chatview": {
-      "code_fingerprint": "cd271ab0d6615f4fd7fb478db4d66e9a586d41e2b0609eb36ae367da99490160",
+      "code_fingerprint": "48b818d5a32f08370962b35828afe05b9a870433b320d5b85e477d94d3ae9950",
       "label": "ChatView()",
       "last": "2026-08-20T08:21:34.030795+00:00",
       "provenance": [
@@ -12,13 +188,29 @@
           "q": "Trace the post-send lifecycle after the first chat and explain why a persisted two-message conversation can show a fresh empty composer until a manual browser refresh."
         }
       ],
-      "score": 0.999952868,
+      "score": 0.706126494,
       "source_file": "services/frontend/components/chat-view.tsx",
       "status": "tentative",
       "uses": 1
     },
+    "services_frontend_components_live_transcription_view_livetranscriptionview": {
+      "code_fingerprint": "b80f27d9c2cc6f497158429358ca57aed447c6e4ae4f1c4ef849aca08f9774e2",
+      "label": "LiveTranscriptionView()",
+      "last": "2026-09-04T09:45:31.941175+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-04T09:45:31.941175+00:00",
+          "outcome": "useful",
+          "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
+        }
+      ],
+      "score": 0.99995993,
+      "source_file": "services/frontend/components/live-transcription-view.tsx",
+      "status": "tentative",
+      "uses": 1
+    },
     "services_frontend_components_workspace_workspace": {
-      "code_fingerprint": "dce999327350a8cdfc70c85a566da1508ca0d8519651e8995f84bd82ccbd1723",
+      "code_fingerprint": "71091642dce33fb5051c146d16d4e124d019c9b526f676709af5d298d3e38978",
       "label": "Workspace()",
       "last": "2026-08-20T08:21:34.030795+00:00",
       "provenance": [
@@ -28,8 +220,40 @@
           "q": "Trace the post-send lifecycle after the first chat and explain why a persisted two-message conversation can show a fresh empty composer until a manual browser refresh."
         }
       ],
-      "score": 0.999952868,
+      "score": 0.706126494,
       "source_file": "services/frontend/components/workspace.tsx",
+      "status": "tentative",
+      "uses": 1
+    },
+    "services_frontend_lib_types_transcriptionjoinrequest": {
+      "code_fingerprint": "b1c4cb7df50b8cdffcf5430fe712513517efc6e64145bb349e2bfb84650cd65a",
+      "label": "TranscriptionJoinRequest",
+      "last": "2026-09-04T09:45:31.941175+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-04T09:45:31.941175+00:00",
+          "outcome": "useful",
+          "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
+        }
+      ],
+      "score": 0.99995993,
+      "source_file": "services/frontend/lib/types.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "services_frontend_public_audio_worklet": {
+      "code_fingerprint": "7368a6a8f5b0f713dbc6e1a0ace7306a07f84339f6be2f65a4140c24be2b2c2d",
+      "label": "audio-worklet.js",
+      "last": "2026-09-04T09:45:31.941175+00:00",
+      "provenance": [
+        {
+          "date": "2026-09-04T09:45:31.941175+00:00",
+          "outcome": "useful",
+          "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
+        }
+      ],
+      "score": 0.99995993,
+      "source_file": "services/frontend/public/audio-worklet.js",
       "status": "tentative",
       "uses": 1
     }

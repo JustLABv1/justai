@@ -85,7 +85,7 @@ func (a *App) Router() *gin.Engine {
 		}
 		var repositoryStorageReady bool
 		if err := a.DB.QueryRowContext(c, `
-			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '037_video_upload_parts.sql')
+			SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '040_transcription_ingress.sql')
 			   AND to_regclass('public.repository_contexts') IS NOT NULL
 			   AND to_regclass('public.repository_context_files') IS NOT NULL
 			   AND to_regclass('public.conversation_repository_contexts') IS NOT NULL
@@ -95,7 +95,9 @@ func (a *App) Router() *gin.Engine {
 			   AND to_regclass('public.agent_workflows') IS NOT NULL
 			   AND to_regclass('public.agent_runs') IS NOT NULL
 			   AND to_regclass('public.generated_pdfs') IS NOT NULL
-			   AND to_regclass('public.transcription_video_upload_parts') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
+			   AND to_regclass('public.transcription_video_upload_parts') IS NOT NULL
+			   AND to_regclass('public.transcription_stream_sources') IS NOT NULL
+			   AND to_regclass('public.transcription_bot_sources') IS NOT NULL`).Scan(&repositoryStorageReady); err != nil || !repositoryStorageReady {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "database migrations are incomplete"})
 			return
 		}
@@ -130,6 +132,7 @@ func (a *App) Router() *gin.Engine {
 	transcriptionPublic.POST("/join-requests", a.platformFeature("transcription"), a.createTranscriptionJoinRequest)
 	transcriptionPublic.GET("/join-requests/:id", a.platformFeature("transcription"), a.getTranscriptionJoinRequest)
 	transcriptionPublic.POST("/capture-tickets", a.platformFeature("transcription"), a.createCaptureWSTicket)
+	transcriptionPublic.POST("/bot-sources/:id/tickets", a.platformFeature("transcription"), a.createTranscriptionBotWSTicket)
 
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.RequireAuth(a.Tokens, a.DB))
@@ -211,6 +214,11 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/video-uploads/:id/cancel", a.platformFeature("transcription"), a.cancelVideoTranscription)
 	org.GET("/transcription/video-uploads/:id/playback", a.platformFeature("transcription"), a.getVideoTranscriptionPlayback)
 	org.POST("/transcription/sessions/:id/sources", a.platformFeature("transcription"), a.createTranscriptionSource)
+	org.POST("/transcription/sessions/:id/stream-sources", a.platformFeature("transcription"), a.createTranscriptionStreamSource)
+	org.POST("/transcription/sessions/:id/bot-sources", a.platformFeature("transcription"), a.createTranscriptionBotSource)
+	org.POST("/transcription/stream-sources/:id/stop", a.platformFeature("transcription"), a.stopTranscriptionStreamSource)
+	org.POST("/transcription/bot-sources/:id/rotate", a.platformFeature("transcription"), a.rotateTranscriptionBotSourceToken)
+	org.POST("/transcription/bot-sources/:id/stop", a.platformFeature("transcription"), a.stopTranscriptionBotSource)
 	org.POST("/transcription/sessions/:id/segments/assign-speaker", a.platformFeature("transcription"), a.assignTranscriptionSegments)
 	org.PATCH("/transcription/sessions/:id/segments/:segmentId", a.platformFeature("transcription"), a.updateTranscriptionSegment)
 	org.GET("/transcription/sessions/:id/annotations", a.platformFeature("transcription"), a.listTranscriptionAnnotations)
@@ -218,6 +226,7 @@ func (a *App) Router() *gin.Engine {
 	org.PATCH("/transcription/sessions/:id/annotations/:annotationId", a.platformFeature("transcription"), a.updateTranscriptionAnnotation)
 	org.DELETE("/transcription/sessions/:id/annotations/:annotationId", a.platformFeature("transcription"), a.deleteTranscriptionAnnotation)
 	org.POST("/transcription/sessions/:id/insights", a.platformFeature("transcription"), a.generateTranscriptionInsights)
+	org.POST("/transcription/sessions/:id/polish", a.platformFeature("transcription"), a.polishTranscriptionSession)
 	org.GET("/transcription/sessions/:id/export/:format", a.platformFeature("transcription"), a.exportTranscription)
 	org.POST("/transcription/sessions/:id/join-code", a.platformFeature("transcription"), a.rotateTranscriptionJoinCode)
 	org.GET("/transcription/sessions/:id/join-requests", a.platformFeature("transcription"), a.listTranscriptionJoinRequests)

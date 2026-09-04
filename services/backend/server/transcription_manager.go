@@ -55,13 +55,15 @@ type TranscriptionManager struct {
 	Secrets *security.SecretBox
 	app     *App
 
-	mu      sync.Mutex
-	hubs    map[uuid.UUID]*transcriptionHub
-	buffers map[uuid.UUID]*pcmBuffer
-	joinMu  sync.Mutex
-	joins   map[string][]time.Time
-	clocks  map[uuid.UUID]int64
-	epochs  map[uuid.UUID]int64
+	mu            sync.Mutex
+	hubs          map[uuid.UUID]*transcriptionHub
+	buffers       map[uuid.UUID]*pcmBuffer
+	streamCancels map[uuid.UUID]context.CancelFunc
+	rootCtx       context.Context
+	joinMu        sync.Mutex
+	joins         map[string][]time.Time
+	clocks        map[uuid.UUID]int64
+	epochs        map[uuid.UUID]int64
 
 	videoDiarizationMu      sync.Mutex
 	videoDiarizationCancels map[uuid.UUID]videoDiarizationCancellation
@@ -75,6 +77,7 @@ func NewTranscriptionManager(cfg config.Config, db *sql.DB, secrets *security.Se
 		Secrets:                 secrets,
 		hubs:                    make(map[uuid.UUID]*transcriptionHub),
 		buffers:                 make(map[uuid.UUID]*pcmBuffer),
+		streamCancels:           make(map[uuid.UUID]context.CancelFunc),
 		joins:                   make(map[string][]time.Time),
 		clocks:                  make(map[uuid.UUID]int64),
 		epochs:                  make(map[uuid.UUID]int64),
@@ -87,8 +90,12 @@ func (m *TranscriptionManager) SetApp(application *App) {
 }
 
 func (m *TranscriptionManager) Start(ctx context.Context) {
+	m.mu.Lock()
+	m.rootCtx = ctx
+	m.mu.Unlock()
 	go m.cleanupLoop(ctx)
 	m.startVideoWorker(ctx)
+	m.startConfiguredStreamSources(ctx)
 }
 
 func (m *TranscriptionManager) cleanupLoop(ctx context.Context) {
@@ -237,6 +244,16 @@ func (m *TranscriptionManager) broadcast(sessionID uuid.UUID, eventType string, 
 // reaching a terminal state must not leave a capture connection streaming
 // audio into a provider after the UI has stopped it.
 func (m *TranscriptionManager) closeSession(sessionID uuid.UUID) {
+	m.stopStreamSources(sessionID)
+	if m.DB != nil {
+		// External sources have a durable worker state in addition to their
+		// websocket/source state. Mark them terminal before the worker's
+		// cancellation defer runs so a session stop cannot leave a reconnecting
+		// stream or bot behind.
+		_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = 'stopped', updated_at = now() WHERE session_id = $1 AND kind IN ('stream', 'meeting-bot') AND status <> 'stopped'`, sessionID)
+		_, _ = m.DB.Exec(`UPDATE transcription_stream_sources stream SET status = 'stopped', last_error = '', updated_at = now() FROM transcription_sources source WHERE source.id = stream.source_id AND source.session_id = $1`, sessionID)
+		_, _ = m.DB.Exec(`UPDATE transcription_bot_sources bot SET status = 'stopped', updated_at = now() FROM transcription_sources source WHERE source.id = bot.source_id AND source.session_id = $1`, sessionID)
+	}
 	m.mu.Lock()
 	hub := m.hubs[sessionID]
 	m.mu.Unlock()
@@ -262,6 +279,30 @@ func (m *TranscriptionManager) closeSession(sessionID uuid.UUID) {
 	}
 }
 
+func (m *TranscriptionManager) closeSource(sessionID, sourceID uuid.UUID) {
+	m.mu.Lock()
+	hub := m.hubs[sessionID]
+	m.mu.Unlock()
+	if hub == nil {
+		return
+	}
+	hub.mu.Lock()
+	clients := make([]*transcriptionClient, 0, 1)
+	for client := range hub.clients {
+		if client.sourceID == sourceID && client.role != "transcription-viewer" {
+			clients = append(clients, client)
+		}
+	}
+	hub.mu.Unlock()
+	deadline := time.Now().Add(time.Second)
+	for _, client := range clients {
+		client.writeMu.Lock()
+		_ = client.connection.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "source stopped"), deadline)
+		_ = client.connection.Close()
+		client.writeMu.Unlock()
+	}
+}
+
 func (m *TranscriptionManager) send(client *transcriptionClient, eventType string, data any) error {
 	client.writeMu.Lock()
 	defer client.writeMu.Unlock()
@@ -273,9 +314,28 @@ func (m *TranscriptionManager) send(client *transcriptionClient, eventType strin
 
 func (m *TranscriptionManager) markSource(sessionID, sourceID uuid.UUID, status string) {
 	now := time.Now().UTC()
-	_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = $2, connected_at = CASE WHEN $2 = 'connected' THEN COALESCE(connected_at, $3) ELSE connected_at END, last_seen_at = $3, updated_at = $3 WHERE id = $1`, sourceID, status, now)
+	_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = $2, connected_at = CASE WHEN $2 = 'connected' THEN COALESCE(connected_at, $3) ELSE connected_at END, last_seen_at = $3, updated_at = $3 WHERE id = $1 AND (status <> 'stopped' OR $2 = 'stopped')`, sourceID, status, now)
+	botStatus := "disconnected"
+	switch status {
+	case "connected":
+		botStatus = "connected"
+	case "stopped":
+		botStatus = "stopped"
+	case "pending":
+		botStatus = "pending"
+	}
+	_, _ = m.DB.Exec(`UPDATE transcription_bot_sources SET status = $2, last_seen_at = $3, updated_at = $3 WHERE source_id = $1 AND (status <> 'stopped' OR $2 = 'stopped')`, sourceID, botStatus, now)
 	var source models.TranscriptionSource
-	if err := m.DB.QueryRow(`SELECT id, session_id, name, kind, device_label, status, clock_offset_ms, connected_at, last_seen_at FROM transcription_sources WHERE id = $1 AND session_id = $2`, sourceID, sessionID).Scan(&source.ID, &source.SessionID, &source.Name, &source.Kind, &source.DeviceLabel, &source.Status, &source.ClockOffsetMs, &source.ConnectedAt, &source.LastSeenAt); err == nil {
+	if err := m.DB.QueryRow(`
+		SELECT source.id, source.session_id, source.name, source.kind, source.device_label,
+		       source.status, source.clock_offset_ms, source.connected_at, source.last_seen_at,
+		       COALESCE(stream.protocol, ''), COALESCE(stream.status, bot.status, ''),
+		       COALESCE(stream.reconnect_count, 0), COALESCE(stream.last_error, ''),
+		       COALESCE(bot.platform, '')
+		FROM transcription_sources source
+		LEFT JOIN transcription_stream_sources stream ON stream.source_id = source.id
+		LEFT JOIN transcription_bot_sources bot ON bot.source_id = source.id
+		WHERE source.id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&source.ID, &source.SessionID, &source.Name, &source.Kind, &source.DeviceLabel, &source.Status, &source.ClockOffsetMs, &source.ConnectedAt, &source.LastSeenAt, &source.Protocol, &source.TransportStatus, &source.ReconnectCount, &source.LastError, &source.Platform); err == nil {
 		m.broadcast(sessionID, "transcription.source", ginData{"sourceId": sourceID, "status": source.Status, "lastSeenAt": now, "source": source})
 		return
 	}
@@ -284,7 +344,7 @@ func (m *TranscriptionManager) markSource(sessionID, sourceID uuid.UUID, status 
 
 func (m *TranscriptionManager) updateSourceLevel(sessionID, sourceID uuid.UUID, level float64) {
 	level = maxFloat(0, minFloat(1, level))
-	_, _ = m.DB.Exec(`UPDATE transcription_sources SET last_seen_at = now(), updated_at = now() WHERE id = $1`, sourceID)
+	_, _ = m.DB.Exec(`UPDATE transcription_sources SET last_seen_at = now(), updated_at = now() WHERE id = $1 AND status <> 'stopped'`, sourceID)
 	m.broadcast(sessionID, "transcription.source.level", ginData{"sourceId": sourceID, "level": level})
 }
 

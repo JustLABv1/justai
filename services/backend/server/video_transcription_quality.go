@@ -409,7 +409,7 @@ func (m *TranscriptionManager) polishVideoTranscriptBatch(ctx context.Context, e
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
-		if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = $2, updated_at = now() WHERE id = $1 AND session_id = $3 AND source_id IS NULL`, id, strings.TrimSpace(text), sessionID); err != nil {
+		if _, err := m.DB.ExecContext(ctx, `UPDATE transcription_segments SET polished_text = $2, updated_at = now() WHERE id = $1 AND session_id = $3`, id, strings.TrimSpace(text), sessionID); err != nil {
 			return err
 		}
 	}

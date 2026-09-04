@@ -9,6 +9,7 @@ import {
   Clock3,
   Copy,
   Download,
+  FileAudio,
   FileText,
   FileVideo,
   GitMerge,
@@ -85,6 +86,7 @@ import { cn } from "@/lib/utils"
 import type {
   TranscriptionAnnotation,
   TranscriptionInsights,
+  TranscriptionRecording,
   TranscriptionSegment,
   TranscriptionSession,
   TranscriptionSpeaker,
@@ -92,19 +94,24 @@ import type {
   TranscriptionVideoUpload,
 } from "@/lib/types"
 
-export type VideoTranscriptSnapshot = {
+export type TranscriptWorkspaceSnapshot = {
   session: TranscriptionSession
   segments: TranscriptionSegment[]
   speakers: TranscriptionSpeaker[]
   annotations?: TranscriptionAnnotation[]
   insights?: TranscriptionInsights
+  recordings?: TranscriptionRecording[]
   videoUpload?: TranscriptionVideoUpload | null
 }
 
-type VideoTranscriptWorkspaceProps = {
-  snapshot: VideoTranscriptSnapshot
+export type TranscriptWorkspaceMediaKind = "video" | "audio" | "none"
+
+export type TranscriptWorkspaceProps = {
+  snapshot: TranscriptWorkspaceSnapshot
   onSnapshotChange: (
-    updater: (snapshot: VideoTranscriptSnapshot) => VideoTranscriptSnapshot
+    updater: (
+      snapshot: TranscriptWorkspaceSnapshot
+    ) => TranscriptWorkspaceSnapshot
   ) => void
   videoRef: RefObject<HTMLVideoElement | null>
   currentTimeMs: number
@@ -116,7 +123,16 @@ type VideoTranscriptWorkspaceProps = {
   onRefreshPlayback: () => Promise<void>
   onRenameSpeaker: (speaker: TranscriptionSpeaker) => void
   onError: (value: string) => void
+  mediaKind?: TranscriptWorkspaceMediaKind
 }
+
+/**
+ * Kept as a compatibility alias for the video pipeline while the workspace
+ * itself is shared by every completed transcript session.
+ */
+export type VideoTranscriptSnapshot = TranscriptWorkspaceSnapshot
+
+type VideoTranscriptWorkspaceProps = TranscriptWorkspaceProps
 
 type TranscriptMode = "verbatim" | "polished" | "edited"
 type WorkspaceView = "review" | "insights" | "speakers" | "details"
@@ -307,7 +323,7 @@ function livePreviewSegments(
     .sort((left, right) => left.startOffsetMs - right.startOffsetMs)
 }
 
-export function VideoTranscriptWorkspace({
+export function TranscriptWorkspace({
   snapshot,
   onSnapshotChange,
   videoRef,
@@ -320,6 +336,7 @@ export function VideoTranscriptWorkspace({
   onRefreshPlayback,
   onRenameSpeaker,
   onError,
+  mediaKind = "video",
 }: VideoTranscriptWorkspaceProps) {
   const [transcriptMode, setTranscriptMode] =
     useState<TranscriptMode>("verbatim")
@@ -346,7 +363,17 @@ export function VideoTranscriptWorkspace({
   const [mergeSourceId, setMergeSourceId] = useState("")
   const [mergeTargetId, setMergeTargetId] = useState("")
   const [mergeSaving, setMergeSaving] = useState(false)
-  const [videoPlaying, setVideoPlaying] = useState(false)
+  const [mediaPlaying, setMediaPlaying] = useState(false)
+  const [audioSource, setAudioSource] = useState<{
+    recordingId: string
+    url: string
+    error: string
+  } | null>(null)
+  const [audioDurationMs, setAudioDurationMs] = useState(0)
+  const [selectedRecordingId, setSelectedRecordingId] = useState(
+    () => snapshot.recordings?.[0]?.id ?? ""
+  )
+  const [polishGenerating, setPolishGenerating] = useState(false)
   const [insightsGenerating, setInsightsGenerating] = useState(false)
   const [insightLanguage, setInsightLanguage] = useState(
     () => snapshot.insights?.language ?? "auto"
@@ -358,6 +385,68 @@ export function VideoTranscriptWorkspace({
     endOffsetMs: number
   } | null>(null)
   const messageRefs = useRef(new Map<string, HTMLDivElement>())
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const recordings = useMemo(() => snapshot.recordings ?? [], [snapshot.recordings])
+  const effectiveRecordingId = recordings.some(
+    (recording) => recording.id === selectedRecordingId
+  )
+    ? selectedRecordingId
+    : (recordings[0]?.id ?? "")
+  const selectedRecording = recordings.find(
+    (recording) => recording.id === effectiveRecordingId
+  )
+  const audioSourceURL =
+    mediaKind === "audio" &&
+    audioSource?.recordingId === effectiveRecordingId &&
+    !audioSource.error
+      ? audioSource.url
+      : ""
+  const audioPlaybackError =
+    mediaKind === "audio" && audioSource?.recordingId === effectiveRecordingId
+      ? audioSource.error
+      : ""
+  const canSeek =
+    mediaKind === "video"
+      ? Boolean(snapshot.videoUpload?.playbackUrl)
+      : mediaKind === "audio"
+        ? Boolean(audioSourceURL)
+        : false
+
+  useEffect(() => {
+    if (mediaKind !== "audio" || !effectiveRecordingId) {
+      return
+    }
+    let cancelled = false
+    let objectURL = ""
+    const recordingId = effectiveRecordingId
+    void api
+      .getBlob(`/api/v1/transcription/recordings/${recordingId}`)
+      .then((blob) => {
+        if (cancelled) return
+        objectURL = URL.createObjectURL(blob)
+        setAudioSource({
+          recordingId,
+          url: objectURL,
+          error: "",
+        })
+      })
+      .catch((caught) => {
+        if (cancelled) return
+        setAudioSource({
+          recordingId,
+          url: "",
+          error:
+            caught instanceof Error
+              ? caught.message
+              : "Audio could not be loaded.",
+        })
+      })
+    return () => {
+      cancelled = true
+      if (objectURL) URL.revokeObjectURL(objectURL)
+    }
+  }, [effectiveRecordingId, mediaKind])
 
   const updateSnapshot = useCallback(
     (
@@ -459,7 +548,11 @@ export function VideoTranscriptWorkspace({
     [currentTimeMs, displaySegments]
   )
   const displayDurationMs =
-    videoDurationMs || snapshot.videoUpload?.durationMs || 0
+    mediaKind === "audio"
+      ? audioDurationMs
+      : mediaKind === "video"
+        ? videoDurationMs || snapshot.videoUpload?.durationMs || 0
+        : 0
   const hasActiveFilter = Boolean(
     transcriptQuery.trim() || speakerFilter !== "all" || qualityOnly
   )
@@ -496,6 +589,12 @@ export function VideoTranscriptWorkspace({
   const insightsReady = insights.status === "completed"
   const insightsProcessing =
     insightsGenerating || insights.status === "processing"
+  const polishProcessing =
+    polishGenerating || snapshot.session.polishStatus === "processing"
+  const canPolishTranscript =
+    snapshot.session.kind === "live" &&
+    Boolean(snapshot.session.grammarEndpointId) &&
+    snapshot.segments.length > 0
   const speakerSummaries = useMemo<SpeakerSummary[]>(() => {
     const segmentsBySpeaker = new Map<string, TranscriptionSegment[]>()
     for (const segment of displaySegments) {
@@ -544,7 +643,7 @@ export function VideoTranscriptWorkspace({
 
   useEffect(() => {
     if (
-      !videoPlaying ||
+      !mediaPlaying ||
       workspaceView !== "review" ||
       editorOpen ||
       hasActiveFilter ||
@@ -566,32 +665,40 @@ export function VideoTranscriptWorkspace({
     activeMessageId,
     editorOpen,
     hasActiveFilter,
-    videoPlaying,
+    mediaPlaying,
     workspaceView,
   ])
 
   useEffect(() => {
     const raw = new URLSearchParams(window.location.search).get("t")
     const offset = raw ? Number(raw) : NaN
-    const video = videoRef.current
-    if (!Number.isFinite(offset) || offset < 0 || !video) return
+    const media =
+      mediaKind === "audio" ? audioRef.current : videoRef.current
+    if (!Number.isFinite(offset) || offset < 0 || !media) return
     const seek = () => {
-      video.currentTime = offset / 1000
+      media.currentTime = offset / 1000
       onCurrentTimeChange(offset)
     }
     seek()
-    video.addEventListener("loadedmetadata", seek)
-    return () => video.removeEventListener("loadedmetadata", seek)
-  }, [onCurrentTimeChange, snapshot.videoUpload?.playbackUrl, videoRef])
+    media.addEventListener("loadedmetadata", seek)
+    return () => media.removeEventListener("loadedmetadata", seek)
+  }, [
+    audioSourceURL,
+    mediaKind,
+    onCurrentTimeChange,
+    snapshot.videoUpload?.playbackUrl,
+    videoRef,
+  ])
 
   const seekTo = useCallback(
     (offsetMs: number, play = true) => {
-      const video = videoRef.current
-      if (!video) return
+      const media =
+        mediaKind === "audio" ? audioRef.current : videoRef.current
+      if (!media) return
       setSpeakerSample(null)
       const durationFromElementMs =
-        Number.isFinite(video.duration) && video.duration > 0
-          ? video.duration * 1000
+        Number.isFinite(media.duration) && media.duration > 0
+          ? media.duration * 1000
           : 0
       const knownDurationMs = Math.max(displayDurationMs, durationFromElementMs)
       const safeOffsetMs = Math.max(0, offsetMs)
@@ -599,34 +706,36 @@ export function VideoTranscriptWorkspace({
         knownDurationMs > 0
           ? Math.min(safeOffsetMs, knownDurationMs)
           : safeOffsetMs
-      video.currentTime = boundedOffsetMs / 1000
+      media.currentTime = boundedOffsetMs / 1000
       onCurrentTimeChange(boundedOffsetMs)
-      if (play) void video.play().catch(() => undefined)
+      if (play) void media.play().catch(() => undefined)
     },
-    [displayDurationMs, onCurrentTimeChange, videoRef]
+    [displayDurationMs, mediaKind, onCurrentTimeChange, videoRef]
   )
 
   const playSpeakerSample = useCallback(
     (summary: SpeakerSummary) => {
-      const video = videoRef.current
-      if (!video || !snapshot.videoUpload?.playbackUrl) return
+      const media =
+        mediaKind === "audio" ? audioRef.current : videoRef.current
+      if (!media || !canSeek) return
       if (speakerSample?.speakerId === summary.speaker.id) {
-        video.pause()
+        media.pause()
         setSpeakerSample(null)
         return
       }
       if (summary.sampleStartMs === null || summary.sampleEndMs === null) return
-      video.currentTime = summary.sampleStartMs / 1000
+      media.currentTime = summary.sampleStartMs / 1000
       onCurrentTimeChange(summary.sampleStartMs)
       setSpeakerSample({
         speakerId: summary.speaker.id,
         endOffsetMs: summary.sampleEndMs,
       })
-      void video.play().catch(() => setSpeakerSample(null))
+      void media.play().catch(() => setSpeakerSample(null))
     },
     [
+      canSeek,
+      mediaKind,
       onCurrentTimeChange,
-      snapshot.videoUpload?.playbackUrl,
       speakerSample?.speakerId,
       videoRef,
     ]
@@ -790,6 +899,39 @@ export function VideoTranscriptWorkspace({
     }
   }
 
+  const polishTranscript = async () => {
+    if (!canPolishTranscript || polishProcessing) return
+    setPolishGenerating(true)
+    updateSnapshot((current) => ({
+      ...current,
+      session: { ...current.session, polishStatus: "processing" },
+    }))
+    try {
+      const result = await api.post<{
+        snapshot: TranscriptWorkspaceSnapshot
+      }>(
+        `/api/v1/transcription/sessions/${snapshot.session.id}/polish`,
+        undefined,
+        { timeoutMs: 15 * 60 * 1000 }
+      )
+      updateSnapshot(() => result.snapshot)
+      setTranscriptMode("polished")
+      onError("")
+    } catch (caught) {
+      onError(
+        caught instanceof Error
+          ? caught.message
+          : "Grammar polish could not be generated."
+      )
+      updateSnapshot((current) => ({
+        ...current,
+        session: { ...current.session, polishStatus: "failed" },
+      }))
+    } finally {
+      setPolishGenerating(false)
+    }
+  }
+
   const generateInsights = async () => {
     setInsightsGenerating(true)
     updateSnapshot((current) => ({
@@ -860,10 +1002,10 @@ export function VideoTranscriptWorkspace({
 
   const workspaceGridClass = cn(
     "grid gap-4",
-    workspaceView === "review" ? "lg:items-stretch" : "lg:items-start",
+    workspaceView === "review" ? "xl:items-stretch" : "xl:items-start",
     workspaceView === "details"
-      ? "lg:grid-cols-1"
-      : "lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)]"
+      ? "xl:grid-cols-1"
+      : "xl:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)]"
   )
 
   return (
@@ -915,7 +1057,7 @@ export function VideoTranscriptWorkspace({
       <div className={workspaceGridClass}>
         <Card
           className={cn(
-            "flex max-h-[min(calc(100dvh-22rem),56rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none lg:h-full",
+            "flex max-h-[min(calc(100dvh-22rem),56rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none xl:h-full",
             workspaceView !== "review" && "hidden"
           )}
         >
@@ -936,7 +1078,7 @@ export function VideoTranscriptWorkspace({
                     ? ` · ${filteredTranscript.length} matches`
                     : ""}
                 </CardDescription>
-                {videoPlaying && !hasActiveFilter ? (
+                {mediaPlaying && !hasActiveFilter ? (
                   <span className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-primary">
                     <span
                       aria-hidden="true"
@@ -978,6 +1120,28 @@ export function VideoTranscriptWorkspace({
                   >
                     <Pencil data-icon="inline-start" />
                     Done editing
+                  </Button>
+                ) : null}
+                {canPolishTranscript ? (
+                  <Button
+                    disabled={polishProcessing}
+                    onClick={() => void polishTranscript()}
+                    size="sm"
+                    variant={polishedAvailable ? "outline" : "default"}
+                  >
+                    {polishProcessing ? (
+                      <LoaderCircle
+                        className="motion-safe:animate-spin motion-reduce:animate-none"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <Sparkles data-icon="inline-start" />
+                    )}
+                    {polishProcessing
+                      ? "Polishing…"
+                      : polishedAvailable
+                        ? "Re-polish"
+                        : "Polish transcript"}
                   </Button>
                 ) : null}
                 <DropdownMenu>
@@ -1286,6 +1450,7 @@ export function VideoTranscriptWorkspace({
                           />
                           <button
                             className="font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                            disabled={!canSeek}
                             onClick={() => seekTo(segment.startOffsetMs)}
                             type="button"
                           >
@@ -1415,6 +1580,7 @@ export function VideoTranscriptWorkspace({
                       <button
                         aria-current={active ? "true" : undefined}
                         aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
+                        disabled={!canSeek}
                         className={cn(
                           "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums",
                           active ? "text-primary" : "text-muted-foreground"
@@ -1504,6 +1670,7 @@ export function VideoTranscriptWorkspace({
                         </div>
                         <button
                           className="block min-w-0 text-left text-sm leading-6 text-foreground"
+                          disabled={!canSeek}
                           onClick={() => seekTo(message.startOffsetMs)}
                           type="button"
                         >
@@ -1566,7 +1733,7 @@ export function VideoTranscriptWorkspace({
         <div
           className={cn(
             workspaceView === "review"
-              ? "flex min-h-0 flex-col gap-4 lg:h-full"
+              ? "flex min-h-0 flex-col gap-4 xl:h-full"
               : "contents"
           )}
         >
@@ -1583,7 +1750,7 @@ export function VideoTranscriptWorkspace({
                 comments
               </CardTitle>
               <CardDescription>
-                Keep review notes attached to exact video moments.
+                Keep review notes attached to exact transcript moments.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col px-4 pb-4">
@@ -1597,6 +1764,7 @@ export function VideoTranscriptWorkspace({
                       <div className="flex items-start gap-2">
                         <button
                           className="font-mono text-[11px] text-primary hover:underline"
+                          disabled={!canSeek}
                           onClick={() => seekTo(annotation.startOffsetMs)}
                           type="button"
                         >
@@ -1737,9 +1905,10 @@ export function VideoTranscriptWorkspace({
                   <p className="mb-1 font-medium text-foreground">Chapters</p>
                   <div className="space-y-1">
                     {validInsightChapters.map((chapter) => (
-                      <button
-                        className="flex w-full items-start gap-2 rounded-md p-1 text-left hover:bg-muted"
-                        key={`${chapter.startOffsetMs}-${chapter.title}`}
+                        <button
+                          className="flex w-full items-start gap-2 rounded-md p-1 text-left hover:bg-muted"
+                          disabled={!canSeek}
+                          key={`${chapter.startOffsetMs}-${chapter.title}`}
                         onClick={() => seekTo(chapter.startOffsetMs)}
                         type="button"
                       >
@@ -1829,7 +1998,7 @@ export function VideoTranscriptWorkspace({
                     const playing =
                       speakerSample?.speakerId === summary.speaker.id
                     const canPlay =
-                      Boolean(snapshot.videoUpload?.playbackUrl) &&
+                      canSeek &&
                       summary.sampleStartMs !== null &&
                       summary.sampleEndMs !== null
                     return (
@@ -1921,98 +2090,221 @@ export function VideoTranscriptWorkspace({
 
           <Card
             className={cn(
-              "shrink-0 shadow-none lg:sticky lg:top-4",
+              "shrink-0 shadow-none xl:sticky xl:top-4",
               workspaceView === "details" && "hidden",
               workspaceView === "review" && "order-first"
             )}
           >
             <CardHeader className="gap-2 px-4 py-4">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <FileVideo className="size-4" /> Source video
+                {mediaKind === "video" ? (
+                  <FileVideo className="size-4" />
+                ) : mediaKind === "audio" ? (
+                  <FileAudio className="size-4" />
+                ) : (
+                  <FileText className="size-4" />
+                )} {mediaKind === "video"
+                  ? "Source video"
+                  : mediaKind === "audio"
+                    ? "Source audio"
+                    : "Transcript only"}
               </CardTitle>
               <CardDescription className="truncate">
-                {snapshot.videoUpload?.fileName ?? "Video upload"}
+                {mediaKind === "video"
+                  ? snapshot.videoUpload?.fileName ?? "Video upload"
+                  : mediaKind === "audio"
+                    ? selectedRecording
+                      ? "Recorded source audio"
+                      : "No recording attached"
+                    : "No source media attached"}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3 px-4 pb-4">
-              <div className="overflow-hidden rounded-xl border border-border bg-muted">
-                {snapshot.videoUpload?.playbackUrl ? (
-                  <video
-                    className="block aspect-video w-full bg-muted object-contain"
-                    controls
-                    onError={() => {
-                      setVideoPlaying(false)
-                      setSpeakerSample(null)
-                      onVideoPlaybackError(
-                        "The video link expired or the stored video is unavailable."
-                      )
-                    }}
-                    onLoadedMetadata={(event) => {
-                      if (Number.isFinite(event.currentTarget.duration))
-                        onVideoDurationChange(
-                          Math.round(event.currentTarget.duration * 1000)
-                        )
-                    }}
-                    onEnded={() => {
-                      setVideoPlaying(false)
-                      setSpeakerSample(null)
-                    }}
-                    onPause={() => setVideoPlaying(false)}
-                    onPlay={() => setVideoPlaying(true)}
-                    onTimeUpdate={(event) => {
-                      const current = Math.round(
-                        event.currentTarget.currentTime * 1000
-                      )
-                      onCurrentTimeChange(current)
-                      if (
-                        speakerSample &&
-                        current >= speakerSample.endOffsetMs
-                      ) {
-                        event.currentTarget.pause()
-                        setSpeakerSample(null)
-                      }
-                    }}
-                    playsInline
-                    preload="metadata"
-                    ref={videoRef}
-                    src={snapshot.videoUpload.playbackUrl}
-                  />
-                ) : (
-                  <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
-                    <FileVideo aria-hidden="true" />
-                    <p className="text-xs">
-                      The video will be available here once the upload has
-                      finished.
-                    </p>
+              {mediaKind === "video" ? (
+                <>
+                  <div className="overflow-hidden rounded-xl border border-border bg-muted">
+                    {snapshot.videoUpload?.playbackUrl ? (
+                      <video
+                        className="block aspect-video w-full bg-muted object-contain"
+                        controls
+                        onError={() => {
+                          setMediaPlaying(false)
+                          setSpeakerSample(null)
+                          onVideoPlaybackError(
+                            "The video link expired or the stored video is unavailable."
+                          )
+                        }}
+                        onLoadedMetadata={(event) => {
+                          if (Number.isFinite(event.currentTarget.duration))
+                            onVideoDurationChange(
+                              Math.round(event.currentTarget.duration * 1000)
+                            )
+                        }}
+                        onEnded={() => {
+                          setMediaPlaying(false)
+                          setSpeakerSample(null)
+                        }}
+                        onPause={() => setMediaPlaying(false)}
+                        onPlay={() => setMediaPlaying(true)}
+                        onTimeUpdate={(event) => {
+                          const current = Math.round(
+                            event.currentTarget.currentTime * 1000
+                          )
+                          onCurrentTimeChange(current)
+                          if (
+                            speakerSample &&
+                            current >= speakerSample.endOffsetMs
+                          ) {
+                            event.currentTarget.pause()
+                            setSpeakerSample(null)
+                          }
+                        }}
+                        playsInline
+                        preload="metadata"
+                        ref={videoRef}
+                        src={snapshot.videoUpload.playbackUrl}
+                      />
+                    ) : (
+                      <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+                        <FileVideo aria-hidden="true" />
+                        <p className="text-xs">
+                          The video will be available here once the upload has
+                          finished.
+                        </p>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              {snapshot.videoUpload?.playbackUrl ? (
-                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1.5">
-                    <Clock3 className="size-3.5" />
-                    {formatVideoTimestamp(currentTimeMs)}
-                    {displayDurationMs
-                      ? ` / ${formatVideoTimestamp(displayDurationMs)}`
-                      : ""}
-                  </span>
-                  <span>Click a transcript line to seek</span>
+                  {snapshot.videoUpload?.playbackUrl ? (
+                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <Clock3 className="size-3.5" />
+                        {formatVideoTimestamp(currentTimeMs)}
+                        {displayDurationMs
+                          ? ` / ${formatVideoTimestamp(displayDurationMs)}`
+                          : ""}
+                      </span>
+                      <span>Click a transcript line to seek</span>
+                    </div>
+                  ) : null}
+                  {videoPlaybackError ? (
+                    <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                      <p className="font-medium">Playback unavailable</p>
+                      <p className="mt-1">{videoPlaybackError}</p>
+                      <Button
+                        className="mt-2"
+                        onClick={() => void onRefreshPlayback()}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <RefreshCw data-icon="inline-start" /> Refresh link
+                      </Button>
+                    </div>
+                  ) : null}
+                </>
+              ) : mediaKind === "audio" ? (
+                <>
+                  {recordings.length > 1 ? (
+                    <Select
+                      items={recordings.map((recording, index) => ({
+                        value: recording.id,
+                        label: `Source ${index + 1}`,
+                      }))}
+                      onValueChange={(value) =>
+                        setSelectedRecordingId(value ?? "")
+                      }
+                      value={selectedRecordingId}
+                    >
+                      <SelectTrigger aria-label="Select source recording">
+                        <SelectValue placeholder="Select recording" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {recordings.map((recording, index) => (
+                          <SelectItem key={recording.id} value={recording.id}>
+                            Source {index + 1}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                  <div className="rounded-xl border border-border bg-muted/40 p-3">
+                    {audioSourceURL ? (
+                      <audio
+                        className="w-full"
+                        controls
+                        onEnded={() => {
+                          setMediaPlaying(false)
+                          setSpeakerSample(null)
+                        }}
+                        onError={() => {
+                          setMediaPlaying(false)
+                          setSpeakerSample(null)
+                          setAudioSource((current) =>
+                            current?.recordingId === effectiveRecordingId
+                              ? {
+                                  ...current,
+                                  url: "",
+                                  error:
+                                    "The source recording could not be decoded.",
+                                }
+                              : current
+                          )
+                        }}
+                        onLoadedMetadata={(event) => {
+                          if (Number.isFinite(event.currentTarget.duration))
+                            setAudioDurationMs(
+                              Math.round(event.currentTarget.duration * 1000)
+                            )
+                        }}
+                        onPause={() => setMediaPlaying(false)}
+                        onPlay={() => setMediaPlaying(true)}
+                        onTimeUpdate={(event) => {
+                          const current = Math.round(
+                            event.currentTarget.currentTime * 1000
+                          )
+                          onCurrentTimeChange(current)
+                          if (
+                            speakerSample &&
+                            current >= speakerSample.endOffsetMs
+                          ) {
+                            event.currentTarget.pause()
+                            setSpeakerSample(null)
+                          }
+                        }}
+                        preload="metadata"
+                        ref={audioRef}
+                        src={audioSourceURL}
+                      />
+                    ) : (
+                      <div className="flex min-h-20 items-center justify-center text-center text-xs text-muted-foreground">
+                        {audioPlaybackError ||
+                          (selectedRecording
+                            ? "Loading the recording…"
+                            : "Record source audio to enable playback.")}
+                      </div>
+                    )}
+                  </div>
+                  {audioSourceURL ? (
+                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <Clock3 className="size-3.5" />
+                        {formatVideoTimestamp(currentTimeMs)}
+                        {displayDurationMs
+                          ? ` / ${formatVideoTimestamp(displayDurationMs)}`
+                          : ""}
+                      </span>
+                      <span>Click a transcript line to seek</span>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="flex min-h-20 items-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 px-4 text-xs text-muted-foreground">
+                  <FileText aria-hidden="true" className="size-4 shrink-0" />
+                  <p>
+                    This session has no recording. The transcript remains
+                    fully editable and exportable.
+                  </p>
                 </div>
-              ) : null}
-              {videoPlaybackError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-                  <p className="font-medium">Playback unavailable</p>
-                  <p className="mt-1">{videoPlaybackError}</p>
-                  <Button
-                    className="mt-2"
-                    onClick={() => void onRefreshPlayback()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <RefreshCw data-icon="inline-start" /> Refresh link
-                  </Button>
-                </div>
-              ) : null}
+              )}
             </CardContent>
           </Card>
 
@@ -2092,7 +2384,7 @@ export function VideoTranscriptWorkspace({
               {annotationTarget
                 ? formatVideoTimestamp(annotationTarget.startOffsetMs)
                 : "the selected moment"}{" "}
-              in the video.
+              in the {mediaKind === "video" ? "video" : "transcript"}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -2256,6 +2548,12 @@ export function VideoTranscriptWorkspace({
       </Dialog>
     </div>
   )
+}
+
+export function VideoTranscriptWorkspace(
+  props: VideoTranscriptWorkspaceProps
+) {
+  return <TranscriptWorkspace {...props} mediaKind="video" />
 }
 
 function AiWritingIndicator() {

@@ -430,16 +430,37 @@ type TranscriptionSession struct {
 }
 
 type TranscriptionSource struct {
-	ID            uuid.UUID  `json:"id"`
-	SessionID     uuid.UUID  `json:"sessionId"`
-	Name          string     `json:"name"`
-	Kind          string     `json:"kind"`
-	DeviceLabel   string     `json:"deviceLabel,omitempty"`
-	Status        string     `json:"status"`
-	ClockOffsetMs int64      `json:"clockOffsetMs"`
-	ConnectedAt   *time.Time `json:"connectedAt,omitempty"`
-	LastSeenAt    *time.Time `json:"lastSeenAt,omitempty"`
-	SignalLevel   float64    `json:"signalLevel"`
+	ID              uuid.UUID  `json:"id"`
+	SessionID       uuid.UUID  `json:"sessionId"`
+	Name            string     `json:"name"`
+	Kind            string     `json:"kind"`
+	DeviceLabel     string     `json:"deviceLabel,omitempty"`
+	Protocol        string     `json:"protocol,omitempty"`
+	Platform        string     `json:"platform,omitempty"`
+	TransportStatus string     `json:"transportStatus,omitempty"`
+	ReconnectCount  int        `json:"reconnectCount,omitempty"`
+	LastError       string     `json:"lastError,omitempty"`
+	Status          string     `json:"status"`
+	ClockOffsetMs   int64      `json:"clockOffsetMs"`
+	ConnectedAt     *time.Time `json:"connectedAt,omitempty"`
+	LastSeenAt      *time.Time `json:"lastSeenAt,omitempty"`
+	SignalLevel     float64    `json:"signalLevel"`
+}
+
+type TranscriptionStreamSource struct {
+	SourceID       uuid.UUID  `json:"sourceId"`
+	Protocol       string     `json:"protocol"`
+	Status         string     `json:"status"`
+	ReconnectCount int        `json:"reconnectCount"`
+	LastError      string     `json:"lastError,omitempty"`
+	LastSeenAt     *time.Time `json:"lastSeenAt,omitempty"`
+}
+
+type TranscriptionBotSource struct {
+	SourceID   uuid.UUID  `json:"sourceId"`
+	Platform   string     `json:"platform"`
+	Status     string     `json:"status"`
+	LastSeenAt *time.Time `json:"lastSeenAt,omitempty"`
 }
 
 type TranscriptionSpeaker struct {

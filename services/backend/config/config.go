@@ -52,6 +52,7 @@ type TranscriptionConfig struct {
 	VideoUploadMaxBytes              int64
 	VideoUploadPartBytes             int64
 	VideoMaxDurationHours            int
+	LiveStreamReconnectSeconds       int
 }
 
 type OIDCConfig struct {
@@ -101,6 +102,7 @@ type fileTranscriptionConfig struct {
 	VideoUploadMaxBytes              int64  `yaml:"video_upload_max_bytes"`
 	VideoUploadPartBytes             int64  `yaml:"video_upload_part_bytes"`
 	VideoMaxDurationHours            int    `yaml:"video_max_duration_hours"`
+	LiveStreamReconnectSeconds       int    `yaml:"live_stream_reconnect_seconds"`
 }
 
 type fileOIDCConfig struct {
@@ -204,6 +206,7 @@ func transcriptionConfig(values fileTranscriptionConfig) TranscriptionConfig {
 		VideoUploadMaxBytes:              int64OrFile("JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_MAX_BYTES", values.VideoUploadMaxBytes, 5*1024*1024*1024),
 		VideoUploadPartBytes:             int64OrFile("JUSTAI_TRANSCRIPTION_VIDEO_UPLOAD_PART_BYTES", values.VideoUploadPartBytes, 16*1024*1024),
 		VideoMaxDurationHours:            intOrFile("JUSTAI_TRANSCRIPTION_VIDEO_MAX_DURATION_HOURS", values.VideoMaxDurationHours, 4),
+		LiveStreamReconnectSeconds:       intOrFile("JUSTAI_TRANSCRIPTION_LIVE_STREAM_RECONNECT_SECONDS", values.LiveStreamReconnectSeconds, 5),
 	}
 	if result.AudioRetentionDays <= 0 {
 		result.AudioRetentionDays = 30
@@ -252,6 +255,12 @@ func transcriptionConfig(values fileTranscriptionConfig) TranscriptionConfig {
 	}
 	if result.VideoMaxDurationHours <= 0 {
 		result.VideoMaxDurationHours = 4
+	}
+	if result.LiveStreamReconnectSeconds <= 0 {
+		result.LiveStreamReconnectSeconds = 5
+	}
+	if result.LiveStreamReconnectSeconds > 60 {
+		result.LiveStreamReconnectSeconds = 60
 	}
 	if result.StorageDriver != "s3" {
 		result.StorageDriver = "local"

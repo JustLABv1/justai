@@ -41,6 +41,8 @@ import {
 } from "@/components/ui/card"
 import type {
   TranscriptionJoinRequest,
+  TranscriptionAnnotation,
+  TranscriptionInsights,
   TranscriptionRecording,
   TranscriptionSegment,
   TranscriptionSession,
@@ -58,9 +60,11 @@ export type LiveTranscriptionSnapshot = {
   speakers: TranscriptionSpeaker[]
   segments: TranscriptionSegment[]
   recordings: TranscriptionRecording[]
+  annotations?: TranscriptionAnnotation[]
+  insights?: TranscriptionInsights
 }
 
-type LiveTranscriptionOrbitProps = {
+export type LiveTranscriptionOrbitProps = {
   snapshot: LiveTranscriptionSnapshot
   user: User
   loading: boolean
@@ -69,6 +73,7 @@ type LiveTranscriptionOrbitProps = {
   partialSpeakerId: string | null
   level: number
   capturing: boolean
+  canStartCapture?: boolean
   joinRequests: TranscriptionJoinRequest[]
   onShare: () => void
   onStartCapture: () => void | Promise<void>
@@ -99,6 +104,7 @@ export function LiveTranscriptionOrbit({
   partialSpeakerId,
   level,
   capturing,
+  canStartCapture = true,
   joinRequests,
   onShare,
   onStartCapture,
@@ -130,7 +136,7 @@ export function LiveTranscriptionOrbit({
   }, [snapshot.segments])
   const dominantSourceId = useMemo(() => {
     const browserSource = snapshot.sources.find(
-      (source) => source.kind === "browser"
+      (source) => source.kind === "browser" || source.kind === "browser-system"
     )
     if (capturing && level > 0.12 && browserSource) {
       return browserSource.id
@@ -353,14 +359,16 @@ export function LiveTranscriptionOrbit({
               <span className="hidden sm:inline">Share</span>
             </Button>
           ) : null}
-          {!capturing && snapshot.session.status !== "completed" ? (
+          {!capturing &&
+          canStartCapture &&
+          snapshot.session.status !== "completed" ? (
             <Button
-              aria-label="Start microphone"
+              aria-label="Start audio capture"
               onClick={() => void onStartCapture()}
               size="sm"
             >
               <Mic2 data-icon="inline-start" />
-              <span className="hidden sm:inline">Start microphone</span>
+              <span className="hidden sm:inline">Start audio</span>
             </Button>
           ) : null}
           {capturing && snapshot.session.status !== "completed" ? (
@@ -403,7 +411,7 @@ export function LiveTranscriptionOrbit({
           <div className="min-w-0">
             <p className="text-xs font-semibold">Room orbit</p>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              Click a speaker to inspect its source, signal, and label.
+              Click a speaker to inspect its source, audio level, and label.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -452,7 +460,7 @@ export function LiveTranscriptionOrbit({
               </p>
               <p className="mt-1 text-[10px] text-muted-foreground">
                 {capturing
-                  ? `${Math.round(level * 100)}% local signal · source-separated audio`
+                  ? `${Math.round(level * 100)}% local audio level · source-separated audio`
                   : "Viewer mode · live room feed"}
               </p>
             </div>
@@ -466,7 +474,7 @@ export function LiveTranscriptionOrbit({
               <CardHeader className="gap-2 px-4 py-4">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="text-sm">
-                    {selectedSpeaker ? "Selected source" : "Room signal"}
+                    {selectedSpeaker ? "Selected source" : "Room audio"}
                   </CardTitle>
                   <Badge
                     variant={
@@ -485,7 +493,7 @@ export function LiveTranscriptionOrbit({
                 <CardDescription className="text-[11px]">
                   {selectedSpeaker
                     ? "The selected circle follows this capture source."
-                    : "The orb follows the loudest connected microphone."}
+                    : "The orb follows the loudest connected audio source."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3 px-4 pb-4">
@@ -525,14 +533,14 @@ export function LiveTranscriptionOrbit({
                       </p>
                       <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
                         {focusedSource?.deviceLabel ||
-                          "Waiting for a microphone"}
+                          "Waiting for an audio source"}
                       </p>
                     </div>
                   </div>
                 )}
                 <div className="flex items-center justify-between gap-2 rounded-xl bg-muted/55 px-3 py-2">
                   <span className="text-[11px] text-muted-foreground">
-                    Signal quality
+                    Audio level
                   </span>
                   <span className="flex items-center gap-2 text-xs font-medium">
                     <SignalBars
@@ -572,7 +580,7 @@ export function LiveTranscriptionOrbit({
                   <div>
                     <CardTitle className="text-sm">Join requests</CardTitle>
                     <CardDescription className="text-[11px]">
-                      Approve another microphone.
+                      Approve another audio source.
                     </CardDescription>
                   </div>
                   <Button
@@ -688,13 +696,13 @@ function ProductionSourceSummary({
           <Mic2 /> Capture sources
         </CardTitle>
         <CardDescription className="text-[11px]">
-          Each microphone stays source-separated.
+          Each audio source stays source-separated.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-1 px-3 pb-3">
         {sources.length === 0 ? (
           <p className="px-2 py-2 text-xs text-muted-foreground">
-            No microphones have joined yet.
+            No audio sources have joined yet.
           </p>
         ) : (
           sources.map((source) => {
