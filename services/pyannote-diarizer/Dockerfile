@@ -65,7 +65,7 @@ RUN apk add --no-cache \
     && /opt/ffmpeg/bin/ffmpeg -version \
     && /opt/ffmpeg/bin/ffprobe -version
 
-FROM reg.mini.dev/python:3.14-dev AS builder
+FROM reg.mini.dev/python:3.14.7-dev AS builder
 
 USER root
 
@@ -114,7 +114,7 @@ COPY app.py model_sync.py ./
 RUN python -c 'import fastapi, lightning, pyannote.audio, torch, torchaudio, uvicorn; print(f"torch={torch.__version__} torchaudio={torchaudio.__version__}")' \
     && python -c 'import importlib.metadata as metadata, importlib.util; installed = {dist.metadata["Name"].lower() for dist in metadata.distributions() if dist.metadata["Name"]}; forbidden = {"pip", "setuptools"}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed)'
 
-FROM reg.mini.dev/python:3.14 AS runtime-base-prepared
+FROM reg.mini.dev/python:3.14.7 AS runtime-base-prepared
 
 USER root
 
