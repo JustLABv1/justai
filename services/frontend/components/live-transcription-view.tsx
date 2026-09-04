@@ -1744,7 +1744,7 @@ export function LiveTranscriptionView({
       : ("none" as const)
 
   return (
-    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4">
+    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
       {error && (
         <Alert variant="destructive">
           <AlertTitle>Live transcription needs attention</AlertTitle>
