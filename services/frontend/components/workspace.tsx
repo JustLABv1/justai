@@ -278,9 +278,11 @@ export function Workspace() {
         // The platform-admin shell is intentionally independent from the
         // active workspace. Avoid loading workspace resources (and emitting
         // misleading feature-gate errors) when a platform administrator does
-        // not belong to an organization.
+        // not belong to an organization. This deliberately depends on the
+        // resolved organization rather than the current route so changing
+        // views keeps the workspace shell and its data mounted.
         const results =
-          activeView === "admin"
+          nextOrganization === null
             ? []
             : await Promise.allSettled([
                 api.get<{ conversations: Conversation[] }>(
@@ -312,7 +314,7 @@ export function Workspace() {
               ])
         if (cancelled) return
 
-        if (activeView === "admin") {
+        if (nextOrganization === null) {
           setFeatureErrors({})
           setDisabledFeatures({})
           setStatus("ready")
@@ -431,7 +433,7 @@ export function Workspace() {
     return () => {
       cancelled = true
     }
-  }, [activeView, redirectToLogin, reloadToken])
+  }, [redirectToLogin, reloadToken])
 
   // `/settings?tab=admin` was the old platform-admin entry point. Keep the
   // organization Operations page for ordinary workspace owners/admins, but

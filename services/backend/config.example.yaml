@@ -55,3 +55,6 @@ transcription:
   video_upload_max_bytes: 5368709120
   video_upload_part_bytes: 16777216
   video_max_duration_hours: 4
+  # Seconds between attempts when an external live source or its provider
+  # connection drops.
+  live_stream_reconnect_seconds: 5

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { Fragment, useMemo, useState } from "react"
 import {
   Archive,
   Bot,
@@ -13,10 +13,9 @@ import {
   LogOut,
   MessageSquare,
   MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
   PanelRightOpen,
+  Pin,
+  PinOff,
   Plus,
   Plug,
   RotateCcw,
@@ -56,7 +55,13 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import type {
   Conversation,
   Organization,
@@ -76,7 +81,13 @@ const railNavigation: Array<{
   group: string
   feature?: string
 }> = [
-  { id: "chat", label: "Chat", hint: "Conversations", icon: MessageSquare, group: "Create" },
+  {
+    id: "chat",
+    label: "Chat",
+    hint: "Conversations",
+    icon: MessageSquare,
+    group: "Create",
+  },
   {
     id: "agents",
     label: "Agents",
@@ -123,8 +134,6 @@ const railNavigation: Array<{
     feature: "mcp",
   },
 ]
-
-const sidebarRailStorageKey = "justai.sidebar-rail-expanded"
 
 type FocusWorkspaceSidebarProps = {
   activeView: ViewId
@@ -211,28 +220,33 @@ export function FocusWorkspaceSidebar({
   disabledFeatures,
 }: FocusWorkspaceSidebarProps) {
   const [historyQuery, setHistoryQuery] = useState("")
+  const [sessionQuery, setSessionQuery] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
-  const [railExpanded, setRailExpanded] = useState(false)
-  const [railPreferenceLoaded, setRailPreferenceLoaded] = useState(false)
+  const [chatHistoryExpanded, setChatHistoryExpanded] = useState(false)
+  const [historyRailPinned, setHistoryRailPinned] = useState(false)
   const historyView =
     activeView === "chat" ||
     activeView === "transcription" ||
     activeView === "video-transcription"
   const navigation = railNavigation
   const historyVisible = historyView && historyOpen
+  const isSecondaryHistoryRail = historyVisible
+  const contextPanelOpen =
+    historyVisible &&
+    (!isSecondaryHistoryRail || chatHistoryExpanded || historyRailPinned)
 
   const createAction: CreateAction | null =
     activeView === "chat"
       ? {
-          label: "New chat",
+          label: "New conversation",
           hint: "Start a new conversation",
           icon: Plus,
           onClick: () => onNavigate("chat"),
         }
       : activeView === "transcription"
         ? {
-            label: "New room",
+            label: "New live session",
             hint: "Create a live transcription room",
             icon: Headphones,
             onClick: onNewTranscriptionSession,
@@ -249,19 +263,6 @@ export function FocusWorkspaceSidebar({
           : null
   const CreateIcon = createAction?.icon ?? Plus
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const stored = window.localStorage.getItem(sidebarRailStorageKey)
-      if (stored !== null) setRailExpanded(stored === "true")
-      setRailPreferenceLoaded(true)
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [])
-
-  useEffect(() => {
-    if (!railPreferenceLoaded) return
-    window.localStorage.setItem(sidebarRailStorageKey, String(railExpanded))
-  }, [railExpanded, railPreferenceLoaded])
   const liveSessions = useMemo(
     () => transcriptionSessions.filter((session) => session.kind !== "video"),
     [transcriptionSessions]
@@ -290,16 +291,67 @@ export function FocusWorkspaceSidebar({
     activeView === "video-transcription"
       ? archivedVideoSessions
       : archivedLiveSessions
+  const filteredSessions = useMemo(() => {
+    const query = sessionQuery.trim().toLocaleLowerCase()
+    if (!query) return visibleSessions
+    return visibleSessions.filter((session) =>
+      session.title.toLocaleLowerCase().includes(query)
+    )
+  }, [sessionQuery, visibleSessions])
+  const filteredArchivedSessions = useMemo(() => {
+    const query = sessionQuery.trim().toLocaleLowerCase()
+    if (!query) return visibleArchivedSessions
+    return visibleArchivedSessions.filter((session) =>
+      session.title.toLocaleLowerCase().includes(query)
+    )
+  }, [sessionQuery, visibleArchivedSessions])
   const sessionGroups = useMemo(
-    () => groupByRecency(visibleSessions),
+    () => groupByRecency(filteredSessions),
+    [filteredSessions]
+  )
+  const recentChats = useMemo(
+    () =>
+      [...conversations]
+        .sort(
+          (left, right) =>
+            new Date(right.updatedAt).getTime() -
+            new Date(left.updatedAt).getTime()
+        )
+        .slice(0, 4),
+    [conversations]
+  )
+  const recentSessions = useMemo(
+    () =>
+      [...visibleSessions]
+        .sort(
+          (left, right) =>
+            new Date(right.updatedAt).getTime() -
+            new Date(left.updatedAt).getTime()
+        )
+        .slice(0, 4),
     [visibleSessions]
   )
   const archivedSessionGroups = useMemo(
-    () => groupByRecency(visibleArchivedSessions),
-    [visibleArchivedSessions]
+    () => groupByRecency(filteredArchivedSessions),
+    [filteredArchivedSessions]
   )
+  const recentHistoryItems =
+    activeView === "chat" ? recentChats : recentSessions
+  const SecondaryHistoryIcon =
+    activeView === "chat"
+      ? MessageSquare
+      : activeView === "video-transcription"
+        ? FileVideo
+        : Headphones
+  const secondaryHistoryLabel =
+    activeView === "chat"
+      ? "Chat history"
+      : activeView === "video-transcription"
+        ? "Video transcripts"
+        : "Live sessions"
 
   function navigateFromRail(view: ViewId) {
+    setChatHistoryExpanded(false)
     const railItem = navigation.find((item) => item.id === view)
     if (railItem?.feature && disabledFeatures[railItem.feature]) return
 
@@ -338,106 +390,45 @@ export function FocusWorkspaceSidebar({
     onNavigate(view)
   }
 
+  const contextTitle =
+    activeView === "transcription"
+      ? "Live sessions"
+      : activeView === "video-transcription"
+        ? "Video transcripts"
+        : "Chat history"
+  const showContextLabel =
+    activeView === "transcription"
+      ? "Show live sessions"
+      : activeView === "video-transcription"
+        ? "Show video transcripts"
+        : "Show chat history"
   return (
     <aside
       className={cn(
-        "flex h-full min-h-0 shrink-0 overflow-hidden border-r border-border bg-background transition-[width] duration-200 ease-out",
-        historyVisible
-          ? railExpanded
-            ? "w-[32rem] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:w-full max-md:shadow-lg"
-            : "w-[352px] max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:w-full max-md:shadow-lg"
-          : railExpanded
-            ? "w-56"
-            : "w-16"
+        "relative flex h-full min-h-0 w-14 shrink-0 overflow-visible border-r border-border bg-background",
+        isSecondaryHistoryRail && "w-[6.5rem]",
+        historyRailPinned && "lg:w-[19.5rem]"
       )}
+      aria-label="Workspace navigation"
       data-history-open={historyVisible}
-      data-rail-expanded={railExpanded}
     >
-      <div
-        className={cn(
-          "flex shrink-0 flex-col gap-3 border-r border-border/70 py-4 transition-[width] duration-200",
-          railExpanded ? "w-56 items-stretch px-3" : "w-16 items-center px-2"
-        )}
-      >
-        <div
-          className={cn(
-            "flex w-full items-center",
-            railExpanded ? "justify-between" : "justify-center"
-          )}
-        >
-          <BrandMark className="size-8 shrink-0" />
-          {railExpanded && (
-            <Button
-              aria-expanded={railExpanded}
-              aria-label="Collapse navigation"
-              className="size-8 rounded-xl text-muted-foreground"
-              onClick={() => setRailExpanded(false)}
-              size="icon"
-              title="Collapse navigation"
-              variant="ghost"
-            >
-              <PanelLeftClose data-icon="inline-start" />
-            </Button>
-          )}
-        </div>
-        {!railExpanded && (
-          <Button
-            aria-expanded={railExpanded}
-            aria-label="Expand navigation"
-            className="size-9 rounded-xl text-muted-foreground"
-            onClick={() => setRailExpanded(true)}
-            size="icon"
-            title="Expand navigation"
-            variant="ghost"
-          >
-            <PanelLeftOpen data-icon="inline-start" />
-          </Button>
-        )}
-        {railExpanded && (
-          <p className="px-3 text-[10px] font-medium tracking-[0.16em] text-muted-foreground uppercase">
-            Workspace
-          </p>
-        )}
+      <div className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-border/70 py-3">
+        <BrandMark aria-label="JustAI" className="size-8 shrink-0" />
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button
                 aria-label={`Select workspace (${activeOrganization?.name ?? "Workspace"})`}
-                className={cn(
-                  "shrink-0",
-                  railExpanded
-                    ? "h-auto w-full justify-start gap-2 border px-2.5 py-2"
-                    : "size-9 rounded-xl"
-                )}
-                title={activeOrganization?.name ?? "Select workspace"}
-                variant={railExpanded ? "outline" : "ghost"}
+                className="size-9 rounded-xl"
+                variant="ghost"
               />
             }
           >
-            <span
-              className={cn(
-                "flex shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground",
-                railExpanded ? "size-7" : "size-8"
-              )}
-            >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
               <Bot aria-hidden="true" />
             </span>
-            {railExpanded && (
-              <span className="min-w-0 flex-1 text-left">
-                <span className="block truncate text-xs font-medium">
-                  {activeOrganization?.name ?? "Workspace"}
-                </span>
-              </span>
-            )}
-            {railExpanded && (
-              <ChevronDown className="size-4 text-muted-foreground" />
-            )}
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="w-64"
-            side={railExpanded ? "bottom" : "right"}
-          >
+          <DropdownMenuContent align="start" className="w-64" side="right">
             <DropdownMenuGroup>
               <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
               {organizations.map((organization) => (
@@ -464,59 +455,28 @@ export function FocusWorkspaceSidebar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
-          aria-label="Search workspace"
-          aria-keyshortcuts="Meta+K Control+K"
-          className={cn(
-            "rounded-xl border border-border/70 bg-muted/20 text-muted-foreground hover:border-border hover:bg-muted/45",
-            railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
-          )}
-          onClick={() => setSearchOpen(true)}
-          size="icon"
-          title="Search workspace (⌘K / Ctrl K)"
-          variant="ghost"
-        >
-          <Search data-icon="inline-start" />
-          {railExpanded && <span>Search workspace</span>}
-          {railExpanded && (
-            <kbd
-              aria-hidden="true"
-              className="ml-auto hidden rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-flex"
-            >
-              ⌘K
-            </kbd>
-          )}
-        </Button>
-
-        {createAction && (
-          <Button
-            aria-label={createAction.label}
-            className={cn(
-              "rounded-xl",
-              railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
-            )}
-            disabled={createAction.disabled}
-            onClick={createAction.onClick}
-            size="icon"
-            title={
-              createAction.disabled
-                ? "Disabled by platform administrator"
-                : createAction.hint
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                aria-keyshortcuts="Meta+K Control+K"
+                aria-label="Search workspace"
+                className="size-9 rounded-xl border border-border/70 bg-muted/20 text-muted-foreground hover:border-border hover:bg-muted/45"
+                onClick={() => setSearchOpen(true)}
+                size="icon"
+                variant="ghost"
+              >
+                <Search />
+              </Button>
             }
-          >
-            <CreateIcon data-icon="inline-start" />
-            {railExpanded && <span>{createAction.label}</span>}
-          </Button>
-        )}
+          />
+          <TooltipContent side="right">Search workspace · ⌘K</TooltipContent>
+        </Tooltip>
 
         <Separator className="my-1" />
         <nav
           aria-label="Workspace navigation"
-          className={cn(
-            "min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1",
-            "flex flex-col gap-1",
-            railExpanded ? "w-full items-stretch" : "items-center"
-          )}
+          className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto overscroll-contain"
         >
           {navigation.map((item, index) => {
             const Icon = item.icon
@@ -524,111 +484,65 @@ export function FocusWorkspaceSidebar({
             const disabled = Boolean(
               item.feature && disabledFeatures[item.feature]
             )
-            const beginsGroup = index === 0 || navigation[index - 1]?.group !== item.group
+            const beginsGroup =
+              index === 0 || navigation[index - 1]?.group !== item.group
             return (
               <Fragment key={item.id}>
-                {beginsGroup &&
-                  (railExpanded ? (
-                    <p
-                      className={cn(
-                        "px-3 text-[10px] font-medium tracking-[0.14em] text-muted-foreground/80 uppercase",
-                        index > 0 && "mt-3"
-                      )}
-                    >
-                      {item.group}
-                    </p>
-                  ) : (
-                    index > 0 && <Separator className="my-1 w-5" />
-                  ))}
-              <Button
-                aria-current={active ? "page" : undefined}
-                aria-label={item.label}
-                className={cn(
-                  "relative rounded-xl text-muted-foreground",
-                  railExpanded
-                    ? "h-9 w-full justify-start gap-3 px-3"
-                    : "size-9",
-                  active && "bg-accent text-accent-foreground"
-                )}
-                disabled={disabled}
-                onClick={() => navigateFromRail(item.id)}
-                size="icon"
-                title={
-                  disabled ? "Disabled by platform administrator" : item.hint
-                }
-                variant="ghost"
-              >
-                <Icon data-icon="inline-start" />
-                {railExpanded && <span className="truncate">{item.label}</span>}
-              </Button>
+                {beginsGroup && index > 0 && <Separator className="my-1 w-5" />}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        aria-current={active ? "page" : undefined}
+                        aria-label={item.label}
+                        className={cn(
+                          "relative size-9 rounded-xl text-muted-foreground",
+                          active && "bg-accent text-accent-foreground"
+                        )}
+                        disabled={disabled}
+                        onClick={() => navigateFromRail(item.id)}
+                        size="icon"
+                        variant="ghost"
+                      >
+                        <Icon />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="right">
+                    {disabled
+                      ? "Disabled by platform administrator"
+                      : item.label}
+                  </TooltipContent>
+                </Tooltip>
               </Fragment>
             )
           })}
-          {railExpanded && <Separator className="my-2" />}
-          <Button
-            aria-current={activeView === "settings" ? "page" : undefined}
-            aria-label="Settings"
-            className={cn(
-              "rounded-xl text-muted-foreground",
-              railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9",
-              activeView === "settings" && "bg-accent text-accent-foreground"
-            )}
-            onClick={() => onNavigate("settings")}
-            size="icon"
-            title="Settings"
-            variant="ghost"
-          >
-            <Settings2 data-icon="inline-start" />
-            {railExpanded && <span>Settings</span>}
-          </Button>
         </nav>
 
-        {user.platformAdmin && (
-          <Button
-            aria-current={activeView === "admin" ? "page" : undefined}
-            aria-label="Platform admin"
-            className={cn(
-              "rounded-xl text-muted-foreground",
-              railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9",
-              activeView === "admin" && "bg-accent text-accent-foreground"
-            )}
-            onClick={() => onNavigate("admin")}
-            size="icon"
-            title="Global controls"
-            variant="ghost"
-          >
-            <ShieldCheck data-icon="inline-start" />
-            {railExpanded && <span>Platform admin</span>}
-          </Button>
-        )}
         {!historyVisible && historyView && (
-          <Button
-            aria-label="Show chat history"
-            className={cn(
-              "rounded-xl text-muted-foreground",
-              railExpanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
-            )}
-            onClick={() => onHistoryOpenChange(true)}
-            size="icon"
-            title="Show chat history"
-            variant="ghost"
-          >
-            <PanelRightOpen data-icon="inline-start" />
-            {railExpanded && <span>Chat history</span>}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label={showContextLabel}
+                  className="size-9 rounded-xl text-muted-foreground"
+                  onClick={() => onHistoryOpenChange(true)}
+                  size="icon"
+                  variant="ghost"
+                >
+                  <PanelRightOpen />
+                </Button>
+              }
+            />
+            <TooltipContent side="right">{showContextLabel}</TooltipContent>
+          </Tooltip>
         )}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button
                 aria-label={`${user.displayName} account menu`}
-                className={cn(
-                  "rounded-full p-0",
-                  railExpanded
-                    ? "h-9 w-full justify-start gap-2 rounded-xl px-1.5"
-                    : "size-8"
-                )}
-                title={`${user.displayName} · ${user.email}`}
+                className="size-8 rounded-full p-0"
                 variant="ghost"
               />
             }
@@ -636,11 +550,6 @@ export function FocusWorkspaceSidebar({
             <Avatar size="sm">
               <AvatarFallback>{userInitials}</AvatarFallback>
             </Avatar>
-            {railExpanded && (
-              <span className="min-w-0 flex-1 truncate text-left text-xs font-medium">
-                {user.displayName}
-              </span>
-            )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56" side="right">
             <DropdownMenuGroup>
@@ -688,83 +597,267 @@ export function FocusWorkspaceSidebar({
 
       <div
         className={cn(
-          "min-w-0 flex-col gap-3 overflow-hidden p-4",
-          railExpanded ? "w-72 max-md:w-[calc(100vw-14rem)]" : "w-72",
-          historyVisible ? "flex" : "hidden"
+          isSecondaryHistoryRail ? "relative h-full w-12 shrink-0" : "contents",
+          historyRailPinned && "lg:contents"
         )}
+        onBlurCapture={(event) => {
+          if (
+            isSecondaryHistoryRail &&
+            !historyRailPinned &&
+            !event.currentTarget.contains(event.relatedTarget)
+          ) {
+            setChatHistoryExpanded(false)
+          }
+        }}
+        onFocusCapture={() => {
+          if (isSecondaryHistoryRail) setChatHistoryExpanded(true)
+        }}
+        onMouseEnter={() => {
+          if (isSecondaryHistoryRail) setChatHistoryExpanded(true)
+        }}
+        onMouseLeave={() => {
+          if (isSecondaryHistoryRail && !historyRailPinned) {
+            setChatHistoryExpanded(false)
+          }
+        }}
       >
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold tracking-tight">
-              {activeView === "transcription"
-                ? "Live sessions"
-                : activeView === "video-transcription"
-                  ? "Video transcripts"
-                  : activeView === "chat"
-                    ? "Chat history"
-                    : "Workspace"}
-            </h2>
-          </div>
-          <Button
-            aria-label="Hide chat history"
-            className="size-8 rounded-xl text-muted-foreground"
-            onClick={() => onHistoryOpenChange(false)}
-            size="icon"
-            title="Hide chat history"
-            variant="ghost"
+        {isSecondaryHistoryRail && (
+          <div
+            className={cn(
+              "flex h-full w-12 flex-col items-center gap-1 border-r border-border/70 py-3",
+              historyRailPinned && "lg:hidden"
+            )}
           >
-            <PanelRightClose data-icon="inline-start" />
-          </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-expanded={chatHistoryExpanded}
+                    aria-label={`Open ${secondaryHistoryLabel.toLocaleLowerCase()}`}
+                    className="size-9 rounded-xl bg-accent text-accent-foreground"
+                    onClick={() => setChatHistoryExpanded(true)}
+                    size="icon"
+                    variant="ghost"
+                  >
+                    <SecondaryHistoryIcon />
+                  </Button>
+                }
+              />
+              <TooltipContent side="right">
+                {secondaryHistoryLabel}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label={`Search ${secondaryHistoryLabel.toLocaleLowerCase()}`}
+                    className="size-9 rounded-xl text-muted-foreground"
+                    onClick={() => setChatHistoryExpanded(true)}
+                    size="icon"
+                    variant="ghost"
+                  >
+                    <Search />
+                  </Button>
+                }
+              />
+              <TooltipContent side="right">
+                Search {secondaryHistoryLabel.toLocaleLowerCase()}
+              </TooltipContent>
+            </Tooltip>
+            {createAction && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      aria-label={createAction.label}
+                      className="size-9 rounded-xl text-muted-foreground"
+                      disabled={createAction.disabled}
+                      onClick={createAction.onClick}
+                      size="icon"
+                      variant="ghost"
+                    >
+                      <CreateIcon />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="right">
+                  {createAction.label}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {recentHistoryItems.length > 0 && (
+              <Separator className="my-1 w-5" />
+            )}
+            <div className="flex flex-col items-center gap-2">
+              {recentHistoryItems.map((item) => {
+                const label = item.title.trim().slice(0, 1).toUpperCase() || "C"
+                const active =
+                  activeView === "chat"
+                    ? activeConversationId === item.id
+                    : activeSessionId === item.id
+                return (
+                  <Tooltip key={item.id}>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          aria-current={active ? "page" : undefined}
+                          aria-label={`Open ${item.title}`}
+                          className={cn(
+                            "size-8 rounded-full text-[11px] font-semibold text-muted-foreground",
+                            active && "bg-accent text-accent-foreground"
+                          )}
+                          onClick={() => {
+                            setChatHistoryExpanded(false)
+                            onNavigate(
+                              activeView === "video-transcription"
+                                ? "video-transcription"
+                                : activeView === "transcription"
+                                  ? "transcription"
+                                  : "chat",
+                              activeView === "chat" ? item.id : null,
+                              activeView === "chat" ? null : item.id
+                            )
+                          }}
+                          size="icon"
+                          variant="ghost"
+                        >
+                          {label}
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="right">
+                      <span className="max-w-52 truncate">{item.title}</span>
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        <div
+          aria-label={contextTitle}
+          className={cn(
+            "min-w-0 flex-col gap-3 overflow-hidden border-r border-border bg-background p-4 shadow-xl motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in-0 motion-safe:slide-in-from-left-2",
+            isSecondaryHistoryRail
+              ? "absolute inset-y-0 left-0 z-30 w-64"
+              : "absolute inset-y-0 left-14 z-30 w-64 xl:static xl:z-auto xl:shadow-none",
+            historyRailPinned && "lg:static lg:z-auto lg:shadow-none",
+            contextPanelOpen ? "flex" : "hidden",
+            "max-md:fixed max-md:left-0 max-md:z-50 max-md:w-full"
+          )}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold tracking-tight">
+                {contextTitle}
+              </h2>
+            </div>
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      aria-label={
+                        historyRailPinned
+                          ? `Unpin ${secondaryHistoryLabel.toLocaleLowerCase()}`
+                          : `Keep ${secondaryHistoryLabel.toLocaleLowerCase()} open`
+                      }
+                      aria-pressed={historyRailPinned}
+                      className="size-7 rounded-lg text-muted-foreground"
+                      onClick={() => {
+                        setHistoryRailPinned((pinned) => !pinned)
+                        setChatHistoryExpanded(true)
+                      }}
+                      size="icon"
+                      variant="ghost"
+                    >
+                      {historyRailPinned ? <PinOff /> : <Pin />}
+                    </Button>
+                  }
+                />
+                <TooltipContent>
+                  {historyRailPinned
+                    ? `Unpin ${secondaryHistoryLabel.toLocaleLowerCase()}`
+                    : `Keep ${secondaryHistoryLabel.toLocaleLowerCase()} open`}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+
+          {createAction && (
+            <Button
+              aria-label={createAction.label}
+              className="h-9 w-full justify-start gap-2"
+              disabled={createAction.disabled}
+              onClick={createAction.onClick}
+            >
+              <CreateIcon data-icon="inline-start" />
+              {createAction.label}
+            </Button>
+          )}
+
+          {actionError && (
+            <Alert className="shrink-0" variant="destructive">
+              <AlertDescription className="text-xs">
+                {actionError}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {activeView === "chat" && (
+            <AssistantThreadList
+              activeConversationId={activeConversationId}
+              archivedConversations={archivedConversations}
+              conversations={conversations}
+              organizationId={activeOrganization?.id ?? null}
+              historyQuery={historyQuery}
+              onArchive={onArchiveConversation}
+              onDelete={onDeleteConversation}
+              onHistoryQueryChange={setHistoryQuery}
+              onRename={onRenameConversation}
+              onShare={onShareConversation}
+              onConversationRefresh={onConversationRefresh}
+              onSelect={(id) => onNavigate("chat", id)}
+            />
+          )}
+
+          {(activeView === "transcription" ||
+            activeView === "video-transcription") && (
+            <>
+              <Input
+                aria-label="Search sessions"
+                onChange={(event) => setSessionQuery(event.target.value)}
+                placeholder={
+                  activeView === "video-transcription"
+                    ? "Search videos"
+                    : "Search sessions"
+                }
+                value={sessionQuery}
+              />
+              <TranscriptionHistoryPanel
+                activeSessionId={activeSessionId}
+                archivedSessionGroups={archivedSessionGroups}
+                archivedSessions={filteredArchivedSessions}
+                archivedOpen={archivedSessionsOpen}
+                onArchive={onArchiveSession}
+                onDelete={onDeleteSession}
+                onSelect={(id) =>
+                  onNavigate(
+                    activeView === "video-transcription"
+                      ? "video-transcription"
+                      : "transcription",
+                    null,
+                    id
+                  )
+                }
+                sessionGroups={sessionGroups}
+                setArchivedOpen={setArchivedSessionsOpen}
+                video={activeView === "video-transcription"}
+              />
+            </>
+          )}
         </div>
-
-        {actionError && (
-          <Alert className="shrink-0" variant="destructive">
-            <AlertDescription className="text-xs">
-              {actionError}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {activeView === "chat" && (
-          <AssistantThreadList
-            activeConversationId={activeConversationId}
-            archivedConversations={archivedConversations}
-            conversations={conversations}
-            organizationId={activeOrganization?.id ?? null}
-            historyQuery={historyQuery}
-            onArchive={onArchiveConversation}
-            onDelete={onDeleteConversation}
-            onHistoryQueryChange={setHistoryQuery}
-            onRename={onRenameConversation}
-            onShare={onShareConversation}
-            onConversationRefresh={onConversationRefresh}
-            onSelect={(id) => onNavigate("chat", id)}
-          />
-        )}
-
-        {(activeView === "transcription" ||
-          activeView === "video-transcription") && (
-          <TranscriptionHistoryPanel
-            activeSessionId={activeSessionId}
-            archivedSessionGroups={archivedSessionGroups}
-            archivedSessions={visibleArchivedSessions}
-            archivedOpen={archivedSessionsOpen}
-            onArchive={onArchiveSession}
-            onDelete={onDeleteSession}
-            onSelect={(id) =>
-              onNavigate(
-                activeView === "video-transcription"
-                  ? "video-transcription"
-                  : "transcription",
-                null,
-                id
-              )
-            }
-            sessionGroups={sessionGroups}
-            setArchivedOpen={setArchivedSessionsOpen}
-            video={activeView === "video-transcription"}
-          />
-        )}
       </div>
     </aside>
   )
@@ -795,9 +888,6 @@ function TranscriptionHistoryPanel({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-      <p className="text-xs font-semibold">
-        {video ? "Recent videos" : "Recent sessions"}
-      </p>
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {sessionGroups.length > 0 ? (
           <div className="flex flex-col gap-4 pt-1">

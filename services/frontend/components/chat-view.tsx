@@ -13,6 +13,7 @@ import {
   Bot,
   BrainCircuit,
   Check,
+  ChevronLeft,
   ChevronDown,
   Copy,
   FileText,
@@ -24,6 +25,7 @@ import {
   Plug,
   RefreshCw,
   RotateCcw,
+  Star,
   Quote,
   ThumbsDown,
   ThumbsUp,
@@ -112,6 +114,22 @@ type EnsureConversationOptions = {
   activate?: boolean
   assistantId?: string | null
   inheritRepositories?: boolean
+}
+
+const FAVORITE_ENDPOINTS_STORAGE_KEY = "justai.favorite-endpoints"
+const FAVORITE_MODELS_STORAGE_KEY = "justai.favorite-models"
+
+function readStoredIds(key: string) {
+  if (typeof window === "undefined") return [] as string[]
+  try {
+    const stored = window.localStorage.getItem(key)
+    const parsed: unknown = stored ? JSON.parse(stored) : []
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : []
+  } catch {
+    return [] as string[]
+  }
 }
 
 type Props = {
@@ -1704,7 +1722,7 @@ function EmptyThread({ children }: { children?: ReactNode }) {
   )
 }
 
-function ModelEndpointPicker({
+export function ModelEndpointPicker({
   endpoints,
   endpointId,
   onEndpointChange,
@@ -1832,7 +1850,7 @@ function ModelEndpointPicker({
   )
 }
 
-function AssistantPicker({
+export function AssistantPicker({
   assistants,
   assistantId,
   compact,
@@ -1936,7 +1954,7 @@ function AssistantPicker({
   )
 }
 
-function DeepContextToggle({
+export function DeepContextToggle({
   available,
   compact,
   enabled,
@@ -2025,6 +2043,415 @@ function DeepContextToggle({
         </PopoverPrimitive.Positioner>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
+  )
+}
+
+function ResponseSetupPopover({
+  assistants,
+  assistantId,
+  assistantLocked,
+  onAssistantChange,
+  endpoints,
+  endpointId,
+  onEndpointChange,
+  models,
+  modelId,
+  modelDiscoveryLoading,
+  onModelChange,
+  deepContext,
+  deepContextAvailable,
+  onDeepContextChange,
+  deepContextTitle,
+}: {
+  assistants: SavedAssistant[]
+  assistantId: string
+  assistantLocked: boolean
+  onAssistantChange: (id: string) => void
+  endpoints: Endpoint[]
+  endpointId: string
+  onEndpointChange: (id: string) => void
+  models: DiscoveredChatModel[]
+  modelId: string
+  modelDiscoveryLoading?: boolean
+  onModelChange: (id: string) => void
+  deepContext: boolean
+  deepContextAvailable: boolean
+  onDeepContextChange: (enabled: boolean) => void
+  deepContextTitle: string
+}) {
+  const [view, setView] = useState<"main" | "agent" | "model">("main")
+  const [favoriteEndpointIds, setFavoriteEndpointIds] = useState<string[]>(() =>
+    readStoredIds(FAVORITE_ENDPOINTS_STORAGE_KEY)
+  )
+  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() =>
+    readStoredIds(FAVORITE_MODELS_STORAGE_KEY)
+  )
+  const selectedAssistant = assistants.find(
+    (assistant) => assistant.id === assistantId
+  )
+  const endpoint = endpoints.find((item) => item.id === endpointId)
+  const selectedModel = models.find((model) => model.id === modelId)
+  const assistantLabel = selectedAssistant?.name ?? "JustAI default"
+  const modelLabel = selectedModel?.name || modelId || "Select model"
+  const endpointLabel = endpoint?.name ?? "Select endpoint"
+  const setupLabel = `${modelLabel} · ${endpointLabel}`
+  const favoriteEndpointIdSet = new Set(favoriteEndpointIds)
+  const favoriteModelIdSet = new Set(favoriteModelIds)
+  const sortedEndpoints = [...endpoints].sort(
+    (left, right) =>
+      Number(favoriteEndpointIdSet.has(right.id)) -
+      Number(favoriteEndpointIdSet.has(left.id))
+  )
+  const sortedModels = [...models].sort(
+    (left, right) =>
+      Number(favoriteModelIdSet.has(right.id)) -
+      Number(favoriteModelIdSet.has(left.id))
+  )
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        FAVORITE_ENDPOINTS_STORAGE_KEY,
+        JSON.stringify(favoriteEndpointIds)
+      )
+    } catch {
+      // Preferences are optional; the popover still works without storage.
+    }
+  }, [favoriteEndpointIds])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        FAVORITE_MODELS_STORAGE_KEY,
+        JSON.stringify(favoriteModelIds)
+      )
+    } catch {
+      // Preferences are optional; the popover still works without storage.
+    }
+  }, [favoriteModelIds])
+
+  const toggleFavorite = (
+    id: string,
+    setFavoriteIds: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    setFavoriteIds((ids) =>
+      ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]
+    )
+  }
+
+  const selectAgent = (id: string) => {
+    onAssistantChange(id)
+    setView("main")
+  }
+
+  const selectModel = (id: string) => {
+    onModelChange(id)
+    setView("main")
+  }
+
+  return (
+    <PopoverPrimitive.Root onOpenChange={(open) => !open && setView("main")}>
+      <PopoverPrimitive.Trigger
+        aria-label="Open response setup"
+        render={
+          <Button
+            className="h-8 max-w-64 min-w-0 justify-start gap-1.5 rounded-full px-2.5 text-xs font-medium text-foreground hover:bg-muted active:scale-[0.97]"
+            size="sm"
+            title={setupLabel}
+            type="button"
+            variant="ghost"
+          />
+        }
+      >
+        <span
+          className="flex size-4 shrink-0 items-center justify-center rounded-md bg-muted text-[9px] font-semibold text-muted-foreground"
+          aria-hidden="true"
+        >
+          AI
+        </span>
+        <span className="truncate">{setupLabel}</span>
+        {deepContext && (
+          <span
+            aria-label="Deep context enabled"
+            className="size-1.5 shrink-0 rounded-full bg-primary"
+          />
+        )}
+        <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Positioner
+          align="start"
+          className="z-50 outline-none"
+          side="top"
+          sideOffset={8}
+        >
+          <PopoverPrimitive.Popup
+            className="w-[min(21rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl border bg-popover p-2 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            initialFocus={false}
+          >
+            {view === "main" ? (
+              <>
+                <div className="px-2.5 py-2">
+                  <PopoverPrimitive.Title className="text-xs font-semibold">
+                    Response setup
+                  </PopoverPrimitive.Title>
+                  <PopoverPrimitive.Description className="mt-0.5 text-[11px] text-muted-foreground">
+                    Configure how JustAI answers this conversation.
+                  </PopoverPrimitive.Description>
+                </div>
+                <div className="space-y-1">
+                  <button
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={assistantLocked}
+                    onClick={() => setView("agent")}
+                    type="button"
+                  >
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                      <Bot className="size-3.5" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-medium">Agent</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {assistantLocked
+                          ? "Locked after the first message"
+                          : assistantLabel}
+                      </span>
+                    </span>
+                    {!assistantLocked && (
+                      <ChevronDown className="size-3.5 -rotate-90 text-muted-foreground" />
+                    )}
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-muted"
+                    onClick={() => setView("model")}
+                    type="button"
+                  >
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                      <span className="text-[11px] font-semibold">AI</span>
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-medium">Model</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {modelLabel} · {endpointLabel}
+                      </span>
+                    </span>
+                    <ChevronDown className="size-3.5 -rotate-90 text-muted-foreground" />
+                  </button>
+                  <div className="flex items-center gap-2.5 rounded-xl px-2.5 py-2">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                      <BrainCircuit className="size-3.5" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-medium">
+                        Deep context
+                      </span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {deepContextAvailable
+                          ? deepContext
+                            ? "Broader retrieval is active"
+                            : "Use a smaller context window"
+                          : deepContextTitle}
+                      </span>
+                    </span>
+                    <button
+                      aria-checked={deepContext}
+                      aria-label="Toggle deep context"
+                      className={cn(
+                        "relative h-5 w-9 shrink-0 rounded-full bg-muted transition-colors duration-150 ease-out after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-background after:shadow-sm after:transition-transform after:duration-150 after:ease-out active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50",
+                        deepContext && "bg-primary after:translate-x-4"
+                      )}
+                      disabled={!deepContextAvailable}
+                      onClick={() => onDeepContextChange(!deepContext)}
+                      role="switch"
+                      title={deepContextTitle}
+                      type="button"
+                    />
+                  </div>
+                </div>
+              </>
+            ) : view === "agent" ? (
+              <>
+                <SetupPopoverHeader
+                  label="Choose agent"
+                  onBack={() => setView("main")}
+                />
+                <div className="max-h-72 overflow-y-auto p-1">
+                  <SetupOption
+                    description="Use the normal workspace behavior"
+                    icon={<Bot className="size-3.5" aria-hidden="true" />}
+                    label="JustAI default"
+                    onClick={() => selectAgent("")}
+                    selected={!assistantId}
+                  />
+                  {assistants.map((assistant) => (
+                    <SetupOption
+                      description={
+                        assistant.kind === "remote"
+                          ? "Remote A2A agent"
+                          : assistant.description ||
+                            "Saved instructions and defaults"
+                      }
+                      icon={<Bot className="size-3.5" aria-hidden="true" />}
+                      key={assistant.id}
+                      label={assistant.name}
+                      onClick={() => selectAgent(assistant.id)}
+                      selected={assistant.id === assistantId}
+                    />
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <SetupPopoverHeader
+                  label="Choose model"
+                  onBack={() => setView("main")}
+                />
+                <div className="max-h-64 overflow-y-auto p-1">
+                  <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-medium text-muted-foreground">
+                    Endpoint
+                  </p>
+                  {sortedEndpoints.map((item) => (
+                    <SetupOption
+                      description={`${item.providerType} · ${item.chatModel || "No default model"}`}
+                      favorite={favoriteEndpointIdSet.has(item.id)}
+                      icon={
+                        <span className="text-[10px] font-semibold">↗</span>
+                      }
+                      key={item.id}
+                      label={item.name}
+                      onClick={() => onEndpointChange(item.id)}
+                      onFavoriteToggle={() =>
+                        toggleFavorite(item.id, setFavoriteEndpointIds)
+                      }
+                      selected={item.id === endpointId}
+                    />
+                  ))}
+                  <p className="px-2.5 pt-3 pb-1.5 text-[11px] font-medium text-muted-foreground">
+                    Chat model{modelDiscoveryLoading ? " · Discovering…" : ""}
+                  </p>
+                  {models.length > 0 ? (
+                    sortedModels.map((model) => (
+                      <SetupOption
+                        description={
+                          model.name && model.name !== model.id
+                            ? model.id
+                            : undefined
+                        }
+                        favorite={favoriteModelIdSet.has(model.id)}
+                        icon={
+                          <span className="text-[10px] font-semibold">AI</span>
+                        }
+                        key={model.id}
+                        label={model.name || model.id}
+                        onClick={() => selectModel(model.id)}
+                        onFavoriteToggle={() =>
+                          toggleFavorite(model.id, setFavoriteModelIds)
+                        }
+                        selected={model.id === modelId}
+                      />
+                    ))
+                  ) : (
+                    <p className="px-2.5 py-3 text-xs text-muted-foreground">
+                      {modelDiscoveryLoading
+                        ? "Discovering models for this endpoint…"
+                        : "No models are available. Configure one in Settings."}
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </PopoverPrimitive.Popup>
+        </PopoverPrimitive.Positioner>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  )
+}
+
+function SetupPopoverHeader({
+  label,
+  onBack,
+}: {
+  label: string
+  onBack: () => void
+}) {
+  return (
+    <div className="flex items-center gap-2 border-b px-2.5 py-2">
+      <button
+        aria-label="Back to response setup"
+        className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.97]"
+        onClick={onBack}
+        type="button"
+      >
+        <ChevronLeft className="size-3.5" />
+      </button>
+      <p className="text-xs font-semibold">{label}</p>
+    </div>
+  )
+}
+
+function SetupOption({
+  icon,
+  label,
+  description,
+  selected,
+  onClick,
+  favorite = false,
+  onFavoriteToggle,
+}: {
+  icon: ReactNode
+  label: string
+  description?: string
+  selected: boolean
+  onClick: () => void
+  favorite?: boolean
+  onFavoriteToggle?: () => void
+}) {
+  return (
+    <div className="group/setup-option flex items-center gap-1 rounded-xl pr-1 hover:bg-muted">
+      <button
+        className="flex min-w-0 flex-1 items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-transform active:scale-[0.99]"
+        onClick={onClick}
+        type="button"
+      >
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          {icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium">{label}</span>
+          {description && (
+            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+              {description}
+            </span>
+          )}
+        </span>
+        <Check
+          className={cn(
+            "mt-0.5 size-3.5 shrink-0 text-primary",
+            selected ? "opacity-100" : "opacity-0"
+          )}
+        />
+      </button>
+      {onFavoriteToggle && (
+        <button
+          aria-label={
+            favorite
+              ? `Remove ${label} from favorites`
+              : `Add ${label} to favorites`
+          }
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground active:scale-[0.97]"
+          onClick={onFavoriteToggle}
+          type="button"
+        >
+          <Star
+            className={cn(
+              "size-3.5",
+              favorite && "fill-amber-400 text-amber-500"
+            )}
+            aria-hidden="true"
+          />
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -2540,6 +2967,23 @@ function Composer({
                       <History className="size-4" />
                     </Button>
                   )}
+                  <ResponseSetupPopover
+                    assistantId={assistantId}
+                    assistantLocked={assistantSelectionLocked}
+                    assistants={assistants}
+                    deepContext={deepContext}
+                    deepContextAvailable={deepContextAvailable}
+                    deepContextTitle={deepContextTitle}
+                    endpointId={endpointId}
+                    endpoints={endpoints}
+                    modelDiscoveryLoading={modelDiscoveryLoading}
+                    modelId={modelId}
+                    models={models}
+                    onAssistantChange={onAssistantChange}
+                    onDeepContextChange={onDeepContextChange}
+                    onEndpointChange={onEndpointChange}
+                    onModelChange={onModelChange}
+                  />
                 </div>
                 <div
                   className={cn(
@@ -2548,30 +2992,6 @@ function Composer({
                       "ml-auto max-w-full min-w-0 flex-wrap justify-end"
                   )}
                 >
-                  <AssistantPicker
-                    assistantId={assistantId}
-                    assistants={assistants}
-                    compact={compact}
-                    disabled={assistantSelectionLocked}
-                    onAssistantChange={onAssistantChange}
-                  />
-                  <DeepContextToggle
-                    available={deepContextAvailable}
-                    compact={compact}
-                    enabled={deepContext}
-                    onToggle={() => onDeepContextChange(!deepContext)}
-                    title={deepContextTitle}
-                  />
-                  <ModelEndpointPicker
-                    compact={compact}
-                    endpointId={endpointId}
-                    endpoints={endpoints}
-                    modelDiscoveryLoading={modelDiscoveryLoading}
-                    modelId={modelId}
-                    models={models}
-                    onEndpointChange={onEndpointChange}
-                    onModelChange={onModelChange}
-                  />
                   <VoiceControl
                     className="shrink-0"
                     compact

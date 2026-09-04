@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,6 +103,74 @@ func TestTranscriptionModeKeepsRealtimeAndChunkedTransportsDistinct(t *testing.T
 	endpoint := models.Endpoint{ProviderType: "openai-compatible", Capabilities: json.RawMessage(`{"chunked-transcription":true}`)}
 	if !endpointSupportsModel(endpoint, "transcription") {
 		t.Fatal("chunked endpoint should satisfy generic transcription capability")
+	}
+}
+
+func TestTranscriptionIngressNormalizesBotPlatformsAndBearerTokens(t *testing.T) {
+	for input, expected := range map[string]string{
+		"":                "generic",
+		"custom":          "generic",
+		"zoom":            "zoom",
+		"google meet":     "google-meet",
+		"teams":           "microsoft-teams",
+		"microsoft-teams": "microsoft-teams",
+	} {
+		if got := normalizeBotPlatform(input); got != expected {
+			t.Fatalf("normalizeBotPlatform(%q) = %q, want %q", input, got, expected)
+		}
+	}
+	if normalizeBotPlatform("skype") != "" {
+		t.Fatal("unsupported meeting platform should be rejected")
+	}
+	if bearerToken("Bearer bot-secret") != "bot-secret" {
+		t.Fatal("bearer token was not extracted")
+	}
+	if bearerToken("Basic bot-secret") != "" || bearerToken("Bearer") != "" {
+		t.Fatal("malformed authorization header was accepted")
+	}
+}
+
+func TestLiveStreamFFmpegArgsKeepInputAsOneArgument(t *testing.T) {
+	streamURL := "https://example.com/live/playlist.m3u8?token=one%20two"
+	args := ffmpegLiveAudioArgs(streamURL, "https")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-reconnect 1") || !strings.Contains(joined, "-ar 16000") {
+		t.Fatalf("live stream FFmpeg args are missing reconnect/audio settings: %s", joined)
+	}
+	for index, value := range args {
+		if value == streamURL {
+			if index == 0 || args[index-1] != "-i" {
+				t.Fatalf("stream URL was not kept as the input argument: %#v", args)
+			}
+			return
+		}
+	}
+	t.Fatalf("stream URL was not present in FFmpeg args: %#v", args)
+}
+
+func TestRedactTranscriptionStreamErrorRemovesMediaURLSecrets(t *testing.T) {
+	message := redactTranscriptionStreamError(fmt.Errorf("decoder failed url=https://media.example.test/live.m3u8?token=secret"), "https://media.example.test/live.m3u8?token=secret")
+	if strings.Contains(message, "token=secret") {
+		t.Fatalf("stream credential leaked in diagnostic: %q", message)
+	}
+	if !strings.Contains(message, "https://media.example.test/live.m3u8") {
+		t.Fatalf("expected safe media path in diagnostic: %q", message)
+	}
+}
+
+func TestLiveStreamWAVHeaderUsesMono16KPCM(t *testing.T) {
+	header := liveStreamWAVHeader()
+	if len(header) != 44 || string(header[:4]) != "RIFF" || string(header[8:12]) != "WAVE" {
+		t.Fatalf("unexpected WAV header: %q", header)
+	}
+	if got := binary.LittleEndian.Uint32(header[24:28]); got != 16000 {
+		t.Fatalf("sample rate = %d, want 16000", got)
+	}
+	if got := binary.LittleEndian.Uint16(header[22:24]); got != 1 {
+		t.Fatalf("channels = %d, want mono", got)
+	}
+	if got := binary.LittleEndian.Uint16(header[34:36]); got != 16 {
+		t.Fatalf("bits per sample = %d, want 16", got)
 	}
 }
 

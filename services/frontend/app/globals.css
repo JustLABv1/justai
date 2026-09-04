@@ -6,38 +6,38 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(0.9821 0 0);
-  --foreground: oklch(0.2435 0 0);
-  --card: oklch(0.9911 0 0);
-  --card-foreground: oklch(0.2435 0 0);
-  --popover: oklch(0.9911 0 0);
-  --popover-foreground: oklch(0.2435 0 0);
+  --background: oklch(0.985 0.006 50);
+  --foreground: oklch(0.255 0.012 45);
+  --card: oklch(0.994 0.004 50);
+  --card-foreground: oklch(0.255 0.012 45);
+  --popover: oklch(0.994 0.004 50);
+  --popover-foreground: oklch(0.255 0.012 45);
   --primary: oklch(0.4341 0.0392 41.9938);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.92 0.0651 74.3695);
-  --secondary-foreground: oklch(0.3499 0.0685 40.8288);
-  --muted: oklch(0.9521 0 0);
-  --muted-foreground: oklch(0.5032 0 0);
-  --accent: oklch(0.931 0 0);
-  --accent-foreground: oklch(0.2435 0 0);
+  --secondary: oklch(0.947 0.018 45);
+  --secondary-foreground: oklch(0.3499 0.03 42);
+  --muted: oklch(0.963 0.009 50);
+  --muted-foreground: oklch(0.52 0.014 45);
+  --accent: oklch(0.932 0.018 45);
+  --accent-foreground: oklch(0.255 0.012 45);
   --destructive: oklch(0.6271 0.1936 33.339);
   --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.8822 0 0);
-  --input: oklch(0.8822 0 0);
+  --border: oklch(0.89 0.015 47);
+  --input: oklch(0.89 0.015 47);
   --ring: oklch(0.4341 0.0392 41.9938);
   --chart-1: oklch(0.4341 0.0392 41.9938);
-  --chart-2: oklch(0.92 0.0651 74.3695);
-  --chart-3: oklch(0.931 0 0);
+  --chart-2: oklch(0.947 0.018 45);
+  --chart-3: oklch(0.932 0.018 45);
   --chart-4: oklch(0.9367 0.0523 75.5009);
   --chart-5: oklch(0.4338 0.0437 41.6746);
-  --sidebar: oklch(0.9881 0 0);
-  --sidebar-foreground: oklch(0.2645 0 0);
-  --sidebar-primary: oklch(0.325 0 0);
-  --sidebar-primary-foreground: oklch(0.9881 0 0);
-  --sidebar-accent: oklch(0.9761 0 0);
-  --sidebar-accent-foreground: oklch(0.325 0 0);
-  --sidebar-border: oklch(0.9401 0 0);
-  --sidebar-ring: oklch(0.7731 0 0);
+  --sidebar: oklch(0.99 0.005 50);
+  --sidebar-foreground: oklch(0.265 0.012 45);
+  --sidebar-primary: oklch(0.325 0.02 42);
+  --sidebar-primary-foreground: oklch(0.99 0.005 50);
+  --sidebar-accent: oklch(0.972 0.01 50);
+  --sidebar-accent-foreground: oklch(0.325 0.02 42);
+  --sidebar-border: oklch(0.944 0.009 50);
+  --sidebar-ring: oklch(0.7731 0.02 45);
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
@@ -356,7 +356,10 @@
   display: inline-block;
   flex: none;
   color: var(--primary);
-  transition: transform 180ms var(--motion-ease-out), filter 180ms ease, color 180ms ease;
+  transition:
+    transform 180ms var(--motion-ease-out),
+    filter 180ms ease,
+    color 180ms ease;
 }
 
 .justai-chat-mark::after {
@@ -370,7 +373,9 @@
 }
 
 .justai-chat-mark[data-state="thinking"] {
-  filter: drop-shadow(0 0 8px color-mix(in oklab, var(--primary) 40%, transparent));
+  filter: drop-shadow(
+    0 0 8px color-mix(in oklab, var(--primary) 40%, transparent)
+  );
   animation: justai-mark-focus 1.35s var(--motion-ease-in-out) infinite;
 }
 
@@ -389,9 +394,26 @@
   }
 }
 
-@keyframes justai-mark-focus { 50% { transform: scale(1.055); } }
-@keyframes justai-mark-ring { 45% { opacity: 0.72; transform: scale(1.18); } 100% { opacity: 0; transform: scale(1.32); } }
-@keyframes justai-mark-complete { 50% { transform: translateY(-2px) scale(1.08); } }
+@keyframes justai-mark-focus {
+  50% {
+    transform: scale(1.055);
+  }
+}
+@keyframes justai-mark-ring {
+  45% {
+    opacity: 0.72;
+    transform: scale(1.18);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.32);
+  }
+}
+@keyframes justai-mark-complete {
+  50% {
+    transform: translateY(-2px) scale(1.08);
+  }
+}
 
 .chat-ambient {
   pointer-events: none;
@@ -403,18 +425,59 @@
   width: 22rem;
   height: 22rem;
   border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in oklab, var(--primary) 16%, transparent) 0%, transparent 68%);
+  background: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--primary) 16%, transparent) 0%,
+    transparent 68%
+  );
   filter: blur(2px);
   will-change: transform;
 }
 
-.chat-ambient__orb--one { top: 12%; left: 14%; animation: chat-ambient-drift-one 14s var(--motion-ease-in-out) infinite alternate; }
-.chat-ambient__orb--two { right: 10%; bottom: 9%; width: 18rem; height: 18rem; background: radial-gradient(circle, color-mix(in oklab, var(--secondary) 19%, transparent) 0%, transparent 68%); animation: chat-ambient-drift-two 17s var(--motion-ease-in-out) infinite alternate; }
-.chat-ambient__orb--three { top: 50%; left: 49%; width: 13rem; height: 13rem; opacity: 0.7; animation: chat-ambient-drift-three 12s var(--motion-ease-in-out) infinite alternate; }
+.chat-ambient__orb--one {
+  top: 12%;
+  left: 14%;
+  animation: chat-ambient-drift-one 14s var(--motion-ease-in-out) infinite
+    alternate;
+}
+.chat-ambient__orb--two {
+  right: 10%;
+  bottom: 9%;
+  width: 18rem;
+  height: 18rem;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--secondary) 19%, transparent) 0%,
+    transparent 68%
+  );
+  animation: chat-ambient-drift-two 17s var(--motion-ease-in-out) infinite
+    alternate;
+}
+.chat-ambient__orb--three {
+  top: 50%;
+  left: 49%;
+  width: 13rem;
+  height: 13rem;
+  opacity: 0.7;
+  animation: chat-ambient-drift-three 12s var(--motion-ease-in-out) infinite
+    alternate;
+}
 
-@keyframes chat-ambient-drift-one { to { transform: translate3d(3rem, 1.5rem, 0) scale(1.1); } }
-@keyframes chat-ambient-drift-two { to { transform: translate3d(-2rem, -2rem, 0) scale(1.16); } }
-@keyframes chat-ambient-drift-three { to { transform: translate3d(-1rem, 2rem, 0) scale(0.85); } }
+@keyframes chat-ambient-drift-one {
+  to {
+    transform: translate3d(3rem, 1.5rem, 0) scale(1.1);
+  }
+}
+@keyframes chat-ambient-drift-two {
+  to {
+    transform: translate3d(-2rem, -2rem, 0) scale(1.16);
+  }
+}
+@keyframes chat-ambient-drift-three {
+  to {
+    transform: translate3d(-1rem, 2rem, 0) scale(0.85);
+  }
+}
 
 @keyframes mcp-approval-border-shimmer {
   from {

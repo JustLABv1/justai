@@ -93,7 +93,7 @@ export function SignalBars({
 
   return (
     <div
-      aria-label={`${safeValue}% signal`}
+      aria-label={`${safeValue}% audio level`}
       aria-valuemax={100}
       aria-valuemin={0}
       aria-valuenow={safeValue}
@@ -271,9 +271,7 @@ export function TranscriptTray({
           }
         >
           <span className={cn(styles.liveDot, open && styles.liveDotActive)} />
-          <span className="truncate text-xs font-semibold">
-            {label}
-          </span>
+          <span className="truncate text-xs font-semibold">{label}</span>
           <Badge className="shrink-0" variant="secondary">
             {segmentCount} segments
           </Badge>
@@ -312,7 +310,9 @@ export function TranscriptTray({
           <MessageScrollerProvider autoScroll defaultScrollPosition="end">
             <TranscriptScroller
               emptyMessage={
-                normalizedSearch ? "No matching transcript segments." : undefined
+                normalizedSearch
+                  ? "No matching transcript segments."
+                  : undefined
               }
               speakers={speakers}
               transcript={filteredTranscript}
@@ -495,7 +495,7 @@ export function SpeakerDetailDialog({
               <div className="mt-2 flex items-center gap-2">
                 <SignalBars accent={speaker.accent} value={speaker.signal} />
                 <span className="text-[11px] text-muted-foreground">
-                  {speaker.signal}% signal
+                  {speaker.signal}% audio level
                 </span>
               </div>
             </div>

@@ -941,7 +941,7 @@ export function TranscriptionJoin() {
               <div>
                 <p className="font-medium">{sourceName || "Room microphone"}</p>
                 <p className="text-sm text-muted-foreground">
-                  Signal {Math.round(level * 100)}% · audio is live
+                  Audio level {Math.round(level * 100)}% · audio is live
                 </p>
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">

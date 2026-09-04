@@ -47,6 +47,31 @@ func TestValidateEndpointURLBlocksPrivateAndCredentialURLs(t *testing.T) {
 	}
 }
 
+func TestValidateMediaSourceURLSupportsNetworkMediaAndBlocksUnsafeInputs(t *testing.T) {
+	for _, raw := range []string{
+		"file:///tmp/audio.wav",
+		"ftp://example.com/live",
+		"https://user:secret@example.com/live.m3u8",
+		"https://8.8.8.8/live.m3u8#fragment",
+		"https://www.youtube.com/watch?v=live-video",
+	} {
+		if err := ValidateMediaSourceURL(raw, false); err == nil {
+			t.Errorf("expected media source URL %q to be rejected", raw)
+		}
+	}
+	for _, raw := range []string{
+		"https://8.8.8.8/live.m3u8?token=secret",
+		"rtmps://8.8.8.8/live/channel",
+	} {
+		if err := ValidateMediaSourceURL(raw, false); err != nil {
+			t.Errorf("expected media source URL %q to be accepted: %v", raw, err)
+		}
+	}
+	if err := ValidateMediaSourceURL("http://127.0.0.1:8080/live.m3u8", true); err != nil {
+		t.Fatalf("operator private-target gate should allow local media source: %v", err)
+	}
+}
+
 func TestSafeHTTPClientStripsSecretsAndRefererAcrossOrigins(t *testing.T) {
 	client := SafeHTTPClientForOrigin(time.Second, true, "https://1.1.1.1")
 	previous := &http.Request{URL: &url.URL{Scheme: "https", Host: "1.1.1.1", RawQuery: "key=secret"}}
