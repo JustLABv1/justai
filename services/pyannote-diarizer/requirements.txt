@@ -1,6 +1,6 @@
-boto3>=1.43.86,<2
+boto3>=1.43.87,<2
 fastapi>=0.141.1,<1
-huggingface_hub>=1.29.0,<2
+huggingface_hub>=1.30.0,<2
 httpx>=0.28.1,<1
 pyannote.audio>=4.0.7,<5
 uvicorn[standard]>=0.52.4,<1
