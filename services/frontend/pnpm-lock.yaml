@@ -54,6 +54,9 @@ importers:
       cn:
         specifier: ^0.2.4
         version: 0.2.4
+      img-fx:
+        specifier: ^0.5.1
+        version: 0.5.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.185.1)
       lucide-react:
         specifier: ^1.40.0
         version: 1.41.0(react@19.2.8)
@@ -84,6 +87,9 @@ importers:
       shadcn:
         specifier: ^4.20.1
         version: 4.20.1(supports-color@7.2.0)(typescript@6.0.3)
+      three:
+        specifier: ^0.185.1
+        version: 0.185.1
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
@@ -2924,6 +2930,13 @@ packages:
     resolution: {integrity: sha512-BAg6QkE8W+TuQLrrw0Ugr7HegXduRuuj8/ti2kSOc+jz1dmx8/WNcjr6XGnq5YpDWxFwwaavqD0+jIUOKelTsw==}
     engines: {node: '>= 4'}
 
+  img-fx@0.5.1:
+    resolution: {integrity: sha512-CXIFGoGgK5F80d8I+VXZ96dmfkWqb4EGpecAIVXVXhuUVqCe1571Xhf5oGZ4qmTce0UoTfNMKLQDOgSAbIbH0w==}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
+      three: '>=0.149.0'
+
   immer@11.1.17:
     resolution: {integrity: sha512-8Vu44Y0MuMBlTQz/jQ8HEMYNq/bBqk87MnBwYR5mC8AthfhEXidZ5aT/oA/CUqboa8THKltnD9L3xyqhU/Sy1Q==}
 
@@ -4282,6 +4295,9 @@ packages:
   tapable@2.3.3:
     resolution: {integrity: sha512-uxc/zpqFg6x7C8vOE7lh6Lbda8eEL9zmVm/PLeTPBRhh1xCgdWaQ+J1CUieGpIfm2HdtsUpRv+HshiasBMcc6A==}
     engines: {node: '>=6'}
+
+  three@0.185.1:
+    resolution: {integrity: sha512-5aojFCXKwnjBRZvUnt3WFfEcvUJgkN5LlijRFN95hMy8WVkG4I0QNcJE+OuWvuJ0bOdStrbfXn0pkd6/QyiAlg==}
 
   throttleit@2.1.0:
     resolution: {integrity: sha512-nt6AMGKW1p/70DF/hGBdJB57B8Tspmbp5gfJ8ilhLnt7kkr2ye7hzD6NVG8GGErk2HWF34igrL2CXmNIkzKqKw==}
@@ -7629,6 +7645,12 @@ snapshots:
 
   ignore@7.0.6: {}
 
+  img-fx@0.5.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.185.1):
+    dependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+      three: 0.185.1
+
   immer@11.1.17: {}
 
   import-fresh@3.3.1:
@@ -9276,6 +9298,8 @@ snapshots:
   tailwindcss@4.3.3: {}
 
   tapable@2.3.3: {}
+
+  three@0.185.1: {}
 
   throttleit@2.1.0: {}
 

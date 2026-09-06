@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -121,7 +122,7 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 		}
 		return json.Marshal(map[string]any{"image": item})
 	case "edit_image":
-		item, err := a.editImageForChat(ctx, userID, organizationID, arguments, latestUser)
+		item, err := a.editImageForChat(ctx, userID, organizationID, conversationID, arguments, latestUser)
 		if err != nil {
 			return nil, err
 		}
@@ -364,9 +365,10 @@ func looseActionStringField(raw, key string) string {
 	for valueStart < len(raw) && (raw[valueStart] == ' ' || raw[valueStart] == '\t' || raw[valueStart] == '\r' || raw[valueStart] == '\n') {
 		valueStart++
 	}
-	if valueStart >= len(raw) || raw[valueStart] != '"' {
+	if valueStart >= len(raw) || (raw[valueStart] != '"' && raw[valueStart] != '\'') {
 		return ""
 	}
+	quote := raw[valueStart]
 	valueStart++
 	var encoded strings.Builder
 	for index := valueStart; index < len(raw); index++ {
@@ -376,10 +378,12 @@ func looseActionStringField(raw, key string) string {
 			index++
 			continue
 		}
-		if raw[index] == '"' {
+		if raw[index] == quote {
 			value := encoded.String()
-			if decoded, err := strconv.Unquote(`"` + value + `"`); err == nil {
-				return decoded
+			if quote == '"' {
+				if decoded, err := strconv.Unquote(`"` + value + `"`); err == nil {
+					return decoded
+				}
 			}
 			return value
 		}
@@ -427,7 +431,9 @@ func (a *App) executeAssistantBuiltinFallback(ctx context.Context, userID, organ
 	case "generate_image":
 		message = "Here is the generated image."
 	case "edit_image":
-		message = "Here is the edited image."
+		// The image card is the user-facing completion. Avoid adding redundant
+		// assistant prose below it when an attached-image edit was routed here.
+		return nil
 	case "create_pdf":
 		message = "The PDF is ready to download."
 	}
@@ -546,12 +552,12 @@ type generatedImageRecord struct {
 	CreatedAt any       `json:"createdAt"`
 }
 
-func (a *App) editImageForChat(ctx context.Context, userID, organizationID uuid.UUID, arguments map[string]any, latestUser *assistantUserMessage) (generatedImageRecord, error) {
+func (a *App) editImageForChat(ctx context.Context, userID, organizationID, conversationID uuid.UUID, arguments map[string]any, latestUser *assistantUserMessage) (generatedImageRecord, error) {
 	prompt := strings.TrimSpace(stringToolArgument(arguments, "prompt"))
 	if prompt == "" || len([]rune(prompt)) > 4000 {
 		return generatedImageRecord{}, fmt.Errorf("an edit prompt between 1 and 4000 characters is required")
 	}
-	data, _, filename, err := assistantUIChatImageSource(arguments, latestUser)
+	data, _, filename, err := a.assistantUIChatImageSource(ctx, userID, organizationID, conversationID, arguments, latestUser)
 	if err != nil {
 		return generatedImageRecord{}, err
 	}
@@ -571,7 +577,7 @@ func (a *App) editImageForChat(ctx context.Context, userID, organizationID uuid.
 	if err := writer.WriteField("model", imageModelForEndpoint(endpoint)); err != nil {
 		return generatedImageRecord{}, err
 	}
-	if err := writer.WriteField("prompt", prompt); err != nil {
+	if err := writer.WriteField("prompt", imageEditPrompt(prompt)); err != nil {
 		return generatedImageRecord{}, err
 	}
 	if err := writer.WriteField("response_format", "b64_json"); err != nil {
@@ -602,7 +608,11 @@ func (a *App) editImageForChat(ctx context.Context, userID, organizationID uuid.
 	return generatedImageRecord{ID: item.ID, URL: item.URL, Prompt: item.Prompt, Mode: item.Mode, MimeType: item.MimeType, CreatedAt: item.CreatedAt}, nil
 }
 
-func assistantUIChatImageSource(arguments map[string]any, latestUser *assistantUserMessage) ([]byte, string, string, error) {
+func imageEditPrompt(request string) string {
+	return "Edit the supplied source image directly. Apply the user's request exactly, even when it is written in a language other than English: \"" + request + "\". The requested addition, removal, or change must be clearly visible in the final image. Preserve the existing composition, subject, lighting, and all unrelated details unless the request says otherwise. Do not return an unchanged or near-identical copy of the source image."
+}
+
+func (a *App) assistantUIChatImageSource(ctx context.Context, userID, organizationID, conversationID uuid.UUID, arguments map[string]any, latestUser *assistantUserMessage) ([]byte, string, string, error) {
 	if raw, ok := arguments["image"].(string); ok && strings.TrimSpace(raw) != "" {
 		return decodeAssistantUIChatImage(raw, "attached-image")
 	}
@@ -623,7 +633,56 @@ func assistantUIChatImageSource(arguments map[string]any, latestUser *assistantU
 			return decodeAssistantUIChatImage(imageURL, filename)
 		}
 	}
-	return nil, "", "", fmt.Errorf("attach an image before asking me to edit it")
+	return a.latestConversationGeneratedImage(ctx, userID, organizationID, conversationID)
+}
+
+func (a *App) latestConversationGeneratedImage(ctx context.Context, userID, organizationID, conversationID uuid.UUID) ([]byte, string, string, error) {
+	rows, err := a.DB.QueryContext(ctx, `SELECT content FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 500`, conversationID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var content string
+		if err := rows.Scan(&content); err != nil {
+			return nil, "", "", err
+		}
+		event, ok := parseChatToolEvent(content)
+		if !ok || event.Status != "completed" || (event.ToolName != "generate_image" && event.ToolName != "edit_image") {
+			continue
+		}
+		var result struct {
+			Image struct {
+				ID string `json:"id"`
+			} `json:"image"`
+		}
+		if json.Unmarshal([]byte(event.Result), &result) != nil {
+			continue
+		}
+		imageID, err := uuid.Parse(result.Image.ID)
+		if err != nil {
+			continue
+		}
+		var data []byte
+		var mimeType string
+		err = a.DB.QueryRowContext(ctx, `SELECT image_data, mime_type FROM generated_images WHERE id = $1 AND user_id = $2 AND organization_id = $3`, imageID, userID, organizationID).Scan(&data, &mimeType)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return nil, "", "", err
+		}
+		filename := "generated-image"
+		if extensions, _ := mime.ExtensionsByType(mimeType); len(extensions) > 0 {
+			filename += extensions[0]
+		}
+		return data, mimeType, filename, nil
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", "", err
+	}
+	return nil, "", "", fmt.Errorf("attach an image or generate one in this conversation before asking me to edit it")
 }
 
 func decodeAssistantUIChatImage(raw, filename string) ([]byte, string, string, error) {

@@ -29,7 +29,10 @@ import {
 
 import { AssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import { AssistantSource } from "@/components/assistant-ui/sources"
-import { ToolResultContent } from "@/components/assistant-ui/tool-fallback"
+import {
+  GeneratedImageCard,
+  ToolResultContent,
+} from "@/components/assistant-ui/tool-fallback"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CompactMarkdown } from "@/components/ui/compact-markdown"
 import {
@@ -417,7 +420,8 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
             icon_url: displayMetadata.iconUrl,
             inputs: parseToolInputs(part),
             output:
-              part.result === undefined
+              part.result === undefined ||
+              ["generate_image", "edit_image"].includes(part.toolName)
                 ? undefined
                 : formatToolValue(part.result),
             error: toolCallError(part),
@@ -431,6 +435,28 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
     [aui, indices, messageParts, threadIsRunning]
   )
 
+  const generatedImages = useMemo(
+    () =>
+      indices.flatMap((index) => {
+        const part = messageParts[index]
+        if (
+          !part ||
+          part.type !== "tool-call" ||
+          !["generate_image", "edit_image"].includes(part.toolName)
+        ) {
+          return []
+        }
+        return [
+          {
+            id: part.toolCallId,
+            isGenerating: toolCallStatus(part, threadIsRunning) === "running",
+            value: part.result,
+          },
+        ]
+      }),
+    [indices, messageParts, threadIsRunning]
+  )
+
   if (toolCalls.length === 0) return null
 
   return (
@@ -441,7 +467,7 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
       />
       <ToolCallsSection
         approvalActions={false}
-        className="my-2 w-full max-w-2xl"
+        className="mb-2 w-full max-w-2xl"
         toolCalls={toolCalls}
         renderContent={(content, call, kind) =>
           kind === "output" ? (
@@ -451,6 +477,13 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
           )
         }
       />
+      {generatedImages.map((image) => (
+        <GeneratedImageCard
+          isGenerating={image.isGenerating}
+          key={image.id}
+          value={image.value}
+        />
+      ))}
     </>
   )
 }

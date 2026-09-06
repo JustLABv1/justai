@@ -1310,13 +1310,22 @@ function UserMessage() {
 
 function AssistantMessage({ isLatest }: { isLatest: boolean }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+  const startsWithTool = useAuiState((state) =>
+    state.message.parts.find((part) => part.type !== "data")?.type ===
+    "tool-call"
+  )
   const isStreamingMessage = isLatest && isThreadRunning
 
   return (
     <MessagePrimitive.Root className="group/message px-1 py-4 sm:px-4">
       <div className="mx-auto flex w-full max-w-4xl items-start gap-3">
         {!isStreamingMessage ? (
-          <ChatBrandMark className="mt-1 size-5 shrink-0" />
+          <ChatBrandMark
+            className={cn(
+              "size-5 shrink-0",
+              startsWithTool ? "mt-5" : "mt-1"
+            )}
+          />
         ) : null}
         <div className={cn("min-w-0 flex-1", isStreamingMessage && "pl-8")}>
           <div className="w-full text-sm leading-7 text-foreground">
