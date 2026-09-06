@@ -604,7 +604,32 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		metadata["errorText"] = streamErr.Error()
 		_ = a.persistAssistantUIAssistantAtPartsStatus(c, conversationID, outputParent, assistantMessageID, response.String(), citations, errorParts, metadata, "error")
 	}
-	if len(definitions) > 0 && provider.SupportsToolCalling(endpoint) {
+	if assistantUIRequestsImageEdit(latestUser) {
+		// Image edits have an unambiguous first-class path. Do not leave this to
+		// the chat model's general tool selection: text-oriented models can
+		// incorrectly choose web search even when the user attached an image and
+		// explicitly asked to modify it.
+		streamErr := a.executeAssistantBuiltinFallback(
+			c,
+			principal.UserID,
+			organizationID,
+			conversationID,
+			&outputParent,
+			runID,
+			"edit_image",
+			map[string]any{"prompt": latestUser.Text},
+			latestUser,
+			writeChunk,
+			&response,
+			textID,
+			&toolParts,
+		)
+		if streamErr != nil {
+			persistError(streamErr)
+			_ = writeChunk(map[string]any{"type": "error", "errorText": streamErr.Error()})
+			return
+		}
+	} else if len(definitions) > 0 && provider.SupportsToolCalling(endpoint) {
 		var toolHistory []provider.ToolMessage
 		var historyErr error
 		if hasHistoryHead {
@@ -1846,6 +1871,27 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 
 func assistantUIEmptyToolFollowup(round, roundOffset int, streamErr error) bool {
 	return errors.Is(streamErr, provider.ErrNoChatContentOrToolCalls) && (round > roundOffset+1 || roundOffset > 0)
+}
+
+func assistantUIRequestsImageEdit(message *assistantUserMessage) bool {
+	if message == nil {
+		return false
+	}
+	text := strings.ToLower(message.Text)
+	hasAttachedImage := assistantUIMessageHasImages([]assistantUIMessage{{Role: "user", Parts: message.Parts}})
+	if !hasAttachedImage && !strings.Contains(text, "image") && !strings.Contains(text, "bild") && !strings.Contains(text, "photo") && !strings.Contains(text, "foto") && !strings.Contains(text, "picture") {
+		return false
+	}
+	for _, phrase := range []string{
+		"add ", "change ", "edit ", "remove ", "replace ", "retouch ",
+		"transform ", "crop ", "place ", "füge ", "hinzu", "bearbeite",
+		"ändere", "entferne", "ersetze", "verändere", "mache ", "platziere",
+	} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) listAssistantUIMessages(c *gin.Context) {

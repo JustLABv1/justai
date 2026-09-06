@@ -1198,7 +1198,7 @@ func (a *App) editImage(c *gin.Context) {
 	form := &bytes.Buffer{}
 	writer := multipart.NewWriter(form)
 	_ = writer.WriteField("model", imageModelForEndpoint(endpoint))
-	_ = writer.WriteField("prompt", prompt)
+	_ = writer.WriteField("prompt", imageEditPrompt(prompt))
 	_ = writer.WriteField("response_format", "b64_json")
 	part, err := writer.CreateFormFile("image", fileHeader.Filename)
 	if err != nil {

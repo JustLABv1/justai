@@ -221,6 +221,42 @@ func TestAssistantUIEmptyToolFollowupOnlyHandlesPostToolEmptyCompletions(t *test
 	}
 }
 
+func TestAssistantUIRequestsImageEdit(t *testing.T) {
+	imagePart := json.RawMessage(`{"type":"image","image":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgAI/ScLkeAAAAABJRU5ErkJggg=="}`)
+	for _, text := range []string{
+		"Add a seagull to this image",
+		"Füge auf diesem Bild eine Möwe hinzu",
+		"Bearbeite das Bild und entferne den Hintergrund",
+		"Und jetzt platziere noch den Eiffelturm auf dem Bild",
+	} {
+		if !assistantUIRequestsImageEdit(&assistantUserMessage{Text: text, Parts: []json.RawMessage{imagePart}}) {
+			t.Fatalf("expected image edit request for %q", text)
+		}
+	}
+	if assistantUIRequestsImageEdit(&assistantUserMessage{Text: "Describe this image", Parts: []json.RawMessage{imagePart}}) {
+		t.Fatal("image analysis must not be routed as an edit")
+	}
+	if !assistantUIRequestsImageEdit(&assistantUserMessage{Text: "Add a seagull to the image"}) {
+		t.Fatal("a follow-up that refers to a prior generated image must be routed as an edit")
+	}
+	if assistantUIRequestsImageEdit(&assistantUserMessage{Text: "Add a seagull"}) {
+		t.Fatal("an unrelated request without an attached image must not be routed as an edit")
+	}
+}
+
+func TestImageEditPromptRequiresVisibleChange(t *testing.T) {
+	prompt := imageEditPrompt("Platziere bitte neben dem Big Ben den Eiffelturm")
+	for _, fragment := range []string{
+		"Platziere bitte neben dem Big Ben den Eiffelturm",
+		"must be clearly visible",
+		"Do not return an unchanged or near-identical copy",
+	} {
+		if !strings.Contains(prompt, fragment) {
+			t.Fatalf("edit prompt is missing %q: %s", fragment, prompt)
+		}
+	}
+}
+
 func TestChatToolLoopGuardAllowsPaginationWithChangedArguments(t *testing.T) {
 	guard := newChatToolLoopGuard([]provider.ToolMessage{{Role: "user", Content: "list everything"}})
 	call := provider.ToolCall{Name: "mcp_history"}
