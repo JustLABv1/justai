@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"net"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -37,6 +39,9 @@ type App struct {
 	authProtectionMu      sync.Mutex
 	authLimiter           *authAttemptLimiter
 	passwordHashSlots     chan struct{}
+	workerHealthMu        sync.RWMutex
+	workerHealth          map[string]workerHealthStatus
+	instanceID            string
 }
 
 const videoUploadPartRoutePattern = "/api/v1/transcription/video-uploads/:id/parts/:partNumber"
@@ -47,14 +52,23 @@ func isVideoUploadPartRequest(c *gin.Context) bool {
 
 func New(cfg config.Config, db *sql.DB) *App {
 	application := &App{
-		Config:                cfg,
-		DB:                    db,
-		Tokens:                auth.NewTokenManager(cfg.JWTSecret),
+		Config: cfg,
+		DB:     db,
+		Tokens: auth.NewTokenManagerWithOptions(cfg.JWTSecret, auth.TokenOptions{
+			Issuer:   cfg.JWTIssuer,
+			Audience: cfg.JWTAudience,
+			KeyID:    cfg.JWTKeyID,
+		}),
 		Secrets:               security.NewSecretBox(cfg.EncryptionKey),
 		RAG:                   rag.NewWorker(db, cfg.AllowPrivate),
 		repositoryImportSlots: make(chan struct{}, 2),
+		workerHealth:          make(map[string]workerHealthStatus),
+		instanceID:            uuid.NewString(),
 	}
 	application.RAG.SetSecretBox(application.Secrets)
+	application.RAG.SetHeartbeat(func() {
+		application.markWorkerHeartbeat("rag")
+	})
 	application.Live = NewTranscriptionManager(cfg, db, application.Secrets)
 	application.Live.SetApp(application)
 	application.AgentWorker = NewAgentEngine(application)
@@ -67,7 +81,7 @@ func (a *App) Router() *gin.Engine {
 		// Video parts are streamed and enforce their exact per-part size in the
 		// route handler. Do not wrap them in the small general API limit.
 		return isVideoUploadPartRequest(c)
-	}), middleware.CORS(a.Config.FrontendOrigins), middleware.RequestLog(a.DB))
+	}), middleware.CORS(a.Config.FrontendOrigins), middleware.CSRF(a.Config.FrontendOrigins), middleware.RequestLog(a.DB))
 	healthHandler := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "justai-backend"})
 	}
@@ -105,6 +119,10 @@ func (a *App) Router() *gin.Engine {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "background workers are unavailable"})
 			return
 		}
+		if !a.workersReady() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "background worker heartbeat is stale"})
+			return
+		}
 		if _, err := exec.LookPath("pdftotext"); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": "pdftotext is unavailable"})
 			return
@@ -122,6 +140,8 @@ func (a *App) Router() *gin.Engine {
 	router.GET("/api/v1/health", healthHandler)
 	router.GET("/api/v1/health/live", liveHandler)
 	router.GET("/api/v1/health/ready", readyHandler)
+	router.GET("/api/v1/health/workers", a.workerHealthHandler)
+	router.GET("/metrics", a.metricsHandler)
 	// Keep conventional root health paths available to load balancers while
 	// retaining the versioned paths used by the compose health checks.
 	router.GET("/health/live", liveHandler)
@@ -241,7 +261,7 @@ func (a *App) Router() *gin.Engine {
 	org.PUT("/transcription/recordings/:id/parts/:part", a.platformFeature("transcription"), a.appendTranscriptionRecordingPart)
 	org.POST("/transcription/recordings/:id/complete", a.platformFeature("transcription"), a.completeTranscriptionRecording)
 	org.GET("/knowledge/sources", a.platformFeature("knowledge"), a.listKnowledgeSources)
-	org.POST("/knowledge/sources", a.platformFeature("knowledge"), a.createKnowledgeSource)
+	org.POST("/knowledge/sources", a.platformFeature("knowledge"), a.scopedRateLimit("knowledge", 30), a.createKnowledgeSource)
 	org.POST("/knowledge/sources/:id/reindex", a.platformFeature("knowledge"), a.reindexKnowledgeSource)
 	org.DELETE("/knowledge/sources/:id", a.platformFeature("knowledge"), a.deleteKnowledgeSource)
 	org.GET("/repositories", a.platformFeature("knowledge"), a.listUserRepositoryContexts)
@@ -271,6 +291,9 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/agent-workflows", a.listAgentWorkflows)
 	org.POST("/agent-workflows", a.createAgentWorkflow)
 	org.GET("/agent-workflows/:id", a.getAgentWorkflow)
+	org.GET("/agent-workflows/:id/versions", a.listAgentWorkflowVersions)
+	org.GET("/agent-workflows/:id/versions/:version", a.getAgentWorkflowVersion)
+	org.POST("/agent-workflows/:id/versions/:version/restore", a.restoreAgentWorkflowVersion)
 	org.PATCH("/agent-workflows/:id", a.updateAgentWorkflow)
 	org.DELETE("/agent-workflows/:id", a.deleteAgentWorkflow)
 	org.POST("/agent-workflows/:id/validate", a.validateAgentWorkflow)
@@ -317,8 +340,8 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/privacy/cleanup", a.runPrivacyCleanup)
 	org.GET("/web/search", a.webSearch)
 	org.GET("/web/fetch", a.webFetch)
-	org.POST("/images/generate", a.generateImage)
-	org.POST("/images/edit", a.editImage)
+	org.POST("/images/generate", a.scopedRateLimit("image", 20), a.generateImage)
+	org.POST("/images/edit", a.scopedRateLimit("image", 20), a.editImage)
 	org.GET("/images/:id", a.serveGeneratedImage)
 	org.GET("/pdfs/:id", a.serveGeneratedPDF)
 	org.GET("/conversations/:id/context", a.getConversationContext)
@@ -356,7 +379,7 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/conversations/:id/messages", a.listConversationMessages)
 	org.PUT("/conversations/:id/messages/:messageId", a.upsertAssistantMessage)
 	org.PATCH("/conversations/:id/messages/:messageId", a.updateAssistantMessage)
-	org.POST("/chat", a.platformFeature("ai"), a.assistantUIChat)
+	org.POST("/chat", a.platformFeature("ai"), a.scopedRateLimit("chat", 60), a.assistantUIChat)
 	org.GET("/chat/resume/:streamId", a.platformFeature("ai"), a.resumeChatStream)
 
 	protected.GET("/ws/voice", a.platformFeature("voice"), a.voiceWebSocket)
@@ -388,11 +411,9 @@ func (a *App) registerAuthRoutes(router *gin.Engine) {
 }
 
 func (a *App) issueSession(c *gin.Context, user models.User) error {
-	token, err := a.Tokens.Issue(user.ID, user.Email, user.PlatformAdmin, user.SessionVersion)
-	if err != nil {
+	if _, err := a.issueSessionToken(c, user); err != nil {
 		return err
 	}
-	a.setSessionCookie(c, token, 12*60*60)
 	organizations, err := a.organizationsFor(c, user.ID)
 	if err != nil {
 		return err
@@ -401,9 +422,57 @@ func (a *App) issueSession(c *gin.Context, user models.User) error {
 	return nil
 }
 
+func (a *App) issueSessionToken(c *gin.Context, user models.User) (string, error) {
+	sessionID := uuid.New()
+	if _, err := a.DB.ExecContext(c, `INSERT INTO user_sessions (id, user_id, expires_at, user_agent, ip_address) VALUES ($1, $2, now() + interval '12 hours', $3, NULLIF($4, '')::inet)`, sessionID, user.ID, truncateSessionUserAgent(c.GetHeader("User-Agent")), remoteIP(c)); err != nil {
+		return "", err
+	}
+	token, err := a.Tokens.IssueWithSession(user.ID, user.Email, user.PlatformAdmin, sessionID.String(), user.SessionVersion)
+	if err != nil {
+		return "", err
+	}
+	a.setSessionCookie(c, token, 12*60*60)
+	if err := a.setCSRFCookie(c); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
 func (a *App) setSessionCookie(c *gin.Context, token string, maxAge int) {
 	c.SetSameSite(a.cookieSameSite())
 	c.SetCookie("justai_session", token, maxAge, "/", a.Config.CookieDomain, a.Config.SecureCookies, true)
+	if maxAge < 0 {
+		c.SetCookie("justai_csrf", "", maxAge, "/", a.Config.CookieDomain, a.Config.SecureCookies, false)
+	}
+}
+
+func (a *App) setCSRFCookie(c *gin.Context) error {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		return err
+	}
+	c.SetSameSite(a.cookieSameSite())
+	c.SetCookie("justai_csrf", base64.RawURLEncoding.EncodeToString(value), 12*60*60, "/", a.Config.CookieDomain, a.Config.SecureCookies, false)
+	return nil
+}
+
+func remoteIP(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	value := strings.TrimSpace(c.Request.RemoteAddr)
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		return host
+	}
+	return value
+}
+
+func truncateSessionUserAgent(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 512 {
+		return value[:512]
+	}
+	return value
 }
 
 func (a *App) cookieSameSite() http.SameSite {
@@ -484,27 +553,19 @@ func (a *App) listOrganizations(c *gin.Context) {
 }
 
 func (a *App) logout(c *gin.Context) {
+	if principal, ok := middleware.GetPrincipal(c); ok && principal.SessionID != uuid.Nil {
+		if _, err := a.DB.ExecContext(c, `UPDATE user_sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND user_id = $2`, principal.SessionID, principal.UserID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
 	a.setSessionCookie(c, "", -1)
 	c.Status(http.StatusNoContent)
 }
 
-func writeError(c *gin.Context, status int, err error) {
-	message := err.Error()
-	c.JSON(status, gin.H{
-		"error":     message,
-		"message":   message,
-		"code":      normalizedHTTPCode(status),
-		"requestId": middleware.GetRequestID(c),
-	})
-}
-
-func normalizedHTTPCode(status int) string {
-	return strings.ToLower(strings.ReplaceAll(http.StatusText(status), " ", "_"))
-}
-
 func decodeJSON(c *gin.Context, target any) bool {
 	if err := c.ShouldBindJSON(target); err != nil {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid request: %w", err))
+		writeError(c, http.StatusBadRequest, publicError("invalid_request", "request body is invalid"))
 		return false
 	}
 	return true

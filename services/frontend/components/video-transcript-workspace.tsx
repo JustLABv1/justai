@@ -380,6 +380,7 @@ export function TranscriptWorkspace({
   )
   const [exportFormat, setExportFormat] = useState("pdf")
   const [includeInsightsInExport, setIncludeInsightsInExport] = useState(true)
+  const [actionItemsCopied, setActionItemsCopied] = useState(false)
   const [speakerSample, setSpeakerSample] = useState<{
     speakerId: string
     endOffsetMs: number
@@ -387,7 +388,10 @@ export function TranscriptWorkspace({
   const messageRefs = useRef(new Map<string, HTMLDivElement>())
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const recordings = useMemo(() => snapshot.recordings ?? [], [snapshot.recordings])
+  const recordings = useMemo(
+    () => snapshot.recordings ?? [],
+    [snapshot.recordings]
+  )
   const effectiveRecordingId = recordings.some(
     (recording) => recording.id === selectedRecordingId
   )
@@ -672,8 +676,7 @@ export function TranscriptWorkspace({
   useEffect(() => {
     const raw = new URLSearchParams(window.location.search).get("t")
     const offset = raw ? Number(raw) : NaN
-    const media =
-      mediaKind === "audio" ? audioRef.current : videoRef.current
+    const media = mediaKind === "audio" ? audioRef.current : videoRef.current
     if (!Number.isFinite(offset) || offset < 0 || !media) return
     const seek = () => {
       media.currentTime = offset / 1000
@@ -692,8 +695,7 @@ export function TranscriptWorkspace({
 
   const seekTo = useCallback(
     (offsetMs: number, play = true) => {
-      const media =
-        mediaKind === "audio" ? audioRef.current : videoRef.current
+      const media = mediaKind === "audio" ? audioRef.current : videoRef.current
       if (!media) return
       setSpeakerSample(null)
       const durationFromElementMs =
@@ -715,8 +717,7 @@ export function TranscriptWorkspace({
 
   const playSpeakerSample = useCallback(
     (summary: SpeakerSummary) => {
-      const media =
-        mediaKind === "audio" ? audioRef.current : videoRef.current
+      const media = mediaKind === "audio" ? audioRef.current : videoRef.current
       if (!media || !canSeek) return
       if (speakerSample?.speakerId === summary.speaker.id) {
         media.pause()
@@ -933,6 +934,7 @@ export function TranscriptWorkspace({
   }
 
   const generateInsights = async () => {
+    setActionItemsCopied(false)
     setInsightsGenerating(true)
     updateSnapshot((current) => ({
       ...current,
@@ -975,6 +977,20 @@ export function TranscriptWorkspace({
       }))
     } finally {
       setInsightsGenerating(false)
+    }
+  }
+
+  const copyActionItems = async () => {
+    const actionItems = insights.actionItems ?? []
+    if (!actionItems.length) return
+    try {
+      await navigator.clipboard.writeText(
+        actionItems.map((item) => `- ${item}`).join("\n")
+      )
+      setActionItemsCopied(true)
+      onError("")
+    } catch {
+      onError("Action items could not be copied. Check clipboard permissions.")
     }
   }
 
@@ -1905,10 +1921,10 @@ export function TranscriptWorkspace({
                   <p className="mb-1 font-medium text-foreground">Chapters</p>
                   <div className="space-y-1">
                     {validInsightChapters.map((chapter) => (
-                        <button
-                          className="flex w-full items-start gap-2 rounded-md p-1 text-left hover:bg-muted"
-                          disabled={!canSeek}
-                          key={`${chapter.startOffsetMs}-${chapter.title}`}
+                      <button
+                        className="flex w-full items-start gap-2 rounded-md p-1 text-left hover:bg-muted"
+                        disabled={!canSeek}
+                        key={`${chapter.startOffsetMs}-${chapter.title}`}
                         onClick={() => seekTo(chapter.startOffsetMs)}
                         type="button"
                       >
@@ -1944,12 +1960,26 @@ export function TranscriptWorkspace({
               ) : null}
               {(insights.actionItems?.length ?? 0) > 0 ? (
                 <div>
-                  <p className="mb-1 font-medium text-foreground">
-                    Action items
-                  </p>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <p className="font-medium text-foreground">Action items</p>
+                    <Button
+                      aria-label="Copy action items"
+                      onClick={() => void copyActionItems()}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {actionItemsCopied ? (
+                        <Check data-icon="inline-start" />
+                      ) : (
+                        <Copy data-icon="inline-start" />
+                      )}
+                      {actionItemsCopied ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
                   <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
-                    {insights.actionItems?.map((item) => (
-                      <li key={item}>{item}</li>
+                    {insights.actionItems?.map((item, index) => (
+                      <li key={`${item}-${index}`}>{item}</li>
                     ))}
                   </ul>
                 </div>
@@ -2103,7 +2133,8 @@ export function TranscriptWorkspace({
                   <FileAudio className="size-4" />
                 ) : (
                   <FileText className="size-4" />
-                )} {mediaKind === "video"
+                )}{" "}
+                {mediaKind === "video"
                   ? "Source video"
                   : mediaKind === "audio"
                     ? "Source audio"
@@ -2111,7 +2142,7 @@ export function TranscriptWorkspace({
               </CardTitle>
               <CardDescription className="truncate">
                 {mediaKind === "video"
-                  ? snapshot.videoUpload?.fileName ?? "Video upload"
+                  ? (snapshot.videoUpload?.fileName ?? "Video upload")
                   : mediaKind === "audio"
                     ? selectedRecording
                       ? "Recorded source audio"
@@ -2300,8 +2331,8 @@ export function TranscriptWorkspace({
                 <div className="flex min-h-20 items-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 px-4 text-xs text-muted-foreground">
                   <FileText aria-hidden="true" className="size-4 shrink-0" />
                   <p>
-                    This session has no recording. The transcript remains
-                    fully editable and exportable.
+                    This session has no recording. The transcript remains fully
+                    editable and exportable.
                   </p>
                 </div>
               )}
@@ -2550,9 +2581,7 @@ export function TranscriptWorkspace({
   )
 }
 
-export function VideoTranscriptWorkspace(
-  props: VideoTranscriptWorkspaceProps
-) {
+export function VideoTranscriptWorkspace(props: VideoTranscriptWorkspaceProps) {
   return <TranscriptWorkspace {...props} mediaKind="video" />
 }
 

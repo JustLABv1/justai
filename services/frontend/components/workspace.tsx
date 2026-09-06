@@ -145,8 +145,8 @@ export function Workspace() {
 
   const redirectToLogin = useCallback(() => {
     const next = `${window.location.pathname}${window.location.search}`
-    window.location.assign(`/login?next=${encodeURIComponent(next)}`)
-  }, [])
+    router.push(`/login?next=${encodeURIComponent(next)}`)
+  }, [router])
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -601,12 +601,14 @@ export function Workspace() {
 
   const workspaceViewKey =
     activeView === "settings"
-      ? `${activeView}:${route.settingsTab}`
+      ? `${activeView}:${route.settingsTab}:${route.targetId ?? ""}`
       : activeView === "admin"
         ? `${activeView}:${route.adminTab}`
         : activeView === "agents"
           ? `${activeView}:${route.agentTab}`
-          : activeView
+          : activeView === "notes"
+            ? `${activeView}:${route.targetId ?? ""}`
+            : activeView
 
   const chatAgents = useMemo<SavedAssistant[]>(
     () => [
@@ -784,7 +786,6 @@ export function Workspace() {
       return id
     },
     [
-      navigate,
       draftAssistantId,
       pendingConversationId,
       promotePendingConversation,
@@ -1010,7 +1011,7 @@ export function Workspace() {
     try {
       await api.post("/api/v1/auth/logout")
     } finally {
-      window.location.assign("/login")
+      router.push("/login")
     }
   }
 
@@ -1416,7 +1417,12 @@ export function Workspace() {
 
 function WorkspaceLoading() {
   return (
-    <main className="flex min-h-full flex-1 items-center justify-center bg-background p-6">
+    <main
+      className="flex min-h-full flex-1 items-center justify-center bg-background p-6"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
       <div className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
         <BrandMark className="size-10" />
         <p className="text-sm text-muted-foreground">Loading JustAI…</p>

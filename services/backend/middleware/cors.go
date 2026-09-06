@@ -24,7 +24,7 @@ func CORS(origins []string) gin.HandlerFunc {
 			c.Header("Vary", "Origin")
 		}
 		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Organization-ID, x-vercel-ai-ui-message-stream")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Organization-ID, X-CSRF-Token, x-vercel-ai-ui-message-stream")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 		if strings.EqualFold(c.Request.Method, http.MethodOptions) {
 			c.AbortWithStatus(http.StatusNoContent)

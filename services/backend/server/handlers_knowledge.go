@@ -2,10 +2,12 @@ package server
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -26,12 +28,25 @@ type knowledgeRequest struct {
 func (a *App) listKnowledgeSources(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
-	result, err := rag.ListSources(c, a.DB, organizationID, principal.UserID)
+	limit := 50
+	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
+		parsed, parseErr := strconv.Atoi(rawLimit)
+		if parseErr != nil || parsed < 1 || parsed > 100 {
+			writeError(c, http.StatusBadRequest, publicError("invalid_limit", "limit must be between 1 and 100"))
+			return
+		}
+		limit = parsed
+	}
+	page, err := rag.ListSourcesPage(c, a.DB, organizationID, principal.UserID, limit, strings.TrimSpace(c.Query("cursor")))
 	if err != nil {
+		if errors.Is(err, rag.ErrInvalidSourceCursor) {
+			writeError(c, http.StatusBadRequest, publicError("invalid_cursor", "cursor is invalid"))
+			return
+		}
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"sources": result})
+	c.JSON(http.StatusOK, gin.H{"sources": page.Sources, "nextCursor": page.NextCursor})
 }
 
 func (a *App) createKnowledgeSource(c *gin.Context) {

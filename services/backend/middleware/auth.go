@@ -19,6 +19,7 @@ const (
 
 type Principal struct {
 	UserID         uuid.UUID
+	SessionID      uuid.UUID
 	Email          string
 	PlatformAdmin  bool
 	SessionVersion int
@@ -66,9 +67,23 @@ func RequireAuth(tokens *auth.TokenManager, db *sql.DB) gin.HandlerFunc {
 			AbortError(c, http.StatusUnauthorized, "session_revoked", "this session has been revoked")
 			return
 		}
+		var sessionID uuid.UUID
+		if strings.TrimSpace(claims.SessionID) != "" {
+			parsedSessionID, parseErr := uuid.Parse(claims.SessionID)
+			if parseErr != nil {
+				AbortError(c, http.StatusUnauthorized, "invalid_session", "invalid session identifier")
+				return
+			}
+			var sessionActive bool
+			if err := db.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM user_sessions WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL AND expires_at > now())`, parsedSessionID, userID).Scan(&sessionActive); err != nil || !sessionActive {
+				AbortError(c, http.StatusUnauthorized, "session_revoked", "this session has been revoked or expired")
+				return
+			}
+			sessionID = parsedSessionID
+		}
 		// Resolve the current platform-admin flag from the database instead of
 		// trusting a potentially stale JWT claim after an access change.
-		c.Set(PrincipalKey, Principal{UserID: userID, Email: claims.Email, PlatformAdmin: platformAdmin, SessionVersion: sessionVersion})
+		c.Set(PrincipalKey, Principal{UserID: userID, SessionID: sessionID, Email: claims.Email, PlatformAdmin: platformAdmin, SessionVersion: sessionVersion})
 		c.Next()
 	}
 }

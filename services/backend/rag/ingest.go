@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,6 +34,8 @@ type Worker struct {
 	db           *sql.DB
 	allowPrivate bool
 	secrets      *security.SecretBox
+	heartbeat    func()
+	workerID     string
 }
 
 // DeepContextLimit is the number of grounded passages exposed to the model in
@@ -52,14 +56,23 @@ const (
 const AttachedDocumentContextLimit = DeepContextLimit
 
 func NewWorker(db *sql.DB, allowPrivate bool) *Worker {
-	return &Worker{db: db, allowPrivate: allowPrivate}
+	return &Worker{db: db, allowPrivate: allowPrivate, workerID: "rag-worker-" + uuid.NewString()}
 }
 
 func (w *Worker) SetSecretBox(secrets *security.SecretBox) {
 	w.secrets = secrets
 }
 
+// SetHeartbeat lets the server expose this worker's liveness without making
+// the RAG package depend on the HTTP server package.
+func (w *Worker) SetHeartbeat(heartbeat func()) {
+	w.heartbeat = heartbeat
+}
+
 func (w *Worker) Start(ctx context.Context) {
+	if w.heartbeat != nil {
+		w.heartbeat()
+	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -68,6 +81,9 @@ func (w *Worker) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				if w.heartbeat != nil {
+					w.heartbeat()
+				}
 				_ = w.processOne(ctx)
 			}
 		}
@@ -107,7 +123,8 @@ func (w *Worker) processOne(ctx context.Context) error {
 		_, _ = transaction.ExecContext(ctx, `UPDATE knowledge_sources SET status = 'failed', error_message = 'maximum retry attempts exceeded', updated_at = now() WHERE id = $1`, sourceID)
 		return transaction.Commit()
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE ingestion_jobs SET status = 'processing', attempts = attempts + 1, lease_until = now() + interval '2 minutes', stage = 'extracting', progress = 5, updated_at = now() WHERE id = $1`, jobID); err != nil {
+	var leaseEpoch int64
+	if err := transaction.QueryRowContext(ctx, `UPDATE ingestion_jobs SET status = 'processing', attempts = attempts + 1, lease_owner = $2, lease_epoch = lease_epoch + 1, lease_until = now() + interval '2 minutes', stage = 'extracting', progress = 5, updated_at = now() WHERE id = $1 RETURNING lease_epoch`, jobID, w.workerID).Scan(&leaseEpoch); err != nil {
 		return err
 	}
 	if _, err := transaction.ExecContext(ctx, `UPDATE knowledge_sources SET status = 'processing', error_message = NULL, updated_at = now() WHERE id = $1`, sourceID); err != nil {
@@ -116,16 +133,16 @@ func (w *Worker) processOne(ctx context.Context) error {
 	if err := transaction.Commit(); err != nil {
 		return err
 	}
-	if err := w.ingest(ctx, jobID, sourceID); err != nil {
-		if finishErr := w.finishIngestionFailure(jobID, sourceID, err); finishErr != nil {
+	if err := w.ingest(ctx, jobID, sourceID, leaseEpoch); err != nil {
+		if finishErr := w.finishIngestionFailure(jobID, sourceID, leaseEpoch, err); finishErr != nil {
 			return fmt.Errorf("%w (recording ingestion failure: %v)", err, finishErr)
 		}
 		return err
 	}
-	return w.finishIngestionSuccess(jobID, sourceID)
+	return w.finishIngestionSuccess(jobID, sourceID, leaseEpoch)
 }
 
-func (w *Worker) finishIngestionFailure(jobID, sourceID uuid.UUID, cause error) error {
+func (w *Worker) finishIngestionFailure(jobID, sourceID uuid.UUID, leaseEpoch int64, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	transaction, err := w.db.BeginTx(ctx, nil)
@@ -133,16 +150,27 @@ func (w *Worker) finishIngestionFailure(jobID, sourceID uuid.UUID, cause error) 
 		return err
 	}
 	defer transaction.Rollback()
-	if _, err := transaction.ExecContext(ctx, `UPDATE ingestion_jobs SET status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END, error_message = $2, lease_until = NULL, stage = CASE WHEN attempts < max_attempts THEN 'retrying' ELSE 'failed' END, run_after = now() + CASE attempts WHEN 1 THEN interval '5 seconds' WHEN 2 THEN interval '10 seconds' ELSE interval '20 seconds' END, updated_at = now() WHERE id = $1`, jobID, cause.Error()); err != nil {
+	publicMessage := ingestionFailureMessage(cause)
+	if _, err := transaction.ExecContext(ctx, `UPDATE ingestion_jobs SET status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END, error_message = $2, lease_owner = NULL, lease_until = NULL, stage = CASE WHEN attempts < max_attempts THEN 'retrying' ELSE 'failed' END, run_after = now() + CASE attempts WHEN 1 THEN interval '5 seconds' WHEN 2 THEN interval '10 seconds' ELSE interval '20 seconds' END, updated_at = now() WHERE id = $1 AND lease_owner = $3 AND lease_epoch = $4`, jobID, publicMessage, w.workerID, leaseEpoch); err != nil {
 		return err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE knowledge_sources SET status = CASE WHEN EXISTS (SELECT 1 FROM ingestion_jobs WHERE source_id = $1 AND status = 'queued') THEN 'queued' ELSE 'failed' END, error_message = $2, updated_at = now() WHERE id = $1`, sourceID, cause.Error()); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE knowledge_sources SET status = CASE WHEN EXISTS (SELECT 1 FROM ingestion_jobs WHERE source_id = $1 AND status = 'queued') THEN 'queued' ELSE 'failed' END, error_message = $2, updated_at = now() WHERE id = $1 AND EXISTS (SELECT 1 FROM ingestion_jobs WHERE id = $3 AND lease_epoch = $4 AND lease_owner IS NULL)`, sourceID, publicMessage, jobID, leaseEpoch); err != nil {
 		return err
 	}
 	return transaction.Commit()
 }
 
-func (w *Worker) finishIngestionSuccess(jobID, sourceID uuid.UUID) error {
+func ingestionFailureMessage(err error) string {
+	if err == nil {
+		return "ingestion failed"
+	}
+	// Provider responses, URLs, filesystem paths, and database details can
+	// contain secrets or personal data. Keep the durable/user-visible message
+	// categorical; the caller still returns the detailed error to restricted logs.
+	return "ingestion failed; the job will retry automatically"
+}
+
+func (w *Worker) finishIngestionSuccess(jobID, sourceID uuid.UUID, leaseEpoch int64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	transaction, err := w.db.BeginTx(ctx, nil)
@@ -150,10 +178,10 @@ func (w *Worker) finishIngestionSuccess(jobID, sourceID uuid.UUID) error {
 		return err
 	}
 	defer transaction.Rollback()
-	if _, err := transaction.ExecContext(ctx, `UPDATE ingestion_jobs SET status = 'ready', error_message = NULL, lease_until = NULL, stage = CASE WHEN stage = 'lexical-only' THEN 'lexical-only' ELSE 'ready' END, progress = 100, updated_at = now() WHERE id = $1`, jobID); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE ingestion_jobs SET status = 'ready', error_message = NULL, lease_owner = NULL, lease_until = NULL, stage = CASE WHEN stage = 'lexical-only' THEN 'lexical-only' ELSE 'ready' END, progress = 100, updated_at = now() WHERE id = $1 AND lease_owner = $2 AND lease_epoch = $3`, jobID, w.workerID, leaseEpoch); err != nil {
 		return err
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE knowledge_sources SET status = 'ready', updated_at = now() WHERE id = $1`, sourceID); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE knowledge_sources SET status = 'ready', updated_at = now() WHERE id = $1 AND EXISTS (SELECT 1 FROM ingestion_jobs WHERE id = $2 AND status = 'ready' AND lease_epoch = $3)`, sourceID, jobID, leaseEpoch); err != nil {
 		return err
 	}
 	return transaction.Commit()
@@ -167,7 +195,7 @@ type chunkToStore struct {
 	dimension int
 }
 
-func (w *Worker) ingest(ctx context.Context, jobID, sourceID uuid.UUID) error {
+func (w *Worker) ingest(ctx context.Context, jobID, sourceID uuid.UUID, leaseEpoch int64) error {
 	var sourceType, sourceURL, content, scopeType string
 	var scopeID uuid.UUID
 	if err := w.db.QueryRowContext(ctx, `SELECT source_type, COALESCE(source_url, ''), content, scope_type, scope_id FROM knowledge_sources WHERE id = $1`, sourceID).Scan(&sourceType, &sourceURL, &content, &scopeType, &scopeID); err != nil {
@@ -179,7 +207,7 @@ func (w *Worker) ingest(ctx context.Context, jobID, sourceID uuid.UUID) error {
 			return err
 		}
 		content = fetched
-		if _, err := w.db.ExecContext(ctx, `UPDATE knowledge_sources SET content = $2, content_hash = $3, updated_at = now() WHERE id = $1`, sourceID, content, hash(content)); err != nil {
+		if _, err := w.db.ExecContext(ctx, `UPDATE knowledge_sources SET content = $2, content_hash = $3, updated_at = now() WHERE id = $1 AND EXISTS (SELECT 1 FROM ingestion_jobs WHERE id = $4 AND status = 'processing' AND lease_owner = $5 AND lease_epoch = $6)`, sourceID, content, hash(content), jobID, w.workerID, leaseEpoch); err != nil {
 			return err
 		}
 	}
@@ -190,7 +218,7 @@ func (w *Worker) ingest(ctx context.Context, jobID, sourceID uuid.UUID) error {
 	if len(chunks) == 0 {
 		return fmt.Errorf("source contains no text")
 	}
-	if err := w.renewLease(ctx, jobID, "chunking", 30); err != nil {
+	if err := w.renewLease(ctx, jobID, leaseEpoch, "chunking", 30); err != nil {
 		return err
 	}
 	embeddingEndpoint, embeddingErr := w.embeddingEndpoint(ctx, scopeType, scopeID)
@@ -204,7 +232,7 @@ func (w *Worker) ingest(ctx context.Context, jobID, sourceID uuid.UUID) error {
 	}
 	for index, chunk := range chunks {
 		progress := 30 + int(float64(index+1)*60/float64(len(chunks)))
-		if err := w.renewLease(ctx, jobID, "embedding", progress); err != nil {
+		if err := w.renewLease(ctx, jobID, leaseEpoch, "embedding", progress); err != nil {
 			return err
 		}
 		metadata, _ := json.Marshal(map[string]any{"jobId": jobID.String(), "chunkIndex": index})
@@ -225,6 +253,10 @@ func (w *Worker) ingest(ctx context.Context, jobID, sourceID uuid.UUID) error {
 		return err
 	}
 	defer transaction.Rollback()
+	var activeEpoch int64
+	if err := transaction.QueryRowContext(ctx, `SELECT lease_epoch FROM ingestion_jobs WHERE id = $1 AND status = 'processing' AND lease_owner = $2 AND lease_epoch = $3 FOR UPDATE`, jobID, w.workerID, leaseEpoch).Scan(&activeEpoch); err != nil {
+		return fmt.Errorf("ingestion lease is no longer active")
+	}
 	if _, err := transaction.ExecContext(ctx, `DELETE FROM knowledge_chunks WHERE source_id = $1`, sourceID); err != nil {
 		return err
 	}
@@ -233,7 +265,7 @@ func (w *Worker) ingest(ctx context.Context, jobID, sourceID uuid.UUID) error {
 			return err
 		}
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE ingestion_jobs SET stage = 'persisting', progress = 95, lease_until = now() + interval '2 minutes', updated_at = now() WHERE id = $1`, jobID); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE ingestion_jobs SET stage = 'persisting', progress = 95, lease_until = now() + interval '2 minutes', updated_at = now() WHERE id = $1 AND lease_owner = $2 AND lease_epoch = $3`, jobID, w.workerID, activeEpoch); err != nil {
 		return err
 	}
 	if embeddingWarning != "" {
@@ -247,14 +279,14 @@ func (w *Worker) ingest(ctx context.Context, jobID, sourceID uuid.UUID) error {
 	return transaction.Commit()
 }
 
-func (w *Worker) renewLease(ctx context.Context, jobID uuid.UUID, stage string, progress int) error {
+func (w *Worker) renewLease(ctx context.Context, jobID uuid.UUID, leaseEpoch int64, stage string, progress int) error {
 	if progress < 0 {
 		progress = 0
 	}
 	if progress > 99 {
 		progress = 99
 	}
-	result, err := w.db.ExecContext(ctx, `UPDATE ingestion_jobs SET lease_until = now() + interval '2 minutes', stage = $2, progress = $3, updated_at = now() WHERE id = $1 AND status = 'processing'`, jobID, stage, progress)
+	result, err := w.db.ExecContext(ctx, `UPDATE ingestion_jobs SET lease_until = now() + interval '2 minutes', stage = $2, progress = $3, updated_at = now() WHERE id = $1 AND status = 'processing' AND lease_owner = $4 AND lease_epoch = $5`, jobID, stage, progress, w.workerID, leaseEpoch)
 	if err != nil {
 		return err
 	}
@@ -379,12 +411,12 @@ func Search(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, q
 		WHERE ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2))
 		  AND ks.status = 'ready'
 		  AND (
-			to_tsvector('simple', ks.title || ' ' || kc.content) @@ plainto_tsquery('simple', $3)
-			OR to_tsvector('simple', ks.title || ' ' || kc.content) @@ to_tsquery('simple', $4)
-		  )
+			kc.search_vector @@ plainto_tsquery('simple', $3)
+			OR kc.search_vector @@ to_tsquery('simple', $4)
+		)
 		ORDER BY GREATEST(
-			ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), plainto_tsquery('simple', $3)),
-			ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), to_tsquery('simple', $4))
+			ts_rank(kc.search_vector, plainto_tsquery('simple', $3)),
+			ts_rank(kc.search_vector, to_tsquery('simple', $4))
 		) DESC
 		LIMIT $5`, organizationID, userID, query, orQuery, limit)
 	if err != nil {
@@ -555,10 +587,10 @@ func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 		  AND CASE WHEN $2 = '' THEN cks.context_scope = 'persistent'
 		           ELSE cks.source_id = ANY(string_to_array($2, ',')::uuid[])
 		      END
-		  AND (to_tsvector('simple', ks.title || ' ' || kc.content) @@ plainto_tsquery('simple', $3)
-		       OR to_tsvector('simple', ks.title || ' ' || kc.content) @@ to_tsquery('simple', $4))
-		ORDER BY GREATEST(ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), plainto_tsquery('simple', $3)),
-		                  ts_rank(to_tsvector('simple', ks.title || ' ' || kc.content), to_tsquery('simple', $4))) DESC
+		  AND (kc.search_vector @@ plainto_tsquery('simple', $3)
+		       OR kc.search_vector @@ to_tsquery('simple', $4))
+		ORDER BY GREATEST(ts_rank(kc.search_vector, plainto_tsquery('simple', $3)),
+		                  ts_rank(kc.search_vector, to_tsquery('simple', $4))) DESC
 		LIMIT $5`, conversationID, selectedSourceIDs, query, orQuery, lexicalLimit)
 	if err != nil {
 		return nil, err
@@ -1102,13 +1134,34 @@ func NewSource(ctx context.Context, db *sql.DB, scopeType string, scopeID, userI
 	}
 	sourceID := uuid.New()
 	jobID := uuid.New()
+	contentHash := ""
+	if sourceType != "url" && strings.TrimSpace(content) != "" {
+		contentHash = hash(content)
+	}
 	transaction, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.KnowledgeSource{}, err
 	}
 	defer transaction.Rollback()
-	if _, err := transaction.ExecContext(ctx, `INSERT INTO knowledge_sources (id, scope_type, scope_id, title, source_type, source_url, mime_type, content, content_hash, created_by) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), $8, NULLIF($9, ''), $10)`, sourceID, scopeType, scopeID, title, sourceType, sourceURL, mimeType, content, hash(content), userID); err != nil {
-		return models.KnowledgeSource{}, err
+	var insertedID uuid.UUID
+	insertErr := transaction.QueryRowContext(ctx, `INSERT INTO knowledge_sources (id, scope_type, scope_id, title, source_type, source_url, mime_type, content, content_hash, created_by) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), $8, NULLIF($9, ''), $10) ON CONFLICT DO NOTHING RETURNING id`, sourceID, scopeType, scopeID, title, sourceType, sourceURL, mimeType, content, contentHash, userID).Scan(&insertedID)
+	if insertErr == sql.ErrNoRows && contentHash != "" {
+		// A concurrent upload won the unique content-hash race. Return that
+		// source instead of creating a second expensive ingestion job.
+		if err := transaction.Rollback(); err != nil {
+			return models.KnowledgeSource{}, err
+		}
+		var existingID uuid.UUID
+		if err := db.QueryRowContext(ctx, `SELECT id FROM knowledge_sources WHERE scope_type = $1 AND scope_id = $2 AND content_hash = $3 AND source_type <> 'url' ORDER BY created_at, id LIMIT 1`, scopeType, scopeID, contentHash).Scan(&existingID); err != nil {
+			return models.KnowledgeSource{}, err
+		}
+		return GetSource(ctx, db, existingID)
+	}
+	if insertErr != nil {
+		return models.KnowledgeSource{}, insertErr
+	}
+	if insertedID == uuid.Nil {
+		return models.KnowledgeSource{}, fmt.Errorf("knowledge source was not created")
 	}
 	if _, err := transaction.ExecContext(ctx, `INSERT INTO ingestion_jobs (id, source_id) VALUES ($1, $2)`, jobID, sourceID); err != nil {
 		return models.KnowledgeSource{}, err
@@ -1133,9 +1186,41 @@ func GetSource(ctx context.Context, db *sql.DB, sourceID uuid.UUID) (models.Know
 }
 
 func ListSources(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID) ([]models.KnowledgeSource, error) {
-	rows, err := db.QueryContext(ctx, `SELECT ks.id, ks.scope_type, ks.scope_id, ks.title, ks.source_type, COALESCE(ks.source_url, ''), COALESCE(ks.mime_type, ''), ks.status, COALESCE(ks.error_message, ''), COALESCE(ij.progress, 0), COALESCE(ij.stage, ks.status), ks.created_at, ks.updated_at FROM knowledge_sources ks LEFT JOIN LATERAL (SELECT progress, stage FROM ingestion_jobs WHERE source_id = ks.id ORDER BY created_at DESC LIMIT 1) ij ON TRUE WHERE ks.conversation_id IS NULL AND ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2)) ORDER BY ks.created_at DESC`, organizationID, userID)
+	page, err := ListSourcesPage(ctx, db, organizationID, userID, 1000, "")
 	if err != nil {
 		return nil, err
+	}
+	return page.Sources, nil
+}
+
+type SourcePage struct {
+	Sources    []models.KnowledgeSource
+	NextCursor string
+}
+
+var ErrInvalidSourceCursor = errors.New("invalid source cursor")
+
+// ListSourcesPage uses a stable (created_at,id) cursor so a growing workspace
+// cannot force the database to scan and discard a large OFFSET prefix.
+func ListSourcesPage(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, limit int, cursor string) (SourcePage, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	where := `ks.conversation_id IS NULL AND ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2))`
+	args := []any{organizationID, userID}
+	if cursor != "" {
+		cursorTime, cursorID, err := decodeSourceCursor(cursor)
+		if err != nil {
+			return SourcePage{}, err
+		}
+		where += ` AND (ks.created_at, ks.id) < ($3, $4)`
+		args = append(args, cursorTime, cursorID)
+	}
+	args = append(args, limit+1)
+	limitPlaceholder := len(args)
+	rows, err := db.QueryContext(ctx, `SELECT ks.id, ks.scope_type, ks.scope_id, ks.title, ks.source_type, COALESCE(ks.source_url, ''), COALESCE(ks.mime_type, ''), ks.status, COALESCE(ks.error_message, ''), COALESCE(ij.progress, 0), COALESCE(ij.stage, ks.status), ks.created_at, ks.updated_at FROM knowledge_sources ks LEFT JOIN LATERAL (SELECT progress, stage FROM ingestion_jobs WHERE source_id = ks.id ORDER BY created_at DESC LIMIT 1) ij ON TRUE WHERE `+where+` ORDER BY ks.created_at DESC, ks.id DESC LIMIT $`+strconv.Itoa(limitPlaceholder), args...)
+	if err != nil {
+		return SourcePage{}, err
 	}
 	defer rows.Close()
 	result := []models.KnowledgeSource{}
@@ -1143,13 +1228,48 @@ func ListSources(ctx context.Context, db *sql.DB, organizationID, userID uuid.UU
 		var item models.KnowledgeSource
 		var sourceURL, mimeType, errorMessage, stage sql.NullString
 		if err := rows.Scan(&item.ID, &item.ScopeType, &item.ScopeID, &item.Title, &item.SourceType, &sourceURL, &mimeType, &item.Status, &errorMessage, &item.Progress, &stage, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
+			return SourcePage{}, err
 		}
 		item.SourceURL, item.MimeType, item.Error = sourceURL.String, mimeType.String, errorMessage.String
 		item.Stage = stage.String
 		result = append(result, item)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return SourcePage{}, err
+	}
+	page := SourcePage{Sources: result}
+	if len(result) > limit {
+		page.Sources = result[:limit]
+		last := page.Sources[len(page.Sources)-1]
+		page.NextCursor = encodeSourceCursor(last.CreatedAt, last.ID)
+	}
+	return page, nil
+}
+
+func encodeSourceCursor(createdAt time.Time, id uuid.UUID) string {
+	value := createdAt.UTC().Format(time.RFC3339Nano) + "." + id.String()
+	return base64.RawURLEncoding.EncodeToString([]byte(value))
+}
+
+func decodeSourceCursor(cursor string) (time.Time, uuid.UUID, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, uuid.Nil, ErrInvalidSourceCursor
+	}
+	raw := string(decoded)
+	separator := strings.LastIndex(raw, ".")
+	if separator <= 0 || separator == len(raw)-1 {
+		return time.Time{}, uuid.Nil, ErrInvalidSourceCursor
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, raw[:separator])
+	if err != nil {
+		return time.Time{}, uuid.Nil, ErrInvalidSourceCursor
+	}
+	id, err := uuid.Parse(raw[separator+1:])
+	if err != nil {
+		return time.Time{}, uuid.Nil, ErrInvalidSourceCursor
+	}
+	return createdAt, id, nil
 }
 
 func splitChunks(value string, maxRunes, overlap int) []string {

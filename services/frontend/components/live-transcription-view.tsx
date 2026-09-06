@@ -21,14 +21,9 @@ import {
 import type { LucideIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import {
-  LiveTranscriptionOrbit,
-  type LiveTranscriptionSnapshot,
-} from "@/components/live-transcription-orbit"
-import {
-  LiveTranscriptionSourceView,
-  type LiveTranscriptionCaptureViewMode,
-} from "@/components/live-transcription-source-view"
+import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
+import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
+import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
 import { TranscriptWorkspace } from "@/components/transcript-workspace"
 import {
   Dialog,
@@ -1825,8 +1820,7 @@ export function LiveTranscriptionView({
         </>
       ) : (
         <>
-          {captureViewMode === "microphone" ? (
-            <LiveTranscriptionOrbit
+          <LiveTranscriptionConversationView
               capturing={capturing}
               canStartCapture
               joinRequests={joinRequests}
@@ -1850,86 +1844,8 @@ export function LiveTranscriptionView({
               partialSpeakerId={partialSpeakerId}
               snapshot={snapshot}
               user={user}
-            />
-          ) : (
-            <LiveTranscriptionSourceView
-              capturing={capturing}
-              joinRequests={joinRequests}
-              level={level}
-              loading={loading}
               mode={captureViewMode}
-              onPauseOrResume={pauseOrResume}
-              onRefreshJoinRequests={refreshJoinRequests}
-              onRenameSpeaker={(speakerId, name) => {
-                void renameSpeaker(speakerId, name)
-              }}
-              onSetJoinRequest={setJoinRequest}
-              onShare={() =>
-                void (snapshot.session.joinCode
-                  ? setShareOpen(true)
-                  : rotateJoinCode())
-              }
-              onStartCapture={ensureCapture}
-              onStopSession={stopSession}
-              partial={partial}
-              partialSourceId={partialSourceId}
-              partialSpeakerId={partialSpeakerId}
-              snapshot={snapshot}
-              user={user}
             />
-          )}
-          {captureViewMode === "microphone" ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="flex min-w-0 flex-col gap-3 rounded-2xl border bg-card p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                    <Tv aria-hidden="true" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">Capture a live stream</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Add an authorized HLS, HTTP(S), or RTMP(S) audio URL.
-                      JustAI keeps the decoder and provider connection alive
-                      while it reconnects.
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  className="w-fit"
-                  onClick={() => setStreamDialogOpen(true)}
-                  size="sm"
-                  variant="outline"
-                >
-                  <Tv data-icon="inline-start" /> Add stream source
-                </Button>
-              </div>
-              <div className="flex min-w-0 flex-col gap-3 rounded-2xl border bg-card p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                    <Bot aria-hidden="true" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">Connect a meeting bot</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Create a scoped ingress token for a Zoom, Meet, Teams, or
-                      custom adapter. The adapter sends audio into this room.
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  className="w-fit"
-                  onClick={() => {
-                    setBotSetup(null)
-                    setBotDialogOpen(true)
-                  }}
-                  size="sm"
-                  variant="outline"
-                >
-                  <Bot data-icon="inline-start" /> Add meeting bot
-                </Button>
-              </div>
-            </div>
-          ) : null}
         </>
       )}
 

@@ -394,6 +394,12 @@ export function ToolCallsSection({
                       !hasCategoryText ? "pt-2" : ""
                     )}
                     onClick={() => hasDetails && toggleCallExpansion(index)}
+                    aria-expanded={hasDetails ? isCallExpanded : undefined}
+                    aria-controls={
+                      hasDetails
+                        ? `tool-call-details-${call.tool_call_id ?? index}`
+                        : undefined
+                    }
                   >
                     <p
                       className={cn(
@@ -436,7 +442,10 @@ export function ToolCallsSection({
                   )}
 
                   {isCallExpanded && hasDetails && (
-                    <div className="mt-2 mb-3 w-fit space-y-2 rounded-xl bg-zinc-100 p-3 text-[11px] dark:bg-zinc-800/50">
+                    <div
+                      id={`tool-call-details-${call.tool_call_id ?? index}`}
+                      className="mt-2 mb-3 w-fit space-y-2 rounded-xl bg-zinc-100 p-3 text-[11px] dark:bg-zinc-800/50"
+                    >
                       {requiresApproval && (
                         <div
                           aria-live="assertive"

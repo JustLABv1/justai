@@ -26,6 +26,8 @@ export type WorkspaceRoute = {
   view: ViewId
   conversationId: string | null
   sessionId: string | null
+  /** Optional entity selected by a deep link (for example a note or source). */
+  targetId?: string | null
   settingsTab: SettingsTab
   adminTab: AdminTab
   agentTab: AgentTab
@@ -130,7 +132,17 @@ export function workspacePath(
   }
 
   if (view === "endpoints" || view === "knowledge" || view === "mcp") {
-    return `/settings?tab=${view}`
+    return `/settings?tab=${view}${
+      view === "knowledge" && conversationId
+        ? `&source=${encodeURIComponent(conversationId)}`
+        : ""
+    }`
+  }
+
+  if (view === "notes") {
+    return conversationId
+      ? `/notes?note=${encodeURIComponent(conversationId)}`
+      : "/notes"
   }
 
   return `/${view}`
@@ -177,11 +189,13 @@ export function parseWorkspaceRoute(
   }
 
   if (section === "settings") {
+    const settingsTab = parseSettingsTab(searchParams.get("tab"))
     return {
       view: "settings",
       conversationId: null,
       sessionId: null,
-      settingsTab: parseSettingsTab(searchParams.get("tab")),
+      targetId: settingsTab === "knowledge" ? searchParams.get("source") : null,
+      settingsTab,
       adminTab: "overview",
       agentTab: "agents",
     }
@@ -214,6 +228,7 @@ export function parseWorkspaceRoute(
       view: "settings",
       conversationId: null,
       sessionId: null,
+      targetId: section === "knowledge" ? searchParams.get("source") : null,
       settingsTab: section,
       adminTab: "overview",
       agentTab: "agents",
@@ -266,6 +281,18 @@ export function parseWorkspaceRoute(
     }
   }
 
+  if (section === "notes") {
+    return {
+      view: "notes",
+      conversationId: null,
+      sessionId: null,
+      targetId: searchParams.get("note"),
+      settingsTab: "workspace",
+      adminTab: "overview",
+      agentTab: "agents",
+    }
+  }
+
   if (section && validViews.includes(section as ViewId)) {
     return {
       view: section as ViewId,
@@ -277,8 +304,20 @@ export function parseWorkspaceRoute(
     }
   }
 
-  const queryView = searchParams.get("view") as ViewId | null
+  const rawQueryView = searchParams.get("view")
+  const queryView =
+    rawQueryView === "assistants"
+      ? "agents"
+      : rawQueryView === "automations"
+        ? "agents"
+        : (rawQueryView as ViewId | null)
   const view = queryView && validViews.includes(queryView) ? queryView : "chat"
+  const legacyRedirect =
+    rawQueryView === "assistants"
+      ? "/agents"
+      : rawQueryView === "automations"
+        ? "/agents?tab=workflows"
+        : undefined
 
   return {
     view,
@@ -289,6 +328,9 @@ export function parseWorkspaceRoute(
         : null,
     settingsTab: parseSettingsTab(searchParams.get("tab")),
     adminTab: parseAdminTab(searchParams.get("tab")),
-    agentTab: parseAgentTab(searchParams.get("tab")),
+    agentTab: parseAgentTab(
+      rawQueryView === "automations" ? "workflows" : searchParams.get("tab")
+    ),
+    legacyRedirect,
   }
 }

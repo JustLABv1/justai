@@ -16,6 +16,9 @@ type Config struct {
 	Port                string
 	DatabaseURL         string
 	JWTSecret           []byte
+	JWTIssuer           string
+	JWTAudience         string
+	JWTKeyID            string
 	EncryptionKey       []byte
 	FrontendOrigins     []string
 	OIDC                OIDCConfig
@@ -66,6 +69,9 @@ type fileConfig struct {
 	Port                string                  `yaml:"port"`
 	DatabaseURL         string                  `yaml:"database_url"`
 	JWTSecret           string                  `yaml:"jwt_secret"`
+	JWTIssuer           string                  `yaml:"jwt_issuer"`
+	JWTAudience         string                  `yaml:"jwt_audience"`
+	JWTKeyID            string                  `yaml:"jwt_key_id"`
 	EncryptionKey       string                  `yaml:"encryption_key"`
 	FrontendOrigins     []string                `yaml:"frontend_origins"`
 	OIDC                fileOIDCConfig          `yaml:"oidc"`
@@ -163,6 +169,9 @@ func Load(configPath string) (Config, error) {
 		Port:            getenvOrFile("JUSTAI_PORT", fileValues.Port, "8080"),
 		DatabaseURL:     getenvOrFile("JUSTAI_DATABASE_URL", fileValues.DatabaseURL, ""),
 		JWTSecret:       jwtSecret,
+		JWTIssuer:       getenvOrFile("JUSTAI_JWT_ISSUER", fileValues.JWTIssuer, "justai-backend"),
+		JWTAudience:     getenvOrFile("JUSTAI_JWT_AUDIENCE", fileValues.JWTAudience, "justai-web"),
+		JWTKeyID:        getenvOrFile("JUSTAI_JWT_KEY_ID", fileValues.JWTKeyID, "v1"),
 		EncryptionKey:   encryptionSum[:],
 		FrontendOrigins: frontendOrigins(fileValues.FrontendOrigins),
 		OIDC: OIDCConfig{

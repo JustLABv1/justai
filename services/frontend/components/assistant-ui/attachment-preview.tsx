@@ -1,18 +1,21 @@
 "use client"
 
 import Image from "next/image"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Cancel01Icon,
   File02Icon,
   FileImageIcon,
   Pdf02Icon,
+  ReloadIcon,
 } from "@hugeicons/core-free-icons"
 import {
   AttachmentPrimitive,
   type CompleteAttachment,
   type PendingAttachment,
+  useAui,
+  useAuiState,
 } from "@assistant-ui/react"
 
 import {
@@ -83,7 +86,11 @@ function ObjectURLImagePreview({ attachment }: { attachment: ChatAttachment }) {
   )
 }
 
-function AttachmentImagePreview({ attachment }: { attachment: ChatAttachment }) {
+function AttachmentImagePreview({
+  attachment,
+}: {
+  attachment: ChatAttachment
+}) {
   const contentSource = getImageContentSource(attachment)
 
   if (contentSource) {
@@ -114,7 +121,9 @@ function getStatusLabel(
 
   switch (attachment.status.type) {
     case "running":
-      return "Preparing attachment…"
+      return `Preparing attachment… ${Math.round(
+        Math.max(0, Math.min(100, attachment.status.progress ?? 0))
+      )}%`
     case "incomplete":
       return attachment.status.message ?? "Could not prepare attachment"
     case "complete":
@@ -148,6 +157,14 @@ export function ChatAttachmentPreview({
   showRemove = false,
   variant = "message",
 }: ChatAttachmentPreviewProps) {
+  const aui = useAui()
+  const [retrying, setRetrying] = useState(false)
+  const [retryError, setRetryError] = useState("")
+  const attachmentIndex = useAuiState((state) =>
+    state.thread.composer.attachments.findIndex(
+      (item) => item.id === attachment.id
+    )
+  )
   const hasImagePreview =
     isImageAttachment(attachment) &&
     Boolean(attachment.file || getImageContentSource(attachment))
@@ -159,6 +176,32 @@ export function ChatAttachmentPreview({
         : attachment.status.type === "complete"
           ? "done"
           : "idle"
+
+  const canRetry =
+    variant === "composer" &&
+    showRemove &&
+    attachment.status.type === "incomplete" &&
+    Boolean(attachment.file) &&
+    attachmentIndex >= 0
+
+  async function retryAttachment() {
+    if (!canRetry || !attachment.file || retrying) return
+    setRetrying(true)
+    setRetryError("")
+    try {
+      await aui.thread
+        .composer()
+        .attachment({ index: attachmentIndex })
+        .remove()
+      await aui.thread.composer().addAttachment(attachment.file)
+    } catch (caught) {
+      setRetryError(
+        caught instanceof Error ? caught.message : "Retry failed. Try again."
+      )
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   return (
     <Attachment
@@ -185,11 +228,27 @@ export function ChatAttachmentPreview({
       <AttachmentContent className="p-2">
         <AttachmentTitle>{attachment.name}</AttachmentTitle>
         <AttachmentDescription>
-          {getStatusLabel(attachment, variant)}
+          {retryError || getStatusLabel(attachment, variant)}
         </AttachmentDescription>
       </AttachmentContent>
       {showRemove && (
-        <AttachmentActions>
+        <AttachmentActions className="gap-0.5">
+          {canRetry && (
+            <button
+              aria-label={`Retry ${attachment.name}`}
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+              disabled={retrying}
+              onClick={() => void retryAttachment()}
+              title={`Retry ${attachment.name}`}
+              type="button"
+            >
+              <HugeiconsIcon
+                className={retrying ? "animate-spin" : ""}
+                icon={ReloadIcon}
+                size={16}
+              />
+            </button>
+          )}
           <AttachmentPrimitive.Remove
             aria-label={`Remove ${attachment.name}`}
             className="size-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"

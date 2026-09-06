@@ -187,6 +187,7 @@ type CachedConversation = LoadedConversation & {
 const CONVERSATION_CACHE_TTL_MS = 30_000
 const CONVERSATION_CACHE_LIMIT = 20
 const CONTEXT_HINT_DISMISSED_STORAGE_KEY = "justai.chat.context-hint-dismissed"
+const MAX_CHAT_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const conversationCache = new Map<string, CachedConversation>()
 
 function readCachedConversation(
@@ -525,7 +526,11 @@ async function normalizeOutgoingImageMessages<T extends UIMessage>(
 }
 
 function createAttachmentAdapter(
-  upload: (file: File) => Promise<UploadedConversationAttachment>,
+  upload: (
+    file: File,
+    onProgress?: (progress: number) => void,
+    signal?: AbortSignal
+  ) => Promise<UploadedConversationAttachment>,
   remove: (sourceId: string) => Promise<void>,
   supportsVision: boolean
 ): AttachmentAdapter {
@@ -533,6 +538,7 @@ function createAttachmentAdapter(
     string,
     UploadedConversationAttachment
   >()
+  const uploadControllers = new Map<string, AbortController>()
 
   return {
     accept: `${supportsVision ? "image/*," : ""}text/plain,text/markdown,text/html,application/json,application/pdf`,
@@ -546,26 +552,85 @@ function createAttachmentAdapter(
         status: { type: "requires-action", reason: "composer-send" },
       }
 
+      if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
+        yield {
+          ...attachment,
+          status: {
+            type: "incomplete",
+            reason: "error",
+            message: "Files must be 25 MB or smaller.",
+          },
+        }
+        return
+      }
+
       // Vision images are sent as model content, not pushed through the text
       // ingestion pipeline. This keeps image uploads from being advertised as
       // Knowledge sources the backend cannot extract.
       if (attachment.type === "image") {
         if (!supportsVision) {
-          throw new Error("The selected endpoint cannot process images")
+          yield {
+            ...attachment,
+            status: {
+              type: "incomplete",
+              reason: "error",
+              message: "The selected endpoint cannot process images.",
+            },
+          }
+          return
         }
         yield attachment
         return
       }
 
+      const abortController = new AbortController()
+      uploadControllers.set(attachment.id, abortController)
+      let progress = 0
+      let progressPending = false
+      let resolveProgress: (() => void) | null = null
+      const uploadPromise = upload(
+        file,
+        (value) => {
+          progress = Math.max(0, Math.min(100, value))
+          progressPending = true
+          resolveProgress?.()
+          resolveProgress = null
+        },
+        abortController.signal
+      )
       yield {
         ...attachment,
         status: { type: "running", reason: "uploading", progress: 0 },
       }
       try {
-        const uploaded = await upload(file)
+        let uploaded: UploadedConversationAttachment
+        while (true) {
+          if (progressPending) {
+            progressPending = false
+            yield {
+              ...attachment,
+              status: { type: "running", reason: "uploading", progress },
+            }
+          }
+          const nextProgress = new Promise<void>((resolve) => {
+            resolveProgress = resolve
+          })
+          const result = await Promise.race([
+            uploadPromise.then(
+              (value) => ({ type: "done" as const, value }),
+              (reason) => ({ type: "error" as const, reason })
+            ),
+            nextProgress.then(() => ({ type: "progress" as const })),
+          ])
+          if (result.type === "progress") continue
+          if (result.type === "error") throw result.reason
+          uploaded = result.value
+          break
+        }
         uploadedByAttachmentId.set(attachment.id, uploaded)
         yield attachment
       } catch (caught) {
+        if (abortController.signal.aborted) return
         yield {
           ...attachment,
           status: {
@@ -577,6 +642,8 @@ function createAttachmentAdapter(
                 : "The file could not be prepared",
           },
         }
+      } finally {
+        uploadControllers.delete(attachment.id)
       }
     },
     async send(attachment): Promise<CompleteAttachment> {
@@ -633,6 +700,8 @@ function createAttachmentAdapter(
       }
     },
     async remove(attachment) {
+      uploadControllers.get(attachment.id)?.abort()
+      uploadControllers.delete(attachment.id)
       const uploaded = uploadedByAttachmentId.get(attachment.id)
       uploadedByAttachmentId.delete(attachment.id)
       if (uploaded) await remove(uploaded.source.id)
@@ -3610,6 +3679,8 @@ export function ChatView({
   const [surfaceReady, setSurfaceReady] = useState(!conversationId)
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([])
   const [historyLoading, setHistoryLoading] = useState(Boolean(conversationId))
+  const [historyError, setHistoryError] = useState("")
+  const [historyRetryToken, setHistoryRetryToken] = useState(0)
   const [conversationContext, setConversationContext] =
     useState<ConversationContext>(EMPTY_CONTEXT)
   const [contextHintDismissed, setContextHintDismissed] = useState(contextOpen)
@@ -3719,10 +3790,9 @@ export function ChatView({
           onConversationMissingRef.current?.()
           return null
         } else {
-          console.error(
-            "Assistant UI history could not be loaded",
-            historyResult.reason
-          )
+          throw historyResult.reason instanceof Error
+            ? historyResult.reason
+            : new Error("Conversation history could not be loaded.")
         }
         if (contextResult.status === "fulfilled") {
           context = contextResult.value
@@ -3735,8 +3805,9 @@ export function ChatView({
         return { messages, context }
       } catch (caught) {
         if (!signal?.aborted) {
-          console.error("Assistant UI history could not be loaded", caught)
-          return { messages: [], context: EMPTY_CONTEXT }
+          throw caught instanceof Error
+            ? caught
+            : new Error("Conversation history could not be loaded.")
         }
         return null
       }
@@ -3783,6 +3854,7 @@ export function ChatView({
         setSurfaceKey(`new:${cacheScope}`)
         setSurfaceReady(true)
         setHistoryLoading(false)
+        setHistoryError("")
       })
       return () => controller.abort()
     }
@@ -3796,6 +3868,7 @@ export function ChatView({
         setSurfaceKey(`${cacheScope}:${conversationId}`)
         setSurfaceReady(true)
         setHistoryLoading(false)
+        setHistoryError("")
       })
       return
     }
@@ -3804,6 +3877,8 @@ export function ChatView({
     queueMicrotask(() => {
       if (controller.signal.aborted) return
       setHistoryLoading(true)
+      setHistoryError("")
+      setSurfaceReady(false)
       void loadConversationRef
         .current(conversationId, controller.signal)
         .then((loaded) => {
@@ -3816,29 +3891,70 @@ export function ChatView({
           setSurfaceReady(true)
           setHistoryLoading(false)
         })
+        .catch((caught) => {
+          if (controller.signal.aborted) return
+          setHistoryLoading(false)
+          setSurfaceReady(false)
+          setHistoryError(
+            caught instanceof Error
+              ? caught.message
+              : "Conversation history could not be loaded."
+          )
+        })
     })
     return () => controller.abort()
-  }, [cacheScope, conversationId])
+  }, [cacheScope, conversationId, historyRetryToken])
 
   useEffect(() => {
-    if (!conversationId) return
-    let cancelled = false
-    const refresh = () => {
-      void api
-        .get<ConversationContext>(
-          `/api/v1/conversations/${conversationId}/context`
+    // WorkspaceContext owns the live refresh while its inspector is open. Do
+    // not issue a second request for the same conversation in that state.
+    if (!conversationId || contextOpen) return
+    let disposed = false
+    let timer: number | null = null
+    let delay = 5000
+    let controller: AbortController | null = null
+    const schedule = () => {
+      if (disposed) return
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => void refresh(), delay)
+    }
+    const refresh = async () => {
+      if (disposed || document.visibilityState === "hidden") {
+        schedule()
+        return
+      }
+      controller?.abort()
+      controller = new AbortController()
+      try {
+        const context = await api.get<ConversationContext>(
+          `/api/v1/conversations/${conversationId}/context`,
+          { signal: controller.signal }
         )
-        .then((context) => {
-          if (!cancelled) setConversationContext(context)
-        })
-        .catch(() => undefined)
+        if (!disposed) {
+          setConversationContext(context)
+          delay = 5000
+        }
+      } catch {
+        if (!disposed) delay = Math.min(delay * 2, 30_000)
+      } finally {
+        schedule()
+      }
     }
-    const timer = window.setInterval(refresh, 5000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        delay = 5000
+        void refresh()
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    schedule()
     return () => {
-      cancelled = true
-      window.clearInterval(timer)
+      disposed = true
+      controller?.abort()
+      if (timer !== null) window.clearTimeout(timer)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [conversationId])
+  }, [contextOpen, conversationId])
 
   const ensureLocalConversation = useCallback(
     async ({
@@ -3968,11 +4084,20 @@ export function ChatView({
   )
 
   const waitForKnowledgeSource = useCallback(
-    async (id: string, sourceId: string): Promise<KnowledgeSource> => {
+    async (
+      id: string,
+      sourceId: string,
+      signal?: AbortSignal,
+      onProgress?: (progress: number) => void
+    ): Promise<KnowledgeSource> => {
       for (let attempt = 0; attempt < 90; attempt += 1) {
+        if (signal?.aborted)
+          throw new Error("The attachment upload was cancelled.")
         const context = await api.get<ConversationContext>(
-          `/api/v1/conversations/${id}/context`
+          `/api/v1/conversations/${id}/context`,
+          { signal }
         )
+        onProgress?.(Math.min(99, 20 + ((attempt + 1) / 90) * 80))
         setConversationContext(context)
         onConversationUpdatedRef.current?.()
         const source = context.knowledgeSources.find(
@@ -3981,13 +4106,26 @@ export function ChatView({
         if (!source) {
           throw new Error("The imported source disappeared from this chat.")
         }
-        if (source.status === "ready") return source
+        if (source.status === "ready") {
+          onProgress?.(100)
+          return source
+        }
         if (source.status === "failed") {
           throw new Error(
             source.error || "The source could not be indexed for this chat."
           )
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 750))
+        await new Promise<void>((resolve, reject) => {
+          const timer = window.setTimeout(resolve, 750)
+          signal?.addEventListener(
+            "abort",
+            () => {
+              window.clearTimeout(timer)
+              reject(new Error("The attachment upload was cancelled."))
+            },
+            { once: true }
+          )
+        })
       }
       throw new Error("The source took too long to become ready. Try it again.")
     },
@@ -3995,7 +4133,11 @@ export function ChatView({
   )
 
   const uploadFile = useCallback(
-    async (file: File): Promise<UploadedConversationAttachment> => {
+    async (
+      file: File,
+      onProgress?: (progress: number) => void,
+      signal?: AbortSignal
+    ): Promise<UploadedConversationAttachment> => {
       const id = await ensureConversation({
         activate: false,
         inheritRepositories: false,
@@ -4009,7 +4151,14 @@ export function ChatView({
       )
 
       try {
-        return { source: await waitForKnowledgeSource(id, source.id) }
+        return {
+          source: await waitForKnowledgeSource(
+            id,
+            source.id,
+            signal,
+            onProgress
+          ),
+        }
       } catch (caught) {
         // Composer uploads are message-scoped. A failed or timed-out upload
         // should not leave an invisible Knowledge source blocking future turns.
@@ -4066,6 +4215,7 @@ export function ChatView({
 
   const conversationLoading =
     Boolean(conversationId) &&
+    !historyError &&
     (historyLoading || activeConversationId !== conversationId || !surfaceReady)
   const surfaceMatchesRoute = activeConversationId === conversationId
   const showContextHint =
@@ -4219,6 +4369,29 @@ export function ChatView({
               </span>
             </div>
             <p className="font-medium text-foreground">Loading conversation…</p>
+          </div>
+        </div>
+      )}
+      {historyError && (
+        <div
+          aria-live="assertive"
+          className="absolute inset-0 z-20 flex items-center justify-center bg-background/95 p-6 text-center backdrop-blur-sm"
+          role="alert"
+        >
+          <div className="flex max-w-sm flex-col items-center gap-3">
+            <p className="font-medium text-foreground">
+              Conversation history could not be loaded
+            </p>
+            <p className="text-sm text-muted-foreground">{historyError}</p>
+            <Button
+              onClick={() => {
+                setHistoryError("")
+                setHistoryRetryToken((value) => value + 1)
+              }}
+              variant="outline"
+            >
+              <RefreshCw data-icon="inline-start" /> Try again
+            </Button>
           </div>
         </div>
       )}

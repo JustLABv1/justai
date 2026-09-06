@@ -350,6 +350,7 @@ func (a *App) markRepositoryFailed(repositoryID uuid.UUID, message string) {
 // keeps a successful 202 response from leaving a repository stranded if the
 // process exits between creating the row and starting its goroutine.
 func (a *App) StartRepositoryWorker(ctx context.Context) {
+	a.markWorkerStarted("repository")
 	go func() {
 		a.repairPopulatedRepositoryContexts(ctx)
 		ticker := time.NewTicker(2 * time.Second)
@@ -359,6 +360,7 @@ func (a *App) StartRepositoryWorker(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				a.markWorkerHeartbeat("repository")
 				repositoryID, ok := a.nextRepositoryImport(ctx)
 				if ok {
 					go a.populateRepository(repositoryID)

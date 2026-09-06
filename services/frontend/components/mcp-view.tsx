@@ -137,7 +137,8 @@ const integrationPresets: IntegrationPreset[] = [
     endpointUrl: "https://api.githubcopilot.com/mcp/",
     description:
       "Search, create, update, and comment on issues and pull requests.",
-    tokenHint: "Use a fine-grained personal access token with only the repository permissions you need.",
+    tokenHint:
+      "Use a fine-grained personal access token with only the repository permissions you need.",
     docsUrl:
       "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp-in-your-ide/set-up-the-github-mcp-server",
   },
@@ -147,7 +148,8 @@ const integrationPresets: IntegrationPreset[] = [
     endpointUrl: "https://gitlab.com/api/v4/mcp",
     description:
       "Search, create, update, and comment on issues and merge requests.",
-    tokenHint: "Use a personal, project, or group access token. Self-hosted instances can replace the endpoint.",
+    tokenHint:
+      "Use a personal, project, or group access token. Self-hosted instances can replace the endpoint.",
     docsUrl: "https://docs.gitlab.com/user/model_context_protocol/mcp_server/",
   },
 ]
@@ -284,7 +286,7 @@ export function MCPView({
       ...emptyForm,
       name: preset.name,
       endpointUrl: preset.endpointUrl,
-      authType: "api_key",
+      authType: preset.id === "gitlab" ? "oauth" : "api_key",
       scopeType: "user",
       autoDiscover: true,
     })
@@ -339,13 +341,43 @@ export function MCPView({
           `/api/v1/mcp/servers/${editingServer.id}/icon`
         )
       }
+      let connectionNotice = ""
+      const canVerifyNow =
+        server.authType !== "oauth" || Boolean(server.credentialConfigured)
+      if (!editingServer && canVerifyNow) {
+        try {
+          const tested = await api.post<{ server?: MCPServer }>(
+            `/api/v1/mcp/servers/${server.id}/test`
+          )
+          server = { ...server, ...(tested.server ?? {}), lastError: "" }
+          const discovered = await api.get<{
+            tools: Array<{ name: string; description?: string }>
+          }>(`/api/v1/mcp/servers/${server.id}/tools`)
+          setTools((current) => ({
+            ...current,
+            [server.id]: discovered.tools,
+          }))
+          server = { ...server, toolCount: discovered.tools.length }
+          connectionNotice = ` Connection verified and ${discovered.tools.length} tools discovered.`
+        } catch (caught) {
+          server = {
+            ...server,
+            lastError:
+              caught instanceof Error ? caught.message : "Verification failed.",
+          }
+          connectionNotice =
+            " The server was saved, but verification needs attention."
+        }
+      } else if (!editingServer && server.authType === "oauth") {
+        connectionNotice = " Authorize OAuth to verify the connection."
+      }
       onChange(
         editingServer
           ? servers.map((item) => (item.id === server.id ? server : item))
           : [server, ...servers]
       )
       setNotice(
-        `${form.name} is connected. ${form.autoDiscover ? "Relevant tools can now be surfaced automatically." : "Add it to a chat when you want to use its tools."}`
+        `${form.name} is connected.${connectionNotice} ${form.autoDiscover ? "Relevant tools can now be surfaced automatically." : "Add it to a chat when you want to use its tools."}`
       )
     } catch (caught) {
       if (caught instanceof APIError) {
@@ -519,9 +551,9 @@ export function MCPView({
   }
 
   function authorize(server: MCPServer) {
-    window.location.assign(
-      `${API_URL}/api/v1/mcp/servers/${server.id}/oauth/start`
-    )
+    // OAuth must leave the app for the backend/provider redirect chain.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.href = `${API_URL}/api/v1/mcp/servers/${server.id}/oauth/start`
   }
 
   async function remove(server: MCPServer) {
@@ -566,79 +598,92 @@ export function MCPView({
           </div>
         </div>
       )}
-      {mode === "integrations" && <section aria-labelledby="integration-catalog-title">
-        <div className="mb-3 flex items-end justify-between gap-4">
-          <div>
-            <h2 id="integration-catalog-title" className="text-base font-semibold">
-              Issue tracker integrations
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Connect an MCP endpoint with a personal token. JustAI keeps every
-              write action approval-gated.
-            </p>
+      {mode === "integrations" && (
+        <section aria-labelledby="integration-catalog-title">
+          <div className="mb-3 flex items-end justify-between gap-4">
+            <div>
+              <h2
+                id="integration-catalog-title"
+                className="text-base font-semibold"
+              >
+                Issue tracker integrations
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Connect an MCP endpoint with a personal token. JustAI keeps
+                every write action approval-gated.
+              </p>
+            </div>
+            <Badge variant="outline" className="shrink-0">
+              Extensible catalog
+            </Badge>
           </div>
-          <Badge variant="outline" className="shrink-0">
-            Extensible catalog
-          </Badge>
-        </div>
-        <div className="grid gap-3 lg:grid-cols-2">
-          {integrationPresets.map((preset) => {
-            const isConnected = servers.some(
-              (server) => server.endpointUrl === preset.endpointUrl
-            )
-            return (
-              <Card key={preset.id} size="sm" className="flex h-full flex-col gap-0">
-                <CardHeader className="flex-row items-start gap-3 pb-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                    <HugeiconsIcon
-                      aria-hidden="true"
-                      icon={preset.id === "github" ? GithubIcon : GitlabIcon}
-                      size={20}
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CardTitle className="text-base">{preset.name}</CardTitle>
-                      {isConnected && <Badge variant="secondary">Connected</Badge>}
+          <div className="grid gap-3 lg:grid-cols-2">
+            {integrationPresets.map((preset) => {
+              const isConnected = servers.some(
+                (server) => server.endpointUrl === preset.endpointUrl
+              )
+              return (
+                <Card
+                  key={preset.id}
+                  size="sm"
+                  className="flex h-full flex-col gap-0"
+                >
+                  <CardHeader className="flex-row items-start gap-3 pb-3">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+                      <HugeiconsIcon
+                        aria-hidden="true"
+                        icon={preset.id === "github" ? GithubIcon : GitlabIcon}
+                        size={20}
+                      />
                     </div>
-                    <CardDescription className="mt-1">
-                      {preset.description}
-                    </CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent className="flex flex-1 flex-col space-y-3 pt-0">
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {preset.tokenHint}
-                  </p>
-                  <div className="mt-auto flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="gap-1.5">
-                        <KeyRound aria-hidden="true" /> Token or OAuth
-                      </Badge>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CardTitle className="text-base">
+                          {preset.name}
+                        </CardTitle>
+                        {isConnected && (
+                          <Badge variant="secondary">Connected</Badge>
+                        )}
+                      </div>
+                      <CardDescription className="mt-1">
+                        {preset.description}
+                      </CardDescription>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="flex flex-1 flex-col space-y-3 pt-0">
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {preset.tokenHint}
+                    </p>
+                    <div className="mt-auto flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="gap-1.5">
+                          <KeyRound aria-hidden="true" /> Token or OAuth
+                        </Badge>
+                        <Button
+                          aria-label={`Open ${preset.name} setup guide`}
+                          onClick={() => setSetupGuide(preset)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          Setup guide
+                        </Button>
+                      </div>
                       <Button
-                        aria-label={`Open ${preset.name} setup guide`}
-                        onClick={() => setSetupGuide(preset)}
+                        disabled={isConnected}
+                        onClick={() => openIntegration(preset)}
                         size="sm"
                         variant="outline"
                       >
-                        Setup guide
+                        {isConnected ? "Connected" : "Connect"}
                       </Button>
                     </div>
-                    <Button
-                      disabled={isConnected}
-                      onClick={() => openIntegration(preset)}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {isConnected ? "Connected" : "Connect"}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
-      </section>}
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        </section>
+      )}
       <div className="grid gap-3 lg:grid-cols-2">
         {visibleServers.map((server) => (
           <Card key={server.id} size="sm" className="gap-0">
@@ -930,39 +975,86 @@ export function MCPView({
           {setupGuide?.id === "github" ? (
             <div className="space-y-4 text-sm">
               <ol className="list-decimal space-y-2 pl-5 text-muted-foreground">
-                <li>Use a GitHub account that can access the repositories and issues you want JustAI to work with.</li>
-                <li>Create a fine-grained personal access token, restricted to only the selected repositories and the permissions you need.</li>
-                <li>If your organization manages GitHub policies, make sure personal access tokens or the GitHub MCP OAuth application are permitted.</li>
-                <li>Paste the token into JustAI, then save and test the connection.</li>
+                <li>
+                  Use a GitHub account that can access the repositories and
+                  issues you want JustAI to work with.
+                </li>
+                <li>
+                  Create a fine-grained personal access token, restricted to
+                  only the selected repositories and the permissions you need.
+                </li>
+                <li>
+                  If your organization manages GitHub policies, make sure
+                  personal access tokens or the GitHub MCP OAuth application are
+                  permitted.
+                </li>
+                <li>
+                  Paste the token into JustAI, then save and test the
+                  connection.
+                </li>
               </ol>
               <div className="rounded-lg border bg-muted/30 px-3 py-2 font-mono text-xs">
                 {setupGuide.endpointUrl}
               </div>
               <p className="text-xs text-muted-foreground">
-                OAuth is also available. GitHub&apos;s remote MCP server supports OAuth and personal access tokens.
+                OAuth is also available. GitHub&apos;s remote MCP server
+                supports OAuth and personal access tokens.
               </p>
             </div>
           ) : setupGuide ? (
             <div className="space-y-4 text-sm">
               <ol className="list-decimal space-y-2 pl-5 text-muted-foreground">
-                <li>Enable GitLab Duo availability for the relevant top-level group or your self-managed instance.</li>
-                <li>Enable beta and experimental features, then allow access to the GitLab MCP server.</li>
-                <li>Use the GitLab MCP endpoint below, replacing <code>gitlab.com</code> with your self-hosted domain when needed.</li>
-                <li>Prefer OAuth. If Dynamic Client Registration is disabled, create a public OAuth application with the <code>mcp</code> scope and configure its client ID in JustAI.</li>
+                <li>
+                  Enable GitLab Duo availability for the relevant top-level
+                  group or your self-managed instance.
+                </li>
+                <li>
+                  Enable beta and experimental features, then allow access to
+                  the GitLab MCP server.
+                </li>
+                <li>
+                  Use the GitLab MCP endpoint below, replacing{" "}
+                  <code>gitlab.com</code> with your self-hosted domain when
+                  needed.
+                </li>
+                <li>
+                  Prefer OAuth. If Dynamic Client Registration is disabled,
+                  create a public OAuth application with the <code>mcp</code>{" "}
+                  scope and configure its client ID in JustAI.
+                </li>
               </ol>
               <div className="rounded-lg border bg-muted/30 px-3 py-2 font-mono text-xs">
                 {setupGuide.endpointUrl}
               </div>
               <p className="text-xs text-muted-foreground">
-                A token works only when your GitLab MCP endpoint accepts bearer-token authentication; GitLab&apos;s documented MCP flow is OAuth.
+                A token works only when your GitLab MCP endpoint accepts
+                bearer-token authentication; GitLab&apos;s documented MCP flow
+                is OAuth.
               </p>
               <div className="rounded-lg border border-dashed bg-muted/20 p-3 text-xs text-muted-foreground">
-                <p className="font-medium text-foreground">Self-managed GitLab</p>
+                <p className="font-medium text-foreground">
+                  Self-managed GitLab
+                </p>
                 <ul className="mt-2 list-disc space-y-1 pl-4">
-                  <li>Use GitLab 18.6 or later, with the MCP server available for the instance.</li>
-                  <li>Make the instance reachable from the JustAI backend over HTTPS; private-network instances require the platform&apos;s private-network access setting.</li>
-                  <li>Ask an instance administrator to enable Duo, beta/experimental features, and MCP server access for the intended group or instance.</li>
-                  <li>If OAuth Dynamic Client Registration is disabled, register a public OAuth application with the exact JustAI callback URL and the <code>mcp</code> scope.</li>
+                  <li>
+                    Use GitLab 18.6 or later, with the MCP server available for
+                    the instance.
+                  </li>
+                  <li>
+                    Make the instance reachable from the JustAI backend over
+                    HTTPS; private-network instances require the platform&apos;s
+                    private-network access setting.
+                  </li>
+                  <li>
+                    Ask an instance administrator to enable Duo,
+                    beta/experimental features, and MCP server access for the
+                    intended group or instance.
+                  </li>
+                  <li>
+                    If OAuth Dynamic Client Registration is disabled, register a
+                    public OAuth application with the exact JustAI callback URL
+                    and the <code>mcp</code> scope.
+                  </li>
                 </ul>
               </div>
             </div>
@@ -970,7 +1062,11 @@ export function MCPView({
           <DialogFooter>
             <Button
               render={
-                <a href={setupGuide?.docsUrl} rel="noreferrer" target="_blank" />
+                <a
+                  href={setupGuide?.docsUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                />
               }
               variant="outline"
             >
@@ -1263,7 +1359,6 @@ export function MCPView({
                         update("oauthClientId", event.target.value)
                       }
                       placeholder="public-client-id"
-                      required
                     />
                   </Field>
                   <Field>

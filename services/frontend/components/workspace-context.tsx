@@ -129,21 +129,47 @@ export function WorkspaceContext({
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    const loadRepositoryLibrary = () => {
-      void api
-        .get<{ repositories: RepositoryContext[] }>("/api/v1/repositories")
-        .then((result) => {
-          if (!cancelled) setRepositoryLibrary(result.repositories)
-        })
-        .catch(() => undefined)
+    let disposed = false
+    let timer: number | null = null
+    let delay = 10_000
+    let controller: AbortController | null = null
+    const schedule = () => {
+      if (disposed) return
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => void loadRepositoryLibrary(), delay)
     }
-
-    loadRepositoryLibrary()
-    const timer = window.setInterval(loadRepositoryLibrary, 5000)
+    const loadRepositoryLibrary = async () => {
+      if (disposed || document.visibilityState === "hidden") {
+        schedule()
+        return
+      }
+      controller?.abort()
+      controller = new AbortController()
+      try {
+        const result = await api.get<{ repositories: RepositoryContext[] }>(
+          "/api/v1/repositories",
+          { signal: controller.signal }
+        )
+        if (!disposed) {
+          setRepositoryLibrary(result.repositories)
+          delay = 10_000
+        }
+      } catch {
+        if (!disposed) delay = Math.min(delay * 2, 60_000)
+      } finally {
+        schedule()
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") void loadRepositoryLibrary()
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    void loadRepositoryLibrary()
     return () => {
-      cancelled = true
-      window.clearInterval(timer)
+      disposed = true
+      controller?.abort()
+      if (timer !== null) window.clearTimeout(timer)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
   }, [])
 
@@ -151,44 +177,70 @@ export function WorkspaceContext({
     if (!conversationId) {
       return
     }
-    let cancelled = false
-    const loadContext = (showLoading: boolean) => {
-      if (cancelled) return
-      if (showLoading) setLoading(true)
-      void api
-        .get<ConversationContext>(
-          `/api/v1/conversations/${conversationId}/context`
-        )
-        .then((result) => {
-          if (!cancelled) {
-            setContext(result)
-            setLoadedConversationId(conversationId)
-          }
-        })
-        .catch((caught) => {
-          if (!cancelled) {
-            setLoadedConversationId(conversationId)
-            setNotice(
-              caught instanceof Error
-                ? caught.message
-                : "Conversation context could not be loaded."
-            )
-          }
-        })
-        .finally(() => {
-          if (!cancelled && showLoading) setLoading(false)
-        })
+    let disposed = false
+    let timer: number | null = null
+    let delay = 5_000
+    let controller: AbortController | null = null
+    let inFlight = false
+    const schedule = () => {
+      if (disposed) return
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => void loadContext(false), delay)
     }
-    const timer = window.setTimeout(() => {
-      if (cancelled) return
+    const loadContext = async (showLoading: boolean) => {
+      if (disposed || document.visibilityState === "hidden") {
+        schedule()
+        return
+      }
+      if (inFlight) return
+      inFlight = true
+      controller?.abort()
+      controller = new AbortController()
+      if (showLoading) setLoading(true)
+      try {
+        const result = await api.get<ConversationContext>(
+          `/api/v1/conversations/${conversationId}/context`,
+          { signal: controller.signal }
+        )
+        if (!disposed) {
+          setContext(result)
+          setLoadedConversationId(conversationId)
+          setNotice("")
+          delay = 5_000
+        }
+      } catch (caught) {
+        if (!disposed && !controller.signal.aborted) {
+          setLoadedConversationId(conversationId)
+          setNotice(
+            caught instanceof Error
+              ? caught.message
+              : "Conversation context could not be loaded."
+          )
+          delay = Math.min(delay * 2, 60_000)
+        }
+      } finally {
+        inFlight = false
+        if (!disposed && showLoading) setLoading(false)
+        schedule()
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        delay = 5_000
+        void loadContext(false)
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    const initialTimer = window.setTimeout(() => {
       setNotice("")
-      loadContext(true)
+      void loadContext(true)
     }, 0)
-    const refreshTimer = window.setInterval(() => loadContext(false), 5000)
     return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-      window.clearInterval(refreshTimer)
+      disposed = true
+      controller?.abort()
+      window.clearTimeout(initialTimer)
+      if (timer !== null) window.clearTimeout(timer)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
   }, [conversationId])
 
