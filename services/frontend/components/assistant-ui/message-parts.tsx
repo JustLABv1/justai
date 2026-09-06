@@ -467,7 +467,7 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
       />
       <ToolCallsSection
         approvalActions={false}
-        className="my-2 w-full max-w-2xl"
+        className="mb-2 w-full max-w-2xl"
         toolCalls={toolCalls}
         renderContent={(content, call, kind) =>
           kind === "output" ? (
