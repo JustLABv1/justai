@@ -1,6 +1,7 @@
 "use client"
 
 import { LogOut, ShieldCheck, UserRound } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 import { api } from "@/lib/api"
 import type { User } from "@/lib/types"
@@ -19,12 +20,13 @@ type ProfileViewProps = {
 }
 
 export function ProfileView({ user }: ProfileViewProps) {
+  const router = useRouter()
   async function logout() {
     try {
       await api.post("/api/v1/auth/logout")
     } finally {
       api.setOrganizationId(null)
-      window.location.assign("/login")
+      router.push("/login")
     }
   }
 

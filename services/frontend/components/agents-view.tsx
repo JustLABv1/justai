@@ -22,6 +22,7 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Sparkles,
   Terminal,
   Trash2,
   UserRound,
@@ -45,11 +46,19 @@ import {
 import "@xyflow/react/dist/style.css"
 
 import { api, resolveAPIURL } from "@/lib/api"
+import {
+  formatWorkflowNextRun,
+  validateWorkflowDefinition,
+  validateWorkflowResources,
+  workflowInputNames,
+  workflowScheduleDescription,
+} from "@/lib/agent-workflow-logic"
 import type {
   Agent,
   AgentApproval,
   AgentConnection,
   AgentContextScope,
+  AgentInputBinding,
   AgentRun,
   AgentRunEvent,
   AgentRunNode,
@@ -66,6 +75,16 @@ import { cn } from "@/lib/utils"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Card,
   CardAction,
@@ -169,6 +188,13 @@ type FlowNodeData = {
   selected?: boolean
 }
 
+type DeleteTarget =
+  | { kind: "agent"; item: Agent }
+  | { kind: "connection"; item: AgentConnection }
+  | { kind: "workflow"; item: AgentWorkflow }
+
+type WorkflowRunInput = Record<string, string>
+
 const emptyNativeForm: NativeAgentForm = {
   name: "",
   description: "",
@@ -202,6 +228,27 @@ const emptyRemoteForm: RemoteAgentForm = {
   trustedReadOnly: false,
 }
 
+function remoteConnectionPayload(form: RemoteAgentForm) {
+  return {
+    scopeType: form.connectionScope,
+    name: form.name.trim(),
+    endpointUrl: form.endpointUrl.trim(),
+    authType: form.authType,
+    credential: form.credential.trim() || undefined,
+    username: form.username.trim() || undefined,
+    password: form.password || undefined,
+    accessToken: form.accessToken.trim() || undefined,
+    clientSecret: form.clientSecret || undefined,
+    certificate: form.certificate.trim() || undefined,
+    privateKey: form.privateKey.trim() || undefined,
+    oauthAuthorizationUrl: form.oauthAuthorizationUrl.trim() || undefined,
+    oauthTokenUrl: form.oauthTokenUrl.trim() || undefined,
+    oauthClientId: form.oauthClientId.trim() || undefined,
+    oauthScopes: form.oauthScopes.trim() || undefined,
+    trustedReadOnly: form.trustedReadOnly,
+  }
+}
+
 function emptyWorkflow(): WorkflowDraft {
   return {
     id: "",
@@ -226,6 +273,123 @@ function emptyWorkflow(): WorkflowDraft {
     schedule: { kind: "manual" },
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     enabled: true,
+  }
+}
+
+type WorkflowTemplateId =
+  "research-brief" | "meeting-actions" | "content-review"
+
+const workflowTemplates: Array<{
+  id: WorkflowTemplateId
+  name: string
+  description: string
+}> = [
+  {
+    id: "research-brief",
+    name: "Research brief",
+    description: "Research a question, then synthesize the findings.",
+  },
+  {
+    id: "meeting-actions",
+    name: "Meeting actions",
+    description: "Turn a transcript into decisions and next steps.",
+  },
+  {
+    id: "content-review",
+    name: "Content review",
+    description: "Review source material, then produce an editorial pass.",
+  },
+]
+
+function workflowTemplateDraft(templateID: WorkflowTemplateId): WorkflowDraft {
+  const draft = emptyWorkflow()
+  switch (templateID) {
+    case "meeting-actions":
+      return {
+        ...draft,
+        name: "Meeting action plan",
+        description:
+          "Extract decisions, owners, and next steps from a transcript.",
+        definition: {
+          nodes: [
+            {
+              ...draft.definition.nodes[0],
+              id: "extract-actions",
+              instruction:
+                "Read the supplied transcript and extract decisions, owners, deadlines, and unresolved questions. Return concise, factual action items.",
+              inputBindings: [{ name: "transcript", source: "input" }],
+            },
+          ],
+          edges: [],
+        },
+      }
+    case "content-review":
+      return {
+        ...draft,
+        name: "Content review",
+        description:
+          "Review source material and turn the findings into an editorial pass.",
+        definition: {
+          nodes: [
+            {
+              ...draft.definition.nodes[0],
+              id: "review-source",
+              instruction:
+                "Review the supplied source material for factual gaps, unclear claims, and risks. Return a prioritized editorial checklist.",
+              inputBindings: [{ name: "source", source: "input" }],
+            },
+            {
+              ...draft.definition.nodes[0],
+              id: "write-pass",
+              instruction:
+                "Use the review findings to produce a concise, improved editorial pass. Preserve supported facts and call out anything that still needs verification.",
+              inputBindings: [
+                {
+                  name: "review",
+                  source: "node",
+                  nodeId: "review-source",
+                  path: "result",
+                },
+              ],
+            },
+          ],
+          edges: [{ from: "review-source", to: "write-pass" }],
+        },
+      }
+    case "research-brief":
+    default:
+      return {
+        ...draft,
+        name: "Research brief",
+        description:
+          "Research a question, then synthesize a source-aware brief.",
+        definition: {
+          nodes: [
+            {
+              ...draft.definition.nodes[0],
+              id: "research",
+              instruction:
+                "Investigate the supplied question using the approved context and return the strongest findings with their supporting sources.",
+              inputBindings: [{ name: "question", source: "input" }],
+            },
+            {
+              ...draft.definition.nodes[0],
+              id: "synthesize",
+              instruction:
+                "Synthesize the research into a concise brief with an answer first, evidence, caveats, and clearly labeled open questions.",
+              inputBindings: [
+                {
+                  name: "findings",
+                  source: "node",
+                  nodeId: "research",
+                  path: "result",
+                },
+              ],
+            },
+          ],
+          edges: [{ from: "research", to: "synthesize" }],
+        },
+      }
   }
 }
 
@@ -326,54 +490,19 @@ function updateContext(
   return { ...(scope ?? {}), ...patch }
 }
 
-function validateWorkflowDefinition(
-  definition: AgentWorkflowDefinition
-): string | null {
-  if (definition.nodes.length === 0) return "Add at least one agent node."
-  if (definition.nodes.length > 16) return "Workflows are limited to 16 nodes."
-  const ids = new Set<string>()
-  const children = new Map<string, string[]>()
-  const indegree = new Map<string, number>()
-  for (const node of definition.nodes) {
-    if (!node.id.trim()) return "Every node needs an id."
-    if (ids.has(node.id)) return `Node ${node.id} is duplicated.`
-    ids.add(node.id)
-    indegree.set(node.id, 0)
-    if (!node.instruction.trim()) return `Node ${node.id} needs an instruction.`
-  }
-  for (const edge of definition.edges) {
-    if (!ids.has(edge.from) || !ids.has(edge.to))
-      return "Every edge must connect existing nodes."
-    if (edge.from === edge.to) return "A node cannot connect to itself."
-    const next = children.get(edge.from) ?? []
-    next.push(edge.to)
-    children.set(edge.from, next)
-    indegree.set(edge.to, (indegree.get(edge.to) ?? 0) + 1)
-    if (next.length > 4) return `Node ${edge.from} exceeds the fan-out limit.`
-  }
-  const queue = [
-    ...definition.nodes
-      .filter((node) => indegree.get(node.id) === 0)
-      .map((node) => node.id),
-  ]
-  const depth = new Map(queue.map((id) => [id, 1]))
-  let processed = 0
-  while (queue.length) {
-    const id = queue.shift()!
-    processed += 1
-    if ((depth.get(id) ?? 1) > 8) return "Workflow depth cannot exceed 8 nodes."
-    for (const child of children.get(id) ?? []) {
-      depth.set(
-        child,
-        Math.max(depth.get(child) ?? 1, (depth.get(id) ?? 1) + 1)
-      )
-      indegree.set(child, (indegree.get(child) ?? 1) - 1)
-      if (indegree.get(child) === 0) queue.push(child)
-    }
-  }
-  return processed === definition.nodes.length
-    ? null
-    : "Workflow graphs must be acyclic."
+function parseDelimitedList(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+function formatDelimitedList(value: string[] | undefined) {
+  return (value ?? []).join(", ")
 }
 
 const AgentFlowNode = memo(function AgentFlowNode({
@@ -518,10 +647,17 @@ export function AgentsView({
   const [nativeOpen, setNativeOpen] = useState(false)
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null)
+  const [editingConnection, setEditingConnection] =
+    useState<AgentConnection | null>(null)
   const [nativeForm, setNativeForm] = useState<NativeAgentForm>(emptyNativeForm)
   const [remoteForm, setRemoteForm] = useState<RemoteAgentForm>(emptyRemoteForm)
   const [saving, setSaving] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [workflowDraft, setWorkflowDraft] = useState<WorkflowDraft | null>(null)
+  const [runDialogOpen, setRunDialogOpen] = useState(false)
+  const [runInput, setRunInput] = useState<WorkflowRunInput>({})
+  const [running, setRunning] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState("agent-1")
   const [positions, setPositions] = useState<
     Record<string, { x: number; y: number }>
@@ -562,6 +698,7 @@ export function AgentsView({
 
   const openNative = useCallback((agent?: Agent) => {
     setEditingAgent(agent ?? null)
+    setEditingConnection(null)
     setNativeForm(
       agent
         ? {
@@ -581,6 +718,49 @@ export function AgentsView({
     setError("")
     setNativeOpen(true)
   }, [])
+
+  const openRemote = useCallback(
+    (agent?: Agent) => {
+      const connection = agent?.connectionId
+        ? (connections.find((item) => item.id === agent.connectionId) ?? null)
+        : null
+      setEditingAgent(agent ?? null)
+      setEditingConnection(connection)
+      setRemoteForm(
+        agent && connection
+          ? {
+              ...emptyRemoteForm,
+              name: agent.name || connection.name,
+              description: agent.description,
+              endpointUrl: connection.endpointUrl,
+              authType: connection.authType,
+              visibility:
+                agent.visibility === "workspace" ? "workspace" : "private",
+              connectionScope:
+                connection.scopeType === "organization"
+                  ? "organization"
+                  : "user",
+              trustedReadOnly: connection.trustedReadOnly,
+            }
+          : { ...emptyRemoteForm }
+      )
+      setError("")
+      setDiscoveryMessage("")
+      setRemoteOpen(true)
+    },
+    [connections]
+  )
+
+  const openAgent = useCallback(
+    (agent?: Agent) => {
+      if (agent?.kind === "remote") {
+        openRemote(agent)
+      } else {
+        openNative(agent)
+      }
+    },
+    [openNative, openRemote]
+  )
 
   async function saveNative() {
     setSaving(true)
@@ -617,23 +797,8 @@ export function AgentsView({
     }
   }
 
-  async function removeAgent(agent: Agent) {
-    if (
-      !window.confirm(
-        `Delete ${agent.name}? Existing conversations keep their version pin.`
-      )
-    )
-      return
-    try {
-      await api.delete(`/api/v1/agents/${agent.id}`)
-      onAgentsChange(agents.filter((item) => item.id !== agent.id))
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The agent could not be deleted."
-      )
-    }
+  function removeAgent(agent: Agent) {
+    setDeleteTarget({ kind: "agent", item: agent })
   }
 
   async function discoverRemote() {
@@ -662,45 +827,88 @@ export function AgentsView({
   }
 
   async function saveRemote() {
+    if (!remoteForm.name.trim() || !remoteForm.endpointUrl.trim()) {
+      setError("Give the remote agent a name and endpoint URL.")
+      return
+    }
+    if (
+      remoteForm.visibility === "workspace" &&
+      remoteForm.connectionScope !== "organization"
+    ) {
+      setError("Workspace agents require a workspace connection.")
+      return
+    }
     setSaving(true)
     setError("")
+    const connectionPayload = remoteConnectionPayload(remoteForm)
+    const shouldStartOAuth =
+      remoteForm.authType === "oauth2" || remoteForm.authType === "oidc"
     try {
-      const connectionResult = await api.post<{ connection: AgentConnection }>(
-        "/api/v1/agent-connections",
-        {
-          scopeType: remoteForm.connectionScope,
-          name: remoteForm.name,
-          endpointUrl: remoteForm.endpointUrl,
-          authType: remoteForm.authType,
-          credential: remoteForm.credential || undefined,
-          username: remoteForm.username || undefined,
-          password: remoteForm.password || undefined,
-          accessToken: remoteForm.accessToken || undefined,
-          clientSecret: remoteForm.clientSecret || undefined,
-          certificate: remoteForm.certificate || undefined,
-          privateKey: remoteForm.privateKey || undefined,
-          oauthAuthorizationUrl: remoteForm.oauthAuthorizationUrl || undefined,
-          oauthTokenUrl: remoteForm.oauthTokenUrl || undefined,
-          oauthClientId: remoteForm.oauthClientId || undefined,
-          oauthScopes: remoteForm.oauthScopes || undefined,
-          trustedReadOnly: remoteForm.trustedReadOnly,
+      let connection: AgentConnection
+      let agent: Agent
+
+      if (editingAgent?.kind === "remote" && editingConnection) {
+        const connectionResult = await api.patch<{
+          connection: AgentConnection
+        }>(
+          `/api/v1/agent-connections/${editingConnection.id}`,
+          connectionPayload
+        )
+        connection = connectionResult.connection
+        const agentResult = await api.patch<{ agent: Agent }>(
+          `/api/v1/agents/${editingAgent.id}`,
+          {
+            kind: "remote",
+            name: remoteForm.name.trim(),
+            description: remoteForm.description.trim(),
+            visibility: remoteForm.visibility,
+            connectionId: connection.id,
+          }
+        )
+        agent = agentResult.agent
+        onAgentsChange(
+          agents.map((item) => (item.id === agent.id ? agent : item))
+        )
+        setConnections((current) =>
+          current.map((item) => (item.id === connection.id ? connection : item))
+        )
+      } else {
+        const connectionResult = await api.post<{
+          connection: AgentConnection
+        }>("/api/v1/agent-connections", connectionPayload)
+        connection = connectionResult.connection
+        try {
+          const agentResult = await api.post<{ agent: Agent }>(
+            "/api/v1/agents",
+            {
+              kind: "remote",
+              name: remoteForm.name.trim(),
+              description: remoteForm.description.trim(),
+              visibility: remoteForm.visibility,
+              connectionId: connection.id,
+            }
+          )
+          agent = agentResult.agent
+        } catch (caught) {
+          // Creating a connection and agent are two API operations. Roll back
+          // the connection if the second operation fails so a half-created
+          // remote setup does not remain in the workspace.
+          await api
+            .delete(`/api/v1/agent-connections/${connection.id}`)
+            .catch(() => undefined)
+          throw caught
         }
-      )
-      const agentResult = await api.post<{ agent: Agent }>("/api/v1/agents", {
-        kind: "remote",
-        name: remoteForm.name,
-        description: remoteForm.description,
-        visibility: remoteForm.visibility,
-        connectionId: connectionResult.connection.id,
-      })
-      onAgentsChange([agentResult.agent, ...agents])
-      setConnections((current) => [connectionResult.connection, ...current])
+        onAgentsChange([agent, ...agents])
+        setConnections((current) => [connection, ...current])
+      }
       setRemoteOpen(false)
       setRemoteForm(emptyRemoteForm)
+      setEditingAgent(null)
+      setEditingConnection(null)
       setDiscoveryMessage("")
-      if (remoteForm.authType === "oauth2" || remoteForm.authType === "oidc") {
+      if (shouldStartOAuth) {
         const oauth = await api.get<{ authorizationUrl: string }>(
-          `/api/v1/agent-connections/${connectionResult.connection.id}/oauth/start`
+          `/api/v1/agent-connections/${connection.id}/oauth/start`
         )
         window.location.assign(oauth.authorizationUrl)
       }
@@ -750,20 +958,8 @@ export function AgentsView({
     }
   }
 
-  async function deleteConnection(connection: AgentConnection) {
-    if (!window.confirm(`Remove the ${connection.name} connection?`)) return
-    try {
-      await api.delete(`/api/v1/agent-connections/${connection.id}`)
-      setConnections((current) =>
-        current.filter((item) => item.id !== connection.id)
-      )
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The connection could not be removed."
-      )
-    }
+  function deleteConnection(connection: AgentConnection) {
+    setDeleteTarget({ kind: "connection", item: connection })
   }
 
   const openWorkflow = useCallback((workflow?: AgentWorkflow) => {
@@ -772,6 +968,16 @@ export function AgentsView({
     setSelectedNodeId(next.definition.nodes[0]?.id ?? "")
     setPositions({})
     setValidationMessage("")
+  }, [])
+
+  const openWorkflowTemplate = useCallback((templateID: WorkflowTemplateId) => {
+    const next = workflowTemplateDraft(templateID)
+    setWorkflowDraft(next)
+    setSelectedNodeId(next.definition.nodes[0]?.id ?? "")
+    setPositions({})
+    setValidationMessage(
+      "Template loaded. Choose agents and review the mappings before saving."
+    )
   }, [])
 
   const updateWorkflow = useCallback((patch: Partial<WorkflowDraft>) => {
@@ -864,6 +1070,16 @@ export function AgentsView({
       setValidationMessage(localError)
       return
     }
+    const resourceError = validateWorkflowResources(
+      workflowDraft.definition,
+      workflowDraft.visibility,
+      agents,
+      connections
+    )
+    if (resourceError) {
+      setValidationMessage(resourceError)
+      return
+    }
     if (!workflowDraft.id) {
       setValidationMessage("Valid bounded DAG · ready to save")
       return
@@ -894,6 +1110,16 @@ export function AgentsView({
     const localError = validateWorkflowDefinition(workflowDraft.definition)
     if (localError) {
       setValidationMessage(localError)
+      return
+    }
+    const resourceError = validateWorkflowResources(
+      workflowDraft.definition,
+      workflowDraft.visibility,
+      agents,
+      connections
+    )
+    if (resourceError) {
+      setValidationMessage(resourceError)
       return
     }
     if (!workflowDraft.name.trim()) {
@@ -942,17 +1168,28 @@ export function AgentsView({
     }
   }
 
-  async function runWorkflow() {
+  function openRunDialog() {
     if (!workflowDraft?.id) {
       setValidationMessage("Save the workflow before running it.")
       return
     }
+    const names = workflowInputNames(workflowDraft.definition)
+    setRunInput(
+      Object.fromEntries(names.map((name) => [name, ""])) as WorkflowRunInput
+    )
+    setRunDialogOpen(true)
+  }
+
+  async function runWorkflow(input: WorkflowRunInput) {
+    if (!workflowDraft?.id || running) return
+    setRunning(true)
     try {
       const result = await api.post<{ run: AgentRun }>(
         `/api/v1/agent-workflows/${workflowDraft.id}/runs`,
-        { input: {} }
+        { input }
       )
       setRuns((current) => [result.run, ...current])
+      setRunDialogOpen(false)
       onTabChange("runs")
     } catch (caught) {
       setValidationMessage(
@@ -960,28 +1197,49 @@ export function AgentsView({
           ? caught.message
           : "The workflow could not be started."
       )
+    } finally {
+      setRunning(false)
     }
   }
 
-  async function deleteWorkflow(workflow: AgentWorkflow) {
-    if (
-      !window.confirm(
-        `Delete ${workflow.name}? Existing runs stay inspectable.`
-      )
-    )
-      return
+  function deleteWorkflow(workflow: AgentWorkflow) {
+    setDeleteTarget({ kind: "workflow", item: workflow })
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || deleting) return
+    const target = deleteTarget
+    setDeleting(true)
+    setError("")
     try {
-      await api.delete(`/api/v1/agent-workflows/${workflow.id}`)
-      setWorkflows((current) =>
-        current.filter((item) => item.id !== workflow.id)
-      )
-      if (workflowDraft?.id === workflow.id) setWorkflowDraft(null)
+      if (target.kind === "agent") {
+        await api.delete(`/api/v1/agents/${target.item.id}`)
+        onAgentsChange(agents.filter((item) => item.id !== target.item.id))
+      } else if (target.kind === "connection") {
+        await api.delete(`/api/v1/agent-connections/${target.item.id}`)
+        setConnections((current) =>
+          current.filter((item) => item.id !== target.item.id)
+        )
+      } else {
+        await api.delete(`/api/v1/agent-workflows/${target.item.id}`)
+        setWorkflows((current) =>
+          current.filter((item) => item.id !== target.item.id)
+        )
+        if (workflowDraft?.id === target.item.id) setWorkflowDraft(null)
+      }
     } catch (caught) {
-      setValidationMessage(
+      setError(
         caught instanceof Error
           ? caught.message
-          : "The workflow could not be deleted."
+          : target.kind === "agent"
+            ? "The agent could not be deleted."
+            : target.kind === "connection"
+              ? "The connection could not be removed."
+              : "The workflow could not be deleted."
       )
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -1017,6 +1275,9 @@ export function AgentsView({
       })) ?? [],
     [workflowDraft]
   )
+  const currentRunInputNames = workflowDraft
+    ? workflowInputNames(workflowDraft.definition)
+    : []
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -1048,7 +1309,7 @@ export function AgentsView({
         </div>
         {activeTab === "agents" && !disabled && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setRemoteOpen(true)}>
+            <Button variant="outline" onClick={() => openRemote()}>
               <Link2 data-icon="inline-start" />
               Connect remote
             </Button>
@@ -1104,7 +1365,7 @@ export function AgentsView({
             <AgentsPanel
               agents={agents}
               connections={connections}
-              onEdit={openNative}
+              onEdit={openAgent}
               onDelete={removeAgent}
               onTest={testConnection}
               onToggleConnection={toggleConnection}
@@ -1118,6 +1379,7 @@ export function AgentsView({
             workflows={workflows}
             draft={workflowDraft}
             agents={agents}
+            connections={connections}
             mcpServers={mcpServers}
             knowledgeSources={knowledgeSources}
             selectedNode={selectedNode}
@@ -1128,6 +1390,7 @@ export function AgentsView({
             saving={saving}
             validating={validating}
             onOpen={openWorkflow}
+            onOpenTemplate={openWorkflowTemplate}
             onDelete={deleteWorkflow}
             onUpdate={updateWorkflow}
             onUpdateNode={updateWorkflowNode}
@@ -1140,7 +1403,7 @@ export function AgentsView({
             }
             onValidate={() => void validateWorkflow()}
             onSave={() => void saveWorkflow()}
-            onRun={() => void runWorkflow()}
+            onRun={openRunDialog}
             disabled={disabled}
           />
         </TabsContent>
@@ -1299,6 +1562,7 @@ export function AgentsView({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field orientation="horizontal">
                 <Switch
+                  aria-label="Use memory"
                   checked={nativeForm.useMemory}
                   onCheckedChange={(checked) =>
                     setNativeForm({ ...nativeForm, useMemory: checked })
@@ -1313,6 +1577,7 @@ export function AgentsView({
               </Field>
               <Field orientation="horizontal">
                 <Switch
+                  aria-label="Use deep context"
                   checked={nativeForm.deepContext}
                   onCheckedChange={(checked) =>
                     setNativeForm({ ...nativeForm, deepContext: checked })
@@ -1396,10 +1661,21 @@ export function AgentsView({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={remoteOpen} onOpenChange={setRemoteOpen}>
+      <Dialog
+        open={remoteOpen}
+        onOpenChange={(open) => {
+          setRemoteOpen(open)
+          if (!open) {
+            setEditingAgent(null)
+            setEditingConnection(null)
+          }
+        }}
+      >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Connect an A2A agent</DialogTitle>
+            <DialogTitle>
+              {editingAgent ? "Configure A2A agent" : "Connect an A2A agent"}
+            </DialogTitle>
             <DialogDescription>
               JustAI makes outbound A2A 1.0 HTTP+JSON/SSE calls. Credentials are
               encrypted and never included in cards, prompts, logs, or audit
@@ -1456,6 +1732,7 @@ export function AgentsView({
                 <FieldLabel>Connection scope</FieldLabel>
                 <Select
                   value={remoteForm.connectionScope}
+                  disabled={remoteForm.visibility === "workspace"}
                   onValueChange={(value) =>
                     setRemoteForm({
                       ...remoteForm,
@@ -1723,6 +2000,7 @@ export function AgentsView({
             )}
             <Field orientation="horizontal">
               <Switch
+                aria-label="Trust read-only operations"
                 checked={remoteForm.trustedReadOnly}
                 onCheckedChange={(checked) =>
                   setRemoteForm({ ...remoteForm, trustedReadOnly: checked })
@@ -1750,11 +2028,111 @@ export function AgentsView({
               onClick={() => void saveRemote()}
             >
               <LockKeyhole data-icon="inline-start" />
-              {saving ? "Connecting…" : "Save encrypted connection"}
+              {saving
+                ? editingAgent
+                  ? "Saving…"
+                  : "Connecting…"
+                : editingAgent
+                  ? "Save changes"
+                  : "Save encrypted connection"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={runDialogOpen} onOpenChange={setRunDialogOpen}>
+        <DialogContent className="max-h-[min(720px,calc(100svh-2rem))] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Run workflow</DialogTitle>
+            <DialogDescription>
+              Provide the values declared by this workflow. They are captured
+              with the immutable run snapshot and passed only to mapped nodes.
+            </DialogDescription>
+          </DialogHeader>
+          {currentRunInputNames.length ? (
+            <FieldGroup>
+              {currentRunInputNames.map((name) => (
+                <Field key={name}>
+                  <FieldLabel htmlFor={`workflow-run-input-${name}`}>
+                    {name}
+                  </FieldLabel>
+                  <Textarea
+                    id={`workflow-run-input-${name}`}
+                    rows={3}
+                    value={runInput[name] ?? ""}
+                    onChange={(event) =>
+                      setRunInput((current) => ({
+                        ...current,
+                        [name]: event.target.value,
+                      }))
+                    }
+                    placeholder="Enter a value"
+                  />
+                </Field>
+              ))}
+            </FieldGroup>
+          ) : (
+            <Alert>
+              <ListChecks data-icon="inline-start" />
+              <AlertDescription>
+                This workflow has no declared inputs. Add a “Workflow input”
+                binding to a node if the run should accept a value.
+              </AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRunDialogOpen(false)}
+              disabled={running}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void runWorkflow(runInput)}
+              disabled={running}
+            >
+              {running ? "Starting…" : "Start run"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget?.kind === "agent"
+                ? `Delete ${deleteTarget.item.name}?`
+                : deleteTarget?.kind === "connection"
+                  ? `Remove the ${deleteTarget.item.name} connection?`
+                  : `Delete ${deleteTarget?.item.name ?? "this workflow"}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.kind === "agent"
+                ? "Existing conversations keep their pinned agent version. New runs will no longer be able to select this agent."
+                : deleteTarget?.kind === "connection"
+                  ? "Remote agents using this connection may stop working. This cannot be undone."
+                  : "Existing runs stay inspectable, but this workflow will no longer be available for new runs or schedules."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting}
+              onClick={() => void confirmDelete()}
+            >
+              {deleting ? "Removing…" : "Confirm deletion"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -2012,6 +2390,7 @@ function WorkflowsPanel({
   workflows,
   draft,
   agents,
+  connections,
   mcpServers,
   knowledgeSources,
   selectedNode,
@@ -2022,6 +2401,7 @@ function WorkflowsPanel({
   saving,
   validating,
   onOpen,
+  onOpenTemplate,
   onDelete,
   onUpdate,
   onUpdateNode,
@@ -2038,6 +2418,7 @@ function WorkflowsPanel({
   workflows: AgentWorkflow[]
   draft: WorkflowDraft | null
   agents: Agent[]
+  connections: AgentConnection[]
   mcpServers: MCPServer[]
   knowledgeSources: KnowledgeSource[]
   selectedNode?: AgentWorkflowNode
@@ -2048,6 +2429,7 @@ function WorkflowsPanel({
   saving: boolean
   validating: boolean
   onOpen: (workflow?: AgentWorkflow) => void
+  onOpenTemplate: (templateID: WorkflowTemplateId) => void
   onDelete: (workflow: AgentWorkflow) => void
   onUpdate: (patch: Partial<WorkflowDraft>) => void
   onUpdateNode: (id: string, patch: Partial<AgentWorkflowNode>) => void
@@ -2122,9 +2504,11 @@ function WorkflowsPanel({
               </span>
               <span className="mt-1 block text-xs text-muted-foreground">
                 {workflow.definition.nodes.length} nodes ·{" "}
-                {workflow.schedule.kind === "manual"
-                  ? "Manual"
-                  : `${workflow.schedule.kind} · ${workflow.timezone}`}
+                {workflowScheduleDescription(workflow.schedule)}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                Next run:{" "}
+                {formatWorkflowNextRun(workflow.nextRunAt, workflow.timezone)}
               </span>
             </button>
           ))}
@@ -2133,6 +2517,27 @@ function WorkflowsPanel({
               No saved workflows.
             </p>
           )}
+          <div className="mt-2 border-t pt-3">
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
+              <Sparkles className="size-3.5 text-primary" />
+              Start from a template
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {workflowTemplates.map((template) => (
+                <button
+                  key={template.id}
+                  className="rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-muted/60"
+                  onClick={() => onOpenTemplate(template.id)}
+                  type="button"
+                >
+                  <span className="block font-medium">{template.name}</span>
+                  <span className="mt-0.5 block text-muted-foreground">
+                    {template.description}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
         </CardContent>
         {draft?.id && (
           <CardFooter className="border-t">
@@ -2342,6 +2747,8 @@ function WorkflowsPanel({
                 node={selectedNode}
                 selectedNodeId={selectedNodeId}
                 agents={agents}
+                connections={connections}
+                workflowNodes={draft.definition.nodes}
                 mcpServers={mcpServers}
                 knowledgeSources={knowledgeSources}
                 onUpdate={onUpdateNode}
@@ -2352,6 +2759,13 @@ function WorkflowsPanel({
             <ScheduleEditor
               schedule={draft.schedule}
               enabled={draft.enabled}
+              nextRunAt={
+                draft.id
+                  ? workflows.find((workflow) => workflow.id === draft.id)
+                      ?.nextRunAt
+                  : null
+              }
+              timezone={draft.timezone}
               onScheduleChange={(schedule) => onUpdate({ schedule })}
               onEnabledChange={(enabled) => onUpdate({ enabled })}
               disabled={disabled}
@@ -2388,6 +2802,8 @@ function NodeInspector({
   node,
   selectedNodeId,
   agents,
+  connections,
+  workflowNodes,
   mcpServers,
   knowledgeSources,
   onUpdate,
@@ -2397,6 +2813,8 @@ function NodeInspector({
   node?: AgentWorkflowNode
   selectedNodeId: string
   agents: Agent[]
+  connections: AgentConnection[]
+  workflowNodes: AgentWorkflowNode[]
   mcpServers: MCPServer[]
   knowledgeSources: KnowledgeSource[]
   onUpdate: (id: string, patch: Partial<AgentWorkflowNode>) => void
@@ -2412,6 +2830,54 @@ function NodeInspector({
       </Card>
     )
   const context = node.context ?? {}
+  const inputBindings = node.inputBindings ?? []
+  const otherNodes = workflowNodes.filter(
+    (candidate) => candidate.id !== node.id
+  )
+  const selectedAgent = agents.find((agent) => agent.id === node.agentId)
+  const selectedConnection = selectedAgent?.connectionId
+    ? connections.find(
+        (connection) => connection.id === selectedAgent.connectionId
+      )
+    : undefined
+
+  const updateBinding = (index: number, patch: Partial<AgentInputBinding>) => {
+    const next = inputBindings.map((binding, bindingIndex) =>
+      bindingIndex === index ? { ...binding, ...patch } : binding
+    )
+    onUpdate(node.id, { inputBindings: next })
+  }
+
+  const addBinding = () => {
+    const existingNames = new Set(inputBindings.map((binding) => binding.name))
+    let name = "input"
+    let suffix = 2
+    while (existingNames.has(name)) {
+      name = `input_${suffix}`
+      suffix += 1
+    }
+    onUpdate(node.id, {
+      inputBindings: [...inputBindings, { name, source: "input" }],
+    })
+  }
+
+  const removeBinding = (index: number) => {
+    onUpdate(node.id, {
+      inputBindings: inputBindings.filter(
+        (_, bindingIndex) => bindingIndex !== index
+      ),
+    })
+  }
+
+  const updateDelimitedContext = (
+    key: "repositoryIds" | "noteIds" | "transcriptionSessionIds" | "mcpTools",
+    value: string
+  ) => {
+    onUpdate(node.id, {
+      context: updateContext(context, { [key]: parseDelimitedList(value) }),
+    })
+  }
+
   return (
     <Card className="h-fit">
       <CardHeader>
@@ -2445,12 +2911,13 @@ function NodeInspector({
           >
             <SelectTrigger>
               <SelectValue>
-                {node.agentId
-                  ? `${agentToSavedLabel(
-                      agents.find((agent) => agent.id === node.agentId)
-                    )} · ${
-                      agents.find((agent) => agent.id === node.agentId)?.kind ??
-                      "native"
+                {selectedAgent
+                  ? `${agentToSavedLabel(selectedAgent)} · ${
+                      selectedAgent.kind ?? "native"
+                    }${
+                      selectedAgent.kind === "remote" && selectedConnection
+                        ? ` · ${connectionScopeLabel(selectedConnection.scopeType)}`
+                        : ""
                     }`
                   : "Default native agent"}
               </SelectValue>
@@ -2458,11 +2925,21 @@ function NodeInspector({
             <SelectContent>
               <SelectGroup>
                 <SelectItem value="default">Default native agent</SelectItem>
-                {agents.map((agent) => (
-                  <SelectItem key={agent.id} value={agent.id}>
-                    {agent.name} · {agent.kind}
-                  </SelectItem>
-                ))}
+                {agents.map((agent) => {
+                  const connection = agent.connectionId
+                    ? connections.find(
+                        (candidate) => candidate.id === agent.connectionId
+                      )
+                    : undefined
+                  return (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      {agent.name} · {agent.kind}
+                      {agent.kind === "remote" && connection
+                        ? ` · ${connectionScopeLabel(connection.scopeType)}`
+                        : ""}
+                    </SelectItem>
+                  )
+                })}
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -2546,6 +3023,210 @@ function NodeInspector({
           />
         </Field>
         <FieldSet>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <FieldLegend variant="label">
+                Input and output mappings
+              </FieldLegend>
+              <FieldDescription>
+                Give this node named values from the workflow run or a connected
+                previous node.
+              </FieldDescription>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={addBinding}
+              disabled={disabled}
+            >
+              <Plus data-icon="inline-start" />
+              Add mapping
+            </Button>
+          </div>
+          {inputBindings.length ? (
+            <div className="flex flex-col gap-3">
+              {inputBindings.map((binding, index) => {
+                const source = binding.source.trim().toLowerCase()
+                return (
+                  <div
+                    key={`${node.id}-binding-${index}`}
+                    className="rounded-lg border bg-muted/20 p-3"
+                  >
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
+                      <Field>
+                        <FieldLabel
+                          htmlFor={`binding-name-${node.id}-${index}`}
+                        >
+                          Name
+                        </FieldLabel>
+                        <Input
+                          id={`binding-name-${node.id}-${index}`}
+                          value={binding.name}
+                          disabled={disabled}
+                          onChange={(event) =>
+                            updateBinding(index, { name: event.target.value })
+                          }
+                          placeholder="research_question"
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel>Source</FieldLabel>
+                        <Select
+                          value={source === "node" ? "node" : "input"}
+                          disabled={disabled}
+                          onValueChange={(value) =>
+                            updateBinding(index, {
+                              source: value === "node" ? "node" : "input",
+                              nodeId:
+                                value === "node" ? binding.nodeId : undefined,
+                              path: value === "node" ? binding.path : undefined,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue>
+                              {source === "node"
+                                ? "Previous output"
+                                : "Workflow input"}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectItem value="input">
+                                Workflow input
+                              </SelectItem>
+                              <SelectItem value="node">
+                                Previous output
+                              </SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="self-end"
+                        onClick={() => removeBinding(index)}
+                        disabled={disabled}
+                        aria-label={`Remove ${binding.name || "input"} mapping`}
+                      >
+                        <X data-icon="inline-start" />
+                      </Button>
+                    </div>
+                    {source === "node" && (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <Field>
+                          <FieldLabel>Previous node</FieldLabel>
+                          <Select
+                            value={binding.nodeId ?? "none"}
+                            disabled={disabled || !otherNodes.length}
+                            onValueChange={(value) =>
+                              updateBinding(index, {
+                                nodeId:
+                                  value === "none"
+                                    ? undefined
+                                    : (value ?? undefined),
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue>
+                                {otherNodes.find(
+                                  (candidate) => candidate.id === binding.nodeId
+                                )?.id ?? "Choose a connected node"}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                <SelectItem value="none">
+                                  Choose a connected node
+                                </SelectItem>
+                                {otherNodes.map((candidate) => (
+                                  <SelectItem
+                                    key={candidate.id}
+                                    value={candidate.id}
+                                  >
+                                    {candidate.id}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        <Field>
+                          <FieldLabel
+                            htmlFor={`binding-path-${node.id}-${index}`}
+                          >
+                            Output path (optional)
+                          </FieldLabel>
+                          <Input
+                            id={`binding-path-${node.id}-${index}`}
+                            value={binding.path ?? ""}
+                            disabled={disabled}
+                            onChange={(event) =>
+                              updateBinding(index, {
+                                path: event.target.value || undefined,
+                              })
+                            }
+                            placeholder="result.summary"
+                          />
+                        </Field>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No mappings yet. Nodes receive the workflow context by default.
+            </p>
+          )}
+        </FieldSet>
+        <FieldSet>
+          <FieldLegend variant="label">Delegation allowlist</FieldLegend>
+          <FieldDescription>
+            These agents may be selected by this node when it delegates work.
+          </FieldDescription>
+          <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
+            {agents.length ? (
+              agents
+                .filter((agent) => agent.id !== node.agentId)
+                .map((agent) => (
+                  <label
+                    key={agent.id}
+                    className="flex items-center gap-2 text-xs"
+                  >
+                    <input
+                      className="size-3.5 accent-primary"
+                      type="checkbox"
+                      checked={
+                        node.delegationAgentIds?.includes(agent.id) ?? false
+                      }
+                      disabled={disabled}
+                      onChange={() => {
+                        const current = node.delegationAgentIds ?? []
+                        onUpdate(node.id, {
+                          delegationAgentIds: current.includes(agent.id)
+                            ? current.filter((id) => id !== agent.id)
+                            : [...current, agent.id],
+                        })
+                      }}
+                    />
+                    <span className="truncate">{agent.name}</span>
+                    <span className="text-muted-foreground">{agent.kind}</span>
+                  </label>
+                ))
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                Add another agent to enable delegation.
+              </span>
+            )}
+          </div>
+        </FieldSet>
+        <FieldSet>
           <FieldLegend variant="label">MCP grants</FieldLegend>
           <FieldDescription>
             Only selected servers and tools enter this node’s immutable context
@@ -2588,7 +3269,7 @@ function NodeInspector({
           <FieldLegend variant="label">Knowledge grants</FieldLegend>
           <div className="flex max-h-24 flex-col gap-2 overflow-y-auto">
             {knowledgeSources.length ? (
-              knowledgeSources.slice(0, 8).map((source) => (
+              knowledgeSources.map((source) => (
                 <label
                   key={source.id}
                   className="flex items-center gap-2 text-xs"
@@ -2621,6 +3302,74 @@ function NodeInspector({
             )}
           </div>
         </FieldSet>
+        <FieldSet>
+          <FieldLegend variant="label">
+            Additional context references
+          </FieldLegend>
+          <FieldDescription>
+            Optional comma-separated IDs or tool names. Access is evaluated at
+            run time and remains scoped to this node.
+          </FieldDescription>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor={`repositories-${node.id}`}>
+                Repository IDs
+              </FieldLabel>
+              <Input
+                id={`repositories-${node.id}`}
+                value={formatDelimitedList(context.repositoryIds)}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDelimitedContext("repositoryIds", event.target.value)
+                }
+                placeholder="repo_123, repo_456"
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`notes-${node.id}`}>Note IDs</FieldLabel>
+              <Input
+                id={`notes-${node.id}`}
+                value={formatDelimitedList(context.noteIds)}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDelimitedContext("noteIds", event.target.value)
+                }
+                placeholder="note_123, note_456"
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`transcriptions-${node.id}`}>
+                Transcription session IDs
+              </FieldLabel>
+              <Input
+                id={`transcriptions-${node.id}`}
+                value={formatDelimitedList(context.transcriptionSessionIds)}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDelimitedContext(
+                    "transcriptionSessionIds",
+                    event.target.value
+                  )
+                }
+                placeholder="session_123"
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`mcp-tools-${node.id}`}>
+                MCP tool names
+              </FieldLabel>
+              <Input
+                id={`mcp-tools-${node.id}`}
+                value={formatDelimitedList(context.mcpTools)}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDelimitedContext("mcpTools", event.target.value)
+                }
+                placeholder="search, fetch"
+              />
+            </Field>
+          </FieldGroup>
+        </FieldSet>
       </CardContent>
     </Card>
   )
@@ -2629,12 +3378,16 @@ function NodeInspector({
 function ScheduleEditor({
   schedule,
   enabled,
+  nextRunAt,
+  timezone,
   onScheduleChange,
   onEnabledChange,
   disabled = false,
 }: {
   schedule: AgentSchedule
   enabled: boolean
+  nextRunAt?: string | null
+  timezone: string
   onScheduleChange: (schedule: AgentSchedule) => void
   onEnabledChange: (enabled: boolean) => void
   disabled?: boolean
@@ -2651,6 +3404,7 @@ function ScheduleEditor({
         </div>
         <Field orientation="horizontal">
           <Switch
+            aria-label="Enable schedule"
             checked={enabled}
             disabled={disabled}
             onCheckedChange={onEnabledChange}
@@ -2710,15 +3464,9 @@ function ScheduleEditor({
                 }
               />
             </Field>
-            <Field>
-              <FieldLabel>
-                {kind === "monthly"
-                  ? "Day of month"
-                  : kind === "weekly"
-                    ? "Weekday"
-                    : "Time"}
-              </FieldLabel>
-              {kind === "weekly" ? (
+            {kind === "weekly" && (
+              <Field>
+                <FieldLabel>Weekday</FieldLabel>
                 <Select
                   value={String(schedule.weekday ?? 1)}
                   disabled={disabled}
@@ -2750,30 +3498,29 @@ function ScheduleEditor({
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-              ) : (
+              </Field>
+            )}
+            {kind === "monthly" && (
+              <Field>
+                <FieldLabel>Day of month</FieldLabel>
                 <Input
-                  type={kind === "monthly" ? "number" : "time"}
-                  min={kind === "monthly" ? 1 : undefined}
-                  max={kind === "monthly" ? 31 : undefined}
-                  value={
-                    kind === "monthly"
-                      ? (schedule.weekday ?? 1)
-                      : (schedule.time ?? "09:00")
-                  }
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={schedule.weekday ?? 1}
                   disabled={disabled}
                   onChange={(event) =>
-                    onScheduleChange(
-                      kind === "monthly"
-                        ? {
-                            ...schedule,
-                            weekday: Number(event.target.value) || 1,
-                          }
-                        : { ...schedule, time: event.target.value }
-                    )
+                    onScheduleChange({
+                      ...schedule,
+                      weekday: Math.max(
+                        1,
+                        Math.min(31, Number(event.target.value) || 1)
+                      ),
+                    })
                   }
                 />
-              )}
-            </Field>
+              </Field>
+            )}
             <Field>
               <FieldLabel>Time</FieldLabel>
               <Input
@@ -2787,6 +3534,12 @@ function ScheduleEditor({
             </Field>
           </>
         )}
+      </div>
+      <div className="rounded-lg border bg-background/70 px-3 py-2 text-xs">
+        <p className="font-medium">{workflowScheduleDescription(schedule)}</p>
+        <p className="mt-1 text-muted-foreground">
+          Next run: {formatWorkflowNextRun(nextRunAt, timezone)}
+        </p>
       </div>
     </section>
   )

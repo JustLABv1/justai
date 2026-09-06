@@ -21,6 +21,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 export function PrivacyView() {
   const [settings, setSettings] = useState<PrivacySettings>({
@@ -33,6 +34,7 @@ export function PrivacyView() {
   const [cleaning, setCleaning] = useState(false)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
+  const [cleanupOpen, setCleanupOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -79,6 +81,7 @@ export function PrivacyView() {
       setNotice(
         "Privacy settings saved. The retention worker will apply them automatically."
       )
+      setCleanupOpen(false)
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -230,7 +233,7 @@ export function PrivacyView() {
             </Button>
             <Button
               disabled={cleaning}
-              onClick={() => void runCleanup()}
+              onClick={() => setCleanupOpen(true)}
               variant="outline"
             >
               <Play data-icon="inline-start" />
@@ -259,6 +262,15 @@ export function PrivacyView() {
           </p>
         </CardContent>
       </Card>
+      <ConfirmActionDialog
+        open={cleanupOpen}
+        title="Run retention cleanup now?"
+        description="Data older than your retention limits will be permanently removed. Review the values above before continuing."
+        confirmLabel="Run cleanup"
+        pending={cleaning}
+        onOpenChange={setCleanupOpen}
+        onConfirm={runCleanup}
+      />
     </div>
   )
 }

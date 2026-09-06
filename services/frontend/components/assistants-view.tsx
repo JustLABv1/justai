@@ -8,6 +8,7 @@ import type { Endpoint, SavedAssistant } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 import {
   Card,
   CardAction,
@@ -114,6 +115,8 @@ export function AssistantsView({
   const [form, setForm] = useState<AssistantForm>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [deleteTarget, setDeleteTarget] = useState<SavedAssistant | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const chatEndpoints = useMemo(
     () =>
@@ -193,14 +196,10 @@ export function AssistantsView({
     }
   }
 
-  async function deleteAssistant(assistant: SavedAssistant) {
-    if (
-      !window.confirm(
-        `Delete “${assistant.name}”? Existing conversations will keep their pinned version.`
-      )
-    ) {
-      return
-    }
+  async function deleteAssistant() {
+    if (!deleteTarget || deleting) return
+    const assistant = deleteTarget
+    setDeleting(true)
     setError("")
     try {
       await api.delete(`/api/v1/assistants/${assistant.id}`)
@@ -211,6 +210,9 @@ export function AssistantsView({
           ? caught.message
           : "The assistant could not be deleted."
       )
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -309,7 +311,7 @@ export function AssistantsView({
                       aria-label={`Delete ${assistant.name}`}
                       size="icon-sm"
                       variant="ghost"
-                      onClick={() => void deleteAssistant(assistant)}
+                      onClick={() => setDeleteTarget(assistant)}
                     >
                       <Trash2 />
                     </Button>
@@ -498,6 +500,17 @@ export function AssistantsView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmActionDialog
+        open={deleteTarget !== null}
+        title={`Delete “${deleteTarget?.name ?? "assistant"}”?`}
+        description="Existing conversations keep their pinned version, but this reusable assistant will no longer be available for new chats."
+        confirmLabel="Delete assistant"
+        pending={deleting}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null)
+        }}
+        onConfirm={() => void deleteAssistant()}
+      />
     </div>
   )
 }

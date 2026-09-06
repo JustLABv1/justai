@@ -813,6 +813,12 @@ function UsersView({
   const [detail, setDetail] = useState<any | null>(null)
   const [actionError, setActionError] = useState("")
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [deleteCandidate, setDeleteCandidate] = useState<{
+    item: any
+    owned: any[]
+  } | null>(null)
+  const [deletePhrase, setDeletePhrase] = useState("")
+  const [revokeCandidate, setRevokeCandidate] = useState<any | null>(null)
 
   async function showDetail(id: string) {
     setLoadingDetail(true)
@@ -833,8 +839,7 @@ function UsersView({
     }
   }
 
-  async function deleteUser(item: any) {
-    if (!window.confirm("Permanently delete this user?")) return
+  async function openDeleteUser(item: any) {
     setActionError("")
     try {
       const result = await api.get<{ organizations: any[] }>(
@@ -843,17 +848,25 @@ function UsersView({
       const owned = (result.organizations ?? []).filter(
         (organization) => organization.role === "owner"
       )
-      const confirmation = window.prompt(
-        owned.length > 0
-          ? `Type DELETE to remove ${item.displayName} and permanently delete ${owned.length} owned workspace(s).`
-          : `Type DELETE to permanently remove ${item.displayName}.`
+      setDeletePhrase("")
+      setDeleteCandidate({ item, owned })
+    } catch (caught) {
+      setActionError(
+        caught instanceof Error ? caught.message : "User could not be deleted."
       )
-      if (confirmation !== "DELETE") return
-      await api.delete(`/api/v1/admin/users/${item.id}`, {
+    }
+  }
+
+  async function deleteUser() {
+    if (!deleteCandidate || deletePhrase !== "DELETE") return
+    setActionError("")
+    try {
+      await api.delete(`/api/v1/admin/users/${deleteCandidate.item.id}`, {
         confirm: true,
-        deleteOrganizationIds: owned.map((organization) => organization.id),
+        deleteOrganizationIds: deleteCandidate.owned.map((organization) => organization.id),
       })
       setDetail(null)
+      setDeleteCandidate(null)
       onReload()
     } catch (caught) {
       setActionError(
@@ -972,33 +985,14 @@ function UsersView({
                                 : "Promote admin"}
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={async () => {
-                                if (
-                                  !window.confirm(
-                                    "Revoke every active session for this user?"
-                                  )
-                                )
-                                  return
-                                try {
-                                  await api.post(
-                                    `/api/v1/admin/users/${item.id}/revoke-sessions`
-                                  )
-                                  onReload()
-                                } catch (caught) {
-                                  setActionError(
-                                    caught instanceof Error
-                                      ? caught.message
-                                      : "Sessions could not be revoked."
-                                  )
-                                }
-                              }}
+                              onClick={() => setRevokeCandidate(item)}
                             >
                               <RefreshCw aria-hidden="true" /> Revoke sessions
                             </DropdownMenuItem>
                           </DropdownMenuGroup>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={() => void deleteUser(item)}
+                            onClick={() => void openDeleteUser(item)}
                             variant="destructive"
                           >
                             <Trash2 aria-hidden="true" /> Delete user
@@ -1112,33 +1106,14 @@ function UsersView({
                         : "Promote admin"}
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={async () => {
-                        if (
-                          !window.confirm(
-                            "Revoke every active session for this user?"
-                          )
-                        )
-                          return
-                        try {
-                          await api.post(
-                            `/api/v1/admin/users/${detail.user.id}/revoke-sessions`
-                          )
-                          onReload()
-                        } catch (caught) {
-                          setActionError(
-                            caught instanceof Error
-                              ? caught.message
-                              : "Sessions could not be revoked."
-                          )
-                        }
-                      }}
+                      onClick={() => setRevokeCandidate(detail.user)}
                     >
                       <RefreshCw aria-hidden="true" /> Revoke sessions
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    onClick={() => void deleteUser(detail.user)}
+                    onClick={() => void openDeleteUser(detail.user)}
                     variant="destructive"
                   >
                     <Trash2 aria-hidden="true" /> Delete user
@@ -1146,6 +1121,82 @@ function UsersView({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={deleteCandidate !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteCandidate(null)
+            setDeletePhrase("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Permanently delete user</DialogTitle>
+            <DialogDescription>
+              {deleteCandidate?.owned.length
+                ? `This also deletes ${deleteCandidate.owned.length} owned workspace(s). Type DELETE to continue.`
+                : `This permanently removes ${deleteCandidate?.item.displayName ?? "this user"}. Type DELETE to continue.`}
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label="Type DELETE to confirm"
+            autoComplete="off"
+            onChange={(event) => setDeletePhrase(event.target.value)}
+            placeholder="DELETE"
+            value={deletePhrase}
+          />
+          <DialogFooter>
+            <Button onClick={() => setDeleteCandidate(null)} variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={deletePhrase !== "DELETE"}
+              onClick={() => void deleteUser()}
+              variant="destructive"
+            >
+              Delete user
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={revokeCandidate !== null}
+        onOpenChange={(open) => !open && setRevokeCandidate(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Revoke active sessions</DialogTitle>
+            <DialogDescription>
+              {`Every active session for ${revokeCandidate?.displayName ?? "this user"} will need to sign in again.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setRevokeCandidate(null)} variant="outline">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                const userToRevoke = revokeCandidate
+                if (!userToRevoke) return
+                void api
+                  .post(`/api/v1/admin/users/${userToRevoke.id}/revoke-sessions`)
+                  .then(onReload)
+                  .catch((caught) =>
+                    setActionError(
+                      caught instanceof Error
+                        ? caught.message
+                        : "Sessions could not be revoked."
+                    )
+                  )
+                  .finally(() => setRevokeCandidate(null))
+              }}
+            >
+              Revoke sessions
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1172,6 +1223,10 @@ function WorkspacesView({
 }) {
   const [detail, setDetail] = useState<any | null>(null)
   const [actionError, setActionError] = useState("")
+  const [transferCandidate, setTransferCandidate] = useState<any | null>(null)
+  const [newOwnerID, setNewOwnerID] = useState("")
+  const [deleteCandidate, setDeleteCandidate] = useState<any | null>(null)
+  const [deletePhrase, setDeletePhrase] = useState("")
 
   async function showDetail(id: string) {
     setActionError("")
@@ -1299,24 +1354,9 @@ function WorkspacesView({
                                 : "Suspend"}
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={async () => {
-                                const newOwnerId = window
-                                  .prompt("Enter the new owner user ID")
-                                  ?.trim()
-                                if (!newOwnerId) return
-                                try {
-                                  await api.post(
-                                    `/api/v1/admin/organizations/${item.id}/transfer-ownership`,
-                                    { newOwnerId }
-                                  )
-                                  await onUpdate(item.id, {})
-                                } catch (caught) {
-                                  setActionError(
-                                    caught instanceof Error
-                                      ? caught.message
-                                      : "Ownership could not be transferred."
-                                  )
-                                }
+                              onClick={() => {
+                                setNewOwnerID("")
+                                setTransferCandidate(item)
                               }}
                             >
                               <ArrowLeftRight aria-hidden="true" /> Transfer
@@ -1325,24 +1365,9 @@ function WorkspacesView({
                           </DropdownMenuGroup>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={async () => {
-                              const confirmation = window.prompt(
-                                `Type ${item.name} to permanently delete this workspace`
-                              )
-                              if (confirmation !== item.name) return
-                              try {
-                                await api.delete(
-                                  `/api/v1/admin/organizations/${item.id}`,
-                                  { confirmName: confirmation }
-                                )
-                                onReload()
-                              } catch (caught) {
-                                setActionError(
-                                  caught instanceof Error
-                                    ? caught.message
-                                    : "Workspace could not be deleted."
-                                )
-                              }
+                            onClick={() => {
+                              setDeletePhrase("")
+                              setDeleteCandidate(item)
                             }}
                             variant="destructive"
                           >
@@ -1432,6 +1457,98 @@ function WorkspacesView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog
+        open={transferCandidate !== null}
+        onOpenChange={(open) => !open && setTransferCandidate(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Transfer workspace ownership</DialogTitle>
+            <DialogDescription>
+              Enter the user ID of the new owner for {transferCandidate?.name ?? "this workspace"}.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label="New owner user ID"
+            autoComplete="off"
+            onChange={(event) => setNewOwnerID(event.target.value)}
+            placeholder="User ID"
+            value={newOwnerID}
+          />
+          <DialogFooter>
+            <Button onClick={() => setTransferCandidate(null)} variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={!newOwnerID.trim()}
+              onClick={() => {
+                const workspace = transferCandidate
+                const newOwnerId = newOwnerID.trim()
+                if (!workspace || !newOwnerId) return
+                void api
+                  .post(`/api/v1/admin/organizations/${workspace.id}/transfer-ownership`, { newOwnerId })
+                  .then(() => onUpdate(workspace.id, {}))
+                  .catch((caught) =>
+                    setActionError(
+                      caught instanceof Error
+                        ? caught.message
+                        : "Ownership could not be transferred."
+                    )
+                  )
+                  .finally(() => setTransferCandidate(null))
+              }}
+            >
+              Transfer ownership
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={deleteCandidate !== null}
+        onOpenChange={(open) => !open && setDeleteCandidate(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Permanently delete workspace</DialogTitle>
+            <DialogDescription>
+              Type {deleteCandidate?.name ?? "the workspace name"} to permanently delete this workspace and its data.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label="Type workspace name to confirm"
+            autoComplete="off"
+            onChange={(event) => setDeletePhrase(event.target.value)}
+            placeholder={deleteCandidate?.name ?? "Workspace name"}
+            value={deletePhrase}
+          />
+          <DialogFooter>
+            <Button onClick={() => setDeleteCandidate(null)} variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={deletePhrase !== deleteCandidate?.name}
+              onClick={() => {
+                const workspace = deleteCandidate
+                if (!workspace || deletePhrase !== workspace.name) return
+                void api
+                  .delete(`/api/v1/admin/organizations/${workspace.id}`, { confirmName: deletePhrase })
+                  .then(onReload)
+                  .catch((caught) =>
+                    setActionError(
+                      caught instanceof Error
+                        ? caught.message
+                        : "Workspace could not be deleted."
+                    )
+                  )
+                  .finally(() => setDeleteCandidate(null))
+              }}
+              variant="destructive"
+            >
+              Delete workspace
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
@@ -1479,6 +1596,7 @@ function InventoryView({
   const [createError, setCreateError] = useState("")
   const [createIconFile, setCreateIconFile] = useState<File | null>(null)
   const [createIconPreview, setCreateIconPreview] = useState("")
+  const [deleteCandidate, setDeleteCandidate] = useState<any | null>(null)
   const [createValues, setCreateValues] = useState({
     name: "",
     providerType: "openai-compatible",
@@ -2023,26 +2141,7 @@ function InventoryView({
                               <DropdownMenuItem
                                 disabled={busy}
                                 variant="destructive"
-                                onClick={() => {
-                                  if (
-                                    window.confirm(
-                                      `Permanently delete this ${kind === "endpoint" ? "endpoint" : "MCP server"}: ${item.name}?`
-                                    )
-                                  )
-                                    void runAction(
-                                      item.id,
-                                      {
-                                        label: "Deleting…",
-                                        cancellable: false,
-                                        stoppedMessage: `${resourceLabel} deletion was stopped.`,
-                                      },
-                                      async () => {
-                                        await api.delete(
-                                          `/api/v1/admin/${resourcePath}/${item.id}`
-                                        )
-                                      }
-                                    )
-                                }}
+                                onClick={() => setDeleteCandidate(item)}
                               >
                                 <Trash2 aria-hidden="true" /> Delete{" "}
                                 {kind === "endpoint"
@@ -2066,6 +2165,45 @@ function InventoryView({
           )}
         </CardContent>
       </Card>
+      <Dialog
+        open={deleteCandidate !== null}
+        onOpenChange={(open) => !open && setDeleteCandidate(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete {resourceLabel.toLowerCase()}</DialogTitle>
+            <DialogDescription>
+              {`Permanently delete ${deleteCandidate?.name ?? `this ${resourceLabel.toLowerCase()}`}? This cannot be undone.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setDeleteCandidate(null)} variant="outline">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                const resource = deleteCandidate
+                if (!resource) return
+                setDeleteCandidate(null)
+                void runAction(
+                  resource.id,
+                  {
+                    label: "Deleting…",
+                    cancellable: false,
+                    stoppedMessage: `${resourceLabel} deletion was stopped.`,
+                  },
+                  async () => {
+                    await api.delete(`/api/v1/admin/${resourcePath}/${resource.id}`)
+                  }
+                )
+              }}
+              variant="destructive"
+            >
+              Delete {resourceLabel.toLowerCase()}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={createOpen}
         onOpenChange={(open) => {

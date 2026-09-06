@@ -333,6 +333,7 @@ func (a *App) collectPrivacyRows(ctx context.Context, export *gin.H, userID, org
 }
 
 func (a *App) StartLifecycleWorker(ctx context.Context) {
+	a.markWorkerStarted("lifecycle")
 	go func() {
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
@@ -341,6 +342,7 @@ func (a *App) StartLifecycleWorker(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				a.markWorkerHeartbeat("lifecycle")
 				a.cleanupAllPrivacySettings(ctx)
 			}
 		}

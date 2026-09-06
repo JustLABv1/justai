@@ -35,6 +35,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 type ProviderForm = {
   slug: string
@@ -70,6 +71,10 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<ProviderForm>(emptyForm)
+  const [removeTarget, setRemoveTarget] = useState<AdminOIDCProvider | null>(
+    null
+  )
+  const [removing, setRemoving] = useState(false)
   const createRequestRef = useRef(createRequest ?? 0)
 
   const load = useCallback(async () => {
@@ -82,7 +87,11 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
       setProviders(result.providers)
       setCallbackUrl(result.callbackUrl)
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Providers could not be loaded.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Providers could not be loaded."
+      )
     } finally {
       setLoading(false)
     }
@@ -123,7 +132,12 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
 
   async function save() {
     setError("")
-    if (!form.displayName.trim() || !form.slug.trim() || !form.issuer.trim() || !form.clientId.trim()) {
+    if (
+      !form.displayName.trim() ||
+      !form.slug.trim() ||
+      !form.issuer.trim() ||
+      !form.clientId.trim()
+    ) {
       setError("Display name, slug, issuer, and client ID are required.")
       return
     }
@@ -178,11 +192,12 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
   }
 
   async function remove(provider: AdminOIDCProvider) {
-    if (!window.confirm(`Delete the ${provider.displayName} provider?`)) return
+    setRemoving(true)
     setError("")
     try {
       await api.delete(`/api/v1/admin/oidc/providers/${provider.id}`)
       notifySuccess("Identity provider removed", provider.displayName)
+      setRemoveTarget(null)
       await load()
     } catch (caught) {
       setError(
@@ -192,6 +207,8 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
           "Provider could not be deleted."
         )
       )
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -210,11 +227,17 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
             <ShieldCheck className="size-4" /> OIDC providers
           </CardTitle>
           <CardDescription>
-            Platform-wide identity providers shown on the login page. Provider secrets are encrypted and never returned to the browser.
+            Platform-wide identity providers shown on the login page. Provider
+            secrets are encrypted and never returned to the browser.
           </CardDescription>
           <CardAction>
             <div className="flex gap-2">
-              <Button aria-label="Refresh OIDC providers" onClick={() => void load()} size="icon-sm" variant="outline">
+              <Button
+                aria-label="Refresh OIDC providers"
+                onClick={() => void load()}
+                size="icon-sm"
+                variant="outline"
+              >
                 <RefreshCw />
               </Button>
             </div>
@@ -223,42 +246,85 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
         <CardContent className="flex flex-col gap-3">
           <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
             <p className="font-medium text-foreground">Callback URL</p>
-            <p className="mt-1 break-all">{callbackUrl || "Configure oidc.redirect_url on the backend first."}</p>
+            <p className="mt-1 break-all">
+              {callbackUrl ||
+                "Configure oidc.redirect_url on the backend first."}
+            </p>
             {callbackUrl && (
               <p className="mt-1 inline-flex items-center gap-1">
-                Register this URL with every identity provider. <ExternalLink className="size-3" />
+                Register this URL with every identity provider.{" "}
+                <ExternalLink className="size-3" />
               </p>
             )}
           </div>
 
           {loading ? (
             <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
-              <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading providers…
+              <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading
+              providers…
             </div>
           ) : providers.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No OIDC providers configured.</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No OIDC providers configured.
+            </p>
           ) : (
             providers.map((provider) => (
-              <div className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between" key={provider.id || provider.slug}>
+              <div
+                className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                key={provider.id || provider.slug}
+              >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium">{provider.displayName}</p>
-                    <Badge variant={provider.enabled ? "default" : "secondary"}>{provider.enabled ? "Enabled" : "Disabled"}</Badge>
-                    {provider.secretConfigured && <Badge variant="outline">Secret configured</Badge>}
+                    <Badge variant={provider.enabled ? "default" : "secondary"}>
+                      {provider.enabled ? "Enabled" : "Disabled"}
+                    </Badge>
+                    {provider.secretConfigured && (
+                      <Badge variant="outline">Secret configured</Badge>
+                    )}
                   </div>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">{provider.issuer}</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {provider.issuer}
+                  </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {provider.slug} · {provider.scopes}
-                    {provider.lastTestedAt ? ` · tested ${new Date(provider.lastTestedAt).toLocaleString()}` : ""}
+                    {provider.lastTestedAt
+                      ? ` · tested ${new Date(provider.lastTestedAt).toLocaleString()}`
+                      : ""}
                   </p>
-                  {provider.lastError && <p className="mt-1 text-xs text-destructive">{provider.lastError}</p>}
+                  {provider.lastError && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {provider.lastError}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
-                  <Button disabled={testingId === provider.id} onClick={() => void test(provider)} size="sm" variant="outline">
-                    {testingId === provider.id ? <LoaderCircle className="animate-spin" /> : <TestTube2 />} Test
+                  <Button
+                    disabled={testingId === provider.id}
+                    onClick={() => void test(provider)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {testingId === provider.id ? (
+                      <LoaderCircle className="animate-spin" />
+                    ) : (
+                      <TestTube2 />
+                    )}{" "}
+                    Test
                   </Button>
-                  <Button onClick={() => openEdit(provider)} size="sm" variant="outline">Edit</Button>
-                  <Button onClick={() => void remove(provider)} size="icon-sm" variant="ghost" aria-label={`Delete ${provider.displayName}`}>
+                  <Button
+                    onClick={() => openEdit(provider)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    onClick={() => setRemoveTarget(provider)}
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Delete ${provider.displayName}`}
+                  >
                     <Trash2 />
                   </Button>
                 </div>
@@ -271,52 +337,111 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit OIDC provider" : "Add OIDC provider"}</DialogTitle>
+            <DialogTitle>
+              {editingId ? "Edit OIDC provider" : "Add OIDC provider"}
+            </DialogTitle>
             <DialogDescription>
-              Use the issuer URL from the provider’s OpenID Connect discovery configuration.
+              Use the issuer URL from the provider’s OpenID Connect discovery
+              configuration.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="grid gap-1.5 text-xs font-medium">
               Display name
-              <Input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} placeholder="Company SSO" />
+              <Input
+                value={form.displayName}
+                onChange={(event) =>
+                  setForm({ ...form, displayName: event.target.value })
+                }
+                placeholder="Company SSO"
+              />
             </label>
             <label className="grid gap-1.5 text-xs font-medium">
               Slug
-              <Input value={form.slug} onChange={(event) => setForm({ ...form, slug: event.target.value })} placeholder="company-sso" />
+              <Input
+                value={form.slug}
+                onChange={(event) =>
+                  setForm({ ...form, slug: event.target.value })
+                }
+                placeholder="company-sso"
+              />
             </label>
             <label className="grid gap-1.5 text-xs font-medium sm:col-span-2">
               Issuer URL
-              <Input value={form.issuer} onChange={(event) => setForm({ ...form, issuer: event.target.value })} placeholder="https://id.example.com" />
+              <Input
+                value={form.issuer}
+                onChange={(event) =>
+                  setForm({ ...form, issuer: event.target.value })
+                }
+                placeholder="https://id.example.com"
+              />
             </label>
             <label className="grid gap-1.5 text-xs font-medium">
               Client ID
-              <Input value={form.clientId} onChange={(event) => setForm({ ...form, clientId: event.target.value })} />
+              <Input
+                value={form.clientId}
+                onChange={(event) =>
+                  setForm({ ...form, clientId: event.target.value })
+                }
+              />
             </label>
             <label className="grid gap-1.5 text-xs font-medium">
               Client secret
-              <Input type="password" value={form.clientSecret} onChange={(event) => setForm({ ...form, clientSecret: event.target.value })} placeholder={editingId ? "Leave blank to preserve" : "Required"} />
+              <Input
+                type="password"
+                value={form.clientSecret}
+                onChange={(event) =>
+                  setForm({ ...form, clientSecret: event.target.value })
+                }
+                placeholder={editingId ? "Leave blank to preserve" : "Required"}
+              />
             </label>
             <label className="grid gap-1.5 text-xs font-medium sm:col-span-2">
               Scopes
-              <Textarea className="min-h-16" value={form.scopes} onChange={(event) => setForm({ ...form, scopes: event.target.value })} />
+              <Textarea
+                className="min-h-16"
+                value={form.scopes}
+                onChange={(event) =>
+                  setForm({ ...form, scopes: event.target.value })
+                }
+              />
             </label>
             <div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
               <div>
                 <p className="text-xs font-medium">Provider enabled</p>
-                <p className="text-xs text-muted-foreground">Show this provider on the login page.</p>
+                <p className="text-xs text-muted-foreground">
+                  Show this provider on the login page.
+                </p>
               </div>
-              <Switch checked={form.enabled} onCheckedChange={(enabled) => setForm({ ...form, enabled })} aria-label="Provider enabled" />
+              <Switch
+                checked={form.enabled}
+                onCheckedChange={(enabled) => setForm({ ...form, enabled })}
+                aria-label="Provider enabled"
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => setDialogOpen(false)} variant="outline">Cancel</Button>
+            <Button onClick={() => setDialogOpen(false)} variant="outline">
+              Cancel
+            </Button>
             <Button disabled={saving} onClick={() => void save()}>
-              {saving && <LoaderCircle className="animate-spin" />} {saving ? "Saving…" : "Save provider"}
+              {saving && <LoaderCircle className="animate-spin" />}{" "}
+              {saving ? "Saving…" : "Save provider"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmActionDialog
+        open={Boolean(removeTarget)}
+        title={`Delete ${removeTarget?.displayName ?? "identity provider"}?`}
+        description="Users will no longer be able to sign in with this provider. Existing JustAI sessions are not revoked."
+        confirmLabel="Delete provider"
+        pending={removing}
+        onOpenChange={(open) => !open && setRemoveTarget(null)}
+        onConfirm={() => {
+          if (removeTarget) return remove(removeTarget)
+        }}
+      />
     </div>
   )
 }

@@ -207,12 +207,15 @@ export function GlobalSearchDialog({
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<UniversalSearchResult[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [retryToken, setRetryToken] = useState(0)
 
   const setOpen = useCallback(
     (nextOpen: boolean) => {
       if (!nextOpen) {
         setQuery("")
         setResults([])
+        setError("")
       }
       onOpenChange(nextOpen)
     },
@@ -227,28 +230,36 @@ export function GlobalSearchDialog({
     if (!trimmed) {
       return
     }
-    let cancelled = false
+    const controller = new AbortController()
     const timer = window.setTimeout(() => {
       setLoading(true)
+      setError("")
       void api
         .get<{ results: UniversalSearchResult[] }>(
-          `/api/v1/search?q=${encodeURIComponent(trimmed)}&limit=40`
+          `/api/v1/search?q=${encodeURIComponent(trimmed)}&limit=40`,
+          { signal: controller.signal }
         )
         .then((response) => {
-          if (!cancelled) setResults(response.results)
+          if (!controller.signal.aborted) setResults(response.results)
         })
-        .catch(() => {
-          if (!cancelled) setResults([])
+        .catch((caught) => {
+          if (controller.signal.aborted) return
+          setResults([])
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "Workspace search is unavailable."
+          )
         })
         .finally(() => {
-          if (!cancelled) setLoading(false)
+          if (!controller.signal.aborted) setLoading(false)
         })
     }, 160)
     return () => {
-      cancelled = true
+      controller.abort()
       window.clearTimeout(timer)
     }
-  }, [open, query])
+  }, [open, query, retryToken])
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
@@ -296,9 +307,9 @@ export function GlobalSearchDialog({
     } else if (result.kind === "transcript") {
       onNavigate("transcription", null, result.sessionId ?? result.id)
     } else if (result.kind === "note") {
-      onNavigate("notes")
+      onNavigate("notes", result.id)
     } else if (result.kind === "knowledge") {
-      onNavigate("knowledge")
+      onNavigate("knowledge", result.id)
     } else if (result.kind === "project") {
       onNavigate("chat")
     }
@@ -371,8 +382,24 @@ export function GlobalSearchDialog({
             Searching workspace…
           </p>
         )}
-        {query.trim() && !loading && (
+        {query.trim() && !loading && !error && (
           <CommandEmpty>No matching workspace content.</CommandEmpty>
+        )}
+        {query.trim() && !loading && error && (
+          <div
+            aria-live="assertive"
+            className="mx-3 my-2 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+            role="alert"
+          >
+            <span className="min-w-0">{error}</span>
+            <button
+              className="shrink-0 rounded-md border border-destructive/30 px-2 py-1 font-medium hover:bg-destructive/10"
+              onClick={() => setRetryToken((value) => value + 1)}
+              type="button"
+            >
+              Retry
+            </button>
+          </div>
         )}
         {groupedResults.map((group) => {
           if (group.results.length === 0) return null

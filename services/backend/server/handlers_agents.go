@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,14 +69,36 @@ func (a *App) listAgentConnections(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
+	limit := 50
+	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
+		parsed, parseErr := strconv.Atoi(rawLimit)
+		if parseErr != nil || parsed < 1 || parsed > 100 {
+			writeError(c, http.StatusBadRequest, publicError("invalid_limit", "limit must be between 1 and 100"))
+			return
+		}
+		limit = parsed
+	}
+	where := `organization_id = $1 AND (scope_type = 'organization' OR (scope_type = 'user' AND scope_id = $2))`
+	args := []any{organizationID, principal.UserID}
+	if rawCursor := strings.TrimSpace(c.Query("cursor")); rawCursor != "" {
+		cursorAt, cursorID, cursorErr := decodeTimeUUIDCursor(rawCursor)
+		if cursorErr != nil {
+			writeError(c, http.StatusBadRequest, publicError("invalid_cursor", "cursor is invalid"))
+			return
+		}
+		where += ` AND (updated_at, id) < ($3, $4)`
+		args = append(args, cursorAt, cursorID)
+	}
+	args = append(args, limit+1)
 	rows, err := a.DB.QueryContext(c, `
 		SELECT id, scope_type, scope_id, name, protocol, endpoint_url, auth_type,
 		       encrypted_credential IS NOT NULL OR encrypted_client_certificate IS NOT NULL,
 		       agent_card, enabled, trusted_read_only, last_tested_at, last_error,
 		       created_at, updated_at
 		FROM agent_connections
-		WHERE organization_id = $1 AND (scope_type = 'organization' OR (scope_type = 'user' AND scope_id = $2))
-		ORDER BY updated_at DESC, name`, organizationID, principal.UserID)
+		WHERE `+where+`
+		ORDER BY updated_at DESC, id DESC
+		LIMIT $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -94,7 +117,13 @@ func (a *App) listAgentConnections(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"connections": items})
+	nextCursor := ""
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		nextCursor = encodeTimeUUIDCursor(last.UpdatedAt, last.ID)
+	}
+	c.JSON(http.StatusOK, gin.H{"connections": items, "nextCursor": nextCursor})
 }
 
 func scanAgentConnection(scanner interface{ Scan(...any) error }, organizationID uuid.UUID) (models.AgentConnection, error) {

@@ -44,7 +44,7 @@ func RequestLog(db *sql.DB) gin.HandlerFunc {
 					defer func() { <-writeSlots }()
 					ctx, cancel := context.WithTimeout(context.Background(), requestLogWriteTimeout)
 					defer cancel()
-					if _, err := db.ExecContext(ctx, `INSERT INTO api_request_logs (user_id, organization_id, method, path, status_code, duration_ms) VALUES ($1, $2, $3, $4, $5, $6)`, userID, organizationIDValue, method, path, status, float64(duration.Microseconds())/1000); err != nil {
+					if _, err := db.ExecContext(ctx, `INSERT INTO api_request_logs (user_id, organization_id, method, path, status_code, duration_ms, request_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`, userID, organizationIDValue, method, path, status, float64(duration.Microseconds())/1000, requestID); err != nil {
 						slog.Warn("api_request_log_write_failed", "requestId", requestID, "error", err)
 					}
 				}()

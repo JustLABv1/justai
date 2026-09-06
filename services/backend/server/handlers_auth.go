@@ -361,12 +361,10 @@ func (a *App) oidcCallback(c *gin.Context) {
 		return
 	}
 	_, _ = a.DB.ExecContext(c, `UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1`, user.ID)
-	sessionToken, err := a.Tokens.Issue(user.ID, user.Email, user.PlatformAdmin, user.SessionVersion)
-	if err != nil {
+	if _, err := a.issueSessionToken(c, user); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	a.setSessionCookie(c, sessionToken, 12*60*60)
 	frontend := "/"
 	if len(a.Config.FrontendOrigins) > 0 && a.Config.FrontendOrigins[0] != "*" {
 		frontend = strings.TrimRight(a.Config.FrontendOrigins[0], "/")

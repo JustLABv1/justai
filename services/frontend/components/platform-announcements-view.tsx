@@ -26,9 +26,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 type BannerForm = {
   message: string
@@ -89,7 +96,9 @@ function bannerState(banner: PlatformBanner) {
   return "Live"
 }
 
-function badgeVariant(state: string): "default" | "secondary" | "outline" | "destructive" {
+function badgeVariant(
+  state: string
+): "default" | "secondary" | "outline" | "destructive" {
   if (state === "Live") return "default"
   if (state === "Expired") return "destructive"
   if (state === "Scheduled") return "outline"
@@ -108,15 +117,23 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<BannerForm>(emptyForm)
+  const [removeTarget, setRemoveTarget] = useState<PlatformBanner | null>(null)
+  const [removing, setRemoving] = useState(false)
   const createRequestRef = useRef(createRequest ?? 0)
 
   const load = useCallback(async () => {
     setError("")
     try {
-      const result = await api.get<{ banners: PlatformBanner[] }>("/api/v1/admin/banners")
+      const result = await api.get<{ banners: PlatformBanner[] }>(
+        "/api/v1/admin/banners"
+      )
       setBanners(result.banners)
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Announcements could not be loaded.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Announcements could not be loaded."
+      )
     } finally {
       setLoading(false)
     }
@@ -188,7 +205,9 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
         await api.post("/api/v1/admin/banners", payload)
       }
       setDialogOpen(false)
-      notifySuccess(editingId ? "Announcement updated" : "Announcement published")
+      notifySuccess(
+        editingId ? "Announcement updated" : "Announcement published"
+      )
       await load()
     } catch (caught) {
       setError(
@@ -204,11 +223,12 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
   }
 
   async function remove(banner: PlatformBanner) {
-    if (!window.confirm("Delete this announcement?")) return
+    setRemoving(true)
     setError("")
     try {
       await api.delete(`/api/v1/admin/banners/${banner.id}`)
       notifySuccess("Announcement removed")
+      setRemoveTarget(null)
       await load()
     } catch (caught) {
       setError(
@@ -218,6 +238,8 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
           "Announcement could not be deleted."
         )
       )
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -236,38 +258,74 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
             <Megaphone className="size-4" /> Global announcements
           </CardTitle>
           <CardDescription>
-            Scheduled messages appear above login, workspace, administration, and public pages. Higher priority messages appear first.
+            Scheduled messages appear above login, workspace, administration,
+            and public pages. Higher priority messages appear first.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {loading ? (
             <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
-              <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading announcements…
+              <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading
+              announcements…
             </div>
           ) : sortedBanners.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No announcements configured.</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No announcements configured.
+            </p>
           ) : (
             sortedBanners.map((banner) => {
               const state = bannerState(banner)
               return (
-                <div className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between" key={banner.id}>
+                <div
+                  className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between"
+                  key={banner.id}
+                >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={badgeVariant(state)}>{state}</Badge>
                       <Badge variant="outline">{banner.severity}</Badge>
-                      <Badge variant="outline">Priority {banner.priority}</Badge>
-                      {banner.dismissible && <Badge variant="secondary">Dismissible</Badge>}
+                      <Badge variant="outline">
+                        Priority {banner.priority}
+                      </Badge>
+                      {banner.dismissible && (
+                        <Badge variant="secondary">Dismissible</Badge>
+                      )}
                     </div>
-                    <p className="mt-2 whitespace-pre-wrap text-sm">{banner.message}</p>
+                    <p className="mt-2 text-sm whitespace-pre-wrap">
+                      {banner.message}
+                    </p>
                     <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                       <CalendarClock className="size-3.5" />
-                      {new Date(banner.startsAt).toLocaleString()} — {banner.endsAt ? new Date(banner.endsAt).toLocaleString() : "No end"}
-                      {banner.linkUrl && <a className="underline underline-offset-2" href={banner.linkUrl} rel="noreferrer" target="_blank">Link</a>}
+                      {new Date(banner.startsAt).toLocaleString()} —{" "}
+                      {banner.endsAt
+                        ? new Date(banner.endsAt).toLocaleString()
+                        : "No end"}
+                      {banner.linkUrl && (
+                        <a
+                          className="underline underline-offset-2"
+                          href={banner.linkUrl}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Link
+                        </a>
+                      )}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-2">
-                    <Button onClick={() => openEdit(banner)} size="sm" variant="outline">Edit</Button>
-                    <Button aria-label="Delete announcement" onClick={() => void remove(banner)} size="icon-sm" variant="ghost">
+                    <Button
+                      onClick={() => openEdit(banner)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      aria-label="Delete announcement"
+                      onClick={() => setRemoveTarget(banner)}
+                      size="icon-sm"
+                      variant="ghost"
+                    >
                       <Trash2 />
                     </Button>
                   </div>
@@ -281,18 +339,42 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit announcement" : "Add announcement"}</DialogTitle>
-            <DialogDescription>Choose when the message is active and how it should appear to users.</DialogDescription>
+            <DialogTitle>
+              {editingId ? "Edit announcement" : "Add announcement"}
+            </DialogTitle>
+            <DialogDescription>
+              Choose when the message is active and how it should appear to
+              users.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="grid gap-1.5 text-xs font-medium sm:col-span-2">
               Message
-              <Textarea className="min-h-24" maxLength={1000} value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} placeholder="Scheduled maintenance begins at 22:00 UTC." />
+              <Textarea
+                className="min-h-24"
+                maxLength={1000}
+                value={form.message}
+                onChange={(event) =>
+                  setForm({ ...form, message: event.target.value })
+                }
+                placeholder="Scheduled maintenance begins at 22:00 UTC."
+              />
             </label>
             <label className="grid gap-1.5 text-xs font-medium">
               Severity
-              <Select value={form.severity} onValueChange={(value) => value && setForm({ ...form, severity: value as BannerForm["severity"] })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={form.severity}
+                onValueChange={(value) =>
+                  value &&
+                  setForm({
+                    ...form,
+                    severity: value as BannerForm["severity"],
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="info">Info</SelectItem>
                   <SelectItem value="success">Success</SelectItem>
@@ -303,43 +385,98 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
             </label>
             <label className="grid gap-1.5 text-xs font-medium">
               Priority
-              <Input min="-1000" step="1" type="number" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} />
+              <Input
+                min="-1000"
+                step="1"
+                type="number"
+                value={form.priority}
+                onChange={(event) =>
+                  setForm({ ...form, priority: event.target.value })
+                }
+              />
             </label>
             <label className="grid gap-1.5 text-xs font-medium sm:col-span-2">
               Optional link
-              <Input type="url" value={form.linkUrl} onChange={(event) => setForm({ ...form, linkUrl: event.target.value })} placeholder="https://status.example.com" />
+              <Input
+                type="url"
+                value={form.linkUrl}
+                onChange={(event) =>
+                  setForm({ ...form, linkUrl: event.target.value })
+                }
+                placeholder="https://status.example.com"
+              />
             </label>
             <label className="grid gap-1.5 text-xs font-medium">
               Starts at
-              <Input type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} />
+              <Input
+                type="datetime-local"
+                value={form.startsAt}
+                onChange={(event) =>
+                  setForm({ ...form, startsAt: event.target.value })
+                }
+              />
             </label>
             <label className="grid gap-1.5 text-xs font-medium">
               Ends at (optional)
-              <Input type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} />
+              <Input
+                type="datetime-local"
+                value={form.endsAt}
+                onChange={(event) =>
+                  setForm({ ...form, endsAt: event.target.value })
+                }
+              />
             </label>
             <div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
               <div>
                 <p className="text-xs font-medium">Announcement enabled</p>
-                <p className="text-xs text-muted-foreground">Only enabled announcements inside the time window are public.</p>
+                <p className="text-xs text-muted-foreground">
+                  Only enabled announcements inside the time window are public.
+                </p>
               </div>
-              <Switch aria-label="Announcement enabled" checked={form.enabled} onCheckedChange={(enabled) => setForm({ ...form, enabled })} />
+              <Switch
+                aria-label="Announcement enabled"
+                checked={form.enabled}
+                onCheckedChange={(enabled) => setForm({ ...form, enabled })}
+              />
             </div>
             <div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
               <div>
                 <p className="text-xs font-medium">Allow dismissal</p>
-                <p className="text-xs text-muted-foreground">Users can hide this announcement in their current browser.</p>
+                <p className="text-xs text-muted-foreground">
+                  Users can hide this announcement in their current browser.
+                </p>
               </div>
-              <Switch aria-label="Allow announcement dismissal" checked={form.dismissible} onCheckedChange={(dismissible) => setForm({ ...form, dismissible })} />
+              <Switch
+                aria-label="Allow announcement dismissal"
+                checked={form.dismissible}
+                onCheckedChange={(dismissible) =>
+                  setForm({ ...form, dismissible })
+                }
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => setDialogOpen(false)} variant="outline">Cancel</Button>
+            <Button onClick={() => setDialogOpen(false)} variant="outline">
+              Cancel
+            </Button>
             <Button disabled={saving} onClick={() => void save()}>
-              {saving && <LoaderCircle className="animate-spin" />} {saving ? "Saving…" : "Save announcement"}
+              {saving && <LoaderCircle className="animate-spin" />}{" "}
+              {saving ? "Saving…" : "Save announcement"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmActionDialog
+        open={Boolean(removeTarget)}
+        title="Delete this announcement?"
+        description="It will disappear from every JustAI surface immediately. This cannot be undone."
+        confirmLabel="Delete announcement"
+        pending={removing}
+        onOpenChange={(open) => !open && setRemoveTarget(null)}
+        onConfirm={() => {
+          if (removeTarget) return remove(removeTarget)
+        }}
+      />
     </div>
   )
 }

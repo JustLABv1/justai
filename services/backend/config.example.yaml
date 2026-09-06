@@ -6,6 +6,11 @@
 port: "8080"
 database_url: "postgres://justai:justai@localhost:54329/justai?sslmode=disable"
 jwt_secret: "replace-with-a-long-development-secret"
+# JWT validation metadata. Keep the issuer/audience stable for all backend
+# replicas; change jwt_key_id when rotating signing keys.
+jwt_issuer: "justai-backend"
+jwt_audience: "justai-web"
+jwt_key_id: "v1"
 encryption_key: "replace-with-a-long-development-encryption-key"
 frontend_origins:
   - "http://localhost:3000"

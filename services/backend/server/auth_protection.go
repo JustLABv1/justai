@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"strings"
 	"sync"
@@ -109,12 +111,68 @@ func (a *App) allowAuthAttempt(c *gin.Context, email string) bool {
 	limiter, _ := a.passwordProtection()
 	peerKey := "peer:" + directPeer(c)
 	accountKey := "account:" + directPeer(c) + ":" + strings.ToLower(strings.TrimSpace(email))
+	if a.DB != nil {
+		peerAllowed, peerAvailable := a.allowSharedRateBucket(c, peerKey, authPeerLimit)
+		accountAllowed, accountAvailable := a.allowSharedRateBucket(c, accountKey, authAttemptLimit)
+		if peerAvailable && accountAvailable {
+			if peerAllowed && accountAllowed {
+				return true
+			}
+			c.Header("Retry-After", "60")
+			middleware.AbortError(c, 429, "auth_rate_limited", "too many authentication attempts; try again later")
+			return false
+		}
+	}
 	if limiter.allow(peerKey) && limiter.allow(accountKey) {
 		return true
 	}
 	c.Header("Retry-After", "60")
 	middleware.AbortError(c, 429, "auth_rate_limited", "too many authentication attempts; try again later")
 	return false
+}
+
+// allowSharedRateBucket uses one atomic Postgres upsert per bucket. If the
+// reliability migration is not available yet, callers fall back to the
+// bounded in-process limiter rather than failing authentication closed.
+func (a *App) allowSharedRateBucket(c *gin.Context, key string, limit int) (allowed, available bool) {
+	if a == nil || a.DB == nil {
+		return false, false
+	}
+	var result bool
+	hash := sha256.Sum256([]byte(key))
+	key = hex.EncodeToString(hash[:])
+	err := a.DB.QueryRowContext(c, `INSERT INTO api_rate_limit_buckets (bucket_key, window_started_at, count, expires_at) VALUES ($1, date_trunc('minute', now()), 1, date_trunc('minute', now()) + interval '2 minutes') ON CONFLICT (bucket_key) DO UPDATE SET count = CASE WHEN api_rate_limit_buckets.window_started_at < date_trunc('minute', now()) THEN 1 ELSE api_rate_limit_buckets.count + 1 END, window_started_at = CASE WHEN api_rate_limit_buckets.window_started_at < date_trunc('minute', now()) THEN date_trunc('minute', now()) ELSE api_rate_limit_buckets.window_started_at END, expires_at = date_trunc('minute', now()) + interval '2 minutes' RETURNING count <= $2`, key, limit).Scan(&result)
+	if err != nil {
+		return false, false
+	}
+	return result, true
+}
+
+// scopedRateLimit applies a shared per-user/workspace budget to expensive
+// operations. The in-memory limiter remains a safe fallback during a rolling
+// migration or a transient database outage.
+func (a *App) scopedRateLimit(scope string, limit int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		principal, _ := middleware.GetPrincipal(c)
+		organizationID, _ := middleware.GetOrganizationID(c)
+		key := strings.TrimSpace(scope) + ":" + organizationID.String() + ":" + principal.UserID.String()
+		if allowed, available := a.allowSharedRateBucket(c, key, limit); available {
+			if allowed {
+				c.Next()
+				return
+			}
+			c.Header("Retry-After", "60")
+			middleware.AbortError(c, 429, "rate_limited", "this operation is temporarily rate limited")
+			return
+		}
+		limiter, _ := a.passwordProtection()
+		if limiter.allow("account:" + key) {
+			c.Next()
+			return
+		}
+		c.Header("Retry-After", "60")
+		middleware.AbortError(c, 429, "rate_limited", "this operation is temporarily rate limited")
+	}
 }
 
 func (a *App) acquirePasswordSlot(c *gin.Context) (func(), bool) {

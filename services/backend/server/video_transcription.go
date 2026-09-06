@@ -164,6 +164,9 @@ func videoDiarizationStageIsActive(stage string) bool {
 }
 
 func (m *TranscriptionManager) startVideoWorker(ctx context.Context) {
+	if m.app != nil {
+		m.app.markWorkerStarted("video")
+	}
 	capacity := configuredVideoTranscriptionWorkerCapacity(m.Config)
 	slots := make(chan struct{}, capacity)
 	dispatch := func() {
@@ -190,6 +193,9 @@ func (m *TranscriptionManager) startVideoWorker(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				if m.app != nil {
+					m.app.markWorkerHeartbeat("video")
+				}
 				for range capacity {
 					dispatch()
 				}

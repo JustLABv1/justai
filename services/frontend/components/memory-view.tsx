@@ -15,10 +15,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 export function MemoryView() {
   const [memories, setMemories] = useState<Memory[]>([])
@@ -26,6 +32,8 @@ export function MemoryView() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [removeTarget, setRemoveTarget] = useState<Memory | null>(null)
+  const [removing, setRemoving] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -34,7 +42,11 @@ export function MemoryView() {
       setMemories(response.memories)
       setError("")
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Memories could not be loaded.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Memories could not be loaded."
+      )
     } finally {
       setLoading(false)
     }
@@ -61,7 +73,11 @@ export function MemoryView() {
       setContent("")
       setError("")
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The memory could not be saved.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The memory could not be saved."
+      )
     } finally {
       setSaving(false)
     }
@@ -77,16 +93,28 @@ export function MemoryView() {
         current.map((item) => (item.id === memory.id ? response.memory : item))
       )
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The memory could not be updated.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The memory could not be updated."
+      )
     }
   }
 
   async function removeMemory(memory: Memory) {
+    setRemoving(true)
     try {
       await api.delete(`/api/v1/memories/${memory.id}`)
       setMemories((current) => current.filter((item) => item.id !== memory.id))
+      setRemoveTarget(null)
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The memory could not be deleted.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The memory could not be deleted."
+      )
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -108,7 +136,11 @@ export function MemoryView() {
       )
       setError("")
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Memories could not be updated.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Memories could not be updated."
+      )
     } finally {
       setSaving(false)
     }
@@ -121,11 +153,13 @@ export function MemoryView() {
       <div>
         <div className="flex items-center gap-2">
           <Brain className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold tracking-tight">Persistent memory</h1>
+          <h1 className="text-xl font-semibold tracking-tight">
+            Persistent memory
+          </h1>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Save stable preferences and facts you want JustAI to use in future chats.
-          You can disable or remove any memory at any time.
+          Save stable preferences and facts you want JustAI to use in future
+          chats. You can disable or remove any memory at any time.
         </p>
         {!loading && memories.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -179,9 +213,15 @@ export function MemoryView() {
                 placeholder="What should JustAI remember?"
                 value={content}
               />
-              <FieldDescription>{content.length}/2000 characters</FieldDescription>
+              <FieldDescription>
+                {content.length}/2000 characters
+              </FieldDescription>
             </Field>
-            <Button className="w-fit" disabled={saving || !content.trim()} type="submit">
+            <Button
+              className="w-fit"
+              disabled={saving || !content.trim()}
+              type="submit"
+            >
               <Plus data-icon="inline-start" />
               {saving ? "Saving…" : "Save memory"}
             </Button>
@@ -198,7 +238,8 @@ export function MemoryView() {
           <EmptyHeader>
             <EmptyTitle>No memories saved</EmptyTitle>
             <EmptyDescription>
-              Add a preference or recurring detail and it will be available in later chats.
+              Add a preference or recurring detail and it will be available in
+              later chats.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -208,7 +249,9 @@ export function MemoryView() {
             <Card key={memory.id} size="sm">
               <CardContent className="flex items-start gap-4">
                 <div className="min-w-0 flex-1">
-                  <p className="whitespace-pre-wrap text-sm leading-6">{memory.content}</p>
+                  <p className="text-sm leading-6 whitespace-pre-wrap">
+                    {memory.content}
+                  </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{memory.source}</Badge>
                     <span className="text-xs text-muted-foreground">
@@ -220,11 +263,13 @@ export function MemoryView() {
                   <Switch
                     aria-label={`${memory.enabled ? "Disable" : "Enable"} memory`}
                     checked={memory.enabled}
-                    onCheckedChange={(checked) => void toggleMemory(memory, checked)}
+                    onCheckedChange={(checked) =>
+                      void toggleMemory(memory, checked)
+                    }
                   />
                   <Button
                     aria-label="Delete memory"
-                    onClick={() => void removeMemory(memory)}
+                    onClick={() => setRemoveTarget(memory)}
                     size="icon-sm"
                     title="Delete memory"
                     variant="ghost"
@@ -237,6 +282,17 @@ export function MemoryView() {
           ))}
         </div>
       )}
+      <ConfirmActionDialog
+        open={Boolean(removeTarget)}
+        title="Delete this memory?"
+        description="JustAI will stop using this information in future conversations. This cannot be undone."
+        confirmLabel="Delete memory"
+        pending={removing}
+        onOpenChange={(open) => !open && setRemoveTarget(null)}
+        onConfirm={() => {
+          if (removeTarget) return removeMemory(removeTarget)
+        }}
+      />
     </div>
   )
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
@@ -35,6 +36,7 @@ type transcriptionClient struct {
 }
 
 const transcriptionSocketWriteWait = 10 * time.Second
+const transcriptionDiarizationConcurrency = 8
 
 type transcriptionHub struct {
 	mu       sync.Mutex
@@ -55,15 +57,16 @@ type TranscriptionManager struct {
 	Secrets *security.SecretBox
 	app     *App
 
-	mu            sync.Mutex
-	hubs          map[uuid.UUID]*transcriptionHub
-	buffers       map[uuid.UUID]*pcmBuffer
-	streamCancels map[uuid.UUID]context.CancelFunc
-	rootCtx       context.Context
-	joinMu        sync.Mutex
-	joins         map[string][]time.Time
-	clocks        map[uuid.UUID]int64
-	epochs        map[uuid.UUID]int64
+	mu               sync.Mutex
+	hubs             map[uuid.UUID]*transcriptionHub
+	buffers          map[uuid.UUID]*pcmBuffer
+	streamCancels    map[uuid.UUID]context.CancelFunc
+	rootCtx          context.Context
+	joinMu           sync.Mutex
+	joins            map[string][]time.Time
+	clocks           map[uuid.UUID]int64
+	epochs           map[uuid.UUID]int64
+	diarizationSlots chan struct{}
 
 	videoDiarizationMu      sync.Mutex
 	videoDiarizationCancels map[uuid.UUID]videoDiarizationCancellation
@@ -82,6 +85,7 @@ func NewTranscriptionManager(cfg config.Config, db *sql.DB, secrets *security.Se
 		clocks:                  make(map[uuid.UUID]int64),
 		epochs:                  make(map[uuid.UUID]int64),
 		videoDiarizationCancels: make(map[uuid.UUID]videoDiarizationCancellation),
+		diarizationSlots:        make(chan struct{}, transcriptionDiarizationConcurrency),
 	}
 }
 
@@ -90,6 +94,9 @@ func (m *TranscriptionManager) SetApp(application *App) {
 }
 
 func (m *TranscriptionManager) Start(ctx context.Context) {
+	if m.app != nil {
+		m.app.markWorkerStarted("transcription")
+	}
 	m.mu.Lock()
 	m.rootCtx = ctx
 	m.mu.Unlock()
@@ -106,6 +113,9 @@ func (m *TranscriptionManager) cleanupLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if m.app != nil {
+				m.app.markWorkerHeartbeat("transcription")
+			}
 			m.expireRecordings(ctx)
 			m.expireVideoUploads(ctx)
 			m.expireSessions(ctx)
@@ -399,9 +409,7 @@ func (m *TranscriptionManager) appendPCM(sessionID, sourceID uuid.UUID, pcm []by
 		}
 		buffer.data = append([]byte(nil), buffer.data[advance:]...)
 		buffer.startOffset += int64(advance / (16000 * 2) * 1000)
-		if m.app != nil {
-			go m.app.processDiarizationWindow(sessionID, sourceID, startOffset, window)
-		}
+		m.dispatchDiarizationWindow(sessionID, sourceID, startOffset, window)
 	}
 	buffer.mu.Unlock()
 }
@@ -424,12 +432,29 @@ func (m *TranscriptionManager) flushPCM(sessionID, sourceID uuid.UUID) {
 	startOffset := buffer.startOffset
 	buffer.data = nil
 	buffer.mu.Unlock()
-	if len(data) > 0 && m.app != nil {
-		go m.app.processDiarizationWindow(sessionID, sourceID, startOffset, data)
+	if len(data) > 0 {
+		m.dispatchDiarizationWindow(sessionID, sourceID, startOffset, data)
 	}
 	m.mu.Lock()
 	delete(m.clocks, sourceID)
 	m.mu.Unlock()
+}
+
+// dispatchDiarizationWindow applies bounded backpressure to live capture. A
+// provider slowdown therefore pauses ingestion at the source instead of
+// creating an unbounded goroutine and memory backlog.
+func (m *TranscriptionManager) dispatchDiarizationWindow(sessionID, sourceID uuid.UUID, startOffset int64, data []byte) {
+	if m.app == nil || len(data) == 0 {
+		return
+	}
+	if m.diarizationSlots == nil {
+		m.diarizationSlots = make(chan struct{}, transcriptionDiarizationConcurrency)
+	}
+	m.diarizationSlots <- struct{}{}
+	go func() {
+		defer func() { <-m.diarizationSlots }()
+		m.app.processDiarizationWindow(sessionID, sourceID, startOffset, data)
+	}()
 }
 
 func (m *TranscriptionManager) flushPCMForSession(sessionID uuid.UUID) {
@@ -481,13 +506,15 @@ func (m *TranscriptionManager) startRecording(ctx context.Context, sessionID, so
 	recordingID := uuid.New()
 	storageKey := "transcription/" + recordingID.String()
 	if driver == "local" {
-		storageKey = recordingID.String() + ".enc"
+		// New recordings use one immutable file per part. A transaction retry
+		// can safely observe the same part file instead of appending bytes a
+		// second time after a database commit failure. Legacy .enc recordings
+		// continue to use the framed single-file reader below.
+		storageKey = recordingID.String()
 		path := filepath.Join(m.Config.Transcription.LocalStoragePath, storageKey)
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-		if err != nil {
+		if err := os.MkdirAll(path, 0o700); err != nil {
 			return models.TranscriptionRecording{}, err
 		}
-		_ = file.Close()
 	}
 	expiresAt := time.Now().Add(time.Duration(m.Config.Transcription.AudioRetentionDays) * 24 * time.Hour)
 	var recording models.TranscriptionRecording
@@ -502,6 +529,8 @@ func (m *TranscriptionManager) appendRecording(ctx context.Context, recordingID 
 	if part < 0 {
 		return fmt.Errorf("recording part must not be negative")
 	}
+	payloadSum := sha256.Sum256(payload)
+	payloadHash := fmt.Sprintf("%x", payloadSum[:])
 	transaction, err := m.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -522,6 +551,18 @@ func (m *TranscriptionManager) appendRecording(ctx context.Context, recordingID 
 	if completedAt.Valid {
 		return fmt.Errorf("recording is already complete")
 	}
+	var recordedHash string
+	var recordedBytes int64
+	partErr := transaction.QueryRowContext(ctx, `SELECT payload_hash, payload_bytes FROM transcription_recording_parts WHERE recording_id = $1 AND part = $2`, recordingID, part).Scan(&recordedHash, &recordedBytes)
+	if partErr == nil {
+		if recordedHash != payloadHash || recordedBytes != int64(len(payload)) {
+			return fmt.Errorf("recording part %d was already committed with different data", part)
+		}
+		return transaction.Commit()
+	}
+	if partErr != sql.ErrNoRows {
+		return partErr
+	}
 	secret, err := m.Secrets.Decrypt(wrapped)
 	if err != nil {
 		return err
@@ -535,18 +576,24 @@ func (m *TranscriptionManager) appendRecording(ctx context.Context, recordingID 
 		return err
 	}
 	if driver == "local" {
-		path := filepath.Join(m.Config.Transcription.LocalStoragePath, storageKey)
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			return err
-		}
-		var length [4]byte
-		binary.BigEndian.PutUint32(length[:], uint32(len(sealed)))
-		if _, err := file.Write(length[:]); err == nil {
-			_, err = file.Write(sealed)
-		}
-		_ = file.Close()
-		if err != nil {
+		if strings.HasSuffix(storageKey, ".enc") {
+			// Legacy recordings predate per-part files. Keep their format
+			// readable, while all new recordings take the idempotent path.
+			path := filepath.Join(m.Config.Transcription.LocalStoragePath, storageKey)
+			file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+			if err != nil {
+				return err
+			}
+			var length [4]byte
+			binary.BigEndian.PutUint32(length[:], uint32(len(sealed)))
+			if _, err := file.Write(length[:]); err == nil {
+				_, err = file.Write(sealed)
+			}
+			_ = file.Close()
+			if err != nil {
+				return err
+			}
+		} else if err := m.ensureLocalRecordingPart(storageKey, part, key, payload, sealed); err != nil {
 			return err
 		}
 	} else if driver == "s3" {
@@ -560,10 +607,52 @@ func (m *TranscriptionManager) appendRecording(ctx context.Context, recordingID 
 	} else {
 		return fmt.Errorf("recording storage driver %q is not supported", driver)
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_recordings SET bytes = bytes + $2, next_part = next_part + 1 WHERE id = $1`, recordingID, len(payload)); err != nil {
+	if _, err := transaction.ExecContext(ctx, `INSERT INTO transcription_recording_parts (recording_id, part, payload_hash, payload_bytes) VALUES ($1, $2, $3, $4)`, recordingID, part, payloadHash, len(payload)); err != nil {
+		return err
+	}
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_recordings SET bytes = bytes + $2, next_part = next_part + 1 WHERE id = $1 AND next_part = $3`, recordingID, len(payload), part); err != nil {
 		return err
 	}
 	return transaction.Commit()
+}
+
+func (m *TranscriptionManager) ensureLocalRecordingPart(storageKey string, part int, key, payload, sealed []byte) error {
+	directory := filepath.Join(m.Config.Transcription.LocalStoragePath, storageKey)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return err
+	}
+	path := filepath.Join(directory, fmt.Sprintf("part-%08d.enc", part))
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err == nil {
+		if _, writeErr := file.Write(sealed); writeErr != nil {
+			_ = file.Close()
+			_ = os.Remove(path)
+			return writeErr
+		}
+		if syncErr := file.Sync(); syncErr != nil {
+			_ = file.Close()
+			_ = os.Remove(path)
+			return syncErr
+		}
+		return file.Close()
+	}
+	if !os.IsExist(err) {
+		return err
+	}
+	existing, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return readErr
+	}
+	plain, openErr := openAudioChunk(key, existing)
+	if openErr != nil {
+		return fmt.Errorf("existing recording part %d is invalid: %w", part, openErr)
+	}
+	existingSum := sha256.Sum256(plain)
+	payloadSum := sha256.Sum256(payload)
+	if existingSum != payloadSum {
+		return fmt.Errorf("recording part %d already exists with different data", part)
+	}
+	return nil
 }
 
 func (m *TranscriptionManager) completeRecording(ctx context.Context, recordingID uuid.UUID) error {
@@ -577,7 +666,7 @@ func (m *TranscriptionManager) deleteRecording(ctx context.Context, recordingID 
 		return err
 	}
 	if driver == "local" {
-		_ = os.Remove(filepath.Join(m.Config.Transcription.LocalStoragePath, storageKey))
+		_ = os.RemoveAll(filepath.Join(m.Config.Transcription.LocalStoragePath, storageKey))
 	} else if driver == "s3" {
 		storage, err := newS3Storage(m.Config)
 		if err != nil {
@@ -610,7 +699,7 @@ func (m *TranscriptionManager) recordingReader(ctx context.Context, recordingID 
 		if err != nil {
 			return nil, "", err
 		}
-		return &s3RecordingReader{storage: storage, prefix: storageKey, key: key}, mimeType, nil
+		return &s3RecordingReader{storage: storage, prefix: storageKey, key: key, ctx: ctx}, mimeType, nil
 	}
 	if driver != "local" {
 		return nil, "", fmt.Errorf("recording storage driver %q is not supported", driver)
@@ -623,7 +712,11 @@ func (m *TranscriptionManager) recordingReader(ctx context.Context, recordingID 
 	if err != nil {
 		return nil, "", err
 	}
-	file, err := os.Open(filepath.Join(m.Config.Transcription.LocalStoragePath, storageKey))
+	path := filepath.Join(m.Config.Transcription.LocalStoragePath, storageKey)
+	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+		return &localRecordingReader{directory: path, key: key}, mimeType, nil
+	}
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, "", err
 	}
@@ -634,10 +727,45 @@ func recordingPartKey(prefix string, part int) string {
 	return prefix + "/part-" + fmt.Sprintf("%08d", part)
 }
 
+type localRecordingReader struct {
+	directory string
+	key       []byte
+	part      int
+	buffer    bytes.Buffer
+	done      bool
+}
+
+func (r *localRecordingReader) Read(target []byte) (int, error) {
+	for r.buffer.Len() == 0 && !r.done {
+		path := filepath.Join(r.directory, fmt.Sprintf("part-%08d.enc", r.part))
+		sealed, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				r.done = true
+				break
+			}
+			return 0, err
+		}
+		plain, err := openAudioChunk(r.key, sealed)
+		if err != nil {
+			return 0, err
+		}
+		_, _ = r.buffer.Write(plain)
+		r.part++
+	}
+	if r.buffer.Len() == 0 && r.done {
+		return 0, io.EOF
+	}
+	return r.buffer.Read(target)
+}
+
+func (r *localRecordingReader) Close() error { return nil }
+
 type s3RecordingReader struct {
 	storage *s3Storage
 	prefix  string
 	key     []byte
+	ctx     context.Context
 	part    int
 	current io.ReadCloser
 	buffer  bytes.Buffer
@@ -650,7 +778,11 @@ func (r *s3RecordingReader) Read(target []byte) (int, error) {
 			_ = r.current.Close()
 			r.current = nil
 		}
-		object, err := r.storage.get(context.Background(), recordingPartKey(r.prefix, r.part))
+		requestContext := r.ctx
+		if requestContext == nil {
+			requestContext = context.Background()
+		}
+		object, err := r.storage.get(requestContext, recordingPartKey(r.prefix, r.part))
 		if err != nil {
 			if responseError, ok := err.(*s3ResponseError); ok && responseError.status == http.StatusNotFound {
 				r.done = true

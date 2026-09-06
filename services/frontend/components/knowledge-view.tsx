@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   ChevronLeft,
   ChevronRight,
@@ -139,6 +140,8 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
     { sources, onChange, organizationRole, userId, platformAdmin = false },
     ref
   ) {
+    const searchParams = useSearchParams()
+    const targetSourceId = searchParams.get("source")
     const fileInputRef = useRef<HTMLInputElement>(null)
     const [dialogOpen, setDialogOpen] = useState(false)
     const [url, setUrl] = useState("")
@@ -182,7 +185,12 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
       1,
       Math.ceil(filteredSources.length / SOURCE_PAGE_SIZE)
     )
-    const currentPage = Math.min(page, pageCount)
+    const targetIndex = targetSourceId
+      ? filteredSources.findIndex((source) => source.id === targetSourceId)
+      : -1
+    const targetPage =
+      targetIndex >= 0 ? Math.floor(targetIndex / SOURCE_PAGE_SIZE) + 1 : null
+    const currentPage = targetPage ?? Math.min(page, pageCount)
     const visibleSources = filteredSources.slice(
       (currentPage - 1) * SOURCE_PAGE_SIZE,
       currentPage * SOURCE_PAGE_SIZE
@@ -194,6 +202,16 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
       currentPage * SOURCE_PAGE_SIZE,
       filteredSources.length
     )
+
+    useEffect(() => {
+      if (!targetSourceId) return
+      const frame = window.requestAnimationFrame(() => {
+        document
+          .getElementById(`knowledge-source-${targetSourceId}`)
+          ?.scrollIntoView({ block: "center", behavior: "smooth" })
+      })
+      return () => window.cancelAnimationFrame(frame)
+    }, [currentPage, targetSourceId])
 
     useImperativeHandle(
       ref,
@@ -549,8 +567,16 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
 
                       return (
                         <div
+                          data-deep-link-target={
+                            source.id === targetSourceId ? "true" : undefined
+                          }
+                          id={`knowledge-source-${source.id}`}
                           key={source.id}
-                          className="group grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-3 transition-colors hover:bg-muted/20 sm:grid-cols-[minmax(0,1fr)_8rem_5rem] sm:items-center sm:px-5"
+                          className={cn(
+                            "group grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-3 transition-colors hover:bg-muted/20 sm:grid-cols-[minmax(0,1fr)_8rem_5rem] sm:items-center sm:px-5",
+                            source.id === targetSourceId &&
+                              "bg-primary/5 ring-1 ring-primary/40 ring-inset"
+                          )}
                         >
                           <div className="flex min-w-0 items-start gap-3">
                             <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/50 text-muted-foreground">
