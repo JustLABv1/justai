@@ -364,9 +364,10 @@ func looseActionStringField(raw, key string) string {
 	for valueStart < len(raw) && (raw[valueStart] == ' ' || raw[valueStart] == '\t' || raw[valueStart] == '\r' || raw[valueStart] == '\n') {
 		valueStart++
 	}
-	if valueStart >= len(raw) || raw[valueStart] != '"' {
+	if valueStart >= len(raw) || (raw[valueStart] != '"' && raw[valueStart] != '\'') {
 		return ""
 	}
+	quote := raw[valueStart]
 	valueStart++
 	var encoded strings.Builder
 	for index := valueStart; index < len(raw); index++ {
@@ -376,10 +377,12 @@ func looseActionStringField(raw, key string) string {
 			index++
 			continue
 		}
-		if raw[index] == '"' {
+		if raw[index] == quote {
 			value := encoded.String()
-			if decoded, err := strconv.Unquote(`"` + value + `"`); err == nil {
-				return decoded
+			if quote == '"' {
+				if decoded, err := strconv.Unquote(`"` + value + `"`); err == nil {
+					return decoded
+				}
 			}
 			return value
 		}

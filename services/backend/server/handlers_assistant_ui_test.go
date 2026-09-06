@@ -375,6 +375,11 @@ func TestParseAssistantBuiltinAction(t *testing.T) {
 	if !ok || toolName != "generate_image" || arguments["prompt"] != "A raccoon" {
 		t.Fatalf("unexpected malformed action: %q %+v %v", toolName, arguments, ok)
 	}
+
+	toolName, arguments, ok = parseAssistantBuiltinAction(`{ "action": "generate_image", "action_input": "{ "prompt": 'A designer lamp' }" }`)
+	if !ok || toolName != "generate_image" || arguments["prompt"] != "A designer lamp" {
+		t.Fatalf("unexpected single-quoted malformed action: %q %+v %v", toolName, arguments, ok)
+	}
 }
 
 func TestAssistantUIToolMessagePreservesApprovalAndResult(t *testing.T) {

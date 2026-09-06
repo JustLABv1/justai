@@ -1,7 +1,10 @@
 "use client"
 
-import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
+import {
+  ImageGeneration,
+  type ImageGenerationHandle,
+} from "img-fx"
 import {
   Check,
   ChevronDown,
@@ -156,7 +159,13 @@ type ImageToolResult = {
   }
 }
 
-function GeneratedImageResult({ value }: { value: unknown }) {
+export function GeneratedImageCard({
+  value,
+  isGenerating = false,
+}: {
+  value: unknown
+  isGenerating?: boolean
+}) {
   const parsed = parseToolResult(value) as ImageToolResult | null
   const image = parsed?.image
   const imageURL = typeof image?.url === "string" ? image.url : ""
@@ -166,6 +175,7 @@ function GeneratedImageResult({ value }: { value: unknown }) {
   const [preview, setPreview] = useState({ source: "", url: "" })
   const [loadError, setLoadError] = useState({ source: "", message: "" })
   const previewRef = useRef("")
+  const effectRef = useRef<ImageGenerationHandle>(null)
 
   useEffect(() => {
     let active = true
@@ -211,7 +221,15 @@ function GeneratedImageResult({ value }: { value: unknown }) {
     }
   }, [])
 
-  if (!imageURL) return <StructuredToolResult value={value} />
+  useEffect(() => {
+    if (!preview.url) return
+    const frame = requestAnimationFrame(() => {
+      effectRef.current?.triggerReveal({ hold: "manual" })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [preview.url])
+
+  if (!imageURL && !isGenerating) return <StructuredToolResult value={value} />
   if (loadError.source === imageURL && loadError.message) {
     return (
       <p className="rounded-lg border bg-destructive/10 px-2 py-1.5 text-destructive">
@@ -219,34 +237,38 @@ function GeneratedImageResult({ value }: { value: unknown }) {
       </p>
     )
   }
-  if (preview.source !== imageURL || !preview.url) {
-    return (
-      <div className="inline-flex items-center gap-2 rounded-lg border bg-background/60 px-2 py-1.5 text-muted-foreground">
-        <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-        Loading image…
-      </div>
-    )
-  }
+  const imageReady = preview.source === imageURL && Boolean(preview.url)
   return (
-    <div className="overflow-hidden rounded-lg border bg-background/60">
-      <Image
-        alt={prompt}
-        className="h-auto max-h-[32rem] w-full object-contain"
-        height={1024}
-        src={preview.url}
-        unoptimized
-        width={1024}
-      />
+    <div className="my-3 w-fit max-w-full overflow-hidden rounded-xl border bg-background/60">
+      <ImageGeneration
+        aria-label={prompt}
+        borderRadius={0}
+        images={imageReady ? [preview.url] : []}
+        preset="pixels-organic"
+        ref={effectRef}
+        role="img"
+        style={{ width: "min(32rem, calc(100vw - 8rem))" }}
+      >
+        <div
+          aria-hidden="true"
+          className="w-full bg-muted/40"
+          style={{ aspectRatio: "1 / 1" }}
+        />
+      </ImageGeneration>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t px-2 py-1.5">
-        <span className="text-muted-foreground">{mode}</span>
-        <a
-          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 font-medium hover:bg-muted"
-          download
-          href={preview.url}
-        >
-          <Download className="size-3" aria-hidden="true" />
-          Download
-        </a>
+        <span className="text-muted-foreground">
+          {imageReady ? mode : "Generating image…"}
+        </span>
+        {imageReady && (
+          <a
+            className="inline-flex items-center gap-1 rounded-md border px-2 py-1 font-medium hover:bg-muted"
+            download
+            href={preview.url}
+          >
+            <Download className="size-3" aria-hidden="true" />
+            Download
+          </a>
+        )}
       </div>
     </div>
   )
@@ -470,7 +492,7 @@ export function ToolResultContent({
   value: unknown
 }) {
   if (toolName === "generate_image" || toolName === "edit_image") {
-    return <GeneratedImageResult value={value} />
+    return <GeneratedImageCard value={value} />
   }
   if (toolName === "create_pdf") {
     return <GeneratedFileResult value={value} />
