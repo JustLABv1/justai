@@ -95,6 +95,9 @@ func (a *App) loadConversationKnowledge(c *gin.Context, conversationID uuid.UUID
 		       COALESCE(ij.stage, ks.status), ks.created_at, ks.updated_at
 		FROM conversation_knowledge_sources cks
 		JOIN knowledge_sources ks ON ks.id = cks.source_id
+		JOIN conversations current_conversation ON current_conversation.id = cks.conversation_id
+		LEFT JOIN knowledge_items source_item
+		  ON source_item.resource_type = 'source' AND source_item.resource_id = ks.id
 		LEFT JOIN LATERAL (
 			SELECT progress, stage
 			FROM ingestion_jobs
@@ -102,7 +105,16 @@ func (a *App) loadConversationKnowledge(c *gin.Context, conversationID uuid.UUID
 			ORDER BY created_at DESC, id DESC
 			LIMIT 1
 		) ij ON TRUE
-		WHERE cks.conversation_id = $1 AND ks.source_type <> 'repository' ORDER BY cks.created_at`, conversationID)
+		WHERE cks.conversation_id = $1
+		  AND ks.source_type <> 'repository'
+		  AND (
+			cks.context_scope = 'message'
+			OR (
+				source_item.organization_id = current_conversation.organization_id
+				AND (source_item.visibility = 'workspace' OR source_item.owner_id = current_conversation.user_id)
+			)
+		  )
+		ORDER BY cks.created_at`, conversationID)
 	if err != nil {
 		return err
 	}
@@ -158,7 +170,11 @@ func (a *App) loadConversationTranscription(c *gin.Context, conversationID uuid.
 		       (SELECT COUNT(*) FROM transcription_segments tsg WHERE tsg.session_id = ts.id)
 		FROM conversation_transcription_sessions cts
 		JOIN transcription_sessions ts ON ts.id = cts.session_id
-		WHERE cts.conversation_id = $1 ORDER BY cts.created_at`, conversationID)
+		JOIN conversations current_conversation ON current_conversation.id = cts.conversation_id
+		WHERE cts.conversation_id = $1
+		  AND ts.organization_id = current_conversation.organization_id
+		  AND ts.user_id = current_conversation.user_id
+		ORDER BY cts.created_at`, conversationID)
 	if err != nil {
 		return err
 	}
@@ -179,7 +195,10 @@ func (a *App) loadConversationNotes(c *gin.Context, conversationID uuid.UUID, re
 		       n.created_at, n.updated_at
 		FROM conversation_notes cn
 		JOIN notes n ON n.id = cn.note_id
+		JOIN conversations current_conversation ON current_conversation.id = cn.conversation_id
 		WHERE cn.conversation_id = $1
+		  AND n.organization_id = current_conversation.organization_id
+		  AND (n.user_id = current_conversation.user_id OR n.visibility = 'workspace')
 		ORDER BY cn.created_at`, conversationID)
 	if err != nil {
 		return err
@@ -238,7 +257,14 @@ func (a *App) updateConversationKnowledge(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("contextScope must be persistent or message"))
 		return
 	}
-	result, err := a.DB.ExecContext(c, `UPDATE conversation_knowledge_sources SET context_scope = $3 WHERE conversation_id = $1 AND source_id = $2`, conversationID, sourceID, request.ContextScope)
+	principal, _ := middleware.GetPrincipal(c)
+	transaction, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer transaction.Rollback()
+	result, err := transaction.ExecContext(c, `UPDATE conversation_knowledge_sources SET context_scope = $3 WHERE conversation_id = $1 AND source_id = $2`, conversationID, sourceID, request.ContextScope)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -248,6 +274,19 @@ func (a *App) updateConversationKnowledge(c *gin.Context) {
 		return
 	} else if affected == 0 {
 		writeError(c, http.StatusNotFound, fmt.Errorf("knowledge source is not attached to this conversation"))
+		return
+	}
+	// A message-scoped upload starts life as conversation-owned. Promoting it
+	// to durable Knowledge must clear that ownership marker so a later detach
+	// only removes the conversation mapping and cannot delete the library item.
+	if request.ContextScope == "persistent" {
+		if _, err := transaction.ExecContext(c, `UPDATE knowledge_sources SET conversation_id = NULL, updated_at = now() WHERE id = $1 AND conversation_id = $2 AND created_by = $3`, sourceID, conversationID, principal.UserID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -423,7 +462,33 @@ func (a *App) canUseKnowledgeSource(c *gin.Context, sourceID, targetConversation
 	// Queued and processing sources are attachable so the context pane can show
 	// live indexing state and chat/voice can block until the source is ready.
 	// Failed sources remain detached until the user retries indexing.
-	return (status == "queued" || status == "processing" || status == "ready") && ((scopeType == "organization" && scopeID == organizationID) || (scopeType == "user" && scopeID == principal.UserID))
+	if status != "queued" && status != "processing" && status != "ready" {
+		return false
+	}
+	if scopeType == "organization" {
+		return scopeID == organizationID
+	}
+	if scopeType != "user" || scopeID != principal.UserID {
+		return false
+	}
+	// Message-scoped uploads are intentionally disposable and can be attached
+	// to the conversation that owns them even before catalog synchronization.
+	if sourceConversationID.Valid && sourceConversationID.String == targetConversationID.String() {
+		return true
+	}
+	var available bool
+	if err := a.DB.QueryRowContext(c, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM knowledge_items ki
+			JOIN conversations current_conversation ON current_conversation.id = $2
+			WHERE ki.resource_type = 'source' AND ki.resource_id = $1
+			  AND ki.organization_id = current_conversation.organization_id
+			  AND (ki.visibility = 'workspace' OR ki.owner_id = current_conversation.user_id)
+		)`, sourceID, targetConversationID).Scan(&available); err != nil {
+		return false
+	}
+	return available
 }
 
 func scanMCPServerContext(scanner interface{ Scan(dest ...any) error }) (models.MCPServer, error) {

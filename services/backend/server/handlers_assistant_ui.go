@@ -39,6 +39,9 @@ type assistantUIRequest struct {
 	UseMemory           bool              `json:"useMemory"`
 	DeepContext         bool              `json:"deepContext"`
 	InheritRepositories bool              `json:"inheritRepositories"`
+	ContextPolicy       string            `json:"contextPolicy"`
+	IncludeSpaceIDs     []string          `json:"includeSpaceIds"`
+	ExcludeSpaceIDs     []string          `json:"excludeSpaceIds"`
 }
 
 func assistantUIRetrievalMode(deepContext bool) string {
@@ -330,26 +333,75 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		}
 	}
 
-	knowledgeEnabled := a.platformCapabilityEnabled(c, "knowledge")
+	knowledgeEnabled := a.platformCapabilityEnabled(c, "unified_knowledge")
 	knowledgeAttached := false
+	knowledgeStatusRequested := false
+	contextResolution := knowledgeContextResolution{}
+	var persistentSourceIDs []uuid.UUID
 	if knowledgeEnabled {
 		selectedSourceIDs := latestUserAttachmentSourceIDs(latestUser)
-		indexing, err := a.conversationHasIndexingKnowledge(c, conversationID, selectedSourceIDs)
-		if err != nil {
-			runStatus = "error"
-			writeError(c, http.StatusInternalServerError, err)
-			return
-		}
-		if indexing {
-			runStatus = "error"
-			writeError(c, http.StatusConflict, fmt.Errorf("attached Knowledge is still indexing; detach it or wait for indexing to finish"))
-			return
-		}
 		if latestUser != nil {
-			knowledgeAttached, err = a.conversationHasKnowledge(c, conversationID, selectedSourceIDs)
-			if err != nil {
+			var persistentErr error
+			persistentSourceIDs, persistentErr = a.conversationPersistentSourceIDs(c, conversationID, organizationID, principal.UserID)
+			if persistentErr != nil {
+				slog.Warn("explicit Knowledge references could not be loaded", "error", persistentErr)
+				persistentSourceIDs = nil
+			}
+			var knowledgeErr error
+			if len(selectedSourceIDs) > 0 {
+				indexing, indexingErr := a.conversationHasIndexingKnowledge(c, conversationID, organizationID, principal.UserID, selectedSourceIDs)
+				knowledgeErr = indexingErr
+				if indexing {
+					runStatus = "error"
+					writeError(c, http.StatusConflict, fmt.Errorf("attached Knowledge is still indexing; detach it or wait for indexing to finish"))
+					return
+				}
+				knowledgeAttached, knowledgeErr = a.conversationHasKnowledge(c, conversationID, organizationID, principal.UserID, selectedSourceIDs)
+				knowledgeStatusRequested = knowledgeAttached
+			} else if len(persistentSourceIDs) == 0 && len(request.IncludeSpaceIDs) == 0 && len(request.ExcludeSpaceIDs) == 0 && assistantUIRequestsImageGeneration(latestUser) {
+				// Image generation is a self-contained built-in action. Do not
+				// turn a word in the image prompt (for example, "Katze") into
+				// unrelated Knowledge grounding unless the user explicitly
+				// attached, included, or excluded Knowledge for this turn.
+				knowledgeStatusRequested = false
+			} else {
+				routingStarted := time.Now()
+				// Start from an empty, restricted resolution. If catalog routing is
+				// unavailable, automatic grounding must fail closed for this turn
+				// instead of falling back to the entire library.
+				contextResolution = knowledgeContextResolution{Restricted: true}
+				// Durable Knowledge is now background context. The server chooses
+				// relevant authorized passages on each turn; the browser no longer
+				// needs to attach a resource through a conversation drawer.
+				// Catalog synchronization is idempotent and keeps newly-created
+				// native records visible to the resolver.
+				if catalogErr := a.syncKnowledgeCatalog(c); catalogErr != nil {
+					slog.Warn("knowledge catalog is not available; skipping automatic grounding for this turn", "error", catalogErr)
+				} else {
+					includeIDs, includeErr := parseContextSpaceIDs(request.IncludeSpaceIDs)
+					excludeIDs, excludeErr := parseContextSpaceIDs(request.ExcludeSpaceIDs)
+					if includeErr != nil || excludeErr != nil {
+						runStatus = "error"
+						writeError(c, http.StatusBadRequest, fmt.Errorf("invalid knowledge space override"))
+						return
+					}
+					resolved, resolveErr := a.resolveKnowledgeContext(c, organizationID, principal.UserID, conversationID, latestUser.Text, includeIDs, excludeIDs)
+					if resolveErr != nil {
+						slog.Warn("knowledge space routing failed; skipping automatic grounding for this turn", "error", resolveErr)
+					} else {
+						contextResolution = resolved
+						slog.Info("knowledge context routed", "organizationId", organizationID, "userId", principal.UserID, "durationMs", time.Since(routingStarted).Milliseconds(), "spaceCount", len(resolved.Spaces), "restricted", resolved.Restricted, "includeOverrideCount", len(includeIDs), "excludeOverrideCount", len(excludeIDs))
+					}
+				}
+				// This flag means "run the resolver", not "a source was found".
+				// Status parts are emitted later only when retrieval returns a result
+				// or the user explicitly requested Knowledge.
+				knowledgeAttached = true
+				knowledgeStatusRequested = len(persistentSourceIDs) > 0 || len(request.IncludeSpaceIDs) > 0 || len(request.ExcludeSpaceIDs) > 0
+			}
+			if knowledgeErr != nil {
 				runStatus = "error"
-				writeError(c, http.StatusInternalServerError, err)
+				writeError(c, http.StatusInternalServerError, knowledgeErr)
 				return
 			}
 		}
@@ -483,36 +535,127 @@ func (a *App) assistantUIChat(c *gin.Context) {
 
 	var citations []models.Citation
 	if latestUser != nil && knowledgeEnabled && knowledgeAttached {
-		_ = writeChunk(map[string]any{
-			"type": "data-retrieval-status",
-			"id":   "retrieval-status",
-			"data": map[string]any{
-				"status": "started",
-				"mode":   assistantUIRetrievalMode(request.DeepContext),
-				"query":  latestUser.Text,
-			},
-		})
-		var retrievalErr error
-		citations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6, latestUser.AttachmentSourceIDs, request.DeepContext)
-		if retrievalErr != nil {
+		explicitSourceIDs := append([]uuid.UUID(nil), persistentSourceIDs...)
+		seenExplicitSourceIDs := make(map[uuid.UUID]struct{}, len(explicitSourceIDs))
+		for _, sourceID := range explicitSourceIDs {
+			seenExplicitSourceIDs[sourceID] = struct{}{}
+		}
+		for _, sourceID := range latestUser.AttachmentSourceIDs {
+			if _, exists := seenExplicitSourceIDs[sourceID]; exists {
+				continue
+			}
+			seenExplicitSourceIDs[sourceID] = struct{}{}
+			explicitSourceIDs = append(explicitSourceIDs, sourceID)
+		}
+		selectedSpaceNames := resolvedKnowledgeSpaceNames(contextResolution)
+		if len(latestUser.AttachmentSourceIDs) > 0 {
+			selectedSpaceNames = []string{"Message attachments"}
+		}
+		if len(selectedSpaceNames) == 0 {
+			if contextResolution.Restricted {
+				selectedSpaceNames = []string{"Personal"}
+			} else {
+				selectedSpaceNames = []string{"Knowledge library"}
+			}
+		}
+		selectedSpaceIDs := resolvedKnowledgeSpaceIDs(contextResolution)
+		statusRequested := knowledgeStatusRequested || len(explicitSourceIDs) > 0
+		if statusRequested {
 			_ = writeChunk(map[string]any{
-				"type": "data-retrieval-status",
-				"id":   "retrieval-status",
-				"data": map[string]any{"status": "failed", "mode": assistantUIRetrievalMode(request.DeepContext), "error": retrievalErr.Error()},
+				"type": "data-context-selection",
+				"id":   "context-selection",
+				"data": map[string]any{
+					"status":         "started",
+					"spaceNames":     selectedSpaceNames,
+					"spaceIds":       selectedSpaceIDs,
+					"policy":         strings.TrimSpace(request.ContextPolicy),
+					"routingVersion": "catalog-v1",
+				},
 			})
-		} else {
 			_ = writeChunk(map[string]any{
 				"type": "data-retrieval-status",
 				"id":   "retrieval-status",
 				"data": map[string]any{
-					"status":        "completed",
-					"mode":          assistantUIRetrievalMode(request.DeepContext),
-					"citationCount": len(deduplicateAssistantUICitations(citations)),
-					"sourceCount":   len(deduplicateAssistantUICitations(citations)),
-					"passageCount":  len(citations),
+					"status": "started",
+					"mode":   assistantUIRetrievalMode(request.DeepContext),
+					"query":  latestUser.Text,
 				},
 			})
 		}
+		var retrievalErr error
+		retrievalStarted := time.Now()
+		var automaticCitations []models.Citation
+		var explicitCitations []models.Citation
+		if len(latestUser.AttachmentSourceIDs) == 0 && contextResolution.Restricted {
+			automaticCitations, retrievalErr = a.searchKnowledgeInSpaces(c, organizationID, principal.UserID, latestUser.Text, 6, contextResolution)
+		} else if len(latestUser.AttachmentSourceIDs) == 0 {
+			automaticCitations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6, nil, request.DeepContext)
+		}
+		if retrievalErr == nil && len(explicitSourceIDs) > 0 {
+			explicitCitations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6, explicitSourceIDs, request.DeepContext)
+		}
+		if retrievalErr == nil && len(explicitSourceIDs) > 0 {
+			transcriptCitations, transcriptErr := a.searchConversationTranscripts(c, conversationID, latestUser.Text, 6)
+			if transcriptErr != nil {
+				retrievalErr = transcriptErr
+			} else {
+				explicitCitations = interleaveKnowledgeCitations(6, explicitCitations, transcriptCitations)
+			}
+		}
+		if retrievalErr == nil {
+			citations = interleaveKnowledgeCitations(6, explicitCitations, automaticCitations)
+		}
+		slog.Info("knowledge retrieval completed", "organizationId", organizationID, "userId", principal.UserID, "durationMs", time.Since(retrievalStarted).Milliseconds(), "resultCount", len(citations), "status", map[bool]string{true: "failed", false: "completed"}[retrievalErr != nil])
+		if retrievalErr != nil {
+			includeIDs, _ := parseContextSpaceIDs(request.IncludeSpaceIDs)
+			excludeIDs, _ := parseContextSpaceIDs(request.ExcludeSpaceIDs)
+			_ = a.persistKnowledgeContextSnapshot(context.Background(), runID, conversationID, latestUser.ID, contextResolution, citations, includeIDs, excludeIDs, "failed")
+			if statusRequested {
+				_ = writeChunk(map[string]any{
+					"type": "data-retrieval-status",
+					"id":   "retrieval-status",
+					"data": map[string]any{"status": "failed", "mode": assistantUIRetrievalMode(request.DeepContext), "error": retrievalErr.Error()},
+				})
+			}
+		} else {
+			includeIDs, _ := parseContextSpaceIDs(request.IncludeSpaceIDs)
+			excludeIDs, _ := parseContextSpaceIDs(request.ExcludeSpaceIDs)
+			_ = a.persistKnowledgeContextSnapshot(context.Background(), runID, conversationID, latestUser.ID, contextResolution, citations, includeIDs, excludeIDs, "completed")
+			if statusRequested || len(citations) > 0 {
+				_ = writeChunk(map[string]any{
+					"type": "data-context-selection",
+					"id":   "context-selection",
+					"data": map[string]any{
+						"status":         "completed",
+						"spaceNames":     selectedSpaceNames,
+						"spaceIds":       selectedSpaceIDs,
+						"itemCount":      len(deduplicateAssistantUICitations(citations)),
+						"passageCount":   len(citations),
+						"routingVersion": "catalog-v1",
+					},
+				})
+				_ = writeChunk(map[string]any{
+					"type": "data-retrieval-status",
+					"id":   "retrieval-status",
+					"data": map[string]any{
+						"status":        "completed",
+						"mode":          assistantUIRetrievalMode(request.DeepContext),
+						"citationCount": len(deduplicateAssistantUICitations(citations)),
+						"sourceCount":   len(deduplicateAssistantUICitations(citations)),
+						"passageCount":  len(citations),
+					},
+				})
+			}
+		}
+	}
+	// Keep an auditable snapshot even when the authorized library is empty (or
+	// the turn has no matching passage). The empty selection is meaningful: it
+	// records that automatic routing ran and found no durable context rather
+	// than making the run indistinguishable from an older client.
+	if latestUser != nil && knowledgeEnabled && !knowledgeAttached {
+		includeIDs, _ := parseContextSpaceIDs(request.IncludeSpaceIDs)
+		excludeIDs, _ := parseContextSpaceIDs(request.ExcludeSpaceIDs)
+		_ = a.persistKnowledgeContextSnapshot(context.Background(), runID, conversationID, latestUser.ID, contextResolution, nil, includeIDs, excludeIDs, "completed")
 	}
 	for _, citation := range deduplicateAssistantUICitations(citations) {
 		_ = writeChunk(a.assistantUICitationPart(c, citation))
@@ -1894,6 +2037,41 @@ func assistantUIRequestsImageEdit(message *assistantUserMessage) bool {
 	return false
 }
 
+func assistantUIRequestsImageGeneration(message *assistantUserMessage) bool {
+	if message == nil || assistantUIMessageHasImages([]assistantUIMessage{{Role: "user", Parts: message.Parts}}) {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(message.Text))
+	if text == "" {
+		return false
+	}
+	// A prompt that explicitly names Knowledge should still be able to use
+	// retrieved material as part of an image description. Ordinary image
+	// requests, however, should not be grounded just because a library item
+	// shares a noun with the prompt.
+	for _, reference := range []string{"knowledge", "note", "notiz", "memory", "erinner", "context", "kontext", "repository", "repo", "file", "datei"} {
+		if strings.Contains(text, reference) {
+			return false
+		}
+	}
+	hasImageNoun := false
+	for _, noun := range []string{"image", "bild", "picture", "photo", "foto", "illustration", "portrait"} {
+		if strings.Contains(text, noun) {
+			hasImageNoun = true
+			break
+		}
+	}
+	if !hasImageNoun {
+		return false
+	}
+	for _, verb := range []string{"generate", "create", "draw", "make", "render", "generier", "erstell", "zeichn", "mal", "erzeug", "mach"} {
+		if strings.Contains(text, verb) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) listAssistantUIMessages(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
@@ -1911,11 +2089,6 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("conversation not found"))
 		return
 	}
-	knowledgeAttached, err := a.conversationHasKnowledge(c, conversationID, nil)
-	if err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
-	}
 	rows, err := a.DB.QueryContext(c, `
 		SELECT m.id, m.role, m.content, m.citations, m.format, m.ui_message, m.parent_id,
 		       COALESCE(parent.ui_message->>'id', ''), m.run_status, m.feedback
@@ -1931,6 +2104,7 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 	}
 	defer rows.Close()
 	repository := assistantUIRepository{Messages: []assistantUIRepositoryItem{}}
+	allowedCitationKeys := a.authorizedAssistantUICitationKeys(c, organizationID, principal.UserID)
 	var pendingTools *assistantUIToolGroup
 	flushPendingTools := func() {
 		if pendingTools == nil {
@@ -1952,15 +2126,25 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
+		var storedCitations []models.Citation
+		if len(citations) > 0 {
+			_ = json.Unmarshal(citations, &storedCitations)
+		}
+		storedCitations = filterAuthorizedAssistantUICitations(storedCitations, allowedCitationKeys)
+		filteredCitations := jsonRaw(storedCitations)
 		var message map[string]any
 		if len(rawMessage) > 0 {
 			_ = json.Unmarshal(rawMessage, &message)
 		}
 		if message == nil {
-			message = a.legacyAssistantUIMessage(c, id, role, content, citations, runStatus, feedback)
+			message = a.legacyAssistantUIMessage(c, id, role, content, filteredCitations, runStatus, feedback)
 		} else {
-			messageKnowledgeAttached := knowledgeAttached || assistantUIMessageHasSourceParts(message)
-			if messageKnowledgeAttached {
+			filterAssistantUISourceParts(message, allowedCitationKeys)
+			normalizeAssistantUIRetrievalCounts(message, storedCitations)
+			// A conversation-level Knowledge mapping is not evidence that this
+			// particular historical turn used grounding. Keep retrieval badges
+			// only for messages that retain authorized source parts.
+			if assistantUIMessageHasSourceParts(message) {
 				collapseAssistantUIRetrievalStatuses(message)
 			} else {
 				removeAssistantUIRetrievalStatuses(message)
@@ -1979,7 +2163,7 @@ func (a *App) listAssistantUIMessages(c *gin.Context) {
 				message["metadata"] = metadata
 			}
 		}
-		assistantUIAppendMissingCitations(c, message, citations, a)
+		assistantUIAppendMissingCitations(c, message, filteredCitations, a)
 		parent := ""
 		if parentUIID.Valid && parentUIID.String != "" {
 			parent = parentUIID.String
@@ -2032,16 +2216,20 @@ func collapseAssistantUIRetrievalStatuses(message map[string]any) {
 	}
 
 	lastStatusIndex := -1
+	lastSelectionIndex := -1
 	for index, rawPart := range parts {
 		part, ok := rawPart.(map[string]any)
 		if !ok {
 			continue
 		}
-		if partType, _ := part["type"].(string); partType == "data-retrieval-status" {
+		switch partType, _ := part["type"].(string); partType {
+		case "data-retrieval-status":
 			lastStatusIndex = index
+		case "data-context-selection":
+			lastSelectionIndex = index
 		}
 	}
-	if lastStatusIndex < 0 {
+	if lastStatusIndex < 0 && lastSelectionIndex < 0 {
 		return
 	}
 
@@ -2049,8 +2237,15 @@ func collapseAssistantUIRetrievalStatuses(message map[string]any) {
 	for index, rawPart := range parts {
 		part, ok := rawPart.(map[string]any)
 		if ok {
-			if partType, _ := part["type"].(string); partType == "data-retrieval-status" && index != lastStatusIndex {
-				continue
+			switch partType, _ := part["type"].(string); partType {
+			case "data-retrieval-status":
+				if index != lastStatusIndex {
+					continue
+				}
+			case "data-context-selection":
+				if index != lastSelectionIndex {
+					continue
+				}
 			}
 		}
 		collapsed = append(collapsed, rawPart)
@@ -2068,7 +2263,8 @@ func removeAssistantUIRetrievalStatuses(message map[string]any) {
 	for _, rawPart := range parts {
 		part, ok := rawPart.(map[string]any)
 		if ok {
-			if partType, _ := part["type"].(string); partType == "data-retrieval-status" {
+			partType, _ := part["type"].(string)
+			if partType == "data-retrieval-status" || partType == "data-context-selection" {
 				continue
 			}
 		}
@@ -2093,6 +2289,145 @@ func assistantUIMessageHasSourceParts(message map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// authorizedAssistantUICitationKeys loads the organization and ownership
+// envelope once per history request. Historical messages can contain many
+// citations, so authorization must not issue one database query per message.
+func (a *App) authorizedAssistantUICitationKeys(ctx context.Context, organizationID, userID uuid.UUID) map[string]struct{} {
+	allowed := make(map[string]struct{})
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT resource_type, resource_id
+		FROM knowledge_items
+		WHERE organization_id = $1
+		  AND (visibility = 'workspace' OR owner_id = $2)
+		  AND resource_type IN ('source', 'note', 'transcript')`, organizationID, userID)
+	if err != nil {
+		slog.Warn("historical Knowledge citations could not be authorized", "error", err)
+		return allowed
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var resourceType string
+		var resourceID uuid.UUID
+		if err := rows.Scan(&resourceType, &resourceID); err != nil {
+			slog.Warn("historical Knowledge citation authorization could not be read", "error", err)
+			return map[string]struct{}{}
+		}
+		keyType := resourceType
+		if resourceType == "source" {
+			keyType = "knowledge"
+		} else if resourceType == "transcript" {
+			keyType = "transcription"
+		}
+		allowed[keyType+":"+resourceID.String()] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("historical Knowledge citation authorization failed", "error", err)
+		return map[string]struct{}{}
+	}
+	return allowed
+}
+
+func filterAuthorizedAssistantUICitations(citations []models.Citation, allowed map[string]struct{}) []models.Citation {
+	filtered := make([]models.Citation, 0, len(citations))
+	for _, citation := range citations {
+		if citation.Kind != "knowledge" && citation.Kind != "note" && citation.Kind != "transcription" {
+			filtered = append(filtered, citation)
+			continue
+		}
+		id := citation.ResourceID
+		if id == uuid.Nil {
+			id = citation.SourceID
+		}
+		if _, exists := allowed[citation.Kind+":"+id.String()]; exists {
+			filtered = append(filtered, citation)
+		}
+	}
+	return filtered
+}
+
+func filterAssistantUISourceParts(message map[string]any, allowed map[string]struct{}) {
+	parts, ok := message["parts"].([]any)
+	if !ok {
+		return
+	}
+	filtered := make([]any, 0, len(parts))
+	for _, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			filtered = append(filtered, rawPart)
+			continue
+		}
+		partType, _ := part["type"].(string)
+		if partType != "source-document" && partType != "source-url" {
+			filtered = append(filtered, rawPart)
+			continue
+		}
+		sourceID, _ := part["sourceId"].(string)
+		kind := "knowledge"
+		if providerMetadata, ok := part["providerMetadata"].(map[string]any); ok {
+			if justai, ok := providerMetadata["justai"].(map[string]any); ok {
+				if value, ok := justai["kind"].(string); ok && value != "" {
+					kind = value
+				}
+			}
+		}
+		if _, exists := allowed[kind+":"+sourceID]; exists {
+			filtered = append(filtered, rawPart)
+		}
+	}
+	message["parts"] = filtered
+}
+
+// normalizeAssistantUIRetrievalCounts keeps historical status pills honest
+// after unauthorized citation parts have been removed. The original run may
+// have counted sources from another organization; those counts must never be
+// shown in the current workspace's history.
+func normalizeAssistantUIRetrievalCounts(message map[string]any, citations []models.Citation) {
+	parts, ok := message["parts"].([]any)
+	if !ok {
+		return
+	}
+	sourceCount := len(deduplicateAssistantUICitations(citations))
+	if sourceCount == 0 {
+		sourceIDs := make(map[string]struct{})
+		for _, rawPart := range parts {
+			part, ok := rawPart.(map[string]any)
+			if !ok {
+				continue
+			}
+			partType, _ := part["type"].(string)
+			if partType != "source-document" && partType != "source-url" {
+				continue
+			}
+			if sourceID, _ := part["sourceId"].(string); sourceID != "" {
+				sourceIDs[sourceID] = struct{}{}
+			}
+		}
+		sourceCount = len(sourceIDs)
+	}
+	passageCount := len(citations)
+	for _, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			continue
+		}
+		partType, _ := part["type"].(string)
+		data, ok := part["data"].(map[string]any)
+		if !ok {
+			continue
+		}
+		switch partType {
+		case "data-retrieval-status":
+			data["sourceCount"] = sourceCount
+			data["citationCount"] = sourceCount
+			data["passageCount"] = passageCount
+		case "data-context-selection":
+			data["itemCount"] = sourceCount
+			data["passageCount"] = passageCount
+		}
+	}
 }
 
 func assistantUIAppendMissingCitations(ctx context.Context, message map[string]any, raw []byte, app *App) {

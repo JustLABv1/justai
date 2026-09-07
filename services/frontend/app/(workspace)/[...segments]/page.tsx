@@ -15,7 +15,10 @@ export default async function WorkspaceRoutePage({
   if (section === "conversation" || section === "chat") {
     redirect(workspacePath("chat", id ?? null))
   }
-  if (section === "endpoints" || section === "knowledge" || section === "mcp") {
+  // Knowledge is the canonical workspace route. Redirect only the legacy
+  // settings aliases here; redirecting `/knowledge` to itself causes an
+  // endless server-side navigation loop in the App Router.
+  if (section === "endpoints" || section === "mcp") {
     redirect(workspacePath(section))
   }
 

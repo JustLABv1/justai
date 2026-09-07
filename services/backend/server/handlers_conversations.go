@@ -541,6 +541,7 @@ func (a *App) listConversationMessages(c *gin.Context) {
 	defer rows.Close()
 
 	result := []models.Message{}
+	var allowedCitationKeys map[string]struct{}
 	for rows.Next() {
 		var item models.Message
 		var rawCitations []byte
@@ -552,6 +553,15 @@ func (a *App) listConversationMessages(c *gin.Context) {
 			if err := json.Unmarshal(rawCitations, &item.Citations); err != nil {
 				writeError(c, http.StatusInternalServerError, err)
 				return
+			}
+		}
+		for _, citation := range item.Citations {
+			if citation.Kind == "knowledge" || citation.Kind == "note" || citation.Kind == "transcription" {
+				if allowedCitationKeys == nil {
+					allowedCitationKeys = a.authorizedAssistantUICitationKeys(c, organizationID, principal.UserID)
+				}
+				item.Citations = filterAuthorizedAssistantUICitations(item.Citations, allowedCitationKeys)
+				break
 			}
 		}
 		result = append(result, item)

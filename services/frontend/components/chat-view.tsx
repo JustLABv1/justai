@@ -18,13 +18,12 @@ import {
   Copy,
   FileText,
   History,
-  PanelRightClose,
   Paperclip,
-  PanelRightOpen,
   Pencil,
   Plug,
   RefreshCw,
   RotateCcw,
+  Sparkles,
   Star,
   Quote,
   ThumbsDown,
@@ -102,6 +101,7 @@ import type {
   Conversation,
   ConversationContext,
   Endpoint,
+  KnowledgeSpace,
   KnowledgeSource,
   MCPServer,
   Note,
@@ -150,8 +150,6 @@ type Props = {
   onConversationMissing?: () => void
   onNavigate?: (view: ViewId) => void
   onOpenHistory?: () => void
-  onOpenContext?: () => void
-  contextOpen?: boolean
 }
 
 type AssistantHistoryResponse = {
@@ -186,7 +184,6 @@ type CachedConversation = LoadedConversation & {
 
 const CONVERSATION_CACHE_TTL_MS = 30_000
 const CONVERSATION_CACHE_LIMIT = 20
-const CONTEXT_HINT_DISMISSED_STORAGE_KEY = "justai.chat.context-hint-dismissed"
 const MAX_CHAT_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const conversationCache = new Map<string, CachedConversation>()
 
@@ -1058,15 +1055,18 @@ function ContextDisplay({
   onRemoveMCP,
   onRemoveNote,
   onRemoveRepository,
+  onSaveKnowledge,
 }: {
   context: ConversationContext
   onRemoveMCP?: (serverId: string) => Promise<void>
   onRemoveNote?: (noteId: string) => Promise<void>
   onRemoveRepository?: (repositoryId: string) => Promise<void>
+  onSaveKnowledge?: (sourceId: string) => Promise<void>
 }) {
   const [removingContextId, setRemovingContextId] = useState<string | null>(
     null
   )
+  const [savingContextId, setSavingContextId] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const items: Array<{
     id: string
@@ -1074,14 +1074,16 @@ function ContextDisplay({
     detail: string
     kind: "knowledge" | "repository" | "mcp" | "note" | "transcription"
     resourceId?: string
+    contextScope?: "persistent" | "message"
   }> = [
     ...context.knowledgeSources
-      .filter((source) => source.contextScope !== "message")
       .map((source) => ({
         id: `knowledge:${source.id}`,
         label: source.title,
         detail: source.sourceType || "knowledge",
         kind: "knowledge" as const,
+        resourceId: source.id,
+        contextScope: source.contextScope,
       })),
     ...(context.repositories ?? []).map((repository) => ({
       id: `repository:${repository.id}`,
@@ -1140,6 +1142,23 @@ function ContextDisplay({
     }
   }
 
+  const handleSaveKnowledge = async (sourceId: string) => {
+    if (!onSaveKnowledge || savingContextId) return
+    setRemoveError(null)
+    setSavingContextId(sourceId)
+    try {
+      await onSaveKnowledge(sourceId)
+    } catch (error) {
+      setRemoveError(
+        error instanceof Error
+          ? error.message
+          : "The source could not be saved to Knowledge."
+      )
+    } finally {
+      setSavingContextId(null)
+    }
+  }
+
   if (!items.length && !removeError) return null
 
   return (
@@ -1154,6 +1173,18 @@ function ContextDisplay({
           >
             <span className="size-1.5 shrink-0 rounded-full bg-primary/70" />
             <span className="truncate">{item.label}</span>
+            {item.kind === "knowledge" && item.contextScope === "message" && onSaveKnowledge ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-50"
+                aria-label={`Save ${item.label} to Knowledge`}
+                title="Save to Knowledge"
+                disabled={savingContextId !== null}
+                onClick={() => void handleSaveKnowledge(item.resourceId!)}
+              >
+                {savingContextId === item.resourceId ? "Saving…" : "Save"}
+              </button>
+            ) : null}
             {item.resourceId &&
             ((item.kind === "mcp" && onRemoveMCP) ||
               (item.kind === "note" && onRemoveNote) ||
@@ -2557,6 +2588,15 @@ function Composer({
   onAttachNote,
   onRemoveNote,
   onRemoveRepository,
+  onSaveKnowledge,
+  knowledgeSpaces,
+  includedSpaceIds,
+  excludedSpaceIds,
+  pinnedSpaceIds,
+  onToggleKnowledgeSpace,
+  onToggleKnowledgeSpaceExclusion,
+  onToggleKnowledgeSpacePin,
+  onResetKnowledgeScope,
   toolApproval,
 }: {
   assistants: SavedAssistant[]
@@ -2582,6 +2622,15 @@ function Composer({
   onAttachNote: (noteId: string) => Promise<void>
   onRemoveNote: (noteId: string) => Promise<void>
   onRemoveRepository: (repositoryId: string) => Promise<void>
+  onSaveKnowledge: (sourceId: string) => Promise<void>
+  knowledgeSpaces: KnowledgeSpace[]
+  includedSpaceIds: string[]
+  excludedSpaceIds: string[]
+  pinnedSpaceIds: string[]
+  onToggleKnowledgeSpace: (spaceId: string) => void
+  onToggleKnowledgeSpaceExclusion: (spaceId: string) => void
+  onToggleKnowledgeSpacePin: (spaceId: string) => void
+  onResetKnowledgeScope: () => void
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
@@ -2607,6 +2656,18 @@ function Composer({
     : (conversationContext.repositories ?? []).length > 0
       ? "Repository is still indexing"
       : "Connect a repository in Context first"
+  const activeKnowledgeSpaceIds = new Set([
+    ...includedSpaceIds,
+    ...pinnedSpaceIds,
+  ])
+  const activeKnowledgeSpaceNames = knowledgeSpaces
+    .filter((space) => activeKnowledgeSpaceIds.has(space.id))
+    .map((space) => space.name)
+  const knowledgeScopeLabel = activeKnowledgeSpaceNames.length
+    ? activeKnowledgeSpaceNames.join(" · ")
+    : excludedSpaceIds.length
+      ? "All except excluded"
+      : "Automatic"
 
   useEffect(() => {
     if (!deepContextAvailable && deepContext) {
@@ -2943,11 +3004,43 @@ function Composer({
                   </ComposerPrimitive.Attachments>
                 </div>
               )}
+              <PopoverPrimitive.Root>
+                <PopoverPrimitive.Trigger
+                  aria-label="Configure Knowledge scope for the next message"
+                  render={<button className="mx-1 mb-1 flex max-w-full items-center gap-2 rounded-xl border border-primary/15 bg-primary/5 px-2.5 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-primary/10" type="button" />}
+                >
+                  <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
+                  <span className="truncate">Knowledge · {knowledgeScopeLabel}</span>
+                  <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+                </PopoverPrimitive.Trigger>
+                <PopoverPrimitive.Portal>
+                  <PopoverPrimitive.Positioner align="start" className="z-50 outline-none" side="top" sideOffset={8}>
+                    <PopoverPrimitive.Popup className="w-[min(24rem,calc(100vw-2rem))] rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none">
+                      <PopoverPrimitive.Title className="text-xs font-semibold">Knowledge scope</PopoverPrimitive.Title>
+                      <PopoverPrimitive.Description className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Automatic routing runs every turn. These controls override it for the next messages.</PopoverPrimitive.Description>
+                      <div className="mt-3 max-h-56 space-y-1 overflow-y-auto">
+                        {knowledgeSpaces.length === 0 ? <p className="rounded-lg bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground">No project spaces yet. Add one from Knowledge.</p> : knowledgeSpaces.map((space) => {
+                          const included = includedSpaceIds.includes(space.id) || pinnedSpaceIds.includes(space.id)
+                          const excluded = excludedSpaceIds.includes(space.id)
+                          const pinned = pinnedSpaceIds.includes(space.id)
+                          return <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted" key={space.id}>
+                            <button aria-pressed={included && !excluded} className={cn("min-w-0 flex-1 truncate text-left text-[11px]", included && !excluded ? "font-medium text-foreground" : "text-muted-foreground")} onClick={() => onToggleKnowledgeSpace(space.id)} type="button">{space.name}</button>
+                            <button aria-label={`${excluded ? "Include" : "Exclude"} ${space.name}`} className={cn("rounded-md px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background hover:text-foreground", excluded && "bg-destructive/10 text-destructive")} onClick={() => onToggleKnowledgeSpaceExclusion(space.id)} type="button">{excluded ? "Excluded" : "Exclude"}</button>
+                            <button aria-pressed={pinned} aria-label={`${pinned ? "Unpin" : "Pin"} ${space.name}`} className={cn("rounded-md px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background hover:text-foreground", pinned && "bg-primary/10 text-primary")} onClick={() => onToggleKnowledgeSpacePin(space.id)} type="button">{pinned ? "Pinned" : "Pin"}</button>
+                          </div>
+                        })}
+                      </div>
+                      {(includedSpaceIds.length > 0 || excludedSpaceIds.length > 0 || pinnedSpaceIds.length > 0) && <button className="mt-2 w-full rounded-lg border px-2.5 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" onClick={onResetKnowledgeScope} type="button">Reset to automatic routing</button>}
+                    </PopoverPrimitive.Popup>
+                  </PopoverPrimitive.Positioner>
+                </PopoverPrimitive.Portal>
+              </PopoverPrimitive.Root>
               <ContextDisplay
                 context={conversationContext}
                 onRemoveMCP={onRemoveMCP}
                 onRemoveNote={onRemoveNote}
                 onRemoveRepository={onRemoveRepository}
+                onSaveKnowledge={onSaveKnowledge}
               />
               {attachingMcpId && (
                 <div
@@ -3009,8 +3102,8 @@ function Composer({
                 )}
                 placeholder={
                   compact
-                    ? "What do you want to know? (type @ for notes, MCPs or context)"
-                    : "Message JustAI… (type @ for notes, MCPs or context; / and $ for MCPs)"
+                    ? "What do you want to know? (type @ for a specific item)"
+                    : "Message JustAI… (type @ for a specific item; / and $ for MCPs)"
                 }
                 submitMode="enter"
               />
@@ -3218,6 +3311,7 @@ function AssistantChatSurface({
   onAttachNote,
   onRemoveNote,
   onRemoveRepository,
+  onSaveKnowledge,
   onUpload,
   onRemoveUpload,
   onConversationCreated,
@@ -3226,6 +3320,14 @@ function AssistantChatSurface({
   onOpenHistory,
   onAssistantSelectionChange,
   conversationContext,
+  knowledgeSpaces,
+  includedSpaceIds,
+  excludedSpaceIds,
+  pinnedSpaceIds,
+  onToggleKnowledgeSpace,
+  onToggleKnowledgeSpaceExclusion,
+  onToggleKnowledgeSpacePin,
+  onResetKnowledgeScope,
 }: {
   conversationId: string | null
   cacheScope: string
@@ -3242,6 +3344,7 @@ function AssistantChatSurface({
   onAttachNote: (noteId: string) => Promise<void>
   onRemoveNote: (noteId: string) => Promise<void>
   onRemoveRepository: (repositoryId: string) => Promise<void>
+  onSaveKnowledge: (sourceId: string) => Promise<void>
   onUpload: (file: File) => Promise<UploadedConversationAttachment>
   onRemoveUpload: (sourceId: string) => Promise<void>
   onConversationCreated?: (conversation: Conversation) => void
@@ -3250,6 +3353,14 @@ function AssistantChatSurface({
   onOpenHistory?: () => void
   onAssistantSelectionChange?: (assistantId: string | null) => void
   conversationContext: ConversationContext
+  knowledgeSpaces: KnowledgeSpace[]
+  includedSpaceIds: string[]
+  excludedSpaceIds: string[]
+  pinnedSpaceIds: string[]
+  onToggleKnowledgeSpace: (spaceId: string) => void
+  onToggleKnowledgeSpaceExclusion: (spaceId: string) => void
+  onToggleKnowledgeSpacePin: (spaceId: string) => void
+  onResetKnowledgeScope: () => void
 }) {
   const initialAssistant = assistants.find(
     (assistant) => assistant.id === conversationAssistantId
@@ -3284,6 +3395,10 @@ function AssistantChatSurface({
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [deepContext, setDeepContext] = useState(
     initialAssistant?.deepContext ?? false
+  )
+  const effectiveKnowledgeSpaceIds = useMemo(
+    () => Array.from(new Set([...includedSpaceIds, ...pinnedSpaceIds])),
+    [includedSpaceIds, pinnedSpaceIds]
   )
   const selectedAssistant = assistants.find(
     (assistant) => assistant.id === selectedAssistantId
@@ -3436,6 +3551,9 @@ function AssistantChatSurface({
           model: selectedModel,
           useMemory: selectedAssistant?.useMemory ?? true,
           deepContext,
+          contextPolicy: "automatic",
+          includeSpaceIds: effectiveKnowledgeSpaceIds,
+          excludeSpaceIds: excludedSpaceIds,
         }),
         resumable: {
           storage: resumableStorage,
@@ -3475,6 +3593,9 @@ function AssistantChatSurface({
               model: selectedModel,
               useMemory: selectedAssistant?.useMemory ?? true,
               deepContext,
+              contextPolicy: "automatic",
+              includeSpaceIds: effectiveKnowledgeSpaceIds,
+              excludeSpaceIds: excludedSpaceIds,
               requestId,
             },
           }
@@ -3488,6 +3609,8 @@ function AssistantChatSurface({
       selectedAssistantId,
       selectedEndpointId,
       selectedModel,
+      effectiveKnowledgeSpaceIds,
+      excludedSpaceIds,
     ]
   )
 
@@ -3649,6 +3772,15 @@ function AssistantChatSurface({
           onAttachNote,
           onRemoveNote,
           onRemoveRepository,
+          onSaveKnowledge,
+          knowledgeSpaces,
+          includedSpaceIds,
+          excludedSpaceIds,
+          pinnedSpaceIds,
+          onToggleKnowledgeSpace,
+          onToggleKnowledgeSpaceExclusion,
+          onToggleKnowledgeSpacePin,
+          onResetKnowledgeScope,
           toolApproval: voiceApproval,
         }}
         onVoiceErrorClear={() => setVoiceError(null)}
@@ -3674,8 +3806,6 @@ export function ChatView({
   onConversationMissing,
   onEnsureConversation,
   onOpenHistory,
-  onOpenContext,
-  contextOpen = false,
 }: Props) {
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
@@ -3692,9 +3822,10 @@ export function ChatView({
   const [historyRetryToken, setHistoryRetryToken] = useState(0)
   const [conversationContext, setConversationContext] =
     useState<ConversationContext>(EMPTY_CONTEXT)
-  const [contextHintDismissed, setContextHintDismissed] = useState(contextOpen)
-  const [contextHintPreferenceLoaded, setContextHintPreferenceLoaded] =
-    useState(false)
+  const [knowledgeSpaces, setKnowledgeSpaces] = useState<KnowledgeSpace[]>([])
+  const [includedSpaceIds, setIncludedSpaceIds] = useState<string[]>([])
+  const [excludedSpaceIds, setExcludedSpaceIds] = useState<string[]>([])
+  const [pinnedSpaceIds, setPinnedSpaceIds] = useState<string[]>([])
   const locallyCreatedConversationRef = useRef<string | null>(null)
   const pendingConversationRef = useRef(false)
   const conversationCreationRef = useRef<Promise<string> | null>(null)
@@ -3707,28 +3838,50 @@ export function ChatView({
   const selectedAssistantIdRef = useRef<string | null>(
     conversation?.assistantId ?? null
   )
-  const dismissContextHint = useCallback(() => {
-    setContextHintDismissed(true)
-    try {
-      window.localStorage.setItem(CONTEXT_HINT_DISMISSED_STORAGE_KEY, "true")
-    } catch {
-      // Storage can be disabled; the current surface can still dismiss the tip.
-    }
-  }, [])
+
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      let dismissed = false
-      try {
-        dismissed =
-          window.localStorage.getItem(CONTEXT_HINT_DISMISSED_STORAGE_KEY) ===
-          "true"
-      } catch {
-        // Storage can be disabled; default to showing the onboarding tip.
-      }
-      setContextHintDismissed((current) => current || dismissed)
-      setContextHintPreferenceLoaded(true)
-    }, 0)
-    return () => window.clearTimeout(timer)
+    let cancelled = false
+    void api
+      .get<{ spaces: KnowledgeSpace[] }>("/api/v1/knowledge/spaces")
+      .then((result) => {
+        if (!cancelled) setKnowledgeSpaces(result.spaces)
+      })
+      .catch(() => {
+        // Knowledge is optional during a rolling migration. The chat remains
+        // usable with server-side automatic routing when the catalog endpoint
+        // is temporarily unavailable.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [cacheScope])
+
+  const toggleKnowledgeSpace = useCallback((spaceId: string) => {
+    setExcludedSpaceIds((current) => current.filter((id) => id !== spaceId))
+    setIncludedSpaceIds((current) => current.includes(spaceId)
+      ? current.filter((id) => id !== spaceId)
+      : [...current, spaceId])
+  }, [])
+
+  const toggleKnowledgeSpaceExclusion = useCallback((spaceId: string) => {
+    setIncludedSpaceIds((current) => current.filter((id) => id !== spaceId))
+    setPinnedSpaceIds((current) => current.filter((id) => id !== spaceId))
+    setExcludedSpaceIds((current) => current.includes(spaceId)
+      ? current.filter((id) => id !== spaceId)
+      : [...current, spaceId])
+  }, [])
+
+  const toggleKnowledgeSpacePin = useCallback((spaceId: string) => {
+    setExcludedSpaceIds((current) => current.filter((id) => id !== spaceId))
+    setPinnedSpaceIds((current) => current.includes(spaceId)
+      ? current.filter((id) => id !== spaceId)
+      : [...current, spaceId])
+  }, [])
+
+  const resetKnowledgeScope = useCallback(() => {
+    setIncludedSpaceIds([])
+    setExcludedSpaceIds([])
+    setPinnedSpaceIds([])
   }, [])
 
   const handleAssistantSelectionChange = useCallback(
@@ -3915,9 +4068,7 @@ export function ChatView({
   }, [cacheScope, conversationId, historyRetryToken])
 
   useEffect(() => {
-    // WorkspaceContext owns the live refresh while its inspector is open. Do
-    // not issue a second request for the same conversation in that state.
-    if (!conversationId || contextOpen) return
+    if (!conversationId) return
     let disposed = false
     let timer: number | null = null
     let delay = 5000
@@ -3963,7 +4114,7 @@ export function ChatView({
       if (timer !== null) window.clearTimeout(timer)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [contextOpen, conversationId])
+  }, [conversationId])
 
   const ensureLocalConversation = useCallback(
     async ({
@@ -4048,6 +4199,19 @@ export function ChatView({
       if (!id) return
       await api.delete(
         `/api/v1/conversations/${id}/context/repositories/${repositoryId}`
+      )
+      await refreshConversationContext(id)
+    },
+    [refreshConversationContext]
+  )
+
+  const saveKnowledgeSource = useCallback(
+    async (sourceId: string) => {
+      const id = activeConversationRef.current
+      if (!id) return
+      await api.patch(
+        `/api/v1/conversations/${id}/context/knowledge/${sourceId}`,
+        { contextScope: "persistent" }
       )
       await refreshConversationContext(id)
     },
@@ -4227,19 +4391,6 @@ export function ChatView({
     !historyError &&
     (historyLoading || activeConversationId !== conversationId || !surfaceReady)
   const surfaceMatchesRoute = activeConversationId === conversationId
-  const showContextHint =
-    Boolean(onOpenContext) &&
-    !contextOpen &&
-    !contextHintDismissed &&
-    contextHintPreferenceLoaded &&
-    surfaceReady &&
-    !conversationLoading &&
-    (conversationContext.repositories ?? []).length === 0
-  const hasKnowledgeSources = conversationContext.knowledgeSources.length > 0
-  const handleOpenContext = () => {
-    dismissContextHint()
-    onOpenContext?.()
-  }
   // A locally created surface owns the live runtime while the URL and the
   // conversation list catch up. Refreshing the conversation after the first
   // response can fill in assistantId; including that metadata in the React
@@ -4266,68 +4417,6 @@ export function ChatView({
         className="chat-surface-content relative flex min-h-0 flex-1 flex-col"
         data-loading={conversationLoading ? "true" : undefined}
       >
-        {showContextHint && (
-          <div
-            aria-live="polite"
-            className="absolute top-12 right-3 z-30 flex max-w-[280px] items-start gap-2 rounded-xl border bg-background/95 p-3 text-xs shadow-lg backdrop-blur"
-            role="status"
-          >
-            <div className="min-w-0">
-              <p className="font-medium text-foreground">
-                {hasKnowledgeSources
-                  ? "Add a repository"
-                  : "Add files or a repository"}
-              </p>
-              <p className="mt-1 leading-relaxed text-muted-foreground">
-                {hasKnowledgeSources
-                  ? "Open Context in the top right to connect a read-only GitHub/GitLab repository."
-                  : "Open Context in the top right to attach files or connect a read-only GitHub/GitLab repository."}
-              </p>
-              <button
-                className="mt-2 font-medium text-foreground underline underline-offset-2 hover:no-underline"
-                onClick={handleOpenContext}
-                type="button"
-              >
-                Open Context
-              </button>
-            </div>
-            <button
-              aria-label="Dismiss context tip"
-              className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={dismissContextHint}
-              type="button"
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
-        )}
-        {onOpenContext && (
-          <Button
-            aria-expanded={contextOpen}
-            aria-label={
-              contextOpen
-                ? "Close conversation context"
-                : "Open conversation context to add files or repositories"
-            }
-            className="absolute top-3 right-3 z-30 h-8 gap-1.5 rounded-full border bg-background/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground"
-            onClick={handleOpenContext}
-            size="sm"
-            type="button"
-            title={
-              contextOpen
-                ? "Close conversation context"
-                : "Open Context to add files or repositories"
-            }
-            variant="ghost"
-          >
-            {contextOpen ? (
-              <PanelRightClose className="size-3.5" />
-            ) : (
-              <PanelRightOpen className="size-3.5" />
-            )}
-            Context
-          </Button>
-        )}
         {surfaceReady && surfaceMatchesRoute && (
           <div
             key={`${surfaceKey}:${assistantSurfaceKey}`}
@@ -4353,11 +4442,20 @@ export function ChatView({
               onAttachNote={attachNote}
               onRemoveNote={removeNote}
               onRemoveRepository={removeRepository}
+              onSaveKnowledge={saveKnowledgeSource}
               onOpenHistory={onOpenHistory}
               onRemoveUpload={removeUploadedFile}
-              onUpload={uploadFile}
-              conversationContext={conversationContext}
-            />
+	              onUpload={uploadFile}
+	              conversationContext={conversationContext}
+	              knowledgeSpaces={knowledgeSpaces}
+	              includedSpaceIds={includedSpaceIds}
+	              excludedSpaceIds={excludedSpaceIds}
+	              pinnedSpaceIds={pinnedSpaceIds}
+	              onToggleKnowledgeSpace={toggleKnowledgeSpace}
+	              onToggleKnowledgeSpaceExclusion={toggleKnowledgeSpaceExclusion}
+	              onToggleKnowledgeSpacePin={toggleKnowledgeSpacePin}
+	              onResetKnowledgeScope={resetKnowledgeScope}
+	            />
           </div>
         )}
       </div>

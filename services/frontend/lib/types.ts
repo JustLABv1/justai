@@ -287,6 +287,65 @@ export type KnowledgeSource = {
   updatedAt: string
 }
 
+export type KnowledgeItemType =
+  | "source"
+  | "note"
+  | "memory"
+  | "repository"
+  | "transcript"
+
+export type KnowledgeItem = {
+  id: string
+  ownerId?: string | null
+  resourceType: KnowledgeItemType | string
+  resourceId: string
+  title: string
+  visibility: "private" | "workspace" | string
+  status: string
+  metadata?: Record<string, unknown>
+  spaceIds?: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type KnowledgeSpace = {
+  id: string
+  name: string
+  description: string
+  visibility: "private" | "workspace" | string
+  canManage: boolean
+  itemCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type KnowledgeItemDetail = KnowledgeItem & {
+  content?: string
+  sourceUrl?: string
+  mimeType?: string
+  provider?: string
+  repositoryUrl?: string
+  ref?: string
+  locator?: string
+  files?: KnowledgeRepositoryFile[]
+}
+
+export type KnowledgeRepositoryFile = {
+  path: string
+  sourceId: string
+  status: string
+  sizeBytes: number
+}
+
+export type ResolvedContextSummary = {
+  spaceIds?: string[]
+  spaceNames?: string[]
+  itemCount: number
+  passageCount: number
+  status: "started" | "completed" | "failed" | string
+  routingVersion?: string
+}
+
 export type RepositoryContext = {
   id: string
   conversationId?: string | null

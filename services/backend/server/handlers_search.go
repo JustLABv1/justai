@@ -144,6 +144,8 @@ func (a *App) universalSearch(c *gin.Context) {
 			       COALESCE(NULLIF(left(ks.content, 280), ''), left(COALESCE(chunk.content, ''), 280)),
 			       ks.updated_at
 			FROM knowledge_sources ks
+			JOIN knowledge_items ki
+			  ON ki.resource_type = 'source' AND ki.resource_id = ks.id
 			LEFT JOIN LATERAL (
 				SELECT kc.content
 				FROM knowledge_chunks kc
@@ -151,7 +153,9 @@ func (a *App) universalSearch(c *gin.Context) {
 				ORDER BY kc.chunk_index
 				LIMIT 1
 			) chunk ON TRUE
-			WHERE ((ks.scope_type = 'organization' AND ks.scope_id = $2) OR (ks.scope_type = 'user' AND ks.scope_id = $3))
+			WHERE ki.organization_id = $2
+			  AND (ki.visibility = 'workspace' OR ki.owner_id = $3)
+			  AND ((ks.scope_type = 'organization' AND ks.scope_id = $2) OR (ks.scope_type = 'user' AND ks.scope_id = $3))
 			  AND (lower(ks.title) LIKE $1 OR lower(ks.content) LIKE $1 OR EXISTS (SELECT 1 FROM knowledge_chunks kc WHERE kc.source_id = ks.id AND lower(kc.content) LIKE $1))
 			ORDER BY ks.updated_at DESC
 			LIMIT $4`, pattern, organizationID, principal.UserID, perKind)

@@ -54,6 +54,29 @@ type RetrievalStatus = {
   error?: string
 }
 
+type ContextSelection = {
+  status?: string
+  spaceNames?: string[]
+  itemCount?: number
+  passageCount?: number
+  routingVersion?: string
+}
+
+function ContextSelectionPart({ data }: { data: unknown }) {
+  const value = (data ?? {}) as ContextSelection
+  const names = Array.isArray(value.spaceNames)
+    ? value.spaceNames.filter((name): name is string => typeof name === "string")
+    : []
+  const label = names.length > 0 ? names.join(" · ") : "Automatic Knowledge"
+  return (
+    <div className="my-1 inline-flex max-w-full items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs text-muted-foreground">
+      <BrainCircuit className="size-3.5 text-primary" aria-hidden="true" />
+      <span className="truncate">Knowledge · {label}</span>
+      {value.status === "started" && <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />}
+    </div>
+  )
+}
+
 function RetrievalStatusPart({ data }: { data: unknown }) {
   const value = (data ?? {}) as RetrievalStatus
   const status = value.status ?? "started"
@@ -81,16 +104,19 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
   // rename continue to render with the enhanced-context treatment.
   const deepContext =
     value.mode === "deep-context" || value.mode === "repository-analysis"
+  const noMatches = status === "completed" && sourceCount === 0
   const label =
-    status === "completed"
-      ? `${deepContext ? "Deep context ready" : "Grounding ready"} · ${sourceLabel}${passageLabel}`
-      : status === "failed"
-        ? "Grounding unavailable"
-        : status === "disabled"
-          ? "Knowledge grounding is disabled"
-          : deepContext
-            ? "Analyzing deeper context…"
-            : "Searching attached context…"
+    noMatches
+      ? "No matching Knowledge"
+      : status === "completed"
+        ? `${deepContext ? "Deep context ready" : "Grounding ready"} · ${sourceLabel}${passageLabel}`
+        : status === "failed"
+          ? "Grounding unavailable"
+          : status === "disabled"
+            ? "Knowledge grounding is disabled"
+            : deepContext
+              ? "Analyzing deeper context…"
+              : "Searching attached context…"
 
   return (
     <div
@@ -541,7 +567,10 @@ const groupAssistantParts = (
   part: PartState,
   context: GroupByContext
 ): readonly AssistantGroupKey[] => {
-  if (part.type === "data" && part.name === "retrieval-status") {
+  if (
+    part.type === "data" &&
+    (part.name === "retrieval-status" || part.name === "context-selection")
+  ) {
     return ["group-retrieval"] as const
   }
   return assistantGroupByType(part, context)
@@ -601,6 +630,8 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
           <AgentRunPart data={part.data} />
         ) : part.name === "retrieval-status" ? (
           <RetrievalStatusPart data={part.data} />
+        ) : part.name === "context-selection" ? (
+          <ContextSelectionPart data={part.data} />
         ) : part.name === "justai-error" ? (
           <AssistantErrorPart data={part.data} />
         ) : null)

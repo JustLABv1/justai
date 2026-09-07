@@ -609,6 +609,63 @@ type KnowledgeSource struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
+// KnowledgeItem is the normalized catalog representation shared by the
+// Knowledge workspace and automatic context resolver. The native resource
+// tables remain authoritative for content and type-specific fields.
+type KnowledgeItem struct {
+	ID             uuid.UUID       `json:"id"`
+	OrganizationID uuid.UUID       `json:"-"`
+	OwnerID        *uuid.UUID      `json:"ownerId,omitempty"`
+	ResourceType   string          `json:"resourceType"`
+	ResourceID     uuid.UUID       `json:"resourceId"`
+	Title          string          `json:"title"`
+	Visibility     string          `json:"visibility"`
+	Status         string          `json:"status"`
+	Metadata       json.RawMessage `json:"metadata,omitempty"`
+	SpaceIDs       []uuid.UUID     `json:"spaceIds,omitempty"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
+}
+
+type KnowledgeItemDetail struct {
+	KnowledgeItem
+	Content       string                    `json:"content,omitempty"`
+	SourceURL     string                    `json:"sourceUrl,omitempty"`
+	MIMEType      string                    `json:"mimeType,omitempty"`
+	Provider      string                    `json:"provider,omitempty"`
+	RepositoryURL string                    `json:"repositoryUrl,omitempty"`
+	Ref           string                    `json:"ref,omitempty"`
+	Locator       string                    `json:"locator,omitempty"`
+	Files         []KnowledgeRepositoryFile `json:"files,omitempty"`
+}
+
+type KnowledgeRepositoryFile struct {
+	Path      string    `json:"path"`
+	SourceID  uuid.UUID `json:"sourceId"`
+	Status    string    `json:"status"`
+	SizeBytes int64     `json:"sizeBytes"`
+}
+
+type KnowledgeSpace struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Visibility  string    `json:"visibility"`
+	CanManage   bool      `json:"canManage"`
+	ItemCount   int       `json:"itemCount"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type ResolvedContextSummary struct {
+	SpaceIDs       []uuid.UUID `json:"spaceIds,omitempty"`
+	SpaceNames     []string    `json:"spaceNames,omitempty"`
+	ItemCount      int         `json:"itemCount"`
+	PassageCount   int         `json:"passageCount"`
+	Status         string      `json:"status"`
+	RoutingVersion string      `json:"routingVersion,omitempty"`
+}
+
 type RepositoryContext struct {
 	ID               uuid.UUID  `json:"id"`
 	ConversationID   *uuid.UUID `json:"conversationId,omitempty"`

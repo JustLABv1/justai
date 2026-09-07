@@ -19,13 +19,17 @@ func (a *App) platformCapabilityEnabled(ctx context.Context, feature string) boo
 		return true
 	}
 	column := map[string]string{
-		"mcp":           "mcp_enabled",
-		"agents":        "agents_enabled",
-		"knowledge":     "knowledge_enabled",
-		"attachments":   "attachments_enabled",
-		"ai":            "ai_enabled",
-		"voice":         "voice_enabled",
-		"transcription": "transcription_enabled",
+		"mcp":       "mcp_enabled",
+		"agents":    "agents_enabled",
+		"knowledge": "knowledge_enabled",
+		// unified_knowledge is the product-facing capability name. Keep the
+		// existing platform setting as the storage-compatible source of truth
+		// while deployments roll out the new workspace.
+		"unified_knowledge": "knowledge_enabled",
+		"attachments":       "attachments_enabled",
+		"ai":                "ai_enabled",
+		"voice":             "voice_enabled",
+		"transcription":     "transcription_enabled",
 	}[strings.ToLower(feature)]
 	if column == "" {
 		return true
@@ -135,6 +139,8 @@ func (a *App) featureEnabled(c *gin.Context, feature string) bool {
 	case "mcp":
 		enabled = settings.MCPEnabled
 	case "knowledge":
+		enabled = settings.KnowledgeEnabled
+	case "unified_knowledge":
 		enabled = settings.KnowledgeEnabled
 	case "attachments":
 		enabled = settings.AttachmentsEnabled
