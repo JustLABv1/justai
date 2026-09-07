@@ -1052,12 +1052,14 @@ function MessageTiming() {
 
 function ContextDisplay({
   context,
+  leading,
   onRemoveMCP,
   onRemoveNote,
   onRemoveRepository,
   onSaveKnowledge,
 }: {
   context: ConversationContext
+  leading?: ReactNode
   onRemoveMCP?: (serverId: string) => Promise<void>
   onRemoveNote?: (noteId: string) => Promise<void>
   onRemoveRepository?: (repositoryId: string) => Promise<void>
@@ -1159,20 +1161,36 @@ function ContextDisplay({
     }
   }
 
-  if (!items.length && !removeError) return null
+  if (!items.length && !removeError && !leading) return null
 
   return (
-    <div className="order-first w-full min-w-0 basis-full">
-      <div className="mx-1 mb-1 flex w-fit max-w-full min-w-0 items-center gap-1.5 overflow-x-auto rounded-xl border bg-muted/20 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-        <span className="shrink-0 font-medium text-foreground">Context</span>
+    <div className="relative z-10 mx-auto -mb-px flex min-h-7 w-[calc(100%-2.5rem)] min-w-0 items-center gap-1.5 overflow-x-auto rounded-t-[1.35rem] border border-b-0 bg-background/95 px-2.5 py-0.5 text-[11px] text-muted-foreground shadow-[0_-10px_24px_-22px_rgba(0,0,0,0.5)] backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      {leading}
+      {leading && items.length ? (
+        <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border/70" />
+      ) : null}
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="sr-only">Attached context</span>
         {items.map((item) => (
           <div
-            className="inline-flex max-w-48 shrink-0 items-center gap-1 rounded-full bg-background px-2 py-0.5"
+            className="inline-flex max-w-52 shrink-0 items-center gap-1.5 rounded-lg border border-border/70 bg-muted/30 px-2 py-0.5 text-[11px]"
             key={item.id}
             title={`${item.label} · ${item.detail}`}
           >
-            <span className="size-1.5 shrink-0 rounded-full bg-primary/70" />
-            <span className="truncate">{item.label}</span>
+            {item.kind === "mcp" ? (
+              <Plug className="size-3 shrink-0 text-primary" aria-hidden="true" />
+            ) : (
+              <FileText
+                className="size-3 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+            )}
+            <span className="truncate font-medium text-foreground/85">
+              {item.label}
+            </span>
+            <span className="hidden shrink-0 text-[10px] text-muted-foreground/70 sm:inline">
+              {item.detail}
+            </span>
             {item.kind === "knowledge" && item.contextScope === "message" && onSaveKnowledge ? (
               <button
                 type="button"
@@ -1214,7 +1232,7 @@ function ContextDisplay({
         ))}
       </div>
       {removeError ? (
-        <p role="alert" className="mx-2.5 mb-1 text-[11px] text-destructive">
+        <p role="alert" className="shrink-0 text-[11px] text-destructive">
           {removeError}
         </p>
       ) : null}
@@ -2668,6 +2686,116 @@ function Composer({
     : excludedSpaceIds.length
       ? "All except excluded"
       : "Automatic"
+  const knowledgeScopeControl = (
+    <PopoverPrimitive.Root>
+      <PopoverPrimitive.Trigger
+        aria-label="Configure Knowledge scope for the next message"
+        render={
+          <button
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary/15 bg-primary/5 px-1.5 py-0.5 text-left text-[10px] font-medium text-foreground/80 transition-colors hover:bg-primary/10"
+            type="button"
+          />
+        }
+      >
+        <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
+        <span className="whitespace-nowrap">
+          Knowledge · {knowledgeScopeLabel}
+        </span>
+        <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Positioner
+          align="start"
+          className="z-50 outline-none"
+          side="top"
+          sideOffset={8}
+        >
+          <PopoverPrimitive.Popup className="w-[min(24rem,calc(100vw-2rem))] rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none">
+            <PopoverPrimitive.Title className="text-xs font-semibold">
+              Knowledge scope
+            </PopoverPrimitive.Title>
+            <PopoverPrimitive.Description className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+              Automatic routing runs every turn. These controls override it for
+              the next messages.
+            </PopoverPrimitive.Description>
+            <div className="mt-3 flex max-h-56 flex-col gap-1 overflow-y-auto">
+              {knowledgeSpaces.length === 0 ? (
+                <p className="rounded-lg bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground">
+                  No project spaces yet. Add one from Knowledge.
+                </p>
+              ) : (
+                knowledgeSpaces.map((space) => {
+                  const included =
+                    includedSpaceIds.includes(space.id) ||
+                    pinnedSpaceIds.includes(space.id)
+                  const excluded = excludedSpaceIds.includes(space.id)
+                  const pinned = pinnedSpaceIds.includes(space.id)
+                  return (
+                    <div
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted"
+                      key={space.id}
+                    >
+                      <button
+                        aria-pressed={included && !excluded}
+                        className={cn(
+                          "min-w-0 flex-1 truncate text-left text-[11px]",
+                          included && !excluded
+                            ? "font-medium text-foreground"
+                            : "text-muted-foreground"
+                        )}
+                        onClick={() => onToggleKnowledgeSpace(space.id)}
+                        type="button"
+                      >
+                        {space.name}
+                      </button>
+                      <button
+                        aria-label={`${excluded ? "Include" : "Exclude"} ${space.name}`}
+                        className={cn(
+                          "rounded-md px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background hover:text-foreground",
+                          excluded && "bg-destructive/10 text-destructive"
+                        )}
+                        onClick={() =>
+                          onToggleKnowledgeSpaceExclusion(space.id)
+                        }
+                        type="button"
+                      >
+                        {excluded ? "Excluded" : "Exclude"}
+                      </button>
+                      <button
+                        aria-pressed={pinned}
+                        aria-label={`${pinned ? "Unpin" : "Pin"} ${space.name}`}
+                        className={cn(
+                          "rounded-md px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background hover:text-foreground",
+                          pinned && "bg-primary/10 text-primary"
+                        )}
+                        onClick={() => onToggleKnowledgeSpacePin(space.id)}
+                        type="button"
+                      >
+                        {pinned ? "Pinned" : "Pin"}
+                      </button>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+            {(
+              includedSpaceIds.length > 0 ||
+              excludedSpaceIds.length > 0 ||
+              pinnedSpaceIds.length > 0
+            ) ? (
+              <button
+                className="mt-2 w-full rounded-lg border px-2.5 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={onResetKnowledgeScope}
+                type="button"
+              >
+                Reset to automatic routing
+              </button>
+            ) : null}
+          </PopoverPrimitive.Popup>
+        </PopoverPrimitive.Positioner>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  )
 
   useEffect(() => {
     if (!deepContextAvailable && deepContext) {
@@ -2948,8 +3076,17 @@ function Composer({
             <ContextTriggerItems ariaLabel="MCP servers" />
             <TriggerPopoverKeyboardHint />
           </ComposerPrimitive.Unstable_TriggerPopover>
-          <ComposerPrimitive.AttachmentDropzone className="rounded-[2rem] transition-colors data-[dragging=true]:ring-2 data-[dragging=true]:ring-primary/40">
-            <ComposerPrimitive.Root
+          <div className="mx-auto w-[calc(100%-2rem)]">
+            <ContextDisplay
+              context={conversationContext}
+              leading={knowledgeScopeControl}
+              onRemoveMCP={onRemoveMCP}
+              onRemoveNote={onRemoveNote}
+              onRemoveRepository={onRemoveRepository}
+              onSaveKnowledge={onSaveKnowledge}
+            />
+            <ComposerPrimitive.AttachmentDropzone className="rounded-[2rem] transition-colors data-[dragging=true]:ring-2 data-[dragging=true]:ring-primary/40">
+              <ComposerPrimitive.Root
               className={cn(
                 "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                 compact &&
@@ -3004,44 +3141,6 @@ function Composer({
                   </ComposerPrimitive.Attachments>
                 </div>
               )}
-              <PopoverPrimitive.Root>
-                <PopoverPrimitive.Trigger
-                  aria-label="Configure Knowledge scope for the next message"
-                  render={<button className="mx-1 mb-1 flex max-w-full items-center gap-2 rounded-xl border border-primary/15 bg-primary/5 px-2.5 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-primary/10" type="button" />}
-                >
-                  <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
-                  <span className="truncate">Knowledge · {knowledgeScopeLabel}</span>
-                  <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
-                </PopoverPrimitive.Trigger>
-                <PopoverPrimitive.Portal>
-                  <PopoverPrimitive.Positioner align="start" className="z-50 outline-none" side="top" sideOffset={8}>
-                    <PopoverPrimitive.Popup className="w-[min(24rem,calc(100vw-2rem))] rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none">
-                      <PopoverPrimitive.Title className="text-xs font-semibold">Knowledge scope</PopoverPrimitive.Title>
-                      <PopoverPrimitive.Description className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Automatic routing runs every turn. These controls override it for the next messages.</PopoverPrimitive.Description>
-                      <div className="mt-3 max-h-56 space-y-1 overflow-y-auto">
-                        {knowledgeSpaces.length === 0 ? <p className="rounded-lg bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground">No project spaces yet. Add one from Knowledge.</p> : knowledgeSpaces.map((space) => {
-                          const included = includedSpaceIds.includes(space.id) || pinnedSpaceIds.includes(space.id)
-                          const excluded = excludedSpaceIds.includes(space.id)
-                          const pinned = pinnedSpaceIds.includes(space.id)
-                          return <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted" key={space.id}>
-                            <button aria-pressed={included && !excluded} className={cn("min-w-0 flex-1 truncate text-left text-[11px]", included && !excluded ? "font-medium text-foreground" : "text-muted-foreground")} onClick={() => onToggleKnowledgeSpace(space.id)} type="button">{space.name}</button>
-                            <button aria-label={`${excluded ? "Include" : "Exclude"} ${space.name}`} className={cn("rounded-md px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background hover:text-foreground", excluded && "bg-destructive/10 text-destructive")} onClick={() => onToggleKnowledgeSpaceExclusion(space.id)} type="button">{excluded ? "Excluded" : "Exclude"}</button>
-                            <button aria-pressed={pinned} aria-label={`${pinned ? "Unpin" : "Pin"} ${space.name}`} className={cn("rounded-md px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background hover:text-foreground", pinned && "bg-primary/10 text-primary")} onClick={() => onToggleKnowledgeSpacePin(space.id)} type="button">{pinned ? "Pinned" : "Pin"}</button>
-                          </div>
-                        })}
-                      </div>
-                      {(includedSpaceIds.length > 0 || excludedSpaceIds.length > 0 || pinnedSpaceIds.length > 0) && <button className="mt-2 w-full rounded-lg border px-2.5 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" onClick={onResetKnowledgeScope} type="button">Reset to automatic routing</button>}
-                    </PopoverPrimitive.Popup>
-                  </PopoverPrimitive.Positioner>
-                </PopoverPrimitive.Portal>
-              </PopoverPrimitive.Root>
-              <ContextDisplay
-                context={conversationContext}
-                onRemoveMCP={onRemoveMCP}
-                onRemoveNote={onRemoveNote}
-                onRemoveRepository={onRemoveRepository}
-                onSaveKnowledge={onSaveKnowledge}
-              />
               {attachingMcpId && (
                 <div
                   className="mx-1 mb-1 flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[11px] text-muted-foreground"
@@ -3187,7 +3286,8 @@ function Composer({
                 </div>
               </div>
             </ComposerPrimitive.Root>
-          </ComposerPrimitive.AttachmentDropzone>
+            </ComposerPrimitive.AttachmentDropzone>
+          </div>
         </div>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       {!compact && (
