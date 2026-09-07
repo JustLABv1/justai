@@ -334,8 +334,10 @@ func (a *App) collectPrivacyRows(ctx context.Context, export *gin.H, userID, org
 
 func (a *App) StartLifecycleWorker(ctx context.Context) {
 	a.markWorkerStarted("lifecycle")
+	// Keep readiness independent from the infrequent privacy cleanup. The
+	// cleanup may process enough data to take longer than the heartbeat window.
 	go func() {
-		ticker := time.NewTicker(6 * time.Hour)
+		ticker := time.NewTicker(lifecycleHeartbeatInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -343,6 +345,17 @@ func (a *App) StartLifecycleWorker(ctx context.Context) {
 				return
 			case <-ticker.C:
 				a.markWorkerHeartbeat("lifecycle")
+			}
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(lifecycleCleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
 				a.cleanupAllPrivacySettings(ctx)
 			}
 		}

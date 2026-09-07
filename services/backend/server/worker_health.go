@@ -12,7 +12,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const workerHeartbeatStaleAfter = 90 * time.Second
+const (
+	workerHeartbeatStaleAfter  = 90 * time.Second
+	lifecycleHeartbeatInterval = 30 * time.Second
+	lifecycleCleanupInterval   = 6 * time.Hour
+)
 
 type workerHealthStatus struct {
 	LastHeartbeat time.Time
