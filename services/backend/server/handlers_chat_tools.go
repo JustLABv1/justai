@@ -116,7 +116,7 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 		}
 		return json.Marshal(map[string]any{"url": rawURL, "content": content})
 	case "generate_image":
-		item, err := a.generateImageForChat(ctx, userID, organizationID, arguments)
+		item, err := a.generateImageForChat(ctx, userID, organizationID, conversationID, arguments)
 		if err != nil {
 			return nil, err
 		}
@@ -500,7 +500,7 @@ func (a *App) fetchWebURL(ctx context.Context, rawURL string) (string, error) {
 	return content, nil
 }
 
-func (a *App) generateImageForChat(ctx context.Context, userID, organizationID uuid.UUID, arguments map[string]any) (generatedImageRecord, error) {
+func (a *App) generateImageForChat(ctx context.Context, userID, organizationID, conversationID uuid.UUID, arguments map[string]any) (generatedImageRecord, error) {
 	prompt := strings.TrimSpace(stringToolArgument(arguments, "prompt"))
 	if prompt == "" || len([]rune(prompt)) > 4000 {
 		return generatedImageRecord{}, fmt.Errorf("an image prompt between 1 and 4000 characters is required")
@@ -513,7 +513,25 @@ func (a *App) generateImageForChat(ctx context.Context, userID, organizationID u
 	if quality == "" {
 		quality = "auto"
 	}
-	endpointID, err := a.resolveImageEndpoint(ctx, userID, organizationID, strings.TrimSpace(stringToolArgument(arguments, "endpointId")))
+	requestedEndpointID := strings.TrimSpace(stringToolArgument(arguments, "endpointId"))
+	if requestedEndpointID == "" && conversationID != uuid.Nil {
+		// Built-in image tool calls only carry their prompt, so without this
+		// lookup they silently select a separate workspace image default instead
+		// of the endpoint the user chose for this chat. Prefer the conversation
+		// route when it is image-capable; retain the configured image default as
+		// the fallback for text-only chat endpoints and older conversations.
+		var conversationEndpointID sql.NullString
+		err := a.DB.QueryRowContext(ctx, `SELECT endpoint_id::text FROM conversations WHERE id = $1 AND organization_id = $2`, conversationID, organizationID).Scan(&conversationEndpointID)
+		if err != nil && err != sql.ErrNoRows {
+			return generatedImageRecord{}, err
+		}
+		if err == nil && conversationEndpointID.Valid {
+			if _, resolveErr := a.resolveImageEndpoint(ctx, userID, organizationID, conversationEndpointID.String); resolveErr == nil {
+				requestedEndpointID = conversationEndpointID.String
+			}
+		}
+	}
+	endpointID, err := a.resolveImageEndpoint(ctx, userID, organizationID, requestedEndpointID)
 	if err != nil {
 		return generatedImageRecord{}, err
 	}
