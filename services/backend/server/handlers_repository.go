@@ -27,20 +27,32 @@ type repositoryContextRequest struct {
 	AccessToken string `json:"accessToken"`
 }
 
+type knowledgeRepositoryRequest struct {
+	URL         string `json:"url"`
+	Ref         string `json:"ref"`
+	AccessToken string `json:"accessToken"`
+	SpaceID     string `json:"spaceId"`
+}
+
 type repositoryContextExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
 // attachUserRepositories makes a newly created conversation inherit the
-// user's repository library. It only creates mappings; the repository rows,
-// files, and ingestion jobs remain shared and are never re-fetched.
+// user's repository library for that conversation's organization. It only
+// creates mappings; repository rows, files, and ingestion jobs remain shared
+// and are never re-fetched across an organization boundary.
 func attachUserRepositories(ctx context.Context, execer repositoryContextExecer, conversationID, userID uuid.UUID) error {
 	if _, err := execer.ExecContext(ctx, `
 		INSERT INTO conversation_repository_contexts (conversation_id, context_id, added_by, context_scope)
 		SELECT $1, rc.id, $2, 'persistent'
 		FROM repository_contexts rc
+		JOIN conversations c ON c.id = $1 AND c.user_id = $2
+		JOIN knowledge_items ki ON ki.resource_type = 'repository' AND ki.resource_id = rc.id
 		WHERE rc.scope_type = 'user'
 		  AND rc.scope_id = $2
+		  AND ki.organization_id = c.organization_id
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = c.user_id)
 		  AND NOT (rc.status = 'failed' AND rc.file_count = 0)
 		ON CONFLICT (conversation_id, context_id) DO NOTHING`, conversationID, userID); err != nil {
 		return err
@@ -50,8 +62,12 @@ func attachUserRepositories(ctx context.Context, execer repositoryContextExecer,
 		SELECT $1, rcf.source_id, $2, 'persistent'
 		FROM repository_contexts rc
 		JOIN repository_context_files rcf ON rcf.context_id = rc.id
+		JOIN conversations c ON c.id = $1 AND c.user_id = $2
+		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = rcf.source_id
 		WHERE rc.scope_type = 'user'
 		  AND rc.scope_id = $2
+		  AND ki.organization_id = c.organization_id
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = c.user_id)
 		  AND NOT (rc.status = 'failed' AND rc.file_count = 0)
 		ON CONFLICT (conversation_id, source_id) DO UPDATE SET context_scope = 'persistent'`, conversationID, userID)
 	return err
@@ -170,6 +186,302 @@ func (a *App) createRepositoryContext(c *gin.Context) {
 	c.JSON(http.StatusAccepted, item)
 }
 
+// createKnowledgeRepository adds a repository directly to the user's
+// Knowledge library. Conversation mappings are intentionally not required;
+// automatic context retrieves the indexed files through their catalog item.
+func (a *App) createKnowledgeRepository(c *gin.Context) {
+	principal, organizationID, err := workspaceScope(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	var storageReady bool
+	if err := a.DB.QueryRowContext(c, `
+		SELECT to_regclass('public.repository_contexts') IS NOT NULL
+		   AND to_regclass('public.repository_context_files') IS NOT NULL`).Scan(&storageReady); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !storageReady {
+		writeError(c, http.StatusServiceUnavailable, fmt.Errorf("repository storage is not initialized; restart the backend to apply database migrations"))
+		return
+	}
+	var request knowledgeRepositoryRequest
+	if !decodeJSON(c, &request) {
+		return
+	}
+	request.URL = strings.TrimSpace(request.URL)
+	request.Ref = strings.TrimSpace(request.Ref)
+	request.AccessToken = strings.TrimSpace(request.AccessToken)
+	if len(request.AccessToken) > 4096 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("access token is too long"))
+		return
+	}
+	spec, err := repository.ParseURL(request.URL, request.Ref)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	var encryptedToken []byte
+	if request.AccessToken != "" {
+		encryptedToken, err = a.Secrets.Encrypt(request.AccessToken)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, fmt.Errorf("repository credential could not be protected"))
+			return
+		}
+	}
+	var requestedSpaceID uuid.UUID
+	var requestedSpaceVisibility string
+	if strings.TrimSpace(request.SpaceID) != "" {
+		requestedSpaceID, err = uuid.Parse(strings.TrimSpace(request.SpaceID))
+		if err != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid space id"))
+			return
+		}
+		if err := a.DB.QueryRowContext(c, `SELECT visibility FROM workspace_projects WHERE id=$1 AND organization_id=$2 AND user_id=$3`, requestedSpaceID, organizationID, principal.UserID).Scan(&requestedSpaceVisibility); err == sql.ErrNoRows {
+			writeError(c, http.StatusNotFound, fmt.Errorf("space not found or not manageable"))
+			return
+		} else if err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if requestedSpaceVisibility == "workspace" {
+			writeError(c, http.StatusForbidden, fmt.Errorf("private repositories cannot be added to a workspace space"))
+			return
+		}
+	}
+	var repositoryID uuid.UUID
+	var repositoryStatus string
+	var repositoryFileCount int
+	err = a.DB.QueryRowContext(c, `
+		INSERT INTO repository_contexts
+			(id, conversation_id, scope_type, scope_id, provider, repository_url, owner, repository, ref, title, encrypted_credential, created_by)
+		VALUES ($1, NULL, 'user', $2, $3, $4, $5, $6, $7, $8, $9, $2)
+		ON CONFLICT (scope_type, scope_id, provider, repository_url, ref) DO UPDATE
+		SET encrypted_credential = CASE
+				WHEN EXCLUDED.encrypted_credential IS NOT NULL THEN EXCLUDED.encrypted_credential
+				ELSE repository_contexts.encrypted_credential
+			END,
+			status = CASE
+				WHEN repository_contexts.status = 'failed' AND repository_contexts.file_count = 0 THEN 'queued'
+				ELSE repository_contexts.status
+			END,
+			error_message = CASE
+				WHEN repository_contexts.status = 'failed' AND repository_contexts.file_count = 0 THEN NULL
+				ELSE repository_contexts.error_message
+			END,
+			updated_at = now()
+		RETURNING id, status, file_count`, uuid.New(), principal.UserID, string(spec.Provider), spec.RepositoryURL, spec.Owner, spec.Repository, spec.Ref, spec.ProjectPath, encryptedToken).Scan(&repositoryID, &repositoryStatus, &repositoryFileCount)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if requestedSpaceID != uuid.Nil {
+		if syncErr := a.syncKnowledgeCatalog(c); syncErr != nil {
+			writeError(c, http.StatusInternalServerError, syncErr)
+			return
+		}
+		var itemID uuid.UUID
+		if err := a.DB.QueryRowContext(c, `SELECT id FROM knowledge_items WHERE resource_type='repository' AND resource_id=$1 AND organization_id=$2`, repositoryID, organizationID).Scan(&itemID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if _, err := a.DB.ExecContext(c, `INSERT INTO knowledge_space_items (space_id,item_id,added_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, requestedSpaceID, itemID, principal.UserID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if repositoryFileCount == 0 && repositoryStatus == "queued" {
+		go a.populateRepository(repositoryID)
+	}
+	c.JSON(http.StatusAccepted, gin.H{"repositoryId": repositoryID, "status": repositoryStatus, "fileCount": repositoryFileCount})
+}
+
+func (a *App) syncKnowledgeRepository(c *gin.Context) {
+	principal, organizationID, err := workspaceScope(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	repositoryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid repository id"))
+		return
+	}
+	if err := a.queueRepositorySync(c, repositoryID, principal.UserID, organizationID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(c, http.StatusNotFound, fmt.Errorf("repository not found"))
+			return
+		}
+		if strings.Contains(err.Error(), "currently processing") {
+			writeError(c, http.StatusConflict, err)
+			return
+		}
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	go a.populateRepository(repositoryID)
+	c.JSON(http.StatusAccepted, gin.H{"repositoryId": repositoryID, "status": "queued"})
+}
+
+func (a *App) updateKnowledgeRepositorySchedule(c *gin.Context) {
+	principal, _, err := workspaceScope(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	repositoryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid repository id"))
+		return
+	}
+	var request struct {
+		IntervalMinutes int `json:"intervalMinutes"`
+	}
+	if !decodeJSON(c, &request) {
+		return
+	}
+	if request.IntervalMinutes < 0 || request.IntervalMinutes > 10080 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("intervalMinutes must be between 0 and 10080"))
+		return
+	}
+	var nextSyncAt *time.Time
+	var status string
+	err = a.DB.QueryRowContext(c, `
+		UPDATE repository_contexts
+		SET sync_interval_minutes = $3,
+		    next_sync_at = CASE WHEN $3 = 0 THEN NULL ELSE now() + ($3::double precision * interval '1 minute') END,
+		    updated_at = now()
+		WHERE id = $1 AND scope_type='user' AND scope_id=$2
+		RETURNING status, next_sync_at`, repositoryID, principal.UserID, request.IntervalMinutes).Scan(&status, &nextSyncAt)
+	if err == sql.ErrNoRows {
+		writeError(c, http.StatusNotFound, fmt.Errorf("repository not found"))
+		return
+	}
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"repositoryId": repositoryID, "status": status, "intervalMinutes": request.IntervalMinutes, "nextSyncAt": nextSyncAt})
+}
+
+func (a *App) deleteKnowledgeRepository(c *gin.Context) {
+	principal, _, err := workspaceScope(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	repositoryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid repository id"))
+		return
+	}
+
+	transaction, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer transaction.Rollback()
+
+	rows, err := transaction.QueryContext(c, `SELECT source_id FROM repository_context_files WHERE context_id=$1`, repositoryID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	var sourceIDs []uuid.UUID
+	for rows.Next() {
+		var sourceID uuid.UUID
+		if scanErr := rows.Scan(&sourceID); scanErr != nil {
+			_ = rows.Close()
+			writeError(c, http.StatusInternalServerError, scanErr)
+			return
+		}
+		sourceIDs = append(sourceIDs, sourceID)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		_ = rows.Close()
+		writeError(c, http.StatusInternalServerError, rowsErr)
+		return
+	}
+	_ = rows.Close()
+
+	result, err := transaction.ExecContext(c, `
+		DELETE FROM repository_contexts
+		WHERE id=$1 AND scope_type='user' AND scope_id=$2`, repositoryID, principal.UserID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		writeError(c, http.StatusNotFound, fmt.Errorf("repository not found"))
+		return
+	}
+
+	if _, err := transaction.ExecContext(c, `DELETE FROM knowledge_items WHERE resource_type='repository' AND resource_id=$1`, repositoryID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	for _, sourceID := range sourceIDs {
+		// A source can only be removed once no other repository snapshot still
+		// references it. The repository context deletion above removed this
+		// snapshot's file mappings via ON DELETE CASCADE.
+		if _, err := transaction.ExecContext(c, `
+			DELETE FROM knowledge_sources
+			WHERE id=$1 AND NOT EXISTS (SELECT 1 FROM repository_context_files WHERE source_id=$1)`, sourceID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if _, err := transaction.ExecContext(c, `
+			DELETE FROM knowledge_items
+			WHERE resource_type='source' AND resource_id=$1
+			  AND NOT EXISTS (SELECT 1 FROM repository_context_files WHERE source_id=$1)`, sourceID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
+
+	if err := transaction.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// queueRepositorySync removes the previous file snapshot atomically before a
+// manual or scheduled import. The catalog repository item survives; file
+// items and their memberships are replaced by the next snapshot.
+func (a *App) queueRepositorySync(ctx context.Context, repositoryID, userID, organizationID uuid.UUID) error {
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM repository_contexts WHERE id=$1 AND scope_type='user' AND scope_id=$2 FOR UPDATE`, repositoryID, userID).Scan(&status); err != nil {
+		return err
+	}
+	if status == "processing" {
+		return fmt.Errorf("repository is currently processing")
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM knowledge_items ki
+		USING repository_context_files rcf
+		WHERE rcf.context_id=$1 AND ki.resource_type='source' AND ki.resource_id=rcf.source_id`, repositoryID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM knowledge_sources WHERE id IN (SELECT source_id FROM repository_context_files WHERE context_id=$1)`, repositoryID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM repository_context_files WHERE context_id=$1`, repositoryID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE repository_contexts SET status='queued', file_count=0, skipped_file_count=0, total_bytes=0, resolved_ref=NULL, error_message=NULL, next_sync_at=CASE WHEN sync_interval_minutes > 0 THEN now() + (sync_interval_minutes::double precision * interval '1 minute') ELSE NULL END, updated_at=now() WHERE id=$1`, repositoryID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (a *App) populateRepository(repositoryID uuid.UUID) {
 	ctx, cancel := context.WithTimeout(context.Background(), repositoryImportTimeout)
 	defer cancel()
@@ -274,7 +586,9 @@ func (a *App) populateRepository(repositoryID uuid.UUID) {
 	if _, err := transaction.ExecContext(ctx, `
 		UPDATE repository_contexts
 		SET status = 'processing', resolved_ref = NULLIF($2, ''), file_count = $3,
-			skipped_file_count = $4, total_bytes = $5, error_message = NULL, updated_at = now()
+			skipped_file_count = $4, total_bytes = $5, error_message = NULL,
+			next_sync_at = CASE WHEN sync_interval_minutes > 0 THEN now() + (sync_interval_minutes::double precision * interval '1 minute') ELSE NULL END,
+			updated_at = now()
 		WHERE id = $1`, repositoryID, snapshot.ResolvedRef, len(snapshot.Files), snapshot.SkippedFileCount, snapshot.TotalBytes); err != nil {
 		failTransaction("finalize repository context", "", err)
 		return
@@ -361,6 +675,7 @@ func (a *App) StartRepositoryWorker(ctx context.Context) {
 				return
 			case <-ticker.C:
 				a.markWorkerHeartbeat("repository")
+				a.queueDueRepositorySyncs(ctx)
 				repositoryID, ok := a.nextRepositoryImport(ctx)
 				if ok {
 					go a.populateRepository(repositoryID)
@@ -368,6 +683,34 @@ func (a *App) StartRepositoryWorker(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+func (a *App) queueDueRepositorySyncs(ctx context.Context) {
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT id, scope_id
+		FROM repository_contexts
+		WHERE scope_type = 'user' AND sync_interval_minutes > 0
+		  AND next_sync_at IS NOT NULL AND next_sync_at <= now()
+		  AND status <> 'processing'
+		ORDER BY next_sync_at, id
+		LIMIT 8`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	type dueRepository struct{ id, userID uuid.UUID }
+	due := make([]dueRepository, 0, 8)
+	for rows.Next() {
+		var item dueRepository
+		if err := rows.Scan(&item.id, &item.userID); err == nil {
+			due = append(due, item)
+		}
+	}
+	for _, item := range due {
+		if err := a.queueRepositorySync(ctx, item.id, item.userID, uuid.Nil); err == nil {
+			go a.populateRepository(item.id)
+		}
+	}
 }
 
 func (a *App) repairPopulatedRepositoryContexts(ctx context.Context) {
@@ -421,7 +764,18 @@ func (a *App) nextRepositoryImport(ctx context.Context) (uuid.UUID, bool) {
 }
 
 func (a *App) loadConversationRepositories(c *gin.Context, conversationID uuid.UUID, result *models.ConversationContext) error {
-	rows, err := a.DB.QueryContext(c, repositoryContextQuery+` WHERE crc.conversation_id = $1 ORDER BY crc.created_at`, conversationID)
+	rows, err := a.DB.QueryContext(c, repositoryContextQuery+` WHERE crc.conversation_id = $1
+		AND EXISTS (
+			SELECT 1
+			FROM conversations current_conversation
+			JOIN knowledge_items repository_item
+			  ON repository_item.resource_type = 'repository'
+			 AND repository_item.resource_id = rc.id
+			WHERE current_conversation.id = crc.conversation_id
+			  AND repository_item.organization_id = current_conversation.organization_id
+			  AND (repository_item.visibility = 'workspace' OR repository_item.owner_id = current_conversation.user_id)
+		)
+		ORDER BY crc.created_at`, conversationID)
 	if err != nil {
 		return err
 	}

@@ -408,7 +408,10 @@ func Search(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, q
 		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
 		FROM knowledge_chunks kc
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
-		WHERE ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2))
+		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = kc.source_id
+		WHERE ki.organization_id = $1
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = $2)
+		  AND ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2))
 		  AND ks.status = 'ready'
 		  AND (
 			kc.search_vector @@ plainto_tsquery('simple', $3)
@@ -463,6 +466,127 @@ func (w *Worker) Search(ctx context.Context, organizationID, userID uuid.UUID, q
 		return lexical, nil
 	}
 	return mergeCitations(lexical, semantic, limit), nil
+}
+
+// SearchLexical returns only passages with an explicit full-text match. It is
+// used for the unscoped automatic fallback: semantic top-k results are useful
+// inside a deliberately selected space, but returning the nearest vector from
+// the entire library would make every unrelated prompt look grounded.
+func (w *Worker) SearchLexical(ctx context.Context, organizationID, userID uuid.UUID, query string, limit int) ([]models.Citation, error) {
+	if w == nil || w.db == nil {
+		return nil, fmt.Errorf("knowledge worker is not configured")
+	}
+	return Search(ctx, w.db, organizationID, userID, query, limit)
+}
+
+// SearchInSpaces is the catalog-aware counterpart to Search. It keeps the
+// lexical and optional vector paths behind the same authorization envelope,
+// then restricts sources to the selected knowledge spaces. When
+// includeUnassigned is true, personal library items that have not yet been
+// assigned to a space remain eligible; this is how the Personal view behaves
+// without weakening workspace-space isolation.
+func (w *Worker) SearchInSpaces(ctx context.Context, organizationID, userID uuid.UUID, query string, limit int, spaceIDs []uuid.UUID, includeUnassigned bool) ([]models.Citation, error) {
+	if w == nil || w.db == nil {
+		return nil, fmt.Errorf("knowledge worker is not configured")
+	}
+	spaces := uuidIDsCSV(spaceIDs)
+	lexical, err := searchInSpaces(ctx, w.db, organizationID, userID, query, limit, spaces, includeUnassigned)
+	if err != nil {
+		return nil, err
+	}
+	if w.secrets == nil {
+		return lexical, nil
+	}
+	endpoint, endpointErr := w.searchEmbeddingEndpoint(ctx, organizationID, userID)
+	if endpointErr != nil || endpoint == nil {
+		return lexical, nil
+	}
+	embeddingContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	values, embedErr := provider.Embed(embeddingContext, *endpoint, query)
+	cancel()
+	if embedErr != nil || len(values) == 0 {
+		return lexical, nil
+	}
+	semantic, semanticErr := searchByEmbeddingInSpaces(ctx, w.db, organizationID, userID, vectorLiteral(values), len(values), limit, spaces, includeUnassigned)
+	if semanticErr != nil {
+		return lexical, nil
+	}
+	return mergeCitations(lexical, semantic, limit), nil
+}
+
+func uuidIDsCSV(ids []uuid.UUID) string {
+	values := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != uuid.Nil {
+			values = append(values, id.String())
+		}
+	}
+	return strings.Join(values, ",")
+}
+
+func searchInSpaces(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, query string, limit int, spaces string, includeUnassigned bool) ([]models.Citation, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > maxConversationSearchLimit {
+		limit = defaultConversationSearchLimit
+	}
+	orQuery := lexicalOrQuery(query)
+	if orQuery == "" {
+		return nil, nil
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
+		FROM knowledge_chunks kc
+		JOIN knowledge_sources ks ON ks.id = kc.source_id
+		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = kc.source_id
+		WHERE ki.organization_id = $1
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = $2)
+		  AND ks.status = 'ready'
+		  AND (($5 <> '' AND (
+				EXISTS (
+					SELECT 1 FROM knowledge_space_items ksi
+					WHERE ksi.item_id = ki.id
+					  AND ksi.space_id = ANY(string_to_array($5, ',')::uuid[])
+				) OR EXISTS (
+					SELECT 1
+					FROM repository_context_files rcf
+					JOIN knowledge_items repository_item ON repository_item.resource_type = 'repository' AND repository_item.resource_id = rcf.context_id
+					JOIN knowledge_space_items repository_ksi ON repository_ksi.item_id = repository_item.id
+					WHERE rcf.source_id = ki.resource_id
+					  AND repository_ksi.space_id = ANY(string_to_array($5, ',')::uuid[])
+				)
+			)) OR ($6 = TRUE AND ki.visibility = 'private' AND ki.owner_id = $2 AND NOT EXISTS (
+				SELECT 1 FROM knowledge_space_items ksi
+				WHERE ksi.item_id = ki.id
+				) AND NOT EXISTS (
+					SELECT 1
+					FROM repository_context_files rcf
+					JOIN knowledge_items repository_item ON repository_item.resource_type = 'repository' AND repository_item.resource_id = rcf.context_id
+					JOIN knowledge_space_items repository_ksi ON repository_ksi.item_id = repository_item.id
+					WHERE rcf.source_id = ki.resource_id
+				)))
+		  AND (kc.search_vector @@ plainto_tsquery('simple', $3)
+		       OR kc.search_vector @@ to_tsquery('simple', $4))
+		ORDER BY GREATEST(
+			ts_rank(kc.search_vector, plainto_tsquery('simple', $3)),
+			ts_rank(kc.search_vector, to_tsquery('simple', $4))
+		) DESC
+		LIMIT $7`, organizationID, userID, query, orQuery, spaces, includeUnassigned, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]models.Citation, 0, limit)
+	for rows.Next() {
+		citation, scanErr := scanKnowledgeCitation(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, citation)
+	}
+	return result, rows.Err()
 }
 
 // SearchConversation searches only persistent context. Message-scoped uploads
@@ -583,7 +707,12 @@ func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 		FROM knowledge_chunks kc
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
 		JOIN conversation_knowledge_sources cks ON cks.source_id = ks.id
-		WHERE cks.conversation_id = $1 AND ks.status = 'ready'
+		JOIN conversations c ON c.id = cks.conversation_id
+		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = ks.id
+		WHERE cks.conversation_id = $1
+		  AND ki.organization_id = c.organization_id
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = c.user_id)
+		  AND ks.status = 'ready'
 		  AND CASE WHEN $2 = '' THEN cks.context_scope = 'persistent'
 		           ELSE cks.source_id = ANY(string_to_array($2, ',')::uuid[])
 		      END
@@ -615,7 +744,11 @@ func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 		FROM transcription_segments tsg
 		JOIN transcription_sessions ts ON ts.id = tsg.session_id
 		JOIN conversation_transcription_sessions cts ON cts.session_id = ts.id
-		WHERE cts.conversation_id = $1 AND tsg.canonical = TRUE
+		JOIN conversations c ON c.id = cts.conversation_id
+		WHERE cts.conversation_id = $1
+		  AND ts.organization_id = c.organization_id
+		  AND ts.user_id = c.user_id
+		  AND tsg.canonical = TRUE
 		  AND to_tsvector('simple', tsg.text) @@ to_tsquery('simple', $2)
 		ORDER BY ts_rank(to_tsvector('simple', tsg.text), to_tsquery('simple', $2)) DESC
 		LIMIT $3`, conversationID, orQuery, limit)
@@ -689,7 +822,12 @@ func appendSelectedSourceCoverage(ctx context.Context, db *sql.DB, conversationI
 		FROM knowledge_chunks kc
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
 		JOIN conversation_knowledge_sources cks ON cks.source_id = kc.source_id
-		WHERE cks.conversation_id = $1 AND ks.status = 'ready'
+		JOIN conversations c ON c.id = cks.conversation_id
+		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = kc.source_id
+		WHERE cks.conversation_id = $1
+		  AND ki.organization_id = c.organization_id
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = c.user_id)
+		  AND ks.status = 'ready'
 		  AND cks.source_id = ANY(string_to_array($2, ',')::uuid[])
 		ORDER BY cks.source_id, kc.chunk_index
 		LIMIT $3`, conversationID, selectedSourceIDs, limit)
@@ -831,7 +969,12 @@ func searchConversationByEmbedding(ctx context.Context, db *sql.DB, conversation
 		FROM knowledge_chunks kc
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
 		JOIN conversation_knowledge_sources cks ON cks.source_id = kc.source_id
-		WHERE cks.conversation_id = $1 AND ks.status = 'ready' AND kc.embedding IS NOT NULL
+		JOIN conversations c ON c.id = cks.conversation_id
+		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = kc.source_id
+		WHERE cks.conversation_id = $1
+		  AND ki.organization_id = c.organization_id
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = c.user_id)
+		  AND ks.status = 'ready' AND kc.embedding IS NOT NULL
 		  AND CASE WHEN $4 = '' THEN cks.context_scope = 'persistent'
 		           ELSE cks.source_id = ANY(string_to_array($4, ',')::uuid[])
 		      END
@@ -882,12 +1025,66 @@ func searchByEmbedding(ctx context.Context, db *sql.DB, organizationID, userID u
 		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
 		FROM knowledge_chunks kc
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
-		WHERE ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2))
+		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = kc.source_id
+		WHERE ki.organization_id = $1
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = $2)
+		  AND ((ks.scope_type = 'organization' AND ks.scope_id = $1) OR (ks.scope_type = 'user' AND ks.scope_id = $2))
 		  AND ks.status = 'ready'
 		  AND kc.embedding IS NOT NULL
 		  AND kc.embedding_dimension = $3
 		ORDER BY kc.embedding <=> $4::vector
 		LIMIT $5`, organizationID, userID, dimension, embedding, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]models.Citation, 0, limit)
+	for rows.Next() {
+		citation, scanErr := scanKnowledgeCitation(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, citation)
+	}
+	return result, rows.Err()
+}
+
+func searchByEmbeddingInSpaces(ctx context.Context, db *sql.DB, organizationID, userID uuid.UUID, embedding string, dimension, limit int, spaces string, includeUnassigned bool) ([]models.Citation, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT kc.source_id, ks.title, kc.chunk_index, kc.content
+		FROM knowledge_chunks kc
+		JOIN knowledge_sources ks ON ks.id = kc.source_id
+		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = kc.source_id
+		WHERE ki.organization_id = $1
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = $2)
+		  AND ks.status = 'ready'
+		  AND kc.embedding IS NOT NULL
+		  AND kc.embedding_dimension = $3
+		  AND (($4 <> '' AND (
+				EXISTS (
+					SELECT 1 FROM knowledge_space_items ksi
+					WHERE ksi.item_id = ki.id
+					  AND ksi.space_id = ANY(string_to_array($4, ',')::uuid[])
+				) OR EXISTS (
+					SELECT 1
+					FROM repository_context_files rcf
+					JOIN knowledge_items repository_item ON repository_item.resource_type = 'repository' AND repository_item.resource_id = rcf.context_id
+					JOIN knowledge_space_items repository_ksi ON repository_ksi.item_id = repository_item.id
+					WHERE rcf.source_id = ki.resource_id
+					  AND repository_ksi.space_id = ANY(string_to_array($4, ',')::uuid[])
+				)
+			)) OR ($5 = TRUE AND ki.visibility = 'private' AND ki.owner_id = $2 AND NOT EXISTS (
+				SELECT 1 FROM knowledge_space_items ksi
+				WHERE ksi.item_id = ki.id
+				) AND NOT EXISTS (
+					SELECT 1
+					FROM repository_context_files rcf
+					JOIN knowledge_items repository_item ON repository_item.resource_type = 'repository' AND repository_item.resource_id = rcf.context_id
+					JOIN knowledge_space_items repository_ksi ON repository_ksi.item_id = repository_item.id
+					WHERE rcf.source_id = ki.resource_id
+				)))
+		ORDER BY kc.embedding <=> $6::vector
+		LIMIT $7`, organizationID, userID, dimension, spaces, includeUnassigned, embedding, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -919,7 +1116,11 @@ func appendDeepContextCandidates(ctx context.Context, db *sql.DB, conversationID
 		FROM knowledge_chunks kc
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
 		JOIN conversation_knowledge_sources cks ON cks.source_id = kc.source_id
+		JOIN conversations c ON c.id = cks.conversation_id
+		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = kc.source_id
 		WHERE cks.conversation_id = $1
+		  AND ki.organization_id = c.organization_id
+		  AND (ki.visibility = 'workspace' OR ki.owner_id = c.user_id)
 		  AND ks.status = 'ready'
 		  AND ks.source_type = 'repository'
 		  AND kc.chunk_index = 0

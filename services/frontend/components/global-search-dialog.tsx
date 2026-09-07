@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Bot,
   BookOpenText,
-  Brain,
   Cpu,
   FileVideo,
   FolderKanban,
@@ -107,22 +106,6 @@ const navigationItems: NavigationItem[] = [
     feature: "transcription",
   },
   {
-    id: "notes",
-    label: "Notes",
-    hint: "Your notes workspace",
-    keywords: ["note", "notes", "scratchpad"],
-    icon: NotebookPen,
-    view: "notes",
-  },
-  {
-    id: "memory",
-    label: "Memory",
-    hint: "Persistent preferences",
-    keywords: ["memory", "preferences", "personalization"],
-    icon: Brain,
-    view: "memory",
-  },
-  {
     id: "workspace-settings",
     label: "Workspace settings",
     hint: "Workspaces and defaults",
@@ -146,8 +129,7 @@ const navigationItems: NavigationItem[] = [
     hint: "Sources and indexing",
     keywords: ["knowledge", "sources", "documents", "files", "rag"],
     icon: BookOpenText,
-    view: "settings",
-    settingsTab: "knowledge",
+    view: "knowledge",
     feature: "knowledge",
   },
   {
@@ -306,9 +288,7 @@ export function GlobalSearchDialog({
       onNavigate("chat", result.conversationId ?? result.id)
     } else if (result.kind === "transcript") {
       onNavigate("transcription", null, result.sessionId ?? result.id)
-    } else if (result.kind === "note") {
-      onNavigate("notes", result.id)
-    } else if (result.kind === "knowledge") {
+    } else if (result.kind === "note" || result.kind === "knowledge") {
       onNavigate("knowledge", result.id)
     } else if (result.kind === "project") {
       onNavigate("chat")

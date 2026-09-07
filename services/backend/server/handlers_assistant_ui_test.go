@@ -244,6 +244,27 @@ func TestAssistantUIRequestsImageEdit(t *testing.T) {
 	}
 }
 
+func TestAssistantUIRequestsImageGeneration(t *testing.T) {
+	for _, text := range []string{
+		"Generiere ein Bild von einer Britisch Kurzhaar Katze",
+		"Create an image of a mountain at sunset",
+		"Draw a portrait of a dog",
+	} {
+		if !assistantUIRequestsImageGeneration(&assistantUserMessage{Text: text}) {
+			t.Fatalf("expected image generation request for %q", text)
+		}
+	}
+	for _, text := range []string{
+		"Wie heißen meine Katzen?",
+		"Create an image using my Katze note",
+		"Describe this image",
+	} {
+		if assistantUIRequestsImageGeneration(&assistantUserMessage{Text: text}) {
+			t.Fatalf("did not expect image generation request for %q", text)
+		}
+	}
+}
+
 func TestImageEditPromptRequiresVisibleChange(t *testing.T) {
 	prompt := imageEditPrompt("Platziere bitte neben dem Big Ben den Eiffelturm")
 	for _, fragment := range []string{

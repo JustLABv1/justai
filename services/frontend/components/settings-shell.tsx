@@ -1,32 +1,24 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useState } from "react"
 import {
-  BookOpen,
   Cpu,
-  Link2,
   Plug,
   Plus,
   ShieldCheck,
   Settings2,
-  UploadCloud,
   UserPlus,
   Users,
 } from "lucide-react"
 
 import { AdminView } from "@/components/admin-view"
 import { EndpointsView } from "@/components/endpoints-view"
-import {
-  KnowledgeView,
-  type KnowledgeViewHandle,
-} from "@/components/knowledge-view"
 import { MCPView } from "@/components/mcp-view"
 import { PrivacyView } from "@/components/privacy-view"
 import { SettingsView } from "@/components/settings-view"
 import { Button } from "@/components/ui/button"
 import type {
   Endpoint,
-  KnowledgeSource,
   MCPServer,
   Organization,
   SettingsTab,
@@ -39,14 +31,12 @@ type SettingsShellProps = {
   organizations: Organization[]
   user: User
   endpoints: Endpoint[]
-  knowledgeSources: KnowledgeSource[]
   mcpServers: MCPServer[]
   onTabChange: (tab: SettingsTab) => void
   onOrganizationSelect: (organizationId: string) => void
   onOrganizationCreated: (organization: Organization) => void
   onOrganizationUpdated: (organization: Organization) => void
   onEndpointsChange: (endpoints: Endpoint[]) => void
-  onKnowledgeChange: (sources: KnowledgeSource[]) => void
   onMCPChange: (servers: MCPServer[]) => void
 }
 
@@ -54,7 +44,6 @@ const tabs: Array<{ id: SettingsTab; label: string; icon: typeof Settings2 }> =
   [
     { id: "workspace", label: "Workspace", icon: Settings2 },
     { id: "endpoints", label: "Endpoints", icon: Cpu },
-    { id: "knowledge", label: "Knowledge", icon: BookOpen },
     { id: "mcp", label: "MCP", icon: Plug },
     { id: "members", label: "Members", icon: Users },
     { id: "privacy", label: "Privacy", icon: ShieldCheck },
@@ -66,14 +55,12 @@ export function SettingsShell({
   organizations,
   user,
   endpoints,
-  knowledgeSources,
   mcpServers,
   onTabChange,
   onOrganizationSelect,
   onOrganizationCreated,
   onOrganizationUpdated,
   onEndpointsChange,
-  onKnowledgeChange,
   onMCPChange,
 }: SettingsShellProps) {
   const activeOrganization =
@@ -131,7 +118,6 @@ export function SettingsShell({
   const [mcpCreateRequest, setMcpCreateRequest] = useState(0)
   const [workspaceCreateRequest, setWorkspaceCreateRequest] = useState(0)
   const [memberCreateRequest, setMemberCreateRequest] = useState(0)
-  const knowledgeViewRef = useRef<KnowledgeViewHandle>(null)
 
   const pageAction =
     activeTab === "workspace" ? (
@@ -155,20 +141,6 @@ export function SettingsShell({
         <Plus data-icon="inline-start" aria-hidden="true" />
         Add MCP server
       </Button>
-    ) : activeTab === "knowledge" ? (
-      <div className="flex shrink-0 gap-2">
-        <Button
-          variant="outline"
-          onClick={() => knowledgeViewRef.current?.openAddUrl()}
-        >
-          <Link2 data-icon="inline-start" aria-hidden="true" />
-          Add URL
-        </Button>
-        <Button onClick={() => knowledgeViewRef.current?.openFilePicker()}>
-          <UploadCloud data-icon="inline-start" aria-hidden="true" />
-          Upload file
-        </Button>
-      </div>
     ) : null
 
   return (
@@ -225,16 +197,6 @@ export function SettingsShell({
             platformAdmin={user.platformAdmin}
             userId={user.id}
             createRequest={endpointCreateRequest}
-          />
-        ) : null}
-        {activeTab === "knowledge" ? (
-          <KnowledgeView
-            ref={knowledgeViewRef}
-            sources={knowledgeSources}
-            onChange={onKnowledgeChange}
-            organizationRole={activeOrganization?.role}
-            platformAdmin={user.platformAdmin}
-            userId={user.id}
           />
         ) : null}
         {activeTab === "mcp" ? (

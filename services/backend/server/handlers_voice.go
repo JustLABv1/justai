@@ -399,7 +399,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	requestID := "voice-" + uuid.NewString()
 	conversationID := state.conversationID
 	endpointID := state.endpointID
-	indexing, err := a.conversationHasIndexingKnowledge(ctx, conversationID, nil)
+	indexing, err := a.conversationHasIndexingKnowledge(ctx, conversationID, organizationID, userID, nil)
 	if err != nil {
 		if ctx.Err() == nil {
 			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "conversation context could not be checked: " + err.Error()}})
@@ -426,7 +426,18 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	}
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
-	citations, err := a.searchKnowledge(ctx, organizationID, userID, conversationID, content, 6, nil, false)
+	resolution := knowledgeContextResolution{}
+	if a.syncKnowledgeCatalog(ctx) == nil {
+		if resolved, resolveErr := a.resolveKnowledgeContext(ctx, organizationID, userID, conversationID, content, nil, nil); resolveErr == nil {
+			resolution = resolved
+		}
+	}
+	var citations []models.Citation
+	if resolution.Restricted {
+		citations, err = a.searchKnowledgeInSpaces(ctx, organizationID, userID, content, 6, resolution)
+	} else {
+		citations, err = a.searchKnowledge(ctx, organizationID, userID, conversationID, content, 6, nil, false)
+	}
 	if err != nil {
 		citations = nil
 	}

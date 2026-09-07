@@ -10,8 +10,6 @@ const validViews: ViewId[] = [
   "automations",
   "agents",
   "mcp",
-  "notes",
-  "memory",
   "assistants",
   "settings",
   "admin",
@@ -132,18 +130,21 @@ export function workspacePath(
   }
 
   if (view === "endpoints" || view === "knowledge" || view === "mcp") {
-    return `/settings?tab=${view}${
-      view === "knowledge" && conversationId
-        ? `&source=${encodeURIComponent(conversationId)}`
-        : ""
-    }`
+    if (view === "knowledge") {
+      return conversationId
+        ? `/knowledge?item=${encodeURIComponent(conversationId)}`
+        : "/knowledge"
+    }
+    return `/settings?tab=${view}`
   }
 
   if (view === "notes") {
     return conversationId
-      ? `/notes?note=${encodeURIComponent(conversationId)}`
-      : "/notes"
+      ? `/knowledge?type=note&item=${encodeURIComponent(conversationId)}`
+      : "/knowledge?type=note"
   }
+
+  if (view === "memory") return "/knowledge?type=memory"
 
   return `/${view}`
 }
@@ -190,11 +191,26 @@ export function parseWorkspaceRoute(
 
   if (section === "settings") {
     const settingsTab = parseSettingsTab(searchParams.get("tab"))
+    if (settingsTab === "knowledge") {
+      const source = searchParams.get("source")
+      return {
+        view: "knowledge",
+        conversationId: null,
+        sessionId: null,
+        targetId: source,
+        settingsTab,
+        adminTab: "overview",
+        agentTab: "agents",
+        legacyRedirect: source
+          ? `/knowledge?item=${encodeURIComponent(source)}`
+          : "/knowledge",
+      }
+    }
     return {
       view: "settings",
       conversationId: null,
       sessionId: null,
-      targetId: settingsTab === "knowledge" ? searchParams.get("source") : null,
+      targetId: null,
       settingsTab,
       adminTab: "overview",
       agentTab: "agents",
@@ -223,12 +239,12 @@ export function parseWorkspaceRoute(
     }
   }
 
-  if (section === "endpoints" || section === "knowledge" || section === "mcp") {
+  if (section === "endpoints" || section === "mcp") {
     return {
       view: "settings",
       conversationId: null,
       sessionId: null,
-      targetId: section === "knowledge" ? searchParams.get("source") : null,
+      targetId: null,
       settingsTab: section,
       adminTab: "overview",
       agentTab: "agents",
@@ -283,10 +299,38 @@ export function parseWorkspaceRoute(
 
   if (section === "notes") {
     return {
-      view: "notes",
+      view: "knowledge",
       conversationId: null,
       sessionId: null,
       targetId: searchParams.get("note"),
+      settingsTab: "workspace",
+      adminTab: "overview",
+      agentTab: "agents",
+      legacyRedirect: searchParams.get("note")
+        ? `/knowledge?type=note&item=${encodeURIComponent(searchParams.get("note") as string)}`
+        : "/knowledge?type=note",
+    }
+  }
+
+  if (section === "memory") {
+    return {
+      view: "knowledge",
+      conversationId: null,
+      sessionId: null,
+      settingsTab: "workspace",
+      adminTab: "overview",
+      agentTab: "agents",
+      legacyRedirect: "/knowledge?type=memory",
+    }
+  }
+
+  if (section === "knowledge") {
+    const item = searchParams.get("item") ?? searchParams.get("source")
+    return {
+      view: "knowledge",
+      conversationId: null,
+      sessionId: null,
+      targetId: item,
       settingsTab: "workspace",
       adminTab: "overview",
       agentTab: "agents",
@@ -310,6 +354,8 @@ export function parseWorkspaceRoute(
       ? "agents"
       : rawQueryView === "automations"
         ? "agents"
+        : rawQueryView === "notes" || rawQueryView === "memory"
+          ? "knowledge"
         : (rawQueryView as ViewId | null)
   const view = queryView && validViews.includes(queryView) ? queryView : "chat"
   const legacyRedirect =
@@ -317,6 +363,10 @@ export function parseWorkspaceRoute(
       ? "/agents"
       : rawQueryView === "automations"
         ? "/agents?tab=workflows"
+        : rawQueryView === "notes"
+          ? "/knowledge?type=note"
+          : rawQueryView === "memory"
+            ? "/knowledge?type=memory"
         : undefined
 
   return {

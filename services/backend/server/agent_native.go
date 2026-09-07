@@ -100,15 +100,15 @@ func (e *AgentEngine) validateAgentContextIDs(ctx context.Context, nodeID, label
 			}
 		case "knowledge source":
 			if shared {
-				query = `SELECT EXISTS (SELECT 1 FROM knowledge_sources WHERE id=$1 AND scope_type='organization' AND scope_id=$2 AND conversation_id IS NULL)`
+				query = `SELECT EXISTS (SELECT 1 FROM knowledge_sources ks JOIN knowledge_items ki ON ki.resource_type='source' AND ki.resource_id=ks.id WHERE ks.id=$1 AND ki.organization_id=$2 AND ki.visibility='workspace' AND ks.scope_type='organization' AND ks.scope_id=$2 AND ks.conversation_id IS NULL)`
 			} else {
-				query = `SELECT EXISTS (SELECT 1 FROM knowledge_sources WHERE id=$1 AND ((scope_type='organization' AND scope_id=$2) OR (scope_type='user' AND scope_id=$3)) AND (conversation_id IS NULL OR conversation_id=$4))`
+				query = `SELECT EXISTS (SELECT 1 FROM knowledge_sources ks JOIN knowledge_items ki ON ki.resource_type='source' AND ki.resource_id=ks.id WHERE ks.id=$1 AND ki.organization_id=$2 AND (ki.visibility='workspace' OR ki.owner_id=$3) AND ((ks.scope_type='organization' AND ks.scope_id=$2) OR (ks.scope_type='user' AND ks.scope_id=$3)) AND (ks.conversation_id IS NULL OR ks.conversation_id=$4))`
 			}
 		case "repository":
 			if shared {
-				query = `SELECT EXISTS (SELECT 1 FROM repository_contexts WHERE id=$1 AND scope_type='organization' AND scope_id=$2 AND conversation_id IS NULL)`
+				query = `SELECT EXISTS (SELECT 1 FROM repository_contexts rc JOIN knowledge_items ki ON ki.resource_type='repository' AND ki.resource_id=rc.id WHERE rc.id=$1 AND ki.organization_id=$2 AND ki.visibility='workspace' AND rc.scope_type='organization' AND rc.scope_id=$2 AND rc.conversation_id IS NULL)`
 			} else {
-				query = `SELECT EXISTS (SELECT 1 FROM repository_contexts WHERE id=$1 AND ((scope_type='organization' AND scope_id=$2) OR (scope_type='user' AND scope_id=$3)))`
+				query = `SELECT EXISTS (SELECT 1 FROM repository_contexts rc JOIN knowledge_items ki ON ki.resource_type='repository' AND ki.resource_id=rc.id WHERE rc.id=$1 AND ki.organization_id=$2 AND (ki.visibility='workspace' OR ki.owner_id=$3) AND ((rc.scope_type='organization' AND rc.scope_id=$2) OR (rc.scope_type='user' AND rc.scope_id=$3)))`
 			}
 		case "note":
 			if shared {
@@ -196,7 +196,7 @@ func (e *AgentEngine) agentWorkflowContextPrompt(ctx context.Context, userID, or
 	}
 
 	if len(scope.KnowledgeSourceIDs) > 0 {
-		rows, err := e.app.DB.QueryContext(ctx, `SELECT title,LEFT(content,16000) FROM knowledge_sources WHERE id = ANY($1::uuid[]) AND ((scope_type='organization' AND scope_id=$2) OR (scope_type='user' AND scope_id=$3)) AND status='ready' ORDER BY title`, pq.Array(uuidStrings(scope.KnowledgeSourceIDs)), organizationID, userID)
+		rows, err := e.app.DB.QueryContext(ctx, `SELECT ks.title,LEFT(ks.content,16000) FROM knowledge_sources ks JOIN knowledge_items ki ON ki.resource_type='source' AND ki.resource_id=ks.id WHERE ks.id = ANY($1::uuid[]) AND ki.organization_id=$2 AND (ki.visibility='workspace' OR ki.owner_id=$3) AND ((ks.scope_type='organization' AND ks.scope_id=$2) OR (ks.scope_type='user' AND ks.scope_id=$3)) AND ks.status='ready' ORDER BY ks.title`, pq.Array(uuidStrings(scope.KnowledgeSourceIDs)), organizationID, userID)
 		if err != nil {
 			return "", err
 		}
@@ -215,7 +215,7 @@ func (e *AgentEngine) agentWorkflowContextPrompt(ctx context.Context, userID, or
 		rows.Close()
 	}
 	if len(scope.RepositoryIDs) > 0 {
-		rows, err := e.app.DB.QueryContext(ctx, `SELECT rc.title,rcf.path,LEFT(ks.content,12000) FROM repository_contexts rc JOIN repository_context_files rcf ON rcf.context_id=rc.id JOIN knowledge_sources ks ON ks.id=rcf.source_id WHERE rc.id = ANY($1::uuid[]) AND ((rc.scope_type='organization' AND rc.scope_id=$2) OR (rc.scope_type='user' AND rc.scope_id=$3)) AND ks.status='ready' ORDER BY rc.title,rcf.path LIMIT 128`, pq.Array(uuidStrings(scope.RepositoryIDs)), organizationID, userID)
+		rows, err := e.app.DB.QueryContext(ctx, `SELECT rc.title,rcf.path,LEFT(ks.content,12000) FROM repository_contexts rc JOIN repository_context_files rcf ON rcf.context_id=rc.id JOIN knowledge_sources ks ON ks.id=rcf.source_id JOIN knowledge_items ki ON ki.resource_type='repository' AND ki.resource_id=rc.id WHERE rc.id = ANY($1::uuid[]) AND ki.organization_id=$2 AND (ki.visibility='workspace' OR ki.owner_id=$3) AND ((rc.scope_type='organization' AND rc.scope_id=$2) OR (rc.scope_type='user' AND rc.scope_id=$3)) AND ks.status='ready' ORDER BY rc.title,rcf.path LIMIT 128`, pq.Array(uuidStrings(scope.RepositoryIDs)), organizationID, userID)
 		if err != nil {
 			return "", err
 		}

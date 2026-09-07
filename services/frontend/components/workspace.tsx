@@ -6,8 +6,7 @@ import { Info } from "lucide-react"
 import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
-import { MemoryView } from "@/components/memory-view"
-import { NotesView } from "@/components/notes-view"
+import { KnowledgeWorkspace } from "@/components/knowledge-workspace"
 import { ProfileView } from "@/components/profile-view"
 import { PlatformAdminShell } from "@/components/platform-admin-shell"
 import { SettingsShell } from "@/components/settings-shell"
@@ -49,7 +48,6 @@ import type {
 import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
 import { cn } from "@/lib/utils"
 import { FocusWorkspaceSidebar } from "@/components/focus-workspace-sidebar"
-import { WorkspaceContext } from "@/components/workspace-context"
 
 type WorkspaceStatus = "loading" | "ready" | "error"
 
@@ -108,7 +106,6 @@ export function Workspace() {
   ] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(true)
   const [historyPreferenceLoaded, setHistoryPreferenceLoaded] = useState(false)
-  const [contextOpen, setContextOpen] = useState(false)
   const [pendingConversationId, setPendingConversationId] = useState<
     string | null
   >(null)
@@ -654,7 +651,6 @@ export function Workspace() {
       agentTab: AgentTab = "agents"
     ) => {
       if (view !== "chat") {
-        setContextOpen(false)
         setConversationRouteTarget(null)
       }
       const isInternalChatReplace =
@@ -1015,27 +1011,6 @@ export function Workspace() {
     }
   }
 
-  const handleUseNoteInChat = useCallback(
-    async (note: Note) => {
-      const conversationId = await ensureConversationForContext()
-      const saved = await api.patch<{ note: Note }>(
-        `/api/v1/notes/${note.id}`,
-        {
-          title: note.title,
-          content: note.content,
-        }
-      )
-      setNotes((current) =>
-        current.map((item) => (item.id === saved.note.id ? saved.note : item))
-      )
-      await api.post(
-        `/api/v1/conversations/${conversationId}/context/notes/${note.id}`
-      )
-      navigate("chat", conversationId)
-    },
-    [ensureConversationForContext, navigate]
-  )
-
   const handleTranscriptionSessionCreated = useCallback(
     (
       session: TranscriptionSession,
@@ -1234,8 +1209,6 @@ export function Workspace() {
                 onConversationMissing={handleConversationMissing}
                 onNavigate={(view) => navigate(view, null)}
                 onOpenHistory={() => setHistoryOpen(true)}
-                onOpenContext={() => setContextOpen((current) => !current)}
-                contextOpen={contextOpen}
               />
             )}
             {activeView === "transcription" &&
@@ -1285,13 +1258,11 @@ export function Workspace() {
                 activeOrganizationId={activeOrganization?.id ?? null}
                 activeTab={route.settingsTab}
                 endpoints={endpoints}
-                knowledgeSources={sources}
                 mcpServers={servers}
                 onOrganizationSelect={selectOrganization}
                 onOrganizationCreated={handleOrganizationCreated}
                 onOrganizationUpdated={handleOrganizationUpdated}
                 onEndpointsChange={setEndpoints}
-                onKnowledgeChange={setSources}
                 onMCPChange={setServers}
                 onTabChange={(tab) =>
                   navigate("settings", null, false, null, tab)
@@ -1301,13 +1272,23 @@ export function Workspace() {
               />
             )}
             {activeView === "profile" && <ProfileView user={user} />}
-            {activeView === "notes" && (
-              <NotesView
-                onNotesChange={setNotes}
-                onUseInChat={handleUseNoteInChat}
-              />
-            )}
-            {activeView === "memory" && <MemoryView />}
+            {activeView === "knowledge" &&
+              (disabledFeatures.knowledge ? (
+                <FeatureDisabledPanel label="Knowledge" />
+              ) : (
+                <KnowledgeWorkspace
+                  notes={notes}
+                  onNotesChange={setNotes}
+                  onNavigate={(view, conversationId = null) =>
+                    navigate(view, conversationId)
+                  }
+                  onProjectsChange={setProjects}
+                  onSourcesChange={setSources}
+                  projects={projects}
+                  sources={sources}
+                  transcriptionSessions={transcriptionSessions}
+                />
+              ))}
             {activeView === "assistants" && (
               <AssistantsView
                 assistants={savedAssistants}
@@ -1364,21 +1345,6 @@ export function Workspace() {
             )}
           </div>
         </main>
-        {activeView === "chat" && contextOpen && (
-          <WorkspaceContext
-            conversation={activeConversation ?? null}
-            conversationId={activeConversationId}
-            onEnsureConversation={ensureConversationForContext}
-            onClose={() => setContextOpen(false)}
-            onNavigate={(view) => navigate(view, null)}
-            servers={servers}
-            sources={sources}
-            notes={notes}
-            onProjectsChange={setProjects}
-            projects={projects}
-            transcriptionSessions={transcriptionSessions}
-          />
-        )}
       </div>
       <AlertDialog
         onOpenChange={(open) => {
