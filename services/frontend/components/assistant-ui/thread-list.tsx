@@ -66,6 +66,7 @@ type AssistantThreadListProps = {
   conversations: Conversation[]
   archivedConversations: Conversation[]
   historyQuery: string
+  hideSearch?: boolean
   onHistoryQueryChange: (value: string) => void
   onArchive: (conversationId: string, archived: boolean) => void | Promise<void>
   onDelete: (conversation: Conversation) => void
@@ -503,6 +504,7 @@ export function AssistantThreadList({
   conversations,
   archivedConversations,
   historyQuery,
+  hideSearch = false,
   onHistoryQueryChange,
   onArchive,
   onDelete,
@@ -878,14 +880,16 @@ export function AssistantThreadList({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadListPrimitive.Root className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-        <Input
-          aria-label="Search chat history"
-          className="h-9 shrink-0"
-          onChange={(event) => onHistoryQueryChange(event.target.value)}
-          placeholder="Search chats"
-          type="search"
-          value={historyQuery}
-        />
+        {!hideSearch && (
+          <Input
+            aria-label="Search chat history"
+            className="h-9 shrink-0"
+            onChange={(event) => onHistoryQueryChange(event.target.value)}
+            placeholder="Search chats"
+            type="search"
+            value={historyQuery}
+          />
+        )}
         <div className="flex items-center gap-1">
           <DropdownMenu>
             <DropdownMenuTrigger

@@ -224,6 +224,8 @@ export function FocusWorkspaceSidebar({
   const navigation = railNavigation
   const historyVisible = historyView && historyOpen
   const isSecondaryHistoryRail = historyVisible
+  const secondaryHistoryExpanded =
+    isSecondaryHistoryRail && (chatHistoryExpanded || historyRailPinned)
   const contextPanelOpen =
     historyVisible &&
     (!isSecondaryHistoryRail || chatHistoryExpanded || historyRailPinned)
@@ -399,6 +401,7 @@ export function FocusWorkspaceSidebar({
       className={cn(
         "relative flex h-full min-h-0 w-14 shrink-0 overflow-visible border-r border-border bg-background",
         isSecondaryHistoryRail && "w-[6.5rem]",
+        secondaryHistoryExpanded && "md:w-[19.5rem]",
         historyRailPinned && "lg:w-[19.5rem]"
       )}
       aria-label="Workspace navigation"
@@ -589,7 +592,10 @@ export function FocusWorkspaceSidebar({
 
       <div
         className={cn(
-          isSecondaryHistoryRail ? "relative h-full w-12 shrink-0" : "contents",
+          isSecondaryHistoryRail
+            ? "relative flex h-full w-12 shrink-0 overflow-visible transition-[width] duration-200 md:overflow-hidden"
+            : "contents",
+          secondaryHistoryExpanded && "md:w-64",
           historyRailPinned && "lg:contents"
         )}
         onBlurCapture={(event) => {
@@ -613,7 +619,7 @@ export function FocusWorkspaceSidebar({
           }
         }}
       >
-        {isSecondaryHistoryRail && (
+        {isSecondaryHistoryRail && !secondaryHistoryExpanded && (
           <div
             className={cn(
               "flex h-full w-12 flex-col items-center gap-1 border-r border-border/70 py-3",
@@ -730,16 +736,21 @@ export function FocusWorkspaceSidebar({
         <div
           aria-label={contextTitle}
           className={cn(
-            "min-w-0 flex-col gap-3 overflow-hidden border-r border-border bg-background p-4 shadow-xl motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in-0 motion-safe:slide-in-from-left-2",
+            "min-w-0 flex-col overflow-hidden border-r border-border bg-background shadow-xl motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in-0 motion-safe:slide-in-from-left-2",
             isSecondaryHistoryRail
-              ? "absolute inset-y-0 left-0 z-30 w-64"
-              : "absolute inset-y-0 left-14 z-30 w-64 xl:static xl:z-auto xl:shadow-none",
+              ? "w-full gap-1 p-3"
+              : "absolute inset-y-0 left-14 z-30 w-64 gap-3 p-4 xl:static xl:z-auto xl:shadow-none",
             historyRailPinned && "lg:static lg:z-auto lg:shadow-none",
             contextPanelOpen ? "flex" : "hidden",
             "max-md:fixed max-md:left-0 max-md:z-50 max-md:w-full"
           )}
         >
-          <div className="flex items-center justify-between gap-3">
+          <div
+            className={cn(
+              "flex items-center justify-between gap-3",
+              isSecondaryHistoryRail && "h-9 px-1"
+            )}
+          >
             <div className="min-w-0">
               <h2 className="text-sm font-semibold tracking-tight">
                 {contextTitle}
@@ -777,10 +788,41 @@ export function FocusWorkspaceSidebar({
             </div>
           </div>
 
+          {isSecondaryHistoryRail && activeView === "chat" && (
+            <Input
+              aria-label="Search chat history"
+              className="h-9 shrink-0"
+              onChange={(event) => setHistoryQuery(event.target.value)}
+              placeholder="Search chats"
+              type="search"
+              value={historyQuery}
+            />
+          )}
+
+          {isSecondaryHistoryRail &&
+            (activeView === "transcription" ||
+              activeView === "video-transcription") && (
+              <Input
+                aria-label="Search sessions"
+                className="h-9 shrink-0"
+                onChange={(event) => setSessionQuery(event.target.value)}
+                placeholder={
+                  activeView === "video-transcription"
+                    ? "Search videos"
+                    : "Search sessions"
+                }
+                type="search"
+                value={sessionQuery}
+              />
+            )}
+
           {createAction && (
             <Button
               aria-label={createAction.label}
-              className="h-9 w-full justify-start gap-2"
+              className={cn(
+                "h-9 w-full justify-start gap-2",
+                isSecondaryHistoryRail && "px-1"
+              )}
               disabled={createAction.disabled}
               onClick={createAction.onClick}
             >
@@ -802,6 +844,7 @@ export function FocusWorkspaceSidebar({
               activeConversationId={activeConversationId}
               archivedConversations={archivedConversations}
               conversations={conversations}
+              hideSearch={isSecondaryHistoryRail}
               organizationId={activeOrganization?.id ?? null}
               historyQuery={historyQuery}
               onArchive={onArchiveConversation}
@@ -817,16 +860,18 @@ export function FocusWorkspaceSidebar({
           {(activeView === "transcription" ||
             activeView === "video-transcription") && (
             <>
-              <Input
-                aria-label="Search sessions"
-                onChange={(event) => setSessionQuery(event.target.value)}
-                placeholder={
-                  activeView === "video-transcription"
-                    ? "Search videos"
-                    : "Search sessions"
-                }
-                value={sessionQuery}
-              />
+              {!isSecondaryHistoryRail && (
+                <Input
+                  aria-label="Search sessions"
+                  onChange={(event) => setSessionQuery(event.target.value)}
+                  placeholder={
+                    activeView === "video-transcription"
+                      ? "Search videos"
+                      : "Search sessions"
+                  }
+                  value={sessionQuery}
+                />
+              )}
               <TranscriptionHistoryPanel
                 activeSessionId={activeSessionId}
                 archivedSessionGroups={archivedSessionGroups}
