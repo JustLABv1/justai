@@ -37,6 +37,7 @@ type Conversation struct {
 	CanManage          bool              `json:"canManage"`
 	ProjectID          *uuid.UUID        `json:"projectId,omitempty"`
 	EndpointID         *uuid.UUID        `json:"endpointId,omitempty"`
+	ChatModel          string            `json:"chatModel,omitempty"`
 	AssistantID        *uuid.UUID        `json:"assistantId,omitempty"`
 	AssistantVersionID *uuid.UUID        `json:"assistantVersionId,omitempty"`
 	CreatedAt          time.Time         `json:"createdAt"`

@@ -74,11 +74,12 @@ func (a *App) createConversation(c *gin.Context) {
 	err = transaction.QueryRowContext(c, `
 		INSERT INTO conversations (user_id, organization_id, assistant_id, assistant_version_id)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, title, endpoint_id::text, created_at, updated_at
+		RETURNING id, title, endpoint_id::text, COALESCE(chat_model, ''), created_at, updated_at
 	`, principal.UserID, organizationID, requestedAssistantID, assistantVersionID).Scan(
 		&item.ID,
 		&item.Title,
 		&rawEndpointID,
+		&item.ChatModel,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	)
@@ -189,6 +190,7 @@ func (a *App) listConversations(c *gin.Context) {
 				c.id,
 				c.title,
 				COALESCE(c.endpoint_id::text, ''),
+				COALESCE(c.chat_model, ''),
 				COALESCE(c.assistant_id::text, ''),
 				COALESCE(c.assistant_version_id::text, ''),
 				c.created_at,
@@ -211,7 +213,7 @@ func (a *App) listConversations(c *gin.Context) {
 		var item models.Conversation
 		var rawEndpointID string
 		var rawAssistantID, rawAssistantVersionID string
-		if err := rows.Scan(&item.ID, &item.Title, &rawEndpointID, &rawAssistantID, &rawAssistantVersionID, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.MessageCount); err != nil {
+		if err := rows.Scan(&item.ID, &item.Title, &rawEndpointID, &item.ChatModel, &rawAssistantID, &rawAssistantVersionID, &item.CreatedAt, &item.UpdatedAt, &item.ArchivedAt, &item.MessageCount); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
@@ -285,7 +287,7 @@ func (a *App) getConversation(c *gin.Context) {
 	var rawEndpointID sql.NullString
 	var rawAssistantID, rawAssistantVersionID sql.NullString
 	err = a.DB.QueryRowContext(c, `
-		SELECT c.id, c.title, COALESCE(c.endpoint_id::text, ''),
+		SELECT c.id, c.title, COALESCE(c.endpoint_id::text, ''), COALESCE(c.chat_model, ''),
 		       COALESCE(c.assistant_id::text, ''), COALESCE(c.assistant_version_id::text, ''),
 		       c.created_at, c.updated_at, c.archived_at,
 		       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user', 'assistant'))::int
@@ -296,6 +298,7 @@ func (a *App) getConversation(c *gin.Context) {
 		&item.ID,
 		&item.Title,
 		&rawEndpointID,
+		&item.ChatModel,
 		&rawAssistantID,
 		&rawAssistantVersionID,
 		&item.CreatedAt,

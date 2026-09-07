@@ -64,14 +64,40 @@ func (a *App) listEndpoints(c *gin.Context) {
 		       COALESCE(e.embedding_model, ''), COALESCE(e.transcription_model, ''),
 		       COALESCE(e.diarization_model, ''), COALESCE(e.speech_model, ''), e.capabilities,
 		       e.credential_ciphertext IS NOT NULL, e.enabled,
-		       CASE WHEN defaults.endpoint_id IS NOT NULL THEN e.id = defaults.endpoint_id ELSE e.is_default END,
+		       CASE
+		         WHEN defaults.endpoint_id IS NOT NULL THEN e.id = defaults.endpoint_id
+		         -- Defaults are scoped in storage (so a workspace never changes
+		         -- another workspace's routing), but this catalog is a single
+		         -- routing surface. Expose only the highest-precedence default.
+		         -- Without this, a global and organization default could both be
+		         -- labelled "default" to the same user.
+		         ELSE e.is_default AND NOT EXISTS (
+		           SELECT 1 FROM endpoint_settings preferred
+		           WHERE preferred.is_default = TRUE
+		             AND preferred.enabled = TRUE
+		             AND (preferred.capabilities->>'chat') = 'true'
+		             AND (
+		               (preferred.scope_type = 'user' AND preferred.scope_id = $2 AND e.scope_type <> 'user')
+		               OR (preferred.scope_type = 'organization' AND preferred.scope_id = $1 AND e.scope_type = 'global')
+		             )
+		         )
+		       END,
 		       e.timeout_seconds, e.max_output_tokens, e.temperature, e.created_at, e.updated_at
 		FROM endpoint_settings e
 		LEFT JOIN organization_default_endpoints defaults ON defaults.organization_id = $1
 		WHERE (e.scope_type = 'global')
 		   OR (e.scope_type = 'organization' AND e.scope_id = $1)
 		   OR (e.scope_type = 'user' AND e.scope_id = $2)
-		ORDER BY (CASE WHEN defaults.endpoint_id IS NOT NULL THEN e.id = defaults.endpoint_id ELSE e.is_default END) DESC, e.created_at DESC`, organizationID, principal.UserID)
+		ORDER BY (CASE
+		  WHEN defaults.endpoint_id IS NOT NULL THEN e.id = defaults.endpoint_id
+		  ELSE e.is_default AND NOT EXISTS (
+		    SELECT 1 FROM endpoint_settings preferred
+		    WHERE preferred.is_default = TRUE AND preferred.enabled = TRUE
+		      AND (preferred.capabilities->>'chat') = 'true'
+		      AND ((preferred.scope_type = 'user' AND preferred.scope_id = $2 AND e.scope_type <> 'user')
+		        OR (preferred.scope_type = 'organization' AND preferred.scope_id = $1 AND e.scope_type = 'global'))
+		  )
+		END) DESC, e.created_at DESC`, organizationID, principal.UserID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -407,10 +433,10 @@ func scopeIDUUID(value any) *uuid.UUID {
 }
 
 func ensureEndpointDefault(ctx context.Context, executor sqlExecutor, scopeType string, scopeID *uuid.UUID) error {
-	// Older databases may contain a default that was later disabled or had its
-	// chat capability removed. Clear that stale marker before promoting the next
-	// eligible endpoint so delete/disable operations always leave a usable
-	// default when one exists.
+	// A default is optional. In particular, clearing it must not immediately
+	// promote another endpoint: the normal endpoint fallback remains available
+	// for routing, while the settings choice accurately stays unset.
+	// Clear invalid legacy markers, but never elect a replacement here.
 	if _, err := executor.ExecContext(ctx, `
 		UPDATE endpoint_settings
 		SET is_default = FALSE
@@ -420,18 +446,7 @@ func ensureEndpointDefault(ctx context.Context, executor sqlExecutor, scopeType 
 		  AND (enabled = FALSE OR (capabilities->>'chat') IS DISTINCT FROM 'true')`, scopeType, scopeID); err != nil {
 		return err
 	}
-	_, err := executor.ExecContext(ctx, `
-		UPDATE endpoint_settings candidate SET is_default = TRUE
-		WHERE candidate.id = (
-			SELECT id FROM endpoint_settings
-			WHERE scope_type = $1 AND scope_id IS NOT DISTINCT FROM $2 AND enabled = TRUE AND (capabilities->>'chat') = 'true'
-			ORDER BY created_at LIMIT 1
-		)
-		AND NOT EXISTS (
-			SELECT 1 FROM endpoint_settings current_default
-			WHERE current_default.scope_type = $1 AND current_default.scope_id IS NOT DISTINCT FROM $2 AND current_default.is_default = TRUE
-		)`, scopeType, scopeID)
-	return err
+	return nil
 }
 
 func (a *App) testEndpoint(c *gin.Context) {

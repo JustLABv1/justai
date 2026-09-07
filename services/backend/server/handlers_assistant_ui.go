@@ -285,6 +285,13 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
+	// Keep the conversation's route as soon as the turn is accepted. This lets
+	// a user leave and reopen while a stream is in progress (or after a failed
+	// provider response) without falling back to the workspace default.
+	if _, err := a.DB.ExecContext(c, `UPDATE conversations SET endpoint_id = $2, chat_model = NULLIF($3, ''), updated_at = now() WHERE id = $1`, conversationID, endpointID, endpoint.ChatModel); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 
 	runStatus := "complete"
 	runToolCalls := 0
@@ -879,7 +886,6 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	if response.Len() > 0 || len(toolParts) > 0 {
 		_ = a.persistAssistantUIAssistantAtParts(c, conversationID, outputParent, assistantMessageID, response.String(), citations, toolParts, timingMetadata)
 	}
-	_, _ = a.DB.ExecContext(c, `UPDATE conversations SET endpoint_id = $2, updated_at = now() WHERE id = $1`, conversationID, endpointID)
 	_ = start
 }
 
