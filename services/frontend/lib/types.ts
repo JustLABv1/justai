@@ -288,11 +288,7 @@ export type KnowledgeSource = {
 }
 
 export type KnowledgeItemType =
-  | "source"
-  | "note"
-  | "memory"
-  | "repository"
-  | "transcript"
+  "source" | "note" | "memory" | "repository" | "transcript"
 
 export type KnowledgeItem = {
   id: string
@@ -433,6 +429,7 @@ export type Conversation = {
   canManage?: boolean
   projectId?: string | null
   endpointId?: string | null
+  chatModel?: string
   assistantId?: string | null
   assistantVersionId?: string | null
   createdAt: string

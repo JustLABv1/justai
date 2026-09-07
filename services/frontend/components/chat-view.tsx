@@ -1078,15 +1078,14 @@ function ContextDisplay({
     resourceId?: string
     contextScope?: "persistent" | "message"
   }> = [
-    ...context.knowledgeSources
-      .map((source) => ({
-        id: `knowledge:${source.id}`,
-        label: source.title,
-        detail: source.sourceType || "knowledge",
-        kind: "knowledge" as const,
-        resourceId: source.id,
-        contextScope: source.contextScope,
-      })),
+    ...context.knowledgeSources.map((source) => ({
+      id: `knowledge:${source.id}`,
+      label: source.title,
+      detail: source.sourceType || "knowledge",
+      kind: "knowledge" as const,
+      resourceId: source.id,
+      contextScope: source.contextScope,
+    })),
     ...(context.repositories ?? []).map((repository) => ({
       id: `repository:${repository.id}`,
       label: repository.title,
@@ -1178,7 +1177,10 @@ function ContextDisplay({
             title={`${item.label} · ${item.detail}`}
           >
             {item.kind === "mcp" ? (
-              <Plug className="size-3 shrink-0 text-primary" aria-hidden="true" />
+              <Plug
+                className="size-3 shrink-0 text-primary"
+                aria-hidden="true"
+              />
             ) : (
               <FileText
                 className="size-3 shrink-0 text-muted-foreground"
@@ -1191,7 +1193,9 @@ function ContextDisplay({
             <span className="hidden shrink-0 text-[10px] text-muted-foreground/70 sm:inline">
               {item.detail}
             </span>
-            {item.kind === "knowledge" && item.contextScope === "message" && onSaveKnowledge ? (
+            {item.kind === "knowledge" &&
+            item.contextScope === "message" &&
+            onSaveKnowledge ? (
               <button
                 type="button"
                 className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-50"
@@ -1359,9 +1363,10 @@ function UserMessage() {
 
 function AssistantMessage({ isLatest }: { isLatest: boolean }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
-  const startsWithTool = useAuiState((state) =>
-    state.message.parts.find((part) => part.type !== "data")?.type ===
-    "tool-call"
+  const startsWithTool = useAuiState(
+    (state) =>
+      state.message.parts.find((part) => part.type !== "data")?.type ===
+      "tool-call"
   )
   const isStreamingMessage = isLatest && isThreadRunning
 
@@ -1370,10 +1375,7 @@ function AssistantMessage({ isLatest }: { isLatest: boolean }) {
       <div className="mx-auto flex w-full max-w-4xl items-start gap-3">
         {!isStreamingMessage ? (
           <ChatBrandMark
-            className={cn(
-              "size-5 shrink-0",
-              startsWithTool ? "mt-5" : "mt-1"
-            )}
+            className={cn("size-5 shrink-0", startsWithTool ? "mt-5" : "mt-1")}
           />
         ) : null}
         <div className={cn("min-w-0 flex-1", isStreamingMessage && "pl-8")}>
@@ -2778,11 +2780,9 @@ function Composer({
                 })
               )}
             </div>
-            {(
-              includedSpaceIds.length > 0 ||
-              excludedSpaceIds.length > 0 ||
-              pinnedSpaceIds.length > 0
-            ) ? (
+            {includedSpaceIds.length > 0 ||
+            excludedSpaceIds.length > 0 ||
+            pinnedSpaceIds.length > 0 ? (
               <button
                 className="mt-2 w-full rounded-lg border px-2.5 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={onResetKnowledgeScope}
@@ -3087,205 +3087,205 @@ function Composer({
             />
             <ComposerPrimitive.AttachmentDropzone className="rounded-[2rem] transition-colors data-[dragging=true]:ring-2 data-[dragging=true]:ring-primary/40">
               <ComposerPrimitive.Root
-              className={cn(
-                "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
-                compact &&
-                  "flex flex-wrap items-center gap-2 overflow-hidden rounded-[1.75rem] bg-muted/30 p-2 ring-border/60"
-              )}
-              data-running={isThreadRunning}
-            >
-              <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
-                <Quote className="size-3.5 shrink-0" aria-hidden="true" />
-                <ComposerPrimitive.QuoteText className="min-w-0 flex-1 truncate" />
-                <ComposerPrimitive.QuoteDismiss
-                  aria-label="Remove quote"
-                  className="rounded p-0.5 hover:bg-muted hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </ComposerPrimitive.QuoteDismiss>
-              </ComposerPrimitive.Quote>
-              <ComposerPrimitive.Queue>
-                {() => (
-                  <div className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
-                    <span className="size-1.5 shrink-0 rounded-full bg-primary" />
-                    <QueueItemPrimitive.Text className="min-w-0 flex-1 truncate" />
-                    <QueueItemPrimitive.Steer className="rounded px-1.5 py-0.5 text-[11px] hover:bg-muted hover:text-foreground">
-                      Send now
-                    </QueueItemPrimitive.Steer>
-                    <QueueItemPrimitive.Remove
-                      aria-label="Remove queued message"
-                      className="rounded p-0.5 hover:bg-muted hover:text-foreground"
-                    >
-                      <X className="size-3.5" />
-                    </QueueItemPrimitive.Remove>
+                className={cn(
+                  "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
+                  compact &&
+                    "flex flex-wrap items-center gap-2 overflow-hidden rounded-[1.75rem] bg-muted/30 p-2 ring-border/60"
+                )}
+                data-running={isThreadRunning}
+              >
+                <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                  <Quote className="size-3.5 shrink-0" aria-hidden="true" />
+                  <ComposerPrimitive.QuoteText className="min-w-0 flex-1 truncate" />
+                  <ComposerPrimitive.QuoteDismiss
+                    aria-label="Remove quote"
+                    className="rounded p-0.5 hover:bg-muted hover:text-foreground"
+                  >
+                    <X className="size-3.5" />
+                  </ComposerPrimitive.QuoteDismiss>
+                </ComposerPrimitive.Quote>
+                <ComposerPrimitive.Queue>
+                  {() => (
+                    <div className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+                      <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                      <QueueItemPrimitive.Text className="min-w-0 flex-1 truncate" />
+                      <QueueItemPrimitive.Steer className="rounded px-1.5 py-0.5 text-[11px] hover:bg-muted hover:text-foreground">
+                        Send now
+                      </QueueItemPrimitive.Steer>
+                      <QueueItemPrimitive.Remove
+                        aria-label="Remove queued message"
+                        className="rounded p-0.5 hover:bg-muted hover:text-foreground"
+                      >
+                        <X className="size-3.5" />
+                      </QueueItemPrimitive.Remove>
+                    </div>
+                  )}
+                </ComposerPrimitive.Queue>
+                {hasAttachments && (
+                  <div
+                    className={cn(
+                      "flex w-full flex-wrap items-center gap-2 px-2 pt-1 pb-0.5",
+                      compact && "order-first basis-full"
+                    )}
+                  >
+                    <ComposerPrimitive.Attachments>
+                      {({ attachment }) => (
+                        <AttachmentPrimitive.Root className="max-w-full">
+                          <ChatAttachmentPreview
+                            attachment={attachment}
+                            showRemove
+                            variant="composer"
+                          />
+                        </AttachmentPrimitive.Root>
+                      )}
+                    </ComposerPrimitive.Attachments>
                   </div>
                 )}
-              </ComposerPrimitive.Queue>
-              {hasAttachments && (
-                <div
-                  className={cn(
-                    "flex w-full flex-wrap items-center gap-2 px-2 pt-1 pb-0.5",
-                    compact && "order-first basis-full"
-                  )}
-                >
-                  <ComposerPrimitive.Attachments>
-                    {({ attachment }) => (
-                      <AttachmentPrimitive.Root className="max-w-full">
-                        <ChatAttachmentPreview
-                          attachment={attachment}
-                          showRemove
-                          variant="composer"
-                        />
-                      </AttachmentPrimitive.Root>
-                    )}
-                  </ComposerPrimitive.Attachments>
-                </div>
-              )}
-              {attachingMcpId && (
-                <div
-                  className="mx-1 mb-1 flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[11px] text-muted-foreground"
-                  role="status"
-                >
-                  <RefreshCw
-                    className="size-3 shrink-0 animate-spin text-primary"
-                    aria-hidden="true"
-                  />
-                  <span className="truncate">
-                    Adding{" "}
-                    <span className="font-medium text-foreground">
-                      {attachingMcpName}
-                    </span>
-                    …
-                  </span>
-                </div>
-              )}
-              {mcpAttachError && (
-                <div
-                  className="mx-1 mb-1 rounded-xl border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-[11px] text-destructive"
-                  role="alert"
-                >
-                  {mcpAttachError}
-                </div>
-              )}
-              {attachingNoteId && (
-                <div
-                  className="mx-1 mb-1 flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-muted-foreground"
-                  role="status"
-                >
-                  <RefreshCw
-                    className="size-3 shrink-0 animate-spin text-amber-500"
-                    aria-hidden="true"
-                  />
-                  <span className="truncate">
-                    Adding{" "}
-                    <span className="font-medium text-foreground">
-                      {attachingNoteName}
-                    </span>
-                    …
-                  </span>
-                </div>
-              )}
-              {noteAttachError && (
-                <div
-                  className="mx-1 mb-1 rounded-xl border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-[11px] text-destructive"
-                  role="alert"
-                >
-                  {noteAttachError}
-                </div>
-              )}
-              <ComposerPrimitive.Input
-                className={cn(
-                  "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
-                  compact &&
-                    "order-1 min-h-10 min-w-0 flex-none basis-full px-2 py-2 leading-6"
-                )}
-                placeholder={
-                  compact
-                    ? "What do you want to know? (type @ for a specific item)"
-                    : "Message JustAI… (type @ for a specific item; / and $ for MCPs)"
-                }
-                submitMode="enter"
-              />
-              <div
-                className={cn(
-                  "flex items-center justify-between gap-2 px-1",
-                  compact && "contents"
-                )}
-              >
-                <div
-                  className={cn(
-                    "flex min-w-0 items-center gap-1",
-                    compact && "order-2"
-                  )}
-                >
-                  <ComposerPrimitive.AddAttachment
-                    aria-label="Attach a file"
-                    className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    multiple
+                {attachingMcpId && (
+                  <div
+                    className="mx-1 mb-1 flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[11px] text-muted-foreground"
+                    role="status"
                   >
-                    <Paperclip className="size-4" />
-                  </ComposerPrimitive.AddAttachment>
-                  {onOpenHistory && (
-                    <Button
-                      aria-label="Open conversation history"
-                      className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
-                      onClick={onOpenHistory}
-                      size="icon-sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <History className="size-4" />
-                    </Button>
+                    <RefreshCw
+                      className="size-3 shrink-0 animate-spin text-primary"
+                      aria-hidden="true"
+                    />
+                    <span className="truncate">
+                      Adding{" "}
+                      <span className="font-medium text-foreground">
+                        {attachingMcpName}
+                      </span>
+                      …
+                    </span>
+                  </div>
+                )}
+                {mcpAttachError && (
+                  <div
+                    className="mx-1 mb-1 rounded-xl border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-[11px] text-destructive"
+                    role="alert"
+                  >
+                    {mcpAttachError}
+                  </div>
+                )}
+                {attachingNoteId && (
+                  <div
+                    className="mx-1 mb-1 flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-muted-foreground"
+                    role="status"
+                  >
+                    <RefreshCw
+                      className="size-3 shrink-0 animate-spin text-amber-500"
+                      aria-hidden="true"
+                    />
+                    <span className="truncate">
+                      Adding{" "}
+                      <span className="font-medium text-foreground">
+                        {attachingNoteName}
+                      </span>
+                      …
+                    </span>
+                  </div>
+                )}
+                {noteAttachError && (
+                  <div
+                    className="mx-1 mb-1 rounded-xl border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-[11px] text-destructive"
+                    role="alert"
+                  >
+                    {noteAttachError}
+                  </div>
+                )}
+                <ComposerPrimitive.Input
+                  className={cn(
+                    "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
+                    compact &&
+                      "order-1 min-h-10 min-w-0 flex-none basis-full px-2 py-2 leading-6"
                   )}
-                  <ResponseSetupPopover
-                    assistantId={assistantId}
-                    assistantLocked={assistantSelectionLocked}
-                    assistants={assistants}
-                    deepContext={deepContext}
-                    deepContextAvailable={deepContextAvailable}
-                    deepContextTitle={deepContextTitle}
-                    endpointId={endpointId}
-                    endpoints={endpoints}
-                    modelDiscoveryLoading={modelDiscoveryLoading}
-                    modelId={modelId}
-                    models={models}
-                    onAssistantChange={onAssistantChange}
-                    onDeepContextChange={onDeepContextChange}
-                    onEndpointChange={onEndpointChange}
-                    onModelChange={onModelChange}
-                  />
-                </div>
+                  placeholder={
+                    compact
+                      ? "What do you want to know? (type @ for a specific item)"
+                      : "Message JustAI… (type @ for a specific item; / and $ for MCPs)"
+                  }
+                  submitMode="enter"
+                />
                 <div
                   className={cn(
-                    "order-3 flex shrink-0 items-center gap-1",
-                    compact &&
-                      "ml-auto max-w-full min-w-0 flex-wrap justify-end"
+                    "flex items-center justify-between gap-2 px-1",
+                    compact && "contents"
                   )}
                 >
-                  <VoiceControl
-                    className="shrink-0"
-                    compact
-                    toolApproval={toolApproval}
-                  />
-                  {isThreadRunning ? (
-                    <ComposerPrimitive.Cancel
-                      aria-label="Cancel response"
-                      className="flex size-9 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
+                  <div
+                    className={cn(
+                      "flex min-w-0 items-center gap-1",
+                      compact && "order-2"
+                    )}
+                  >
+                    <ComposerPrimitive.AddAttachment
+                      aria-label="Attach a file"
+                      className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      multiple
                     >
-                      <RotateCcw className="size-4" />
-                    </ComposerPrimitive.Cancel>
-                  ) : (
-                    <ComposerPrimitive.Send
-                      aria-label="Send message"
-                      className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
-                      disabled={hasUnreadyAttachments}
-                    >
-                      <ArrowUp className="size-4" />
-                    </ComposerPrimitive.Send>
-                  )}
+                      <Paperclip className="size-4" />
+                    </ComposerPrimitive.AddAttachment>
+                    {onOpenHistory && (
+                      <Button
+                        aria-label="Open conversation history"
+                        className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
+                        onClick={onOpenHistory}
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <History className="size-4" />
+                      </Button>
+                    )}
+                    <ResponseSetupPopover
+                      assistantId={assistantId}
+                      assistantLocked={assistantSelectionLocked}
+                      assistants={assistants}
+                      deepContext={deepContext}
+                      deepContextAvailable={deepContextAvailable}
+                      deepContextTitle={deepContextTitle}
+                      endpointId={endpointId}
+                      endpoints={endpoints}
+                      modelDiscoveryLoading={modelDiscoveryLoading}
+                      modelId={modelId}
+                      models={models}
+                      onAssistantChange={onAssistantChange}
+                      onDeepContextChange={onDeepContextChange}
+                      onEndpointChange={onEndpointChange}
+                      onModelChange={onModelChange}
+                    />
+                  </div>
+                  <div
+                    className={cn(
+                      "order-3 flex shrink-0 items-center gap-1",
+                      compact &&
+                        "ml-auto max-w-full min-w-0 flex-wrap justify-end"
+                    )}
+                  >
+                    <VoiceControl
+                      className="shrink-0"
+                      compact
+                      toolApproval={toolApproval}
+                    />
+                    {isThreadRunning ? (
+                      <ComposerPrimitive.Cancel
+                        aria-label="Cancel response"
+                        className="flex size-9 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
+                      >
+                        <RotateCcw className="size-4" />
+                      </ComposerPrimitive.Cancel>
+                    ) : (
+                      <ComposerPrimitive.Send
+                        aria-label="Send message"
+                        className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
+                        disabled={hasUnreadyAttachments}
+                      >
+                        <ArrowUp className="size-4" />
+                      </ComposerPrimitive.Send>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </ComposerPrimitive.Root>
+              </ComposerPrimitive.Root>
             </ComposerPrimitive.AttachmentDropzone>
           </div>
         </div>
@@ -3399,6 +3399,8 @@ function AssistantChatSurface({
   conversationId,
   cacheScope,
   conversationAssistantId,
+  conversationEndpointId,
+  conversationChatModel,
   initialMessages,
   assistants,
   endpoints,
@@ -3432,6 +3434,8 @@ function AssistantChatSurface({
   conversationId: string | null
   cacheScope: string
   conversationAssistantId?: string | null
+  conversationEndpointId?: string | null
+  conversationChatModel?: string
   initialMessages: UIMessage[]
   assistants: SavedAssistant[]
   endpoints: Endpoint[]
@@ -3466,27 +3470,37 @@ function AssistantChatSurface({
     (assistant) => assistant.id === conversationAssistantId
   )
   const initialAssistantModelEndpointId =
-    initialAssistant?.endpointId ?? activeEndpoint?.id
+    conversationEndpointId ?? initialAssistant?.endpointId ?? activeEndpoint?.id
   const [selectedAssistantId, setSelectedAssistantId] = useState(
     conversationAssistantId ?? ""
   )
   const [endpointId, setEndpointId] = useState(
-    initialAssistant?.endpointId ?? activeEndpoint?.id ?? ""
+    conversationEndpointId ??
+      initialAssistant?.endpointId ??
+      activeEndpoint?.id ??
+      ""
   )
   const [modelsByEndpoint, setModelsByEndpoint] = useState<
     Record<string, DiscoveredChatModel[]>
   >(() =>
-    initialAssistantModelEndpointId && initialAssistant?.model
+    initialAssistantModelEndpointId &&
+    (conversationChatModel || initialAssistant?.model)
       ? {
-          [initialAssistantModelEndpointId]: [{ id: initialAssistant.model }],
+          [initialAssistantModelEndpointId]: [
+            { id: conversationChatModel || initialAssistant?.model || "" },
+          ],
         }
       : {}
   )
   const [modelByEndpoint, setModelByEndpoint] = useState<
     Record<string, string>
   >(() =>
-    initialAssistantModelEndpointId && initialAssistant?.model
-      ? { [initialAssistantModelEndpointId]: initialAssistant.model }
+    initialAssistantModelEndpointId &&
+    (conversationChatModel || initialAssistant?.model)
+      ? {
+          [initialAssistantModelEndpointId]:
+            conversationChatModel || initialAssistant?.model || "",
+        }
       : {}
   )
   const [voiceApproval, setVoiceApproval] = useState<
@@ -3958,24 +3972,30 @@ export function ChatView({
 
   const toggleKnowledgeSpace = useCallback((spaceId: string) => {
     setExcludedSpaceIds((current) => current.filter((id) => id !== spaceId))
-    setIncludedSpaceIds((current) => current.includes(spaceId)
-      ? current.filter((id) => id !== spaceId)
-      : [...current, spaceId])
+    setIncludedSpaceIds((current) =>
+      current.includes(spaceId)
+        ? current.filter((id) => id !== spaceId)
+        : [...current, spaceId]
+    )
   }, [])
 
   const toggleKnowledgeSpaceExclusion = useCallback((spaceId: string) => {
     setIncludedSpaceIds((current) => current.filter((id) => id !== spaceId))
     setPinnedSpaceIds((current) => current.filter((id) => id !== spaceId))
-    setExcludedSpaceIds((current) => current.includes(spaceId)
-      ? current.filter((id) => id !== spaceId)
-      : [...current, spaceId])
+    setExcludedSpaceIds((current) =>
+      current.includes(spaceId)
+        ? current.filter((id) => id !== spaceId)
+        : [...current, spaceId]
+    )
   }, [])
 
   const toggleKnowledgeSpacePin = useCallback((spaceId: string) => {
     setExcludedSpaceIds((current) => current.filter((id) => id !== spaceId))
-    setPinnedSpaceIds((current) => current.includes(spaceId)
-      ? current.filter((id) => id !== spaceId)
-      : [...current, spaceId])
+    setPinnedSpaceIds((current) =>
+      current.includes(spaceId)
+        ? current.filter((id) => id !== spaceId)
+        : [...current, spaceId]
+    )
   }, [])
 
   const resetKnowledgeScope = useCallback(() => {
@@ -4016,6 +4036,9 @@ export function ChatView({
     (endpoint) => endpoint.enabled && endpoint.capabilities?.chat
   )
   const activeEndpoint =
+    activeChatEndpoints.find(
+      (endpoint) => endpoint.id === conversation?.endpointId
+    ) ??
     activeChatEndpoints.find((endpoint) => endpoint.isDefault) ??
     activeChatEndpoints[0]
 
@@ -4528,6 +4551,8 @@ export function ChatView({
               cacheScope={cacheScope}
               conversationId={activeConversationId}
               conversationAssistantId={conversation?.assistantId}
+              conversationEndpointId={conversation?.endpointId}
+              conversationChatModel={conversation?.chatModel}
               endpoints={activeChatEndpoints}
               mcpServers={mcpServers}
               notes={notes}
@@ -4545,17 +4570,17 @@ export function ChatView({
               onSaveKnowledge={saveKnowledgeSource}
               onOpenHistory={onOpenHistory}
               onRemoveUpload={removeUploadedFile}
-	              onUpload={uploadFile}
-	              conversationContext={conversationContext}
-	              knowledgeSpaces={knowledgeSpaces}
-	              includedSpaceIds={includedSpaceIds}
-	              excludedSpaceIds={excludedSpaceIds}
-	              pinnedSpaceIds={pinnedSpaceIds}
-	              onToggleKnowledgeSpace={toggleKnowledgeSpace}
-	              onToggleKnowledgeSpaceExclusion={toggleKnowledgeSpaceExclusion}
-	              onToggleKnowledgeSpacePin={toggleKnowledgeSpacePin}
-	              onResetKnowledgeScope={resetKnowledgeScope}
-	            />
+              onUpload={uploadFile}
+              conversationContext={conversationContext}
+              knowledgeSpaces={knowledgeSpaces}
+              includedSpaceIds={includedSpaceIds}
+              excludedSpaceIds={excludedSpaceIds}
+              pinnedSpaceIds={pinnedSpaceIds}
+              onToggleKnowledgeSpace={toggleKnowledgeSpace}
+              onToggleKnowledgeSpaceExclusion={toggleKnowledgeSpaceExclusion}
+              onToggleKnowledgeSpacePin={toggleKnowledgeSpacePin}
+              onResetKnowledgeScope={resetKnowledgeScope}
+            />
           </div>
         )}
       </div>

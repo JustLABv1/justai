@@ -295,9 +295,6 @@ export function EndpointsView({
         scopeId: form.scopeId.trim() || null,
         capabilities,
       }
-      const hasChatDefault = endpoints.some(
-        (endpoint) => endpoint.enabled && endpoint.capabilities.chat
-      )
       const result = editingEndpoint
         ? await api.patch<Endpoint>(
             `${endpointPath}/${editingEndpoint.id}`,
@@ -305,9 +302,7 @@ export function EndpointsView({
           )
         : await api.post<Endpoint>(endpointPath, {
             ...payload,
-            isDefault: !capabilities.chat
-              ? false
-              : form.isDefault || !hasChatDefault,
+            isDefault: capabilities.chat && form.isDefault,
           })
       onChange(
         editingEndpoint
