@@ -393,7 +393,17 @@ func (a *App) listAgentRuns(c *gin.Context) {
 func (a *App) listRunsForQuery(c *gin.Context, clause string, args []any, userID, organizationID uuid.UUID) {
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, organizationID, userID)
-	query := `SELECT r.id,r.workflow_id,r.root_agent_id,r.parent_run_id,r.conversation_id,r.source_type,r.status,r.input,r.summary,r.error,r.started_at,r.finished_at,r.created_at,r.updated_at FROM agent_runs r LEFT JOIN agent_workflows w ON w.id=r.workflow_id ` + clause + ` AND r.organization_id=$` + strconv.Itoa(len(args)+1) + ` AND (r.user_id=$` + strconv.Itoa(len(args)+2) + ` OR w.visibility='workspace') ORDER BY r.created_at DESC LIMIT 100`
+	query := `SELECT r.id,r.workflow_id,r.root_agent_id,r.parent_run_id,r.conversation_id,r.source_type,r.status,r.input,r.summary,r.error,r.started_at,r.finished_at,r.created_at,r.updated_at FROM agent_runs r LEFT JOIN agent_workflows w ON w.id=r.workflow_id ` + clause + ` AND r.organization_id=$` + strconv.Itoa(len(args)+1) + ` AND (r.user_id=$` + strconv.Itoa(len(args)+2) + ` OR w.visibility='workspace')`
+	if cursor := strings.TrimSpace(c.Query("cursor")); cursor != "" {
+		at, id, err := decodeTimeUUIDCursor(cursor)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, publicError("invalid_cursor", "cursor is invalid"))
+			return
+		}
+		query += ` AND (r.created_at, r.id) < ($` + strconv.Itoa(len(queryArgs)+1) + `, $` + strconv.Itoa(len(queryArgs)+2) + `)`
+		queryArgs = append(queryArgs, at, id)
+	}
+	query += ` ORDER BY r.created_at DESC, r.id DESC LIMIT 101`
 	rows, err := a.DB.QueryContext(c, query, queryArgs...)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -409,7 +419,17 @@ func (a *App) listRunsForQuery(c *gin.Context, clause string, args []any, userID
 		}
 		items = append(items, item)
 	}
-	c.JSON(http.StatusOK, gin.H{"runs": items})
+	if err := rows.Err(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	nextCursor := ""
+	if len(items) > 100 {
+		items = items[:100]
+		last := items[len(items)-1]
+		nextCursor = encodeTimeUUIDCursor(last.CreatedAt, last.ID)
+	}
+	c.JSON(http.StatusOK, gin.H{"runs": items, "nextCursor": nextCursor})
 }
 
 func scanAgentRunSummary(scanner interface{ Scan(...any) error }) (models.AgentRun, error) {
