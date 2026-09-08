@@ -337,6 +337,10 @@ func (e *AgentEngine) createRun(options agentRunCreateOptions) (models.AgentRun,
 		}
 		sharedWorkflow = visibility == "workspace"
 	}
+	options.Definition, err = e.expandWorkflowKnowledgeSpaces(context.Background(), options.Definition, options.UserID, options.OrganizationID, sharedWorkflow)
+	if err != nil {
+		return models.AgentRun{}, err
+	}
 	if err := e.validateAgentWorkflowContext(context.Background(), options.Definition, options.UserID, options.OrganizationID, options.ConversationID, sharedWorkflow); err != nil {
 		return models.AgentRun{}, err
 	}

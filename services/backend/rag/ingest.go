@@ -1677,9 +1677,9 @@ func ExtractUploadContext(ctx context.Context, filename, mimeType string, body [
 	if strings.HasPrefix(lowerMime, "audio/") || strings.HasPrefix(lowerMime, "video/") || mediaExtension(lowerName) {
 		return "", fmt.Errorf("audio and video attachments must be transcribed before they can be added as Knowledge")
 	}
-	allowedText := lowerMime == "" || strings.HasPrefix(lowerMime, "text/") || lowerMime == "application/json" || lowerMime == "application/pdf" || strings.HasSuffix(lowerName, ".md") || strings.HasSuffix(lowerName, ".markdown") || strings.HasSuffix(lowerName, ".txt") || strings.HasSuffix(lowerName, ".html") || strings.HasSuffix(lowerName, ".htm") || strings.HasSuffix(lowerName, ".json") || strings.HasSuffix(lowerName, ".pdf")
+	allowedText := lowerMime == "" || strings.HasPrefix(lowerMime, "text/") || lowerMime == "application/json" || lowerMime == "application/pdf" || lowerMime == "application/vnd.ms-excel" || strings.HasSuffix(lowerName, ".md") || strings.HasSuffix(lowerName, ".markdown") || strings.HasSuffix(lowerName, ".txt") || strings.HasSuffix(lowerName, ".html") || strings.HasSuffix(lowerName, ".htm") || strings.HasSuffix(lowerName, ".json") || strings.HasSuffix(lowerName, ".csv") || strings.HasSuffix(lowerName, ".pdf")
 	if !allowedText {
-		return "", fmt.Errorf("unsupported attachment type; use PDF, Markdown, text, HTML, or JSON")
+		return "", fmt.Errorf("unsupported attachment type; use PDF, CSV, Markdown, text, HTML, or JSON")
 	}
 	if strings.HasSuffix(lowerName, ".pdf") || strings.Contains(lowerMime, "pdf") {
 		parseContext, cancel := context.WithTimeout(ctx, pdfExtractionTimeout)

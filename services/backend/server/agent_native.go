@@ -27,6 +27,9 @@ const (
 func (e *AgentEngine) validateAgentWorkflowContext(ctx context.Context, definition models.AgentWorkflowDefinition, userID, organizationID uuid.UUID, conversationID *uuid.UUID, shared bool) error {
 	for _, node := range definition.Nodes {
 		scope := node.Context
+		if err := validateAgentContextCount(node.ID, "knowledge folders", scope.KnowledgeSpaceIDs); err != nil {
+			return err
+		}
 		if len(scope.MCPTools) > maxAgentContextTools {
 			return fmt.Errorf("workflow node %q cannot grant more than %d MCP tools", node.ID, maxAgentContextTools)
 		}
@@ -62,6 +65,96 @@ func (e *AgentEngine) validateAgentWorkflowContext(ctx context.Context, definiti
 		}
 	}
 	return nil
+}
+
+// expandWorkflowKnowledgeSpaces resolves a folder grant into concrete resource
+// IDs immediately before a run is persisted. The resulting immutable snapshot
+// sees the current folder contents, while later uploads only affect later runs.
+func (e *AgentEngine) expandWorkflowKnowledgeSpaces(ctx context.Context, definition models.AgentWorkflowDefinition, userID, organizationID uuid.UUID, shared bool) (models.AgentWorkflowDefinition, error) {
+	for nodeIndex := range definition.Nodes {
+		node := &definition.Nodes[nodeIndex]
+		if len(node.Context.KnowledgeSpaceIDs) == 0 {
+			continue
+		}
+		if len(node.Context.KnowledgeSpaceIDs) > maxAgentContextItems {
+			return definition, fmt.Errorf("workflow node %q cannot grant more than %d knowledge folders", node.ID, maxAgentContextItems)
+		}
+		uniqueRoots := make(map[uuid.UUID]struct{}, len(node.Context.KnowledgeSpaceIDs))
+		for _, id := range node.Context.KnowledgeSpaceIDs {
+			if id == uuid.Nil {
+				return definition, fmt.Errorf("workflow node %q contains an invalid knowledge folder id", node.ID)
+			}
+			uniqueRoots[id] = struct{}{}
+		}
+		accessClause := "(user_id=$3 OR visibility='workspace')"
+		if shared {
+			accessClause = "visibility='workspace'"
+		}
+		var accessible int
+		countQuery := `SELECT COUNT(DISTINCT id) FROM workspace_projects WHERE id=ANY($1::uuid[]) AND organization_id=$2 AND ` + accessClause
+		countArgs := []any{pq.Array(uuidStrings(node.Context.KnowledgeSpaceIDs)), organizationID}
+		if !shared {
+			countArgs = append(countArgs, userID)
+		}
+		if err := e.app.DB.QueryRowContext(ctx, countQuery, countArgs...).Scan(&accessible); err != nil {
+			return definition, fmt.Errorf("workflow node %q knowledge folders could not be checked: %w", node.ID, err)
+		}
+		if accessible != len(uniqueRoots) {
+			return definition, fmt.Errorf("workflow node %q cannot access one or more knowledge folders", node.ID)
+		}
+		query := `
+			WITH RECURSIVE folders AS (
+				SELECT id FROM workspace_projects
+				WHERE id=ANY($1::uuid[]) AND organization_id=$2 AND ` + accessClause + `
+				UNION
+				SELECT child.id FROM workspace_projects child
+				JOIN folders parent ON child.parent_id=parent.id
+				WHERE child.organization_id=$2 AND ` + strings.ReplaceAll(accessClause, "user_id", "child.user_id") + `
+			)
+			SELECT DISTINCT ki.resource_type,ki.resource_id
+			FROM folders
+			JOIN knowledge_space_items ksi ON ksi.space_id=folders.id
+			JOIN knowledge_items ki ON ki.id=ksi.item_id
+			WHERE ki.organization_id=$2 AND (ki.visibility='workspace' OR ki.owner_id=$3)
+			ORDER BY ki.resource_type,ki.resource_id`
+		rows, err := e.app.DB.QueryContext(ctx, query, pq.Array(uuidStrings(node.Context.KnowledgeSpaceIDs)), organizationID, userID)
+		if err != nil {
+			return definition, fmt.Errorf("workflow node %q knowledge folder contents could not be loaded: %w", node.ID, err)
+		}
+		for rows.Next() {
+			var resourceType string
+			var resourceID uuid.UUID
+			if err := rows.Scan(&resourceType, &resourceID); err != nil {
+				rows.Close()
+				return definition, err
+			}
+			switch resourceType {
+			case "source":
+				node.Context.KnowledgeSourceIDs = appendUniqueUUID(node.Context.KnowledgeSourceIDs, resourceID)
+			case "repository":
+				node.Context.RepositoryIDs = appendUniqueUUID(node.Context.RepositoryIDs, resourceID)
+			case "note":
+				node.Context.NoteIDs = appendUniqueUUID(node.Context.NoteIDs, resourceID)
+			case "transcript":
+				node.Context.TranscriptionSessionIDs = appendUniqueUUID(node.Context.TranscriptionSessionIDs, resourceID)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return definition, err
+		}
+		rows.Close()
+	}
+	return definition, nil
+}
+
+func appendUniqueUUID(values []uuid.UUID, value uuid.UUID) []uuid.UUID {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func validateAgentContextCount(nodeID, label string, values any) error {

@@ -1,6 +1,14 @@
 "use client"
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   Activity,
   Bot,
@@ -8,6 +16,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleAlert,
+  Clock3,
   Cloud,
   GitBranch,
   KeyRound,
@@ -46,6 +55,7 @@ import {
 import "@xyflow/react/dist/style.css"
 
 import { api, resolveAPIURL } from "@/lib/api"
+import { StaticAssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import {
   formatWorkflowNextRun,
   validateWorkflowDefinition,
@@ -68,6 +78,7 @@ import type {
   AgentWorkflowDefinition,
   AgentWorkflowNode,
   Endpoint,
+  KnowledgeSpace,
   KnowledgeSource,
   MCPServer,
 } from "@/lib/types"
@@ -112,6 +123,11 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   Select,
   SelectContent,
@@ -277,13 +293,19 @@ function emptyWorkflow(): WorkflowDraft {
 }
 
 type WorkflowTemplateId =
-  "research-brief" | "meeting-actions" | "content-review"
+  "research-brief" | "meeting-actions" | "content-review" | "daily-news"
 
 const workflowTemplates: Array<{
   id: WorkflowTemplateId
   name: string
   description: string
 }> = [
+  {
+    id: "daily-news",
+    name: "Daily news briefing",
+    description:
+      "Let specialist agents analyze one storage folder, then synthesize a daily brief.",
+  },
   {
     id: "research-brief",
     name: "Research brief",
@@ -304,6 +326,54 @@ const workflowTemplates: Array<{
 function workflowTemplateDraft(templateID: WorkflowTemplateId): WorkflowDraft {
   const draft = emptyWorkflow()
   switch (templateID) {
+    case "daily-news":
+      return {
+        ...draft,
+        name: "Daily news briefing",
+        description:
+          "Parallel political and economic analysis of the latest files in a storage folder.",
+        definition: {
+          nodes: [
+            {
+              ...draft.definition.nodes[0],
+              id: "politics",
+              instruction:
+                "Analyze the current news material for German federal politics. Return factual, deduplicated bullets with portal, publication date, headline, URL, political relevance, and uncertainty where applicable.",
+            },
+            {
+              ...draft.definition.nodes[0],
+              id: "economy",
+              instruction:
+                "Analyze the current news material for economic, fiscal, labor-market, and business implications in Germany. Return factual, deduplicated bullets with portal, publication date, headline, URL, impact, and uncertainty where applicable.",
+            },
+            {
+              ...draft.definition.nodes[0],
+              id: "editor",
+              instruction:
+                "Combine the specialist analyses into a concise German daily briefing. Lead with the most consequential developments, remove duplicates, preserve source URLs, distinguish facts from interpretation, and end with items to monitor.",
+              inputBindings: [
+                {
+                  name: "politics",
+                  source: "node",
+                  nodeId: "politics",
+                  path: "summary",
+                },
+                {
+                  name: "economy",
+                  source: "node",
+                  nodeId: "economy",
+                  path: "summary",
+                },
+              ],
+            },
+          ],
+          edges: [
+            { from: "politics", to: "editor" },
+            { from: "economy", to: "editor" },
+          ],
+        },
+        schedule: { kind: "daily", interval: 1, time: "08:00" },
+      }
     case "meeting-actions":
       return {
         ...draft,
@@ -423,6 +493,21 @@ function statusLabel(status: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+function knowledgeSpacePath(space: KnowledgeSpace, spaces: KnowledgeSpace[]) {
+  const names = [space.name]
+  const seen = new Set([space.id])
+  let parentId = space.parentId
+  while (parentId) {
+    if (seen.has(parentId)) break
+    seen.add(parentId)
+    const parent = spaces.find((candidate) => candidate.id === parentId)
+    if (!parent) break
+    names.unshift(parent.name)
+    parentId = parent.parentId
+  }
+  return names.join(" / ")
+}
+
 function approvalModeLabel(mode: string | undefined) {
   return mode === "read_only_auto"
     ? "Automatic for trusted read-only"
@@ -527,7 +612,7 @@ const AgentFlowNode = memo(function AgentFlowNode({
         <div className="min-w-0">
           <p className="truncate text-xs font-semibold">{data.label}</p>
           <p className="truncate text-[11px] text-muted-foreground">
-            {data.agentName || "Default native agent"}
+            {data.agentName || "No agent selected"}
           </p>
         </div>
       </div>
@@ -602,7 +687,7 @@ function WorkflowCanvas({
   )
 
   return (
-    <div className="min-h-0 flex-1">
+    <div className="h-full min-h-0 w-full flex-1">
       <ReactFlow
         nodes={localNodes}
         edges={edges}
@@ -626,7 +711,16 @@ function WorkflowCanvas({
 }
 
 function agentToSavedLabel(agent: Agent | undefined) {
-  return agent?.name ?? "Default native agent"
+  return agent?.name ?? "No agent selected"
+}
+
+function updateAgentRunURL(runID?: string) {
+  if (typeof window === "undefined") return
+  const url = new URL(window.location.href)
+  url.searchParams.set("tab", "runs")
+  if (runID) url.searchParams.set("run", runID)
+  else url.searchParams.delete("run")
+  window.history.replaceState(window.history.state, "", url)
 }
 
 export function AgentsView({
@@ -642,6 +736,7 @@ export function AgentsView({
   const [connections, setConnections] = useState<AgentConnection[]>([])
   const [workflows, setWorkflows] = useState<AgentWorkflow[]>([])
   const [runs, setRuns] = useState<AgentRun[]>([])
+  const [knowledgeSpaces, setKnowledgeSpaces] = useState<KnowledgeSpace[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [nativeOpen, setNativeOpen] = useState(false)
@@ -669,16 +764,21 @@ export function AgentsView({
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [connectionResult, workflowResult, runResult] = await Promise.all([
-        api.get<{ connections: AgentConnection[] }>(
-          "/api/v1/agent-connections"
-        ),
-        api.get<{ workflows: AgentWorkflow[] }>("/api/v1/agent-workflows"),
-        api.get<{ runs: AgentRun[] }>("/api/v1/agent-runs"),
-      ])
+      const [connectionResult, workflowResult, runResult, spaceResult] =
+        await Promise.all([
+          api.get<{ connections: AgentConnection[] }>(
+            "/api/v1/agent-connections"
+          ),
+          api.get<{ workflows: AgentWorkflow[] }>("/api/v1/agent-workflows"),
+          api.get<{ runs: AgentRun[] }>("/api/v1/agent-runs"),
+          api
+            .get<{ spaces: KnowledgeSpace[] }>("/api/v1/knowledge/spaces")
+            .catch(() => ({ spaces: [] })),
+        ])
       setConnections(connectionResult.connections ?? [])
       setWorkflows(workflowResult.workflows ?? [])
       setRuns(runResult.runs ?? [])
+      setKnowledgeSpaces(spaceResult.spaces ?? [])
       setError("")
     } catch (caught) {
       setError(
@@ -962,23 +1062,41 @@ export function AgentsView({
     setDeleteTarget({ kind: "connection", item: connection })
   }
 
-  const openWorkflow = useCallback((workflow?: AgentWorkflow) => {
-    const next = workflow ? cloneWorkflow(workflow) : emptyWorkflow()
-    setWorkflowDraft(next)
-    setSelectedNodeId(next.definition.nodes[0]?.id ?? "")
-    setPositions({})
-    setValidationMessage("")
-  }, [])
+  const openWorkflow = useCallback(
+    (workflow?: AgentWorkflow) => {
+      const next = workflow ? cloneWorkflow(workflow) : emptyWorkflow()
+      if (!workflow && agents[0]) {
+        next.definition.nodes = next.definition.nodes.map((node) => ({
+          ...node,
+          agentId: agents[0].id,
+        }))
+      }
+      setWorkflowDraft(next)
+      setSelectedNodeId(next.definition.nodes[0]?.id ?? "")
+      setPositions({})
+      setValidationMessage("")
+    },
+    [agents]
+  )
 
-  const openWorkflowTemplate = useCallback((templateID: WorkflowTemplateId) => {
-    const next = workflowTemplateDraft(templateID)
-    setWorkflowDraft(next)
-    setSelectedNodeId(next.definition.nodes[0]?.id ?? "")
-    setPositions({})
-    setValidationMessage(
-      "Template loaded. Choose agents and review the mappings before saving."
-    )
-  }, [])
+  const openWorkflowTemplate = useCallback(
+    (templateID: WorkflowTemplateId) => {
+      const next = workflowTemplateDraft(templateID)
+      if (agents[0]) {
+        next.definition.nodes = next.definition.nodes.map((node) => ({
+          ...node,
+          agentId: agents[0].id,
+        }))
+      }
+      setWorkflowDraft(next)
+      setSelectedNodeId(next.definition.nodes[0]?.id ?? "")
+      setPositions({})
+      setValidationMessage(
+        "Template loaded. Choose agents and review the mappings before saving."
+      )
+    },
+    [agents]
+  )
 
   const updateWorkflow = useCallback((patch: Partial<WorkflowDraft>) => {
     setWorkflowDraft((current) =>
@@ -1010,6 +1128,7 @@ export function AgentsView({
     const node: AgentWorkflowNode = {
       id,
       type: "agent",
+      agentId: agents[0]?.id,
       instruction: "Complete the assigned task and return a concise result.",
       approvalMode: "read_only_auto",
       retry: { maxAttempts: 3 },
@@ -1065,6 +1184,13 @@ export function AgentsView({
 
   async function validateWorkflow() {
     if (!workflowDraft) return
+    const unassignedNode = workflowDraft.definition.nodes.find(
+      (node) => !node.agentId
+    )
+    if (unassignedNode) {
+      setValidationMessage(`Node ${unassignedNode.id} needs an agent.`)
+      return
+    }
     const localError = validateWorkflowDefinition(workflowDraft.definition)
     if (localError) {
       setValidationMessage(localError)
@@ -1107,6 +1233,13 @@ export function AgentsView({
 
   async function saveWorkflow() {
     if (!workflowDraft) return
+    const unassignedNode = workflowDraft.definition.nodes.find(
+      (node) => !node.agentId
+    )
+    if (unassignedNode) {
+      setValidationMessage(`Node ${unassignedNode.id} needs an agent.`)
+      return
+    }
     const localError = validateWorkflowDefinition(workflowDraft.definition)
     if (localError) {
       setValidationMessage(localError)
@@ -1191,6 +1324,7 @@ export function AgentsView({
       setRuns((current) => [result.run, ...current])
       setRunDialogOpen(false)
       onTabChange("runs")
+      updateAgentRunURL(result.run.id)
     } catch (caught) {
       setValidationMessage(
         caught instanceof Error
@@ -1381,6 +1515,7 @@ export function AgentsView({
             agents={agents}
             connections={connections}
             mcpServers={mcpServers}
+            knowledgeSpaces={knowledgeSpaces}
             knowledgeSources={knowledgeSources}
             selectedNode={selectedNode}
             selectedNodeId={selectedNodeId}
@@ -1390,6 +1525,7 @@ export function AgentsView({
             saving={saving}
             validating={validating}
             onOpen={openWorkflow}
+            onClose={() => setWorkflowDraft(null)}
             onOpenTemplate={openWorkflowTemplate}
             onDelete={deleteWorkflow}
             onUpdate={updateWorkflow}
@@ -2392,6 +2528,7 @@ function WorkflowsPanel({
   agents,
   connections,
   mcpServers,
+  knowledgeSpaces,
   knowledgeSources,
   selectedNode,
   selectedNodeId,
@@ -2401,6 +2538,7 @@ function WorkflowsPanel({
   saving,
   validating,
   onOpen,
+  onClose,
   onOpenTemplate,
   onDelete,
   onUpdate,
@@ -2420,6 +2558,7 @@ function WorkflowsPanel({
   agents: Agent[]
   connections: AgentConnection[]
   mcpServers: MCPServer[]
+  knowledgeSpaces: KnowledgeSpace[]
   knowledgeSources: KnowledgeSource[]
   selectedNode?: AgentWorkflowNode
   selectedNodeId: string
@@ -2429,6 +2568,7 @@ function WorkflowsPanel({
   saving: boolean
   validating: boolean
   onOpen: (workflow?: AgentWorkflow) => void
+  onClose: () => void
   onOpenTemplate: (templateID: WorkflowTemplateId) => void
   onDelete: (workflow: AgentWorkflow) => void
   onUpdate: (patch: Partial<WorkflowDraft>) => void
@@ -2483,79 +2623,72 @@ function WorkflowsPanel({
   }, [isFullscreen])
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
-      <Card className="h-fit">
-        <CardHeader>
-          <CardTitle>Workflow library</CardTitle>
-          <CardDescription>Bounded DAGs keep runs replayable.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {workflows.map((workflow) => (
-            <button
-              key={workflow.id}
-              className={cn(
-                "rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted/50",
-                draft?.id === workflow.id && "border-primary bg-primary/[0.04]"
-              )}
-              onClick={() => onOpen(workflow)}
-            >
-              <span className="block truncate text-sm font-medium">
-                {workflow.name}
-              </span>
-              <span className="mt-1 block text-xs text-muted-foreground">
-                {workflow.definition.nodes.length} nodes ·{" "}
-                {workflowScheduleDescription(workflow.schedule)}
-              </span>
-              <span className="block text-xs text-muted-foreground">
-                Next run:{" "}
-                {formatWorkflowNextRun(workflow.nextRunAt, workflow.timezone)}
-              </span>
-            </button>
-          ))}
-          {!workflows.length && (
-            <p className="py-5 text-center text-xs text-muted-foreground">
-              No saved workflows.
-            </p>
-          )}
-          <div className="mt-2 border-t pt-3">
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
-              <Sparkles className="size-3.5 text-primary" />
-              Start from a template
-            </p>
-            <div className="flex flex-col gap-1.5">
-              {workflowTemplates.map((template) => (
-                <button
-                  key={template.id}
-                  className="rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-muted/60"
-                  onClick={() => onOpenTemplate(template.id)}
-                  type="button"
-                >
-                  <span className="block font-medium">{template.name}</span>
-                  <span className="mt-0.5 block text-muted-foreground">
-                    {template.description}
-                  </span>
-                </button>
-              ))}
+    <div
+      className={cn(
+        "grid gap-5",
+        !draft && "xl:grid-cols-[18rem_minmax(0,1fr)]"
+      )}
+    >
+      {!draft && (
+        <Card className="h-fit max-h-[calc(100vh-13rem)] overflow-y-auto">
+          <CardHeader>
+            <CardTitle>Workflow library</CardTitle>
+            <CardDescription>
+              Bounded DAGs keep runs replayable.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {workflows.map((workflow) => (
+              <button
+                key={workflow.id}
+                className={cn(
+                  "rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted/50",
+                  "focus-visible:border-primary"
+                )}
+                onClick={() => onOpen(workflow)}
+              >
+                <span className="block truncate text-sm font-medium">
+                  {workflow.name}
+                </span>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  {workflow.definition.nodes.length} nodes ·{" "}
+                  {workflowScheduleDescription(workflow.schedule)}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Next run:{" "}
+                  {formatWorkflowNextRun(workflow.nextRunAt, workflow.timezone)}
+                </span>
+              </button>
+            ))}
+            {!workflows.length && (
+              <p className="py-5 text-center text-xs text-muted-foreground">
+                No saved workflows.
+              </p>
+            )}
+            <div className="mt-2 border-t pt-3">
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
+                <Sparkles className="size-3.5 text-primary" />
+                Start from a template
+              </p>
+              <div className="flex flex-col gap-1.5">
+                {workflowTemplates.map((template) => (
+                  <button
+                    key={template.id}
+                    className="rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-muted/60"
+                    onClick={() => onOpenTemplate(template.id)}
+                    type="button"
+                  >
+                    <span className="block font-medium">{template.name}</span>
+                    <span className="mt-0.5 block text-muted-foreground">
+                      {template.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        </CardContent>
-        {draft?.id && (
-          <CardFooter className="border-t">
-            <Button
-              className="w-full"
-              size="sm"
-              variant="ghost"
-              disabled={disabled}
-              onClick={() =>
-                onDelete(workflows.find((item) => item.id === draft.id)!)
-              }
-            >
-              <Trash2 data-icon="inline-start" />
-              Delete workflow
-            </Button>
-          </CardFooter>
-        )}
-      </Card>
+          </CardContent>
+        </Card>
+      )}
       {draft ? (
         <Card
           ref={editorRef}
@@ -2573,15 +2706,42 @@ function WorkflowsPanel({
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <CardTitle>
-                  {draft.id ? "Edit workflow" : "New workflow"}
-                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={onClose}
+                  >
+                    Workflows
+                  </Button>
+                  <CardTitle>
+                    {draft.id ? draft.name || "Edit workflow" : "New workflow"}
+                  </CardTitle>
+                </div>
                 <CardDescription>
                   Connect agent nodes, bind outputs, and make every context
                   grant explicit.
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
+                {draft.id && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={disabled}
+                    onClick={() => {
+                      const workflow = workflows.find(
+                        (item) => item.id === draft.id
+                      )
+                      if (workflow) onDelete(workflow)
+                    }}
+                  >
+                    <Trash2 data-icon="inline-start" />
+                    Delete
+                  </Button>
+                )}
                 <Button
                   type="button"
                   size="sm"
@@ -2743,18 +2903,21 @@ function WorkflowsPanel({
                   onPositionChange={onPositionChange}
                 />
               </div>
-              <NodeInspector
-                node={selectedNode}
-                selectedNodeId={selectedNodeId}
-                agents={agents}
-                connections={connections}
-                workflowNodes={draft.definition.nodes}
-                mcpServers={mcpServers}
-                knowledgeSources={knowledgeSources}
-                onUpdate={onUpdateNode}
-                onRemove={onRemoveNode}
-                disabled={disabled}
-              />
+              <div className="max-h-[min(46rem,calc(100vh-12rem))] overflow-y-auto pr-1">
+                <NodeInspector
+                  node={selectedNode}
+                  selectedNodeId={selectedNodeId}
+                  agents={agents}
+                  connections={connections}
+                  workflowNodes={draft.definition.nodes}
+                  mcpServers={mcpServers}
+                  knowledgeSpaces={knowledgeSpaces}
+                  knowledgeSources={knowledgeSources}
+                  onUpdate={onUpdateNode}
+                  onRemove={onRemoveNode}
+                  disabled={disabled}
+                />
+              </div>
             </div>
             <ScheduleEditor
               schedule={draft.schedule}
@@ -2805,6 +2968,7 @@ function NodeInspector({
   connections,
   workflowNodes,
   mcpServers,
+  knowledgeSpaces,
   knowledgeSources,
   onUpdate,
   onRemove,
@@ -2816,6 +2980,7 @@ function NodeInspector({
   connections: AgentConnection[]
   workflowNodes: AgentWorkflowNode[]
   mcpServers: MCPServer[]
+  knowledgeSpaces: KnowledgeSpace[]
   knowledgeSources: KnowledgeSource[]
   onUpdate: (id: string, patch: Partial<AgentWorkflowNode>) => void
   onRemove: () => void
@@ -2901,11 +3066,11 @@ function NodeInspector({
         <Field>
           <FieldLabel>Agent</FieldLabel>
           <Select
-            value={node.agentId ?? "default"}
+            value={node.agentId}
             disabled={disabled}
             onValueChange={(value) =>
               onUpdate(node.id, {
-                agentId: value === "default" ? undefined : (value ?? undefined),
+                agentId: value ?? undefined,
               })
             }
           >
@@ -2919,12 +3084,11 @@ function NodeInspector({
                         ? ` · ${connectionScopeLabel(selectedConnection.scopeType)}`
                         : ""
                     }`
-                  : "Default native agent"}
+                  : "Select an agent"}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="default">Default native agent</SelectItem>
                 {agents.map((agent) => {
                   const connection = agent.connectionId
                     ? connections.find(
@@ -3266,7 +3430,54 @@ function NodeInspector({
           </div>
         </FieldSet>
         <FieldSet>
-          <FieldLegend variant="label">Knowledge grants</FieldLegend>
+          <FieldLegend variant="label">Storage folder grants</FieldLegend>
+          <FieldDescription>
+            Every run reads the current contents of the selected folder and all
+            of its subfolders. The resolved files are frozen in the run snapshot
+            for auditability.
+          </FieldDescription>
+          <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
+            {knowledgeSpaces.length ? (
+              knowledgeSpaces.map((space) => (
+                <label
+                  key={space.id}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <input
+                    className="size-3.5 accent-primary"
+                    type="checkbox"
+                    checked={
+                      context.knowledgeSpaceIds?.includes(space.id) ?? false
+                    }
+                    disabled={disabled}
+                    onChange={() => {
+                      const current = context.knowledgeSpaceIds ?? []
+                      onUpdate(node.id, {
+                        context: updateContext(context, {
+                          knowledgeSpaceIds: current.includes(space.id)
+                            ? current.filter((id) => id !== space.id)
+                            : [...current, space.id],
+                        }),
+                      })
+                    }}
+                  />
+                  <span className="truncate">
+                    {knowledgeSpacePath(space, knowledgeSpaces)}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {space.itemCount}
+                  </span>
+                </label>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                Create a folder in Storage first.
+              </span>
+            )}
+          </div>
+        </FieldSet>
+        <FieldSet>
+          <FieldLegend variant="label">Individual file grants</FieldLegend>
           <div className="flex max-h-24 flex-col gap-2 overflow-y-auto">
             {knowledgeSources.length ? (
               knowledgeSources.map((source) => (
@@ -3558,9 +3769,13 @@ function RunsPanel({
   workflows: AgentWorkflow[]
   disabled?: boolean
 }) {
-  const [selectedID, setSelectedID] = useState<string | null>(
-    runs[0]?.id ?? null
-  )
+  const [selectedID, setSelectedID] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      const requested = new URLSearchParams(window.location.search).get("run")
+      if (requested) return requested
+    }
+    return runs[0]?.id ?? null
+  })
   const [detail, setDetail] = useState<AgentRun | null>(null)
   const [events, setEvents] = useState<AgentRunEvent[]>([])
   const [error, setError] = useState("")
@@ -3569,6 +3784,11 @@ function RunsPanel({
   const runStatusRef = useRef<string | undefined>(undefined)
   const selectedSummary = runs.find((run) => run.id === selectedID)
   const selectedRunStatus = detail?.status ?? selectedSummary?.status
+
+  useEffect(() => {
+    const runID = new URLSearchParams(window.location.search).get("run")
+    if (!runID && selectedID) updateAgentRunURL(selectedID)
+  }, [selectedID])
 
   useEffect(() => {
     runStatusRef.current = selectedRunStatus
@@ -3761,6 +3981,7 @@ function RunsPanel({
     setDetail(null)
     setEvents([])
     setSelectedID(id)
+    updateAgentRunURL(id)
   }
 
   return (
@@ -3882,9 +4103,41 @@ function RunDetail({
   const completed = nodes.filter(
     (node) => node.status === "completed" || node.status === "skipped"
   ).length
+  const failed = nodes.filter((node) => node.status === "failed").length
   const pendingApprovals = (run.approvals ?? []).filter(
     (approval) => approval.status === "pending"
   )
+  const activityCount =
+    events.filter((event) => event.eventType !== "node.progress").length +
+    new Set(
+      events
+        .filter((event) => event.eventType === "node.progress")
+        .map((event) => event.nodeId ?? "run")
+    ).size
+  const duration = formatRunDuration(run.startedAt, run.finishedAt)
+  const flowNodes: Node<FlowNodeData>[] = nodes.map((node, index) => ({
+    id: node.nodeKey,
+    type: "agent",
+    position: {
+      x: (index % 3) * 260 + 30,
+      y: Math.floor(index / 3) * 150 + 35,
+    },
+    data: {
+      label: node.nodeKey,
+      agentName: agentToSavedLabel(
+        agents.find((agent) => agent.id === node.agentId)
+      ),
+      instruction: node.definition?.instruction ?? "",
+      status: node.status,
+    },
+  }))
+  const flowEdges: Edge[] =
+    workflow?.definition.edges.map((edge) => ({
+      id: `${edge.from}-${edge.to}`,
+      source: edge.from,
+      target: edge.to,
+    })) ?? []
+
   return (
     <Card className="min-w-0">
       <CardHeader>
@@ -3892,11 +4145,15 @@ function RunDetail({
           <div>
             <CardTitle className="flex items-center gap-2">
               <Activity data-icon="inline-start" />
-              {statusLabel(run.status)}
+              {workflow?.name ?? "Workflow run"}
             </CardTitle>
-            <CardDescription className="mt-1">
-              {run.id} · {run.sourceType} · started{" "}
-              {new Date(run.startedAt).toLocaleString()}
+            <CardDescription className="mt-1 flex flex-wrap items-center gap-2">
+              <Badge variant={badgeVariant(run.status)}>
+                {statusLabel(run.status)}
+              </Badge>
+              <span>{new Date(run.startedAt).toLocaleString()}</span>
+              <span aria-hidden="true">·</span>
+              <span>{run.sourceType}</span>
             </CardDescription>
           </div>
           <div className="flex gap-2">
@@ -3929,84 +4186,34 @@ function RunDetail({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col gap-5">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between text-xs">
-            <span>Node progress</span>
-            <span className="text-muted-foreground">
+      <CardContent className="flex flex-col gap-6">
+        <section className="grid gap-3 sm:grid-cols-3" aria-label="Run summary">
+          <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
+            <p className="text-xs text-muted-foreground">Nodes successful</p>
+            <p className="mt-1 text-xl font-semibold">
               {completed}/{nodes.length || 1}
-            </span>
+            </p>
           </div>
-          <Progress
-            value={nodes.length ? (completed / nodes.length) * 100 : 0}
-          />
-        </div>
-        <section
-          className="flex flex-col gap-3"
-          aria-labelledby="run-chat-title"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3
-                id="run-chat-title"
-                className="flex items-center gap-2 font-medium"
-              >
-                <MessageSquare className="size-4 text-primary" />
-                Run conversation
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                The request, each agent response, and the final workflow result.
-              </p>
-            </div>
-            <Badge variant="outline" className="shrink-0">
-              {events.length} {events.length === 1 ? "event" : "events"}
-            </Badge>
+          <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
+            <p className="text-xs text-muted-foreground">Duration</p>
+            <p className="mt-1 flex items-center gap-2 text-xl font-semibold">
+              <Clock3 className="size-4 text-muted-foreground" />
+              {duration}
+            </p>
           </div>
-          <div className="flex flex-col gap-5 rounded-2xl border bg-muted/[0.12] p-3 sm:p-5">
-            <RunUserMessage input={run.input} />
-            {nodes.length ? (
-              nodes.map((node) => {
-                const workflowNode = workflow?.definition.nodes.find(
-                  (candidate) => candidate.id === node.nodeKey
-                )
-                return (
-                  <RunAgentMessage
-                    key={node.id}
-                    agent={agents.find((agent) => agent.id === node.agentId)}
-                    events={events.filter((event) => event.nodeId === node.id)}
-                    instruction={
-                      workflowNode?.instruction ?? node.definition?.instruction
-                    }
-                    node={node}
-                  />
-                )
-              })
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No agent node records have been created yet.
-              </p>
-            )}
-            {run.summary && (
-              <RunAssistantMessage
-                content={run.summary}
-                label="Workflow result"
-              />
-            )}
-            {run.error && <RunErrorMessage content={run.error} />}
+          <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
+            <p className="text-xs text-muted-foreground">Health</p>
+            <p className="mt-1 text-xl font-semibold">
+              {failed
+                ? `${failed} failed`
+                : completed === nodes.length && nodes.length
+                  ? "All successful"
+                  : "In progress"}
+            </p>
           </div>
         </section>
-        <RunEventLog agents={agents} events={events} nodes={nodes} />
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <ListChecks className="size-4 text-muted-foreground" />
-            <h3 className="font-medium">Node overview</h3>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {nodes.map((node) => (
-              <RunNodeOverview key={node.id} node={node} agents={agents} />
-            ))}
-          </div>
-        </div>
+        <Progress value={nodes.length ? (completed / nodes.length) * 100 : 0} />
+
         {pendingApprovals.length > 0 && (
           <section className="flex flex-col gap-3">
             <Separator />
@@ -4026,6 +4233,49 @@ function RunDetail({
             ))}
           </section>
         )}
+
+        <section
+          className="flex flex-col gap-3"
+          aria-labelledby="node-status-title"
+        >
+          <div>
+            <h3 id="node-status-title" className="font-medium">
+              Node status
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Outcome and duration for every task in this run.
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {nodes.map((node) => (
+              <RunNodeOverview key={node.id} node={node} agents={agents} />
+            ))}
+          </div>
+        </section>
+
+        {run.summary ? (
+          <section aria-labelledby="run-result-title">
+            <div className="mb-3 flex items-center gap-2">
+              <CheckCircle2 className="size-4 text-primary" />
+              <h3 id="run-result-title" className="font-medium">
+                Final result
+              </h3>
+            </div>
+            <div className="rounded-2xl border border-primary/20 bg-primary/[0.04] p-5 sm:p-6">
+              <StaticAssistantMarkdown
+                content={run.summary}
+                className="break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+              />
+            </div>
+          </section>
+        ) : run.error ? (
+          <RunErrorMessage content={run.error} />
+        ) : (
+          <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
+            The final result will appear here when the workflow completes.
+          </div>
+        )}
+
         {run.artifacts?.length ? (
           <section className="flex flex-col gap-2">
             <Separator />
@@ -4048,9 +4298,106 @@ function RunDetail({
             ))}
           </section>
         ) : null}
+
+        <RunDisclosure
+          title="Flow and execution details"
+          description="Inspect the workflow graph, prompts, intermediate responses, and raw values."
+        >
+          {flowNodes.length > 0 && (
+            <div className="mb-5 h-80 overflow-hidden rounded-xl border bg-muted/20">
+              <WorkflowCanvas
+                nodes={flowNodes}
+                edges={flowEdges}
+                disabled
+                onConnect={() => undefined}
+                onSelectNode={() => undefined}
+                onPositionChange={() => undefined}
+              />
+            </div>
+          )}
+          <div className="flex flex-col gap-5 rounded-2xl border bg-muted/[0.12] p-3 sm:p-5">
+            <RunUserMessage input={run.input} />
+            {nodes.map((node) => {
+              const workflowNode = workflow?.definition.nodes.find(
+                (candidate) => candidate.id === node.nodeKey
+              )
+              return (
+                <RunAgentMessage
+                  key={node.id}
+                  agent={agents.find((agent) => agent.id === node.agentId)}
+                  events={events.filter((event) => event.nodeId === node.id)}
+                  instruction={
+                    workflowNode?.instruction ?? node.definition?.instruction
+                  }
+                  node={node}
+                />
+              )
+            })}
+          </div>
+        </RunDisclosure>
+
+        <RunDisclosure
+          title="Activity log"
+          description={`${activityCount} activities (${events.length} raw events) for troubleshooting and audit.`}
+        >
+          <RunEventLog agents={agents} events={events} nodes={nodes} />
+        </RunDisclosure>
       </CardContent>
     </Card>
   )
+}
+
+function RunDisclosure({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="rounded-xl border"
+    >
+      <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/30">
+        <span>
+          <span className="block text-sm font-medium">{title}</span>
+          <span className="block text-xs text-muted-foreground">
+            {description}
+          </span>
+        </span>
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </CollapsibleTrigger>
+      {open && (
+        <CollapsibleContent className="border-t p-4">
+          {children}
+        </CollapsibleContent>
+      )}
+    </Collapsible>
+  )
+}
+
+function formatRunDuration(startedAt: string, finishedAt?: string | null) {
+  const start = new Date(startedAt).getTime()
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now()
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start)
+    return "—"
+  const seconds = Math.round((end - start) / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const remaining = seconds % 60
+  if (minutes < 60) return `${minutes}m ${remaining}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
 }
 
 function RunUserMessage({ input }: { input: unknown }) {
@@ -4100,7 +4447,7 @@ function RunAgentMessage({
       <div className="min-w-0 flex-1">
         <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-sm font-medium">
-            {agent?.name ?? "Default native agent"}
+            {agent?.name ?? "Agent unavailable"}
           </span>
           <span className="text-xs text-muted-foreground">{node.nodeKey}</span>
           <Badge variant={badgeVariant(node.status)}>
@@ -4123,9 +4470,10 @@ function RunAgentMessage({
               <p className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
                 {output ? "Response" : "Live response"}
               </p>
-              <p className="text-sm leading-6 break-words whitespace-pre-wrap">
-                {response}
-              </p>
+              <StaticAssistantMarkdown
+                content={response}
+                className="break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+              />
             </div>
           ) : isWorking ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -4187,28 +4535,6 @@ function RunAgentMessage({
   )
 }
 
-function RunAssistantMessage({
-  label,
-  content,
-}: {
-  label: string
-  content: string
-}) {
-  return (
-    <div className="flex items-start gap-3">
-      <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/15">
-        <CheckCircle2 className="size-4" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="mb-1.5 text-sm font-medium">{label}</p>
-        <div className="rounded-2xl rounded-tl-md border border-primary/15 bg-primary/[0.04] px-4 py-3 text-sm leading-6">
-          <p className="break-words whitespace-pre-wrap">{content}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function RunErrorMessage({ content }: { content: string }) {
   return (
     <div className="flex items-start gap-3">
@@ -4234,6 +4560,42 @@ function RunEventLog({
   nodes: AgentRunNode[]
   agents: Agent[]
 }) {
+  type ActivityItem =
+    | { kind: "event"; event: AgentRunEvent }
+    | {
+        kind: "progress"
+        event: AgentRunEvent
+        count: number
+        characters: number
+      }
+  const activityItems: ActivityItem[] = []
+  const progressByNode = new Map<
+    string,
+    Extract<ActivityItem, { kind: "progress" }>
+  >()
+  for (const event of events) {
+    if (event.eventType !== "node.progress") {
+      activityItems.push({ kind: "event", event })
+      continue
+    }
+    const key = event.nodeId ?? "run"
+    const existing = progressByNode.get(key)
+    const text = eventText(event)
+    if (existing) {
+      existing.count += 1
+      existing.characters += text.length
+      continue
+    }
+    const item: Extract<ActivityItem, { kind: "progress" }> = {
+      kind: "progress",
+      event,
+      count: 1,
+      characters: text.length,
+    }
+    progressByNode.set(key, item)
+    activityItems.push(item)
+  }
+
   return (
     <section className="flex flex-col gap-3" aria-labelledby="run-events-title">
       <Separator />
@@ -4252,13 +4614,14 @@ function RunEventLog({
           </p>
         </div>
         <Badge variant="outline" className="shrink-0">
-          {events.length}
+          {activityItems.length}
         </Badge>
       </div>
-      {events.length ? (
+      {activityItems.length ? (
         <div className="max-h-[28rem] overflow-y-auto rounded-xl border bg-muted/[0.12] p-3">
           <div className="flex flex-col">
-            {events.map((event, index) => {
+            {activityItems.map((item, index) => {
+              const event = item.event
               const node = event.nodeId
                 ? nodes.find((candidate) => candidate.id === event.nodeId)
                 : undefined
@@ -4267,19 +4630,21 @@ function RunEventLog({
                 : undefined
               return (
                 <div
-                  key={event.id}
+                  key={`${item.kind}-${event.id}`}
                   className="flex gap-3 py-2 first:pt-0 last:pb-0"
                 >
                   <div className="flex w-3 shrink-0 flex-col items-center">
                     <span className="mt-1.5 size-2 rounded-full bg-primary" />
-                    {index < events.length - 1 && (
+                    {index < activityItems.length - 1 && (
                       <span className="mt-1 w-px flex-1 bg-border" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1 pb-2">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                       <span className="text-xs font-medium">
-                        {formatEventType(event.eventType)}
+                        {item.kind === "progress"
+                          ? "Response generated"
+                          : formatEventType(event.eventType)}
                       </span>
                       {agent && (
                         <span className="text-[11px] text-muted-foreground">
@@ -4291,17 +4656,21 @@ function RunEventLog({
                       </time>
                     </div>
                     <p className="mt-1 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
-                      {eventText(event)}
+                      {item.kind === "progress"
+                        ? `${item.count} streaming chunks combined · ${item.characters.toLocaleString()} characters`
+                        : eventText(event)}
                     </p>
-                    <details className="group mt-1.5 text-[11px]">
-                      <summary className="flex cursor-pointer list-none items-center gap-1 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
-                        <ChevronDown className="size-3 transition-transform group-open:rotate-180" />
-                        View event payload
-                      </summary>
-                      <pre className="mt-2 max-h-48 overflow-auto rounded-lg border bg-background p-2 font-mono text-[10px] leading-4 whitespace-pre-wrap">
-                        {formatRunValue(event.payload)}
-                      </pre>
-                    </details>
+                    {item.kind === "event" && (
+                      <details className="group mt-1.5 text-[11px]">
+                        <summary className="flex cursor-pointer list-none items-center gap-1 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                          <ChevronDown className="size-3 transition-transform group-open:rotate-180" />
+                          View event payload
+                        </summary>
+                        <pre className="mt-2 max-h-48 overflow-auto rounded-lg border bg-background p-2 font-mono text-[10px] leading-4 whitespace-pre-wrap">
+                          {formatRunValue(event.payload)}
+                        </pre>
+                      </details>
+                    )}
                   </div>
                 </div>
               )
@@ -4352,8 +4721,14 @@ function RunNodeOverview({
         </div>
         <p className="text-xs text-muted-foreground">
           {agents.find((agent) => agent.id === node.agentId)?.name ??
-            "Default native agent"}{" "}
+            "Agent unavailable"}{" "}
           · attempt {node.attempt || 0}
+        </p>
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Clock3 className="size-3.5" />
+          {node.startedAt
+            ? formatRunDuration(node.startedAt, node.finishedAt)
+            : "Not started"}
         </p>
         {node.providerTaskId && (
           <p className="text-[11px] break-all text-muted-foreground">

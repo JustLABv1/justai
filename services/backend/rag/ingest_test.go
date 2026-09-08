@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -8,6 +9,17 @@ import (
 
 	"justai-backend/models"
 )
+
+func TestExtractUploadContextAcceptsCSVWithGenericMIME(t *testing.T) {
+	body := []byte("portal,title,url\nExample,Daily news,https://example.com/news\n")
+	content, err := ExtractUploadContext(context.Background(), "daily-news.csv", "application/octet-stream", body)
+	if err != nil {
+		t.Fatalf("expected CSV upload to be accepted: %v", err)
+	}
+	if content != string(body[:len(body)-1]) {
+		t.Fatalf("unexpected CSV content: %q", content)
+	}
+}
 
 func TestDiversifyCitationsSpreadsAcrossSources(t *testing.T) {
 	sourceA := uuid.New()

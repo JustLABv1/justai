@@ -314,7 +314,7 @@ func (a *App) listKnowledgeSpaces(c *gin.Context) {
 		return
 	}
 	rows, err := a.DB.QueryContext(c, `
-		SELECT p.id, p.name, p.description, p.visibility, p.created_at, p.updated_at,
+		SELECT p.id, p.parent_id, p.name, p.description, p.visibility, p.created_at, p.updated_at,
 		       COUNT(ksi.item_id)
 		FROM workspace_projects p
 		LEFT JOIN knowledge_space_items ksi ON ksi.space_id = p.id
@@ -328,7 +328,7 @@ func (a *App) listKnowledgeSpaces(c *gin.Context) {
 	spaces := make([]models.KnowledgeSpace, 0)
 	for rows.Next() {
 		var item models.KnowledgeSpace
-		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Visibility, &item.CreatedAt, &item.UpdatedAt, &item.ItemCount); err != nil {
+		if err := rows.Scan(&item.ID, &item.ParentID, &item.Name, &item.Description, &item.Visibility, &item.CreatedAt, &item.UpdatedAt, &item.ItemCount); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
@@ -362,13 +362,13 @@ func (a *App) getKnowledgeSpace(c *gin.Context) {
 	var space models.KnowledgeSpace
 	var ownerID uuid.UUID
 	err = a.DB.QueryRowContext(c, `
-		SELECT p.id, p.name, p.description, p.visibility, p.created_at, p.updated_at,
+		SELECT p.id, p.parent_id, p.name, p.description, p.visibility, p.created_at, p.updated_at,
 		       COUNT(ksi.item_id), p.user_id
 		FROM workspace_projects p
 		LEFT JOIN knowledge_space_items ksi ON ksi.space_id = p.id
 		WHERE p.id=$1 AND p.organization_id=$2 AND (p.user_id=$3 OR p.visibility='workspace')
 		GROUP BY p.id`, spaceID, organizationID, principal.UserID).Scan(
-		&space.ID, &space.Name, &space.Description, &space.Visibility, &space.CreatedAt, &space.UpdatedAt, &space.ItemCount, &ownerID)
+		&space.ID, &space.ParentID, &space.Name, &space.Description, &space.Visibility, &space.CreatedAt, &space.UpdatedAt, &space.ItemCount, &ownerID)
 	if err == sql.ErrNoRows {
 		writeError(c, http.StatusNotFound, fmt.Errorf("space not found"))
 		return
@@ -396,15 +396,17 @@ func (a *App) updateKnowledgeSpace(c *gin.Context) {
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
 		Visibility  *string `json:"visibility"`
+		ParentID    *string `json:"parentId"`
 	}
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if request.Name == nil && request.Description == nil && request.Visibility == nil {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("name, description, or visibility is required"))
+	if request.Name == nil && request.Description == nil && request.Visibility == nil && request.ParentID == nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("name, description, visibility, or parentId is required"))
 		return
 	}
 	var name, description, visibility any
+	var parentID any
 	if request.Name != nil {
 		value := strings.TrimSpace(*request.Name)
 		if value == "" || len([]rune(value)) > 120 {
@@ -429,6 +431,39 @@ func (a *App) updateKnowledgeSpace(c *gin.Context) {
 		}
 		visibility = value
 	}
+	if request.ParentID != nil {
+		value := strings.TrimSpace(*request.ParentID)
+		if value == "" {
+			parentID = ""
+		} else {
+			parsed, parseErr := uuid.Parse(value)
+			if parseErr != nil || parsed == spaceID {
+				writeError(c, http.StatusBadRequest, fmt.Errorf("invalid parent folder id"))
+				return
+			}
+			var available bool
+			if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM workspace_projects WHERE id=$1 AND organization_id=$2 AND user_id=$3)`, parsed, organizationID, principal.UserID).Scan(&available); err != nil || !available {
+				writeError(c, http.StatusBadRequest, fmt.Errorf("parent folder is not available"))
+				return
+			}
+			var createsCycle bool
+			if err := a.DB.QueryRowContext(c, `
+				WITH RECURSIVE descendants AS (
+					SELECT id FROM workspace_projects WHERE parent_id=$1
+					UNION ALL
+					SELECT child.id FROM workspace_projects child JOIN descendants parent ON child.parent_id=parent.id
+				)
+				SELECT EXISTS (SELECT 1 FROM descendants WHERE id=$2)`, spaceID, parsed).Scan(&createsCycle); err != nil {
+				writeError(c, http.StatusInternalServerError, err)
+				return
+			}
+			if createsCycle {
+				writeError(c, http.StatusBadRequest, fmt.Errorf("a storage folder cannot be moved into one of its subfolders"))
+				return
+			}
+			parentID = parsed.String()
+		}
+	}
 	var privateItemCount int
 	if request.Visibility != nil && visibility == "workspace" {
 		if err := a.DB.QueryRowContext(c, `
@@ -448,10 +483,12 @@ func (a *App) updateKnowledgeSpace(c *gin.Context) {
 	err = a.DB.QueryRowContext(c, `
 		UPDATE workspace_projects
 		SET name=COALESCE($3::text,name), description=COALESCE($4::text,description),
-		    visibility=COALESCE($5::text,visibility), updated_at=now()
+		    visibility=COALESCE($5::text,visibility),
+		    parent_id=CASE WHEN $7::text IS NULL THEN parent_id ELSE NULLIF($7,'')::uuid END,
+		    updated_at=now()
 		WHERE id=$1 AND organization_id=$2 AND user_id=$6
-		RETURNING id,name,description,visibility,created_at,updated_at,user_id`, spaceID, organizationID, name, description, visibility, principal.UserID).Scan(
-		&space.ID, &space.Name, &space.Description, &space.Visibility, &space.CreatedAt, &space.UpdatedAt, &ownerID)
+		RETURNING id,parent_id,name,description,visibility,created_at,updated_at,user_id`, spaceID, organizationID, name, description, visibility, principal.UserID, parentID).Scan(
+		&space.ID, &space.ParentID, &space.Name, &space.Description, &space.Visibility, &space.CreatedAt, &space.UpdatedAt, &ownerID)
 	if err == sql.ErrNoRows {
 		writeError(c, http.StatusNotFound, fmt.Errorf("space not found"))
 		return
@@ -497,6 +534,7 @@ func (a *App) createKnowledgeSpace(c *gin.Context) {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Visibility  string `json:"visibility"`
+		ParentID    string `json:"parentId"`
 	}
 	if !decodeJSON(c, &request) {
 		return
@@ -515,8 +553,22 @@ func (a *App) createKnowledgeSpace(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("visibility must be private or workspace"))
 		return
 	}
+	var parentID *uuid.UUID
+	if value := strings.TrimSpace(request.ParentID); value != "" {
+		parsed, parseErr := uuid.Parse(value)
+		if parseErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid parent folder id"))
+			return
+		}
+		var available bool
+		if err := a.DB.QueryRowContext(c, `SELECT EXISTS (SELECT 1 FROM workspace_projects WHERE id=$1 AND organization_id=$2 AND user_id=$3)`, parsed, organizationID, principal.UserID).Scan(&available); err != nil || !available {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("parent folder is not available"))
+			return
+		}
+		parentID = &parsed
+	}
 	var item models.KnowledgeSpace
-	err = a.DB.QueryRowContext(c, `INSERT INTO workspace_projects (user_id, organization_id, name, description, visibility) VALUES ($1,$2,$3,$4,$5) RETURNING id,name,description,visibility,created_at,updated_at`, principal.UserID, organizationID, request.Name, request.Description, request.Visibility).Scan(&item.ID, &item.Name, &item.Description, &item.Visibility, &item.CreatedAt, &item.UpdatedAt)
+	err = a.DB.QueryRowContext(c, `INSERT INTO workspace_projects (user_id, organization_id, parent_id, name, description, visibility) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,parent_id,name,description,visibility,created_at,updated_at`, principal.UserID, organizationID, parentID, request.Name, request.Description, request.Visibility).Scan(&item.ID, &item.ParentID, &item.Name, &item.Description, &item.Visibility, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return

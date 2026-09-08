@@ -306,6 +306,7 @@ export type KnowledgeItem = {
 
 export type KnowledgeSpace = {
   id: string
+  parentId?: string | null
   name: string
   description: string
   visibility: "private" | "workspace" | string
@@ -518,6 +519,7 @@ export type AgentInputBinding = {
 }
 
 export type AgentContextScope = {
+  knowledgeSpaceIds?: string[]
   knowledgeSourceIds?: string[]
   repositoryIds?: string[]
   noteIds?: string[]
@@ -695,6 +697,7 @@ export type Note = {
 
 export type WorkspaceProject = {
   id: string
+  parentId?: string | null
   ownerId?: string
   name: string
   description: string

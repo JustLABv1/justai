@@ -121,6 +121,7 @@ type AgentInputBinding struct {
 }
 
 type AgentContextScope struct {
+	KnowledgeSpaceIDs       []uuid.UUID `json:"knowledgeSpaceIds,omitempty"`
 	KnowledgeSourceIDs      []uuid.UUID `json:"knowledgeSourceIds,omitempty"`
 	RepositoryIDs           []uuid.UUID `json:"repositoryIds,omitempty"`
 	NoteIDs                 []uuid.UUID `json:"noteIds,omitempty"`
@@ -648,14 +649,15 @@ type KnowledgeRepositoryFile struct {
 }
 
 type KnowledgeSpace struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Visibility  string    `json:"visibility"`
-	CanManage   bool      `json:"canManage"`
-	ItemCount   int       `json:"itemCount"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          uuid.UUID  `json:"id"`
+	ParentID    *uuid.UUID `json:"parentId,omitempty"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Visibility  string     `json:"visibility"`
+	CanManage   bool       `json:"canManage"`
+	ItemCount   int        `json:"itemCount"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
 type ResolvedContextSummary struct {

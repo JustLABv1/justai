@@ -112,10 +112,10 @@ const railNavigation: Array<{
   },
   {
     id: "knowledge",
-    label: "Knowledge",
-    hint: "Files, notes, memories, and repositories",
+    label: "Storage",
+    hint: "Folders, files, transcripts, and repositories",
     icon: FolderKanban,
-    group: "Knowledge",
+    group: "Storage",
   },
   {
     id: "integrations",
