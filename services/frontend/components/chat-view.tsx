@@ -2691,7 +2691,7 @@ function Composer({
   const knowledgeScopeControl = (
     <PopoverPrimitive.Root>
       <PopoverPrimitive.Trigger
-        aria-label="Configure Knowledge scope for the next message"
+        aria-label="Choose storage folders for the next message"
         render={
           <button
             className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary/15 bg-primary/5 px-1.5 py-0.5 text-left text-[10px] font-medium text-foreground/80 transition-colors hover:bg-primary/10"
@@ -2701,7 +2701,7 @@ function Composer({
       >
         <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
         <span className="whitespace-nowrap">
-          Knowledge · {knowledgeScopeLabel}
+          Storage · {knowledgeScopeLabel}
         </span>
         <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
       </PopoverPrimitive.Trigger>
@@ -2714,16 +2714,16 @@ function Composer({
         >
           <PopoverPrimitive.Popup className="w-[min(24rem,calc(100vw-2rem))] rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none">
             <PopoverPrimitive.Title className="text-xs font-semibold">
-              Knowledge scope
+              Storage folders
             </PopoverPrimitive.Title>
             <PopoverPrimitive.Description className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-              Automatic routing runs every turn. These controls override it for
-              the next messages.
+              Reference one or more folders directly. Their current contents,
+              including subfolders, become context for the next messages.
             </PopoverPrimitive.Description>
             <div className="mt-3 flex max-h-56 flex-col gap-1 overflow-y-auto">
               {knowledgeSpaces.length === 0 ? (
                 <p className="rounded-lg bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground">
-                  No project spaces yet. Add one from Knowledge.
+                  No storage folders yet. Create one in Storage.
                 </p>
               ) : (
                 knowledgeSpaces.map((space) => {

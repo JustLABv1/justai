@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/lib/pq"
 
 	"justai-backend/auth"
 	"justai-backend/middleware"
@@ -461,6 +462,38 @@ func (a *App) searchKnowledgeInSpaces(ctx context.Context, organizationID, userI
 	spaceIDs := make([]uuid.UUID, 0, len(resolution.Spaces))
 	for _, space := range resolution.Spaces {
 		spaceIDs = append(spaceIDs, space.ID)
+	}
+	if len(spaceIDs) > 0 {
+		rows, err := a.DB.QueryContext(ctx, `
+			WITH RECURSIVE folders AS (
+				SELECT id FROM workspace_projects
+				WHERE id=ANY($1::uuid[]) AND organization_id=$2
+				  AND (user_id=$3 OR visibility='workspace')
+				UNION
+				SELECT child.id FROM workspace_projects child
+				JOIN folders parent ON child.parent_id=parent.id
+				WHERE child.organization_id=$2
+				  AND (child.user_id=$3 OR child.visibility='workspace')
+			)
+			SELECT id FROM folders`, pq.Array(uuidStrings(spaceIDs)), organizationID, userID)
+		if err != nil {
+			return nil, err
+		}
+		expanded := make([]uuid.UUID, 0, len(spaceIDs))
+		for rows.Next() {
+			var id uuid.UUID
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			expanded = append(expanded, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+		spaceIDs = expanded
 	}
 	var sourceCitations []models.Citation
 	var err error

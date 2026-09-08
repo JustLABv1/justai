@@ -140,10 +140,42 @@ func (a *App) createUploadedSource(c *gin.Context, userID, organizationID uuid.U
 			return
 		}
 	}
+	var requestedSpaceID uuid.UUID
+	if rawSpaceID := strings.TrimSpace(c.PostForm("spaceId")); rawSpaceID != "" {
+		requestedSpaceID, err = uuid.Parse(rawSpaceID)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid storage folder id"))
+			return
+		}
+		var spaceVisibility string
+		if err := a.DB.QueryRowContext(c, `SELECT visibility FROM workspace_projects WHERE id=$1 AND organization_id=$2 AND user_id=$3`, requestedSpaceID, organizationID, userID).Scan(&spaceVisibility); err != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("storage folder is not available"))
+			return
+		}
+		if spaceVisibility == "workspace" && scopeType == "user" {
+			writeError(c, http.StatusForbidden, fmt.Errorf("upload workspace-visible files with organization scope"))
+			return
+		}
+	}
 	item, err := rag.NewSource(c, a.DB, scopeType, scopeID, userID, title, "upload", "", mimeType, content)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
+	}
+	if requestedSpaceID != uuid.Nil {
+		if err := a.syncKnowledgeCatalog(c); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		var knowledgeItemID uuid.UUID
+		if err := a.DB.QueryRowContext(c, `SELECT id FROM knowledge_items WHERE resource_type='source' AND resource_id=$1`, item.ID).Scan(&knowledgeItemID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if _, err := a.DB.ExecContext(c, `INSERT INTO knowledge_space_items (space_id,item_id,added_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, requestedSpaceID, knowledgeItemID, userID); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	c.JSON(http.StatusAccepted, item)
 }

@@ -5,7 +5,17 @@ import { useSearchParams } from "next/navigation"
 import {
   Brain,
   Check,
+  ChevronRight,
+  File,
+  FileArchive,
+  FileAudio2,
+  FileCode2,
+  FileImage,
+  FileJson,
+  FileSpreadsheet,
   FileText,
+  FileVideo2,
+  Folder,
   FolderKanban,
   FolderPlus,
   GitBranch,
@@ -20,6 +30,7 @@ import {
   Settings2,
   Trash2,
   Upload,
+  UploadCloud,
   X,
   type LucideIcon,
 } from "lucide-react"
@@ -37,7 +48,6 @@ import type {
   WorkspaceProject,
 } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -74,6 +84,14 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuGroup,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -103,6 +121,51 @@ type KnowledgeWorkspaceProps = {
 
 type ItemFilter = "all" | KnowledgeItemType
 
+type KnowledgeSpaceTreeItem = KnowledgeSpace & { depth: number }
+
+function flattenKnowledgeSpaces(spaces: KnowledgeSpace[]) {
+  const children = new Map<string | null, KnowledgeSpace[]>()
+  for (const space of spaces) {
+    const parentId =
+      space.parentId &&
+      spaces.some((candidate) => candidate.id === space.parentId)
+        ? space.parentId
+        : null
+    children.set(parentId, [...(children.get(parentId) ?? []), space])
+  }
+  for (const values of children.values()) {
+    values.sort((left, right) => left.name.localeCompare(right.name))
+  }
+  const result: KnowledgeSpaceTreeItem[] = []
+  const visit = (parentId: string | null, depth: number) => {
+    for (const space of children.get(parentId) ?? []) {
+      result.push({ ...space, depth })
+      visit(space.id, depth + 1)
+    }
+  }
+  visit(null, 0)
+  return result
+}
+
+function descendantKnowledgeSpaceIds(spaces: KnowledgeSpace[], rootId: string) {
+  const result = new Set([rootId])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const space of spaces) {
+      if (
+        space.parentId &&
+        result.has(space.parentId) &&
+        !result.has(space.id)
+      ) {
+        result.add(space.id)
+        changed = true
+      }
+    }
+  }
+  return result
+}
+
 const typeLabels: Record<string, string> = {
   source: "File or URL",
   note: "Note",
@@ -111,12 +174,53 @@ const typeLabels: Record<string, string> = {
   transcript: "Transcript",
 }
 
-function itemIcon(type: string) {
-  if (type === "memory") return Brain
-  if (type === "note") return NotebookPen
-  if (type === "repository") return GitBranch
-  if (type === "transcript") return FileText
-  return FileText
+function itemIcon(item: KnowledgeItem, source?: KnowledgeSource | null) {
+  if (item.resourceType === "memory") return Brain
+  if (item.resourceType === "note") return NotebookPen
+  if (item.resourceType === "repository") return GitBranch
+  if (item.resourceType === "transcript") return FileText
+  if (source?.sourceType === "url") return Globe2
+
+  const extension = item.title.split(".").pop()?.toLocaleLowerCase() ?? ""
+  const mimeType = source?.mimeType?.toLocaleLowerCase() ?? ""
+  if (
+    ["csv", "xls", "xlsx", "ods"].includes(extension) ||
+    mimeType.includes("spreadsheet") ||
+    mimeType.includes("csv")
+  )
+    return FileSpreadsheet
+  if (extension === "json" || mimeType.includes("json")) return FileJson
+  if (
+    ["html", "htm", "xml", "yaml", "yml", "js", "ts", "tsx", "jsx"].includes(
+      extension
+    )
+  )
+    return FileCode2
+  if (
+    ["png", "jpg", "jpeg", "gif", "webp", "svg", "heic"].includes(extension) ||
+    mimeType.startsWith("image/")
+  )
+    return FileImage
+  if (
+    ["mp3", "wav", "m4a", "aac", "flac", "ogg"].includes(extension) ||
+    mimeType.startsWith("audio/")
+  )
+    return FileAudio2
+  if (
+    ["mp4", "mov", "webm", "mkv", "avi"].includes(extension) ||
+    mimeType.startsWith("video/")
+  )
+    return FileVideo2
+  if (["zip", "tar", "gz", "rar", "7z"].includes(extension)) return FileArchive
+  if (
+    ["pdf", "txt", "md", "markdown", "doc", "docx", "rtf"].includes(
+      extension
+    ) ||
+    mimeType.startsWith("text/") ||
+    mimeType.includes("pdf")
+  )
+    return FileText
+  return File
 }
 
 function itemTypeForSource(source: KnowledgeSource): KnowledgeItemType {
@@ -138,12 +242,6 @@ function itemStatusLabel(status: string) {
   if (status === "disabled") return "Disabled"
   if (status === "completed") return "Completed"
   return status.charAt(0).toUpperCase() + status.slice(1)
-}
-
-function itemStatusVariant(status: string) {
-  if (status === "failed") return "destructive" as const
-  if (status === "ready" || status === "completed") return "secondary" as const
-  return "outline" as const
 }
 
 function formatBytes(bytes: number) {
@@ -267,6 +365,7 @@ export function KnowledgeWorkspace({
   const [ownershipFilter, setOwnershipFilter] = useState("all")
   const [sortBy, setSortBy] = useState<"updated" | "title" | "type">("updated")
   const [spaceId, setSpaceId] = useState("all")
+  const [draggingFiles, setDraggingFiles] = useState(false)
   const [selected, setSelected] = useState<KnowledgeItem | null>(null)
   const [selectedDetail, setSelectedDetail] =
     useState<KnowledgeItemDetail | null>(null)
@@ -284,6 +383,7 @@ export function KnowledgeWorkspace({
   const [spaceVisibility, setSpaceVisibility] = useState<
     "private" | "workspace"
   >("private")
+  const [spaceParentId, setSpaceParentId] = useState("root")
   const [noteTitle, setNoteTitle] = useState("")
   const [noteContent, setNoteContent] = useState("")
   const [memoryContent, setMemoryContent] = useState("")
@@ -296,8 +396,9 @@ export function KnowledgeWorkspace({
   const [repositoryURL, setRepositoryURL] = useState("")
   const [repositoryRef, setRepositoryRef] = useState("")
   const [repositoryToken, setRepositoryToken] = useState("")
-  const [spaceSheetOpen, setSpaceSheetOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<KnowledgeItem | null>(null)
+  const [folderDeleteTarget, setFolderDeleteTarget] =
+    useState<KnowledgeSpace | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [busy, setBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -367,7 +468,14 @@ export function KnowledgeWorkspace({
     } finally {
       setLoading(false)
     }
-  }, [notes, openInspector, projects, requestedItemId, sources, transcriptionSessions])
+  }, [
+    notes,
+    openInspector,
+    projects,
+    requestedItemId,
+    sources,
+    transcriptionSessions,
+  ])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0)
@@ -408,6 +516,40 @@ export function KnowledgeWorkspace({
     return () => window.clearTimeout(timer)
   }, [selected])
 
+  const spaceTree = useMemo(() => flattenKnowledgeSpaces(spaces), [spaces])
+  const selectedFolderIds = useMemo(
+    () =>
+      spaceId !== "all" && spaceId !== "personal"
+        ? descendantKnowledgeSpaceIds(spaces, spaceId)
+        : new Set<string>(),
+    [spaceId, spaces]
+  )
+
+  const selectedSpace =
+    spaceId !== "all" ? spaces.find((space) => space.id === spaceId) : null
+  const childSpaces = useMemo(
+    () =>
+      spaces
+        .filter(
+          (space) => (space.parentId ?? null) === (selectedSpace?.id ?? null)
+        )
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    [selectedSpace?.id, spaces]
+  )
+  const folderPath = useMemo(() => {
+    if (!selectedSpace) return []
+    const byId = new Map(spaces.map((space) => [space.id, space]))
+    const path: KnowledgeSpace[] = []
+    const seen = new Set<string>()
+    let current: KnowledgeSpace | undefined = selectedSpace
+    while (current && !seen.has(current.id)) {
+      path.unshift(current)
+      seen.add(current.id)
+      current = current.parentId ? byId.get(current.parentId) : undefined
+    }
+    return path
+  }, [selectedSpace, spaces])
+
   const visibleItems = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
     const filtered = items.filter((item) => {
@@ -417,11 +559,12 @@ export function KnowledgeWorkspace({
         statusFilter === "all" || item.status === statusFilter
       const matchesOwnership =
         ownershipFilter === "all" || item.visibility === ownershipFilter
-      const matchesSpace =
-        spaceId === "all" ||
-        (spaceId === "personal"
-          ? !item.spaceIds?.length
-          : item.spaceIds?.includes(spaceId))
+      const matchesSpace = normalized
+        ? spaceId === "all" ||
+          item.spaceIds?.some((id) => selectedFolderIds.has(id))
+        : selectedSpace
+          ? item.spaceIds?.includes(selectedSpace.id)
+          : !item.spaceIds?.length
       const matchesQuery =
         !normalized ||
         `${item.title} ${item.resourceType}`
@@ -444,7 +587,17 @@ export function KnowledgeWorkspace({
         )
       return right.updatedAt.localeCompare(left.updatedAt)
     })
-  }, [items, ownershipFilter, query, sortBy, spaceId, statusFilter, typeFilter])
+  }, [
+    items,
+    ownershipFilter,
+    query,
+    selectedFolderIds,
+    selectedSpace,
+    sortBy,
+    spaceId,
+    statusFilter,
+    typeFilter,
+  ])
 
   const selectedMemory =
     selected?.resourceType === "memory"
@@ -458,10 +611,10 @@ export function KnowledgeWorkspace({
     selected?.resourceType === "source"
       ? (sources.find((source) => source.id === selected.resourceId) ?? null)
       : null
-  const selectedSpace =
-    spaceId !== "all" ? spaces.find((space) => space.id === spaceId) : null
   const selectedSpaceItems = selectedSpace
-    ? items.filter((item) => item.spaceIds?.includes(selectedSpace.id))
+    ? items.filter((item) =>
+        item.spaceIds?.some((id) => selectedFolderIds.has(id))
+      )
     : []
   const selectedSpaceProblems = selectedSpaceItems.filter(
     (item) => item.status === "failed"
@@ -489,7 +642,11 @@ export function KnowledgeWorkspace({
     const form = new FormData()
     form.append("file", file)
     form.append("title", file.name)
-    form.append("scopeType", "user")
+    form.append(
+      "scopeType",
+      selectedSpace?.visibility === "workspace" ? "organization" : "user"
+    )
+    if (selectedSpace) form.append("spaceId", selectedSpace.id)
     try {
       const result = await api.upload<KnowledgeSource>(
         "/api/v1/knowledge/sources",
@@ -585,6 +742,7 @@ export function KnowledgeWorkspace({
           name: spaceName.trim(),
           description: spaceDescription.trim(),
           visibility: spaceVisibility,
+          parentId: spaceParentId === "root" ? undefined : spaceParentId,
         }
       )
       setSpaces((current) => [result.space, ...current])
@@ -599,6 +757,7 @@ export function KnowledgeWorkspace({
       setSpaceName("")
       setSpaceDescription("")
       setSpaceVisibility("private")
+      setSpaceParentId("root")
       setSpaceOpen(false)
       setSpaceId(result.space.id)
     } catch (caught) {
@@ -1076,12 +1235,58 @@ export function KnowledgeWorkspace({
     }
   }
 
+  async function deleteKnowledgeFolder(folder: KnowledgeSpace) {
+    if (!folder.canManage || deleteBusy) return
+    setDeleteBusy(true)
+    try {
+      await api.delete<void>(`/api/v1/knowledge/spaces/${folder.id}`)
+      setSpaces((current) =>
+        current
+          .filter((candidate) => candidate.id !== folder.id)
+          .map((candidate) =>
+            candidate.parentId === folder.id
+              ? { ...candidate, parentId: folder.parentId ?? null }
+              : candidate
+          )
+      )
+      setItems((current) =>
+        current.map((item) => ({
+          ...item,
+          spaceIds: item.spaceIds?.filter((id) => id !== folder.id),
+        }))
+      )
+      onProjectsChange(
+        projects
+          .filter((project) => project.id !== folder.id)
+          .map((project) =>
+            project.parentId === folder.id
+              ? { ...project, parentId: folder.parentId ?? null }
+              : project
+          )
+      )
+      if (spaceId === folder.id) setSpaceId(folder.parentId ?? "all")
+      setFolderDeleteTarget(null)
+      setNotice(
+        `Folder “${folder.name}” deleted. Its files were kept in My files.`
+      )
+      await load()
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The folder could not be deleted."
+      )
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
+
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-[1500px] flex-1 flex-col gap-4 p-4 sm:p-6 lg:p-8">
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.md,.markdown,.txt,.html,.htm,.json,text/*,application/pdf,application/json"
+        accept=".pdf,.csv,.md,.markdown,.txt,.html,.htm,.json,text/*,application/pdf,application/json,application/vnd.ms-excel"
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0]
@@ -1092,23 +1297,29 @@ export function KnowledgeWorkspace({
         <div>
           <div className="flex items-center gap-2">
             <FolderKanban className="text-primary" />
-            <h1 className="text-xl font-semibold tracking-tight">Knowledge</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Storage</h1>
           </div>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            One place for the files, notes, memories, repositories, and
-            transcripts JustAI can use.
+            Organize files, notes, repositories, and transcripts in folders that
+            chats and agent workflows can use as live context.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
-            className="lg:hidden"
             variant="outline"
-            onClick={() => setSpaceSheetOpen(true)}
+            disabled={busy}
+            onClick={() => fileInputRef.current?.click()}
           >
-            <FolderKanban data-icon="inline-start" /> Spaces
+            <Upload data-icon="inline-start" /> Upload file
           </Button>
-          <Button variant="outline" onClick={() => setSpaceOpen(true)}>
-            <FolderPlus data-icon="inline-start" /> New space
+          <Button
+            variant="outline"
+            onClick={() => {
+              setSpaceParentId(selectedSpace?.id ?? "root")
+              setSpaceOpen(true)
+            }}
+          >
+            <FolderPlus data-icon="inline-start" /> New folder
           </Button>
           <Button onClick={() => setAddOpen(true)}>
             <Plus data-icon="inline-start" /> Add knowledge
@@ -1126,75 +1337,53 @@ export function KnowledgeWorkspace({
         </Alert>
       )}
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <Card className="hidden min-h-0 overflow-hidden lg:block">
-          <CardHeader className="gap-1 border-b px-4 py-3">
-            <CardTitle className="text-sm">Spaces</CardTitle>
-            <CardDescription className="text-xs">
-              Choose where JustAI looks first.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex min-h-0 flex-col gap-1 overflow-y-auto p-2">
-            <button
-              className={cn(
-                "flex items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted",
-                spaceId === "all" && "bg-muted font-medium"
-              )}
-              onClick={() => setSpaceId("all")}
-              type="button"
-            >
-              <span>All knowledge</span>
-              <span className="text-xs text-muted-foreground">
-                {items.length}
-              </span>
-            </button>
-            <button
-              className={cn(
-                "flex items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted",
-                spaceId === "personal" && "bg-muted font-medium"
-              )}
-              onClick={() => setSpaceId("personal")}
-              type="button"
-            >
-              <span>Personal</span>
-              <span className="text-xs text-muted-foreground">
-                {items.filter((item) => !item.spaceIds?.length).length}
-              </span>
-            </button>
-            {spaces.map((space) => (
-              <button
-                className={cn(
-                  "flex items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted",
-                  spaceId === space.id && "bg-muted font-medium"
-                )}
-                key={space.id}
-                onClick={() => setSpaceId(space.id)}
-                type="button"
-              >
-                <span className="min-w-0 truncate">{space.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {space.itemCount}
-                </span>
-              </button>
-            ))}
-            {spaces.length === 0 && (
-              <p className="px-3 py-4 text-xs text-muted-foreground">
-                Create a space for a project or topic.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
+      <div className="min-h-0 flex-1">
         <Card className="min-h-0 overflow-hidden">
           <CardHeader className="gap-3 border-b px-4 py-3">
+            {selectedSpace && (
+              <nav
+                aria-label="Folder path"
+                className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+              >
+                <button
+                  className="rounded-sm px-1.5 py-1 hover:bg-muted hover:text-foreground"
+                  onClick={() => setSpaceId("all")}
+                  type="button"
+                >
+                  My files
+                </button>
+                {folderPath.slice(0, -1).map((folder) => (
+                  <span
+                    className="flex min-w-0 items-center gap-1"
+                    key={folder.id}
+                  >
+                    <ChevronRight
+                      className="size-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <button
+                      className={cn(
+                        "truncate rounded-sm px-1.5 py-1 hover:bg-muted hover:text-foreground",
+                        folder.id === selectedSpace.id &&
+                          "font-medium text-foreground"
+                      )}
+                      onClick={() => setSpaceId(folder.id)}
+                      type="button"
+                    >
+                      {folder.name}
+                    </button>
+                  </span>
+                ))}
+              </nav>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <CardTitle className="text-sm">
-                  {selectedSpace?.name ?? "Library"}
+                  {selectedSpace?.name ?? "My files"}
                 </CardTitle>
                 <CardDescription className="truncate text-xs">
                   {selectedSpace?.description ||
-                    "Search and manage the durable context available to your AI."}
+                    "Browse folders and files available to chats and agent workflows."}
                 </CardDescription>
                 {selectedSpace && (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -1242,18 +1431,18 @@ export function KnowledgeWorkspace({
                 </Button>
               )}
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1.35fr)_repeat(4,minmax(7rem,1fr))]">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
               <div className="relative min-w-0 sm:col-span-2 xl:col-span-1">
                 <Search
-                  className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
+                  className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
                   aria-hidden="true"
                 />
                 <Input
-                  className="h-9 w-full pl-8"
-                  placeholder="Search knowledge"
+                  className="w-full pl-7"
+                  placeholder="Search this folder"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  aria-label="Search knowledge"
+                  aria-label="Search this folder"
                 />
               </div>
               <Select
@@ -1262,7 +1451,7 @@ export function KnowledgeWorkspace({
                   setTypeFilter((value as ItemFilter) || "all")
                 }
               >
-                <SelectTrigger className="h-9 w-full">
+                <SelectTrigger className="w-full">
                   <SelectValue>
                     {typeFilter === "all"
                       ? "All types"
@@ -1282,10 +1471,7 @@ export function KnowledgeWorkspace({
                 value={statusFilter}
                 onValueChange={(value) => setStatusFilter(value ?? "all")}
               >
-                <SelectTrigger
-                  className="h-9 w-full"
-                  aria-label="Filter by status"
-                >
+                <SelectTrigger className="w-full" aria-label="Filter by status">
                   <Settings2 data-icon="inline-start" />
                   <SelectValue>
                     {statusFilter === "all"
@@ -1307,7 +1493,7 @@ export function KnowledgeWorkspace({
                 onValueChange={(value) => setOwnershipFilter(value ?? "all")}
               >
                 <SelectTrigger
-                  className="h-9 w-full"
+                  className="w-full"
                   aria-label="Filter by ownership"
                 >
                   <SelectValue>
@@ -1332,10 +1518,7 @@ export function KnowledgeWorkspace({
                   )
                 }
               >
-                <SelectTrigger
-                  className="h-9 w-full"
-                  aria-label="Sort knowledge"
-                >
+                <SelectTrigger className="w-full" aria-label="Sort knowledge">
                   <SelectValue>
                     {sortBy === "updated"
                       ? "Recently updated"
@@ -1352,148 +1535,310 @@ export function KnowledgeWorkspace({
               </Select>
             </div>
           </CardHeader>
-          <CardContent className="min-h-0 overflow-y-auto p-0">
-            {loading ? (
-              <div className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground">
-                <LoaderCircle className="animate-spin" /> Loading Knowledge…
-              </div>
-            ) : visibleItems.length === 0 ? (
-              <Empty className="min-h-72 border-0">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <FolderKanban />
-                  </EmptyMedia>
-                  <EmptyTitle>
-                    {query || typeFilter !== "all"
-                      ? "No matching knowledge"
-                      : "Your Knowledge library is empty"}
-                  </EmptyTitle>
-                  <EmptyDescription>
-                    Add a file, note, memory, URL, or repository to give JustAI
-                    durable context.
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            ) : (
-              <div className="min-w-0 overflow-auto">
-                <table className="w-full min-w-[40rem] border-collapse text-sm">
-                  <thead className="sticky top-0 z-10 bg-background/95 text-left text-xs text-muted-foreground backdrop-blur">
-                    <tr className="border-b">
-                      <th className="h-10 px-4 font-medium">Name</th>
-                      <th className="h-10 px-3 font-medium">Type</th>
-                      <th className="h-10 px-3 font-medium">Scope</th>
-                      <th className="h-10 px-3 font-medium">Status</th>
-                      <th className="h-10 px-3 font-medium">Updated</th>
-                      <th className="h-10 w-12 px-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
+          <ContextMenu>
+            <ContextMenuTrigger className="block min-h-96">
+              <CardContent
+                className={cn(
+                  "min-h-96 overflow-y-auto bg-muted/20 p-4 transition-colors sm:p-5",
+                  draggingFiles && "bg-muted/45"
+                )}
+                onDragEnter={(event) => {
+                  event.preventDefault()
+                  setDraggingFiles(true)
+                }}
+                onDragOver={(event) => event.preventDefault()}
+                onDragLeave={(event) => {
+                  if (
+                    !event.currentTarget.contains(event.relatedTarget as Node)
+                  )
+                    setDraggingFiles(false)
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  setDraggingFiles(false)
+                  const file = event.dataTransfer.files?.[0]
+                  if (file) void uploadFile(file)
+                }}
+              >
+                <button
+                  className={cn(
+                    "mb-5 flex w-full items-center justify-center gap-3 rounded-lg border border-border/80 bg-background/80 px-4 py-5 text-left shadow-xs transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                    draggingFiles && "border-primary bg-primary/5"
+                  )}
+                  disabled={busy}
+                  onClick={() => fileInputRef.current?.click()}
+                  type="button"
+                >
+                  {busy ? (
+                    <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
+                  ) : (
+                    <UploadCloud className="size-6 text-primary" />
+                  )}
+                  <span>
+                    <span className="block text-sm font-medium">
+                      {busy
+                        ? "Uploading file…"
+                        : "Drop a file here or click to upload"}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      PDF, CSV, Markdown, text, HTML or JSON · up to 25 MB
+                    </span>
+                  </span>
+                </button>
+
+                {loading ? (
+                  <div className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground">
+                    <LoaderCircle className="animate-spin" /> Loading files…
+                  </div>
+                ) : visibleItems.length === 0 && childSpaces.length === 0 ? (
+                  <Empty className="min-h-64 border-0">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <FolderKanban />
+                      </EmptyMedia>
+                      <EmptyTitle>
+                        {query ? "No matching files" : "This folder is empty"}
+                      </EmptyTitle>
+                      <EmptyDescription>
+                        Upload a file, or right-click here to create a folder.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    {!query.trim() &&
+                      childSpaces.map((folder) => (
+                        <ContextMenu key={folder.id}>
+                          <ContextMenuTrigger
+                            className="group flex min-w-0 cursor-pointer flex-col rounded-lg border border-border/80 bg-background/80 p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+                            onDoubleClick={() => setSpaceId(folder.id)}
+                          >
+                            <div className="mb-3 flex items-start justify-between gap-2">
+                              <span className="flex size-12 items-center justify-center rounded-lg bg-muted text-primary">
+                                <Folder className="size-7" aria-hidden="true" />
+                              </span>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger
+                                  render={
+                                    <Button
+                                      aria-label={`Actions for ${folder.name}`}
+                                      size="icon-sm"
+                                      variant="ghost"
+                                    />
+                                  }
+                                >
+                                  <MoreHorizontal />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    onClick={() => setSpaceId(folder.id)}
+                                  >
+                                    <Folder /> Open
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSpaceParentId(folder.id)
+                                      setSpaceOpen(true)
+                                    }}
+                                  >
+                                    <FolderPlus /> New subfolder
+                                  </DropdownMenuItem>
+                                  {folder.canManage && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        variant="destructive"
+                                        onClick={() =>
+                                          setFolderDeleteTarget(folder)
+                                        }
+                                      >
+                                        <Trash2 /> Delete folder
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                            <button
+                              className="w-full truncate text-left text-sm font-medium"
+                              onClick={() => setSpaceId(folder.id)}
+                              type="button"
+                            >
+                              {folder.name}
+                            </button>
+                            <span className="mt-1 text-xs text-muted-foreground">
+                              {folder.itemCount}{" "}
+                              {folder.itemCount === 1 ? "item" : "items"}
+                            </span>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent className="w-48">
+                            <ContextMenuGroup>
+                              <ContextMenuItem
+                                onClick={() => setSpaceId(folder.id)}
+                              >
+                                <Folder /> Open
+                              </ContextMenuItem>
+                              <ContextMenuItem
+                                onClick={() => {
+                                  setSpaceParentId(folder.id)
+                                  setSpaceOpen(true)
+                                }}
+                              >
+                                <FolderPlus /> New subfolder
+                              </ContextMenuItem>
+                            </ContextMenuGroup>
+                            {folder.canManage && (
+                              <>
+                                <ContextMenuSeparator />
+                                <ContextMenuGroup>
+                                  <ContextMenuItem
+                                    variant="destructive"
+                                    onClick={() =>
+                                      setFolderDeleteTarget(folder)
+                                    }
+                                  >
+                                    <Trash2 /> Delete folder
+                                  </ContextMenuItem>
+                                </ContextMenuGroup>
+                              </>
+                            )}
+                          </ContextMenuContent>
+                        </ContextMenu>
+                      ))}
                     {visibleItems.map((item) => {
-                      const Icon = itemIcon(item.resourceType)
                       const source =
                         item.resourceType === "source"
                           ? sources.find(
                               (candidate) => candidate.id === item.resourceId
                             )
                           : null
+                      const Icon = itemIcon(item, source)
                       const pending =
                         source?.status === "queued" ||
                         source?.status === "processing"
                       return (
-                        <tr
-                          className={cn(
-                            "group border-b last:border-b-0 transition-colors hover:bg-muted/35",
-                            selected?.id === item.id && "bg-primary/5"
-                          )}
-                          data-state={selected?.id === item.id ? "selected" : undefined}
-                          key={item.id}
-                        >
-                          <td className="max-w-[20rem] px-4 py-3">
+                        <ContextMenu key={item.id}>
+                          <ContextMenuTrigger
+                            className={cn(
+                              "group flex min-w-0 cursor-pointer flex-col rounded-lg border border-border/80 bg-background/80 p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                              selected?.id === item.id &&
+                                "ring-2 ring-primary/30"
+                            )}
+                            onDoubleClick={() => openInspector(item)}
+                          >
+                            <div className="mb-3 flex items-start justify-between gap-2">
+                              <span className="flex size-12 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                                <Icon className="size-6" aria-hidden="true" />
+                              </span>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger
+                                  render={
+                                    <Button
+                                      aria-label={`Actions for ${item.title}`}
+                                      size="icon-sm"
+                                      variant="ghost"
+                                    />
+                                  }
+                                >
+                                  <MoreHorizontal />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    onClick={() => openInspector(item)}
+                                  >
+                                    <Search /> Open details
+                                  </DropdownMenuItem>
+                                  {canDeleteKnowledgeItem(item) && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        variant="destructive"
+                                        onClick={() => setDeleteTarget(item)}
+                                      >
+                                        <Trash2 /> Delete
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
                             <button
-                              className="flex min-w-0 items-center gap-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2"
+                              className="w-full truncate text-left text-sm font-medium"
                               onClick={() => openInspector(item)}
                               type="button"
                             >
-                              <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground [&_svg:not([class*='size-'])]:size-4">
-                                <Icon aria-hidden="true" />
-                              </span>
-                              <span className="min-w-0">
-                                <span className="block truncate font-medium">
-                                  {item.title}
-                                </span>
-                                {pending && (
-                                  <Progress
-                                    className="mt-1.5 h-1 max-w-48"
-                                    value={source?.progress ?? 0}
-                                  />
-                                )}
-                              </span>
+                              {item.title}
                             </button>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
-                            <Badge variant="outline">
-                              {typeLabels[item.resourceType] ?? item.resourceType}
-                            </Badge>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">
-                            <span>
-                              {item.visibility === "workspace" ? "Workspace" : "Personal"}
-                            </span>
-                            {item.spaceIds?.length ? (
-                              <span className="ml-1.5 text-muted-foreground/70">
-                                · {item.spaceIds.length} space{item.spaceIds.length === 1 ? "" : "s"}
+                            <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                              <span className="truncate">
+                                {typeLabels[item.resourceType] ??
+                                  item.resourceType}
                               </span>
-                            ) : null}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-3">
-                            <Badge variant={itemStatusVariant(item.status)}>
-                              {itemStatusLabel(item.status)}
-                            </Badge>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">
-                            {new Date(item.updatedAt).toLocaleDateString()}
-                          </td>
-                          <td className="px-2 py-3 text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger
-                                render={
-                                  <Button
-                                    aria-label={`Actions for ${item.title}`}
-                                    className="opacity-70 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-                                    size="icon-sm"
-                                    title={`Actions for ${item.title}`}
-                                    variant="ghost"
-                                  />
-                                }
+                              <span>
+                                {new Date(item.updatedAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                            {pending && (
+                              <Progress
+                                className="mt-2 h-1"
+                                value={source?.progress ?? 0}
+                              />
+                            )}
+                          </ContextMenuTrigger>
+                          <ContextMenuContent className="w-44">
+                            <ContextMenuGroup>
+                              <ContextMenuItem
+                                onClick={() => openInspector(item)}
                               >
-                                <MoreHorizontal aria-hidden="true" />
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-40">
-                                <DropdownMenuItem onClick={() => openInspector(item)}>
-                                  <Search data-icon="inline-start" /> Open details
-                                </DropdownMenuItem>
-                                {canDeleteKnowledgeItem(item) && (
-                                  <>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      variant="destructive"
-                                      onClick={() => setDeleteTarget(item)}
-                                    >
-                                      <Trash2 data-icon="inline-start" /> Delete
-                                    </DropdownMenuItem>
-                                  </>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </td>
-                        </tr>
+                                <Search /> Open details
+                              </ContextMenuItem>
+                            </ContextMenuGroup>
+                            {canDeleteKnowledgeItem(item) && (
+                              <>
+                                <ContextMenuSeparator />
+                                <ContextMenuGroup>
+                                  <ContextMenuItem
+                                    variant="destructive"
+                                    onClick={() => setDeleteTarget(item)}
+                                  >
+                                    <Trash2 /> Delete
+                                  </ContextMenuItem>
+                                </ContextMenuGroup>
+                              </>
+                            )}
+                          </ContextMenuContent>
+                        </ContextMenu>
                       )
                     })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
+                  </div>
+                )}
+              </CardContent>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-48">
+              <ContextMenuGroup>
+                <ContextMenuItem
+                  onClick={() => {
+                    setSpaceParentId(selectedSpace?.id ?? "root")
+                    setSpaceOpen(true)
+                  }}
+                >
+                  <FolderPlus /> New folder
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => fileInputRef.current?.click()}>
+                  <Upload /> Upload file
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => setAddOpen(true)}>
+                  <Plus /> Add knowledge
+                </ContextMenuItem>
+              </ContextMenuGroup>
+              <ContextMenuSeparator />
+              <ContextMenuGroup>
+                <ContextMenuItem onClick={() => void load()}>
+                  <RefreshCw /> Refresh
+                </ContextMenuItem>
+              </ContextMenuGroup>
+            </ContextMenuContent>
+          </ContextMenu>
         </Card>
 
         <Sheet
@@ -1515,447 +1860,403 @@ export function KnowledgeWorkspace({
               </SheetDescription>
             </SheetHeader>
             <Card className="min-h-full rounded-none border-0 shadow-none">
-          {selected ? (
-            <>
-              <CardHeader className="border-b px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="truncate text-sm">
-                      {selected.title}
-                    </CardTitle>
-                    <CardDescription>
-                      {typeLabels[selected.resourceType] ??
-                        selected.resourceType}
-                    </CardDescription>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {canDeleteKnowledgeItem(selected) && (
-                      <Button
-                        aria-label={`Delete ${selected.title}`}
-                        size="icon-sm"
-                        variant="ghost"
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        onClick={() => setDeleteTarget(selected)}
-                      >
-                        <Trash2 />
-                      </Button>
-                    )}
-                    <Button
-                      aria-label="Close item details"
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={closeInspector}
-                    >
-                      <X />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
-                {spaces.length > 0 && (
-                  <div className="rounded-lg border bg-muted/20 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium">Spaces</p>
-                        <p className="text-xs text-muted-foreground">
-                          Assign this item to one or more spaces.
-                        </p>
+              {selected ? (
+                <>
+                  <CardHeader className="border-b px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <CardTitle className="truncate text-sm">
+                          {selected.title}
+                        </CardTitle>
+                        <CardDescription>
+                          {typeLabels[selected.resourceType] ??
+                            selected.resourceType}
+                        </CardDescription>
                       </div>
-                      <Select
-                        value="none"
-                        onValueChange={(value) => {
-                          if (value) void assignSelectedSpace(value)
-                        }}
-                      >
-                        <SelectTrigger
-                          className="h-8 w-28"
-                          aria-label="Add to space"
-                        >
-                          <SelectValue>Add to…</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Add to…</SelectItem>
-                          {spaces
-                            .filter(
-                              (space) => !selected.spaceIds?.includes(space.id)
-                            )
-                            .map((space) => (
-                              <SelectItem key={space.id} value={space.id}>
-                                {space.name}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {(selected.spaceIds ?? []).map((assignedID) => {
-                        const assigned = spaces.find(
-                          (space) => space.id === assignedID
-                        )
-                        return (
-                          <span
-                            className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs"
-                            key={assignedID}
+                      <div className="flex shrink-0 items-center gap-1">
+                        {canDeleteKnowledgeItem(selected) && (
+                          <Button
+                            aria-label={`Delete ${selected.title}`}
+                            size="icon-sm"
+                            variant="ghost"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => setDeleteTarget(selected)}
                           >
-                            {assigned?.name ?? "Space"}
-                            <button
-                              type="button"
-                              className="text-muted-foreground hover:text-foreground"
-                              aria-label={`Remove from ${assigned?.name ?? "space"}`}
-                              onClick={() =>
-                                void removeSelectedSpace(assignedID)
-                              }
+                            <Trash2 />
+                          </Button>
+                        )}
+                        <Button
+                          aria-label="Close item details"
+                          size="icon-sm"
+                          variant="ghost"
+                          onClick={closeInspector}
+                        >
+                          <X />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
+                    {spaces.length > 0 && (
+                      <div className="rounded-lg border bg-muted/20 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium">Spaces</p>
+                            <p className="text-xs text-muted-foreground">
+                              Assign this item to one or more spaces.
+                            </p>
+                          </div>
+                          <Select
+                            value="none"
+                            onValueChange={(value) => {
+                              if (value) void assignSelectedSpace(value)
+                            }}
+                          >
+                            <SelectTrigger
+                              className="h-8 w-28"
+                              aria-label="Add to space"
                             >
-                              <X className="size-3" />
-                            </button>
-                          </span>
-                        )
-                      })}
-                      {!selected.spaceIds?.length && (
-                        <span className="text-xs text-muted-foreground">
-                          Personal library (not assigned)
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {selectedSource && (
-                  <>
-                    <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-                      <p className="flex items-center gap-2 font-medium text-foreground">
-                        {selectedSource.sourceType === "url" ? (
-                          <Globe2 />
-                        ) : (
-                          <FileText />
-                        )}{" "}
-                        {selectedSource.sourceType === "url"
-                          ? selectedSource.sourceUrl
-                          : "Uploaded source"}
-                      </p>
-                      <p className="mt-2">
-                        Status: {selectedSource.status}
-                        {selectedSource.stage
-                          ? ` · ${selectedSource.stage}`
-                          : ""}
-                      </p>
-                      {selectedSource.error && (
-                        <p className="mt-2 text-destructive">
-                          {selectedSource.error}
-                        </p>
-                      )}
-                    </div>
-                    {selectedDetail?.content && (
-                      <pre className="max-h-64 overflow-auto rounded-lg border bg-background p-3 text-xs leading-5 whitespace-pre-wrap">
-                        {selectedDetail.content}
-                      </pre>
+                              <SelectValue>Add to…</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Add to…</SelectItem>
+                              {spaces
+                                .filter(
+                                  (space) =>
+                                    !selected.spaceIds?.includes(space.id)
+                                )
+                                .map((space) => (
+                                  <SelectItem key={space.id} value={space.id}>
+                                    {space.name}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {(selected.spaceIds ?? []).map((assignedID) => {
+                            const assigned = spaces.find(
+                              (space) => space.id === assignedID
+                            )
+                            return (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs"
+                                key={assignedID}
+                              >
+                                {assigned?.name ?? "Space"}
+                                <button
+                                  type="button"
+                                  className="text-muted-foreground hover:text-foreground"
+                                  aria-label={`Remove from ${assigned?.name ?? "space"}`}
+                                  onClick={() =>
+                                    void removeSelectedSpace(assignedID)
+                                  }
+                                >
+                                  <X className="size-3" />
+                                </button>
+                              </span>
+                            )
+                          })}
+                          {!selected.spaceIds?.length && (
+                            <span className="text-xs text-muted-foreground">
+                              Personal library (not assigned)
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     )}
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => void reindexSelectedSource()}
-                      >
-                        <RefreshCw data-icon="inline-start" /> Reindex
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={busy}
-                        onClick={() => void removeSelectedSource()}
-                      >
-                        <Trash2 data-icon="inline-start" /> Remove
-                      </Button>
-                    </div>
-                  </>
-                )}
-                {selectedNote && (
-                  <NoteInspector
-                    note={selectedNote}
-                    onChange={(next) =>
-                      onNotesChange(
-                        notes.map((note) => (note.id === next.id ? next : note))
-                      )
-                    }
-                    onSave={() => void updateSelectedNote()}
-                    saving={busy}
-                  />
-                )}
-                {selectedMemory && (
-                  <div className="flex flex-col gap-4">
-                    <div>
-                      <Label htmlFor="inspector-memory-content">Memory</Label>
-                      <Textarea
-                        id="inspector-memory-content"
-                        className="mt-2 min-h-28"
-                        maxLength={2000}
-                        value={memoryDraft}
-                        onChange={(event) => setMemoryDraft(event.target.value)}
+                    {selectedSource && (
+                      <>
+                        <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                          <p className="flex items-center gap-2 font-medium text-foreground">
+                            {selectedSource.sourceType === "url" ? (
+                              <Globe2 />
+                            ) : (
+                              <FileText />
+                            )}{" "}
+                            {selectedSource.sourceType === "url"
+                              ? selectedSource.sourceUrl
+                              : "Uploaded source"}
+                          </p>
+                          <p className="mt-2">
+                            Status: {selectedSource.status}
+                            {selectedSource.stage
+                              ? ` · ${selectedSource.stage}`
+                              : ""}
+                          </p>
+                          {selectedSource.error && (
+                            <p className="mt-2 text-destructive">
+                              {selectedSource.error}
+                            </p>
+                          )}
+                        </div>
+                        {selectedDetail?.content && (
+                          <pre className="max-h-64 overflow-auto rounded-lg border bg-background p-3 text-xs leading-5 whitespace-pre-wrap">
+                            {selectedDetail.content}
+                          </pre>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => void reindexSelectedSource()}
+                          >
+                            <RefreshCw data-icon="inline-start" /> Reindex
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => void removeSelectedSource()}
+                          >
+                            <Trash2 data-icon="inline-start" /> Remove
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                    {selectedNote && (
+                      <NoteInspector
+                        note={selectedNote}
+                        onChange={(next) =>
+                          onNotesChange(
+                            notes.map((note) =>
+                              note.id === next.id ? next : note
+                            )
+                          )
+                        }
+                        onSave={() => void updateSelectedNote()}
+                        saving={busy}
                       />
-                    </div>
-                    <Button
-                      size="sm"
-                      className="w-fit"
-                      onClick={() => void updateSelectedMemory()}
-                      disabled={busy || !memoryDraft.trim()}
-                    >
-                      {busy ? "Saving…" : "Save memory"}
-                    </Button>
-                    <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                      <div>
-                        <p className="text-sm font-medium">Use in chats</p>
+                    )}
+                    {selectedMemory && (
+                      <div className="flex flex-col gap-4">
+                        <div>
+                          <Label htmlFor="inspector-memory-content">
+                            Memory
+                          </Label>
+                          <Textarea
+                            id="inspector-memory-content"
+                            className="mt-2 min-h-28"
+                            maxLength={2000}
+                            value={memoryDraft}
+                            onChange={(event) =>
+                              setMemoryDraft(event.target.value)
+                            }
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          className="w-fit"
+                          onClick={() => void updateSelectedMemory()}
+                          disabled={busy || !memoryDraft.trim()}
+                        >
+                          {busy ? "Saving…" : "Save memory"}
+                        </Button>
+                        <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                          <div>
+                            <p className="text-sm font-medium">Use in chats</p>
+                            <p className="text-xs text-muted-foreground">
+                              Available across your conversations.
+                            </p>
+                          </div>
+                          <Switch
+                            checked={selectedMemory.enabled}
+                            onCheckedChange={(checked) =>
+                              void toggleSelectedMemory(checked)
+                            }
+                            disabled={busy}
+                          />
+                        </div>
                         <p className="text-xs text-muted-foreground">
-                          Available across your conversations.
+                          Provenance: {selectedMemory.source}
                         </p>
                       </div>
-                      <Switch
-                        checked={selectedMemory.enabled}
-                        onCheckedChange={(checked) =>
-                          void toggleSelectedMemory(checked)
-                        }
-                        disabled={busy}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Provenance: {selectedMemory.source}
-                    </p>
-                  </div>
-                )}
-                {selected.resourceType === "repository" && (
-                  <div className="flex flex-col gap-3">
-                    <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-                      <p className="flex items-center gap-2 font-medium text-foreground">
-                        <GitBranch />{" "}
-                        {String(
-                          selectedDetail?.provider ??
-                            selected.metadata?.provider ??
-                            "Repository"
+                    )}
+                    {selected.resourceType === "repository" && (
+                      <div className="flex flex-col gap-3">
+                        <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                          <p className="flex items-center gap-2 font-medium text-foreground">
+                            <GitBranch />{" "}
+                            {String(
+                              selectedDetail?.provider ??
+                                selected.metadata?.provider ??
+                                "Repository"
+                            )}
+                          </p>
+                          <p className="mt-2 break-all">
+                            {String(
+                              selectedDetail?.repositoryUrl ??
+                                selected.metadata?.repositoryUrl ??
+                                ""
+                            )}
+                          </p>
+                          <p className="mt-1">
+                            Ref:{" "}
+                            {String(
+                              selectedDetail?.ref ??
+                                selected.metadata?.ref ??
+                                "HEAD"
+                            )}
+                          </p>
+                        </div>
+                        {selectedDetail?.files &&
+                          selectedDetail.files.length > 0 && (
+                            <div className="overflow-hidden rounded-lg border bg-muted/20">
+                              <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+                                <p className="text-sm font-medium">
+                                  Indexed files
+                                </p>
+                                <span className="text-xs text-muted-foreground">
+                                  {selectedDetail.files.length} files
+                                </span>
+                              </div>
+                              <div className="max-h-64 overflow-auto">
+                                <table className="w-full min-w-[30rem] text-xs">
+                                  <thead className="sticky top-0 bg-background/95 text-left text-muted-foreground backdrop-blur">
+                                    <tr className="border-b">
+                                      <th className="px-3 py-2 font-medium">
+                                        Path
+                                      </th>
+                                      <th className="px-3 py-2 font-medium">
+                                        State
+                                      </th>
+                                      <th className="px-3 py-2 text-right font-medium">
+                                        Size
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {selectedDetail.files.map((file) => (
+                                      <tr
+                                        className="border-b last:border-b-0"
+                                        key={file.sourceId}
+                                      >
+                                        <td
+                                          className="max-w-[20rem] truncate px-3 py-2 text-muted-foreground"
+                                          title={file.path}
+                                        >
+                                          {file.path}
+                                        </td>
+                                        <td
+                                          className={cn(
+                                            "px-3 py-2 whitespace-nowrap",
+                                            file.status === "failed" &&
+                                              "text-destructive"
+                                          )}
+                                        >
+                                          {itemStatusLabel(file.status)}
+                                        </td>
+                                        <td className="px-3 py-2 text-right whitespace-nowrap text-muted-foreground">
+                                          {formatBytes(file.sizeBytes)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => void syncSelectedRepository()}
+                        >
+                          <RefreshCw data-icon="inline-start" /> Sync now
+                        </Button>
+                        <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+                          <div>
+                            <p className="text-sm font-medium">Sync schedule</p>
+                            <p className="text-xs text-muted-foreground">
+                              Refresh this repository automatically.
+                            </p>
+                          </div>
+                          <Select
+                            value={String(
+                              Number(
+                                selected.metadata?.syncIntervalMinutes ?? 0
+                              )
+                            )}
+                            onValueChange={(value) =>
+                              void updateRepositorySchedule(Number(value))
+                            }
+                          >
+                            <SelectTrigger
+                              className="h-8 w-28"
+                              aria-label="Repository sync schedule"
+                            >
+                              <SelectValue>
+                                {Number(
+                                  selected.metadata?.syncIntervalMinutes ?? 0
+                                ) === 60
+                                  ? "Hourly"
+                                  : Number(
+                                        selected.metadata
+                                          ?.syncIntervalMinutes ?? 0
+                                      ) === 1440
+                                    ? "Daily"
+                                    : Number(
+                                          selected.metadata
+                                            ?.syncIntervalMinutes ?? 0
+                                        ) === 10080
+                                      ? "Weekly"
+                                      : "Manual"}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="0">Manual</SelectItem>
+                              <SelectItem value="60">Hourly</SelectItem>
+                              <SelectItem value="1440">Daily</SelectItem>
+                              <SelectItem value="10080">Weekly</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+                    {selected.resourceType === "transcript" && (
+                      <>
+                        <p className="text-sm leading-6 text-muted-foreground">
+                          Transcript passages are searchable with
+                          timestamp-aware citations. Open the transcript
+                          workspace for the full recording.
+                        </p>
+                        {selectedDetail?.content && (
+                          <pre className="max-h-64 overflow-auto rounded-lg border bg-muted/20 p-3 text-xs leading-5 whitespace-pre-wrap">
+                            {selectedDetail.content}
+                          </pre>
                         )}
-                      </p>
-                      <p className="mt-2 break-all">
-                        {String(
-                          selectedDetail?.repositoryUrl ??
-                            selected.metadata?.repositoryUrl ??
-                            ""
-                        )}
+                      </>
+                    )}
+                    <div className="mt-auto rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                      <p>
+                        Added{" "}
+                        {new Date(selected.createdAt).toLocaleDateString()}
                       </p>
                       <p className="mt-1">
-                        Ref:{" "}
-                        {String(
-                          selectedDetail?.ref ??
-                            selected.metadata?.ref ??
-                            "HEAD"
-                        )}
+                        Updated{" "}
+                        {new Date(selected.updatedAt).toLocaleDateString()}
                       </p>
                     </div>
-                    {selectedDetail?.files &&
-                      selectedDetail.files.length > 0 && (
-                        <div className="overflow-hidden rounded-lg border bg-muted/20">
-                          <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
-                            <p className="text-sm font-medium">Indexed files</p>
-                            <span className="text-xs text-muted-foreground">
-                              {selectedDetail.files.length} files
-                            </span>
-                          </div>
-                          <div className="max-h-64 overflow-auto">
-                            <table className="w-full min-w-[30rem] text-xs">
-                              <thead className="sticky top-0 bg-background/95 text-left text-muted-foreground backdrop-blur">
-                                <tr className="border-b">
-                                  <th className="px-3 py-2 font-medium">Path</th>
-                                  <th className="px-3 py-2 font-medium">State</th>
-                                  <th className="px-3 py-2 text-right font-medium">Size</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                            {selectedDetail.files.map((file) => (
-                              <tr
-                                className="border-b last:border-b-0"
-                                key={file.sourceId}
-                              >
-                                <td
-                                  className="max-w-[20rem] truncate px-3 py-2 text-muted-foreground"
-                                  title={file.path}
-                                >
-                                  {file.path}
-                                </td>
-                                <td
-                                  className={cn(
-                                    "whitespace-nowrap px-3 py-2",
-                                    file.status === "failed" &&
-                                      "text-destructive"
-                                  )}
-                                >
-                                  {itemStatusLabel(file.status)}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-2 text-right text-muted-foreground">
-                                  {formatBytes(file.sizeBytes)}
-                                </td>
-                              </tr>
-                            ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => void syncSelectedRepository()}
-                    >
-                      <RefreshCw data-icon="inline-start" /> Sync now
-                    </Button>
-                    <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
-                      <div>
-                        <p className="text-sm font-medium">Sync schedule</p>
-                        <p className="text-xs text-muted-foreground">
-                          Refresh this repository automatically.
-                        </p>
-                      </div>
-                      <Select
-                        value={String(
-                          Number(selected.metadata?.syncIntervalMinutes ?? 0)
-                        )}
-                        onValueChange={(value) =>
-                          void updateRepositorySchedule(Number(value))
-                        }
-                      >
-                        <SelectTrigger
-                          className="h-8 w-28"
-                          aria-label="Repository sync schedule"
-                        >
-                          <SelectValue>
-                            {Number(
-                              selected.metadata?.syncIntervalMinutes ?? 0
-                            ) === 60
-                              ? "Hourly"
-                              : Number(
-                                    selected.metadata?.syncIntervalMinutes ?? 0
-                                  ) === 1440
-                                ? "Daily"
-                                : Number(
-                                      selected.metadata?.syncIntervalMinutes ??
-                                        0
-                                    ) === 10080
-                                  ? "Weekly"
-                                  : "Manual"}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="0">Manual</SelectItem>
-                          <SelectItem value="60">Hourly</SelectItem>
-                          <SelectItem value="1440">Daily</SelectItem>
-                          <SelectItem value="10080">Weekly</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-                {selected.resourceType === "transcript" && (
-                  <>
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      Transcript passages are searchable with timestamp-aware
-                      citations. Open the transcript workspace for the full
-                      recording.
-                    </p>
-                    {selectedDetail?.content && (
-                      <pre className="max-h-64 overflow-auto rounded-lg border bg-muted/20 p-3 text-xs leading-5 whitespace-pre-wrap">
-                        {selectedDetail.content}
-                      </pre>
-                    )}
-                  </>
-                )}
-                <div className="mt-auto rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-                  <p>
-                    Added {new Date(selected.createdAt).toLocaleDateString()}
-                  </p>
-                  <p className="mt-1">
-                    Updated {new Date(selected.updatedAt).toLocaleDateString()}
-                  </p>
-                </div>
-              </CardContent>
-            </>
-          ) : (
-            <Empty className="h-full min-h-72 border-0">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Search />
-                </EmptyMedia>
-                <EmptyTitle>Select an item</EmptyTitle>
-                <EmptyDescription>
-                  Inspect, edit, or manage a Knowledge item here.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          )}
+                  </CardContent>
+                </>
+              ) : (
+                <Empty className="h-full min-h-72 border-0">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <Search />
+                    </EmptyMedia>
+                    <EmptyTitle>Select an item</EmptyTitle>
+                    <EmptyDescription>
+                      Inspect, edit, or manage a Knowledge item here.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
             </Card>
           </SheetContent>
         </Sheet>
       </div>
-
-      <Sheet open={spaceSheetOpen} onOpenChange={setSpaceSheetOpen}>
-        <SheetContent side="left" className="w-80 p-0 sm:max-w-sm">
-          <SheetHeader className="border-b pr-12">
-            <SheetTitle>Knowledge spaces</SheetTitle>
-            <SheetDescription>
-              Choose the library view to browse.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex flex-col gap-1 overflow-y-auto p-3">
-            <button
-              className={cn(
-                "flex items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted",
-                spaceId === "all" && "bg-muted font-medium"
-              )}
-              onClick={() => {
-                setSpaceId("all")
-                setSpaceSheetOpen(false)
-              }}
-              type="button"
-            >
-              <span>All knowledge</span>
-              <span className="text-xs text-muted-foreground">
-                {items.length}
-              </span>
-            </button>
-            <button
-              className={cn(
-                "flex items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted",
-                spaceId === "personal" && "bg-muted font-medium"
-              )}
-              onClick={() => {
-                setSpaceId("personal")
-                setSpaceSheetOpen(false)
-              }}
-              type="button"
-            >
-              <span>Personal</span>
-              <span className="text-xs text-muted-foreground">
-                {items.filter((item) => !item.spaceIds?.length).length}
-              </span>
-            </button>
-            {spaces.map((space) => (
-              <button
-                className={cn(
-                  "flex items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted",
-                  spaceId === space.id && "bg-muted font-medium"
-                )}
-                key={space.id}
-                onClick={() => {
-                  setSpaceId(space.id)
-                  setSpaceSheetOpen(false)
-                }}
-                type="button"
-              >
-                <span className="min-w-0 truncate">{space.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {space.itemCount}
-                </span>
-              </button>
-            ))}
-          </div>
-        </SheetContent>
-      </Sheet>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent
@@ -1972,7 +2273,7 @@ export function KnowledgeWorkspace({
             <AddKnowledgeOption
               icon={Upload}
               title="Upload a file"
-              description="PDF, Markdown, text, HTML, or JSON"
+              description="PDF, CSV, Markdown, text, HTML, or JSON"
               onClick={() => {
                 setAddOpen(false)
                 fileInputRef.current?.click()
@@ -2008,9 +2309,10 @@ export function KnowledgeWorkspace({
             <AddKnowledgeOption
               icon={FileText}
               title="Import a transcript"
-              description="Add a recorded session to a space"
+              description="Store a recorded session in a folder"
               onClick={() => {
                 setAddOpen(false)
+                setTranscriptSpaceId(selectedSpace?.id ?? "none")
                 setTranscriptOpen(true)
               }}
             />
@@ -2031,9 +2333,9 @@ export function KnowledgeWorkspace({
         <DialogContent>
           <form onSubmit={createSpace}>
             <DialogHeader>
-              <DialogTitle>New knowledge space</DialogTitle>
+              <DialogTitle>New storage folder</DialogTitle>
               <DialogDescription>
-                Give a project or topic a durable home.
+                Create it at the root or inside another folder.
               </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col gap-3 py-4">
@@ -2051,6 +2353,28 @@ export function KnowledgeWorkspace({
                 onChange={(event) => setSpaceDescription(event.target.value)}
                 placeholder="What belongs in this space?"
               />
+              <Label>Parent folder</Label>
+              <Select
+                value={spaceParentId}
+                onValueChange={(value) => setSpaceParentId(value ?? "root")}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {spaceParentId === "root"
+                      ? "Storage root"
+                      : (spaceTree.find((space) => space.id === spaceParentId)
+                          ?.name ?? "Storage root")}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="root">Storage root</SelectItem>
+                  {spaceTree.map((space) => (
+                    <SelectItem key={space.id} value={space.id}>
+                      {`${"— ".repeat(space.depth)}${space.name}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Label>Visibility</Label>
               <Select
                 value={spaceVisibility}
@@ -2080,7 +2404,7 @@ export function KnowledgeWorkspace({
                 Cancel
               </Button>
               <Button type="submit" disabled={busy || !spaceName.trim()}>
-                {busy ? "Creating…" : "Create space"}
+                {busy ? "Creating…" : "Create folder"}
               </Button>
             </DialogFooter>
           </form>
@@ -2362,6 +2686,24 @@ export function KnowledgeWorkspace({
         }}
         onConfirm={() => {
           if (deleteTarget) return deleteKnowledgeItem(deleteTarget)
+        }}
+      />
+      <ConfirmActionDialog
+        open={Boolean(folderDeleteTarget)}
+        title="Delete folder?"
+        description={
+          folderDeleteTarget
+            ? `“${folderDeleteTarget.name}” will be deleted. Files are kept in My files, and subfolders move up one level.`
+            : "Files in this folder will be kept."
+        }
+        confirmLabel="Delete folder"
+        pending={deleteBusy}
+        onOpenChange={(open) => {
+          if (!open && !deleteBusy) setFolderDeleteTarget(null)
+        }}
+        onConfirm={() => {
+          if (folderDeleteTarget)
+            return deleteKnowledgeFolder(folderDeleteTarget)
         }}
       />
     </div>
