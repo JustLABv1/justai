@@ -507,7 +507,16 @@ def run_diarization(audio_path: Path, request: DiarizeRequest) -> list[Diarizati
     # enabled is important for long recordings because it avoids retaining
     # autograd state while the pipeline processes the complete WAV.
     with PIPELINE_LOCK, torch.inference_mode():
-        annotation = PIPELINE(load_extracted_audio(audio_path), **parameters)
+        result = PIPELINE(load_extracted_audio(audio_path), **parameters)
+
+    # pyannote.audio 4 returns a DiarizeOutput wrapper. Earlier releases (and
+    # pipelines configured with legacy mode) return Annotation directly. Keep
+    # both forms working so upgrading the worker image does not turn a valid
+    # diarization request into a runtime 500.
+    annotation = getattr(result, "speaker_diarization", result)
+    if not hasattr(annotation, "itertracks"):
+        raise RuntimeError("pyannote returned an unsupported diarization output")
+
     turns: list[DiarizationTurn] = []
     for turn, _, speaker in annotation.itertracks(yield_label=True):
         start = float(turn.start)

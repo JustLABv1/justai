@@ -347,6 +347,19 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	var persistentSourceIDs []uuid.UUID
 	if knowledgeEnabled {
 		selectedSourceIDs := latestUserAttachmentSourceIDs(latestUser)
+		if len(selectedSourceIDs) > 0 {
+			// Uploaded attachments are mapped to the conversation immediately,
+			// while their knowledge_items row is maintained by the catalog sync.
+			// The authorization and retrieval queries below join knowledge_items,
+			// so an explicit attachment must be synchronized before those checks
+			// or its context is silently omitted from the model request.
+			if catalogErr := a.syncKnowledgeCatalog(c); catalogErr != nil {
+				slog.Error("failed to sync knowledge catalog for explicit attachment", "error", catalogErr)
+				runStatus = "error"
+				writeError(c, http.StatusServiceUnavailable, fmt.Errorf("knowledge catalog is unavailable"))
+				return
+			}
+		}
 		if latestUser != nil {
 			var persistentErr error
 			persistentSourceIDs, persistentErr = a.conversationPersistentSourceIDs(c, conversationID, organizationID, principal.UserID)
