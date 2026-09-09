@@ -638,3 +638,16 @@
     animation: none;
   }
 }
+
+:root {
+  --composer-accent: #2675ff;
+}
+
+/* The composer is a raised neutral surface in the dark reference. */
+.dark .composer-surface {
+  --background: #252525;
+  --foreground: #f5f5f5;
+  --muted: #252525;
+  --muted-foreground: #777777;
+  --border: #414141;
+}

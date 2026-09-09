@@ -190,7 +190,7 @@ export function VoiceControl({
           aria-label={label}
           aria-pressed={active && !muted}
           className={cn(
-            "relative size-9 rounded-full p-0 text-muted-foreground hover:bg-muted hover:text-foreground",
+            "relative size-8 rounded-full border bg-background p-0 text-foreground shadow-sm hover:bg-muted dark:border-[#414141]",
             "focus-visible:ring-2 focus-visible:ring-primary/50",
             active && "bg-primary/10 text-primary hover:bg-primary/15",
             muted && "opacity-70"
@@ -203,12 +203,16 @@ export function VoiceControl({
           type="button"
           variant="ghost"
         >
-          <VoiceOrb
-            className="absolute inset-1 border-0 bg-primary/10 shadow-none"
-            compact
-            state={orbState}
-            volume={volume}
-          />
+          {active ? (
+            <VoiceOrb
+              className="absolute inset-1 border-0 bg-primary/10 shadow-none"
+              compact
+              state={orbState}
+              volume={volume}
+            />
+          ) : (
+            <Mic className="size-4" />
+          )}
           <span className="sr-only">{label}</span>
         </Button>
         {active && (
