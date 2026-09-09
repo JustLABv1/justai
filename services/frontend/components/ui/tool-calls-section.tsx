@@ -46,7 +46,7 @@ export interface ToolCallEntry {
     resolution?: "cancelled" | "expired"
   }
   /** Respond to a pending approval request */
-  respondToApproval?: (response: ToolApprovalResponse) => void
+  respondToApproval?: (response: ToolApprovalResponse) => Promise<void>
   /** URL to custom icon for integrations */
   icon_url?: string
   /** Friendly name for the integration (e.g., "Linear", "Slack") */
@@ -191,7 +191,7 @@ export function ToolCallsSection({
     })
   }
 
-  const submitApproval = (
+  const submitApproval = async (
     call: ToolCallEntry,
     response: ToolApprovalResponse
   ) => {
@@ -207,7 +207,7 @@ export function ToolCallsSection({
     submittingApprovalIdsRef.current.add(callId)
     setSubmittingApprovalIds(new Set(submittingApprovalIdsRef.current))
     try {
-      call.respondToApproval(response)
+      await call.respondToApproval(response)
     } catch (error) {
       // The runtime can reject a stale approval after a reconnect. Allow the
       // user to retry it instead of leaving both buttons permanently locked.
