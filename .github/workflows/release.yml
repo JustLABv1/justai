@@ -223,6 +223,30 @@ jobs:
           cache-from: type=gha,scope=pyannote
           cache-to: type=gha,scope=pyannote,mode=max
 
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: meta-gpu
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},prefix=pyannote-gpu-
+            type=raw,value=pyannote-gpu-beta,enable=${{ contains(github.ref_name, '-beta.') }}
+            type=raw,value=pyannote-gpu-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: services/pyannote-diarizer
+          file: services/pyannote-diarizer/Dockerfile
+          push: true
+          tags: ${{ steps.meta-gpu.outputs.tags }}
+          labels: ${{ steps.meta-gpu.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.meta-gpu.outputs.version }}
+            TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
+          build-contexts: |
+            ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ needs.build-ffmpeg.outputs.digest }}
+          cache-from: type=gha,scope=pyannote-gpu
+          cache-to: type=gha,scope=pyannote-gpu,mode=max
+
   release-helm-chart:
     name: Package & Push Helm Chart
     runs-on: ubuntu-latest

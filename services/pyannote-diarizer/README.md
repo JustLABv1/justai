@@ -77,7 +77,7 @@ with the NVIDIA container runtime:
 
 ```bash
 docker build \
-  --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126 \
+  --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130 \
   -t justai-pyannote services/pyannote-diarizer
 ```
 
