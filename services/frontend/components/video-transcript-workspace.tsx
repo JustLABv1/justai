@@ -1806,7 +1806,7 @@ export function TranscriptWorkspace({
                         </p>
                       ) : null}
                       <Button
-                        className="mt-2 h-7 text-[11px]"
+                        className="mt-2"
                         onClick={() =>
                           void copyTimestampLink(annotation.startOffsetMs)
                         }
@@ -1876,7 +1876,8 @@ export function TranscriptWorkspace({
                 >
                   <SelectTrigger
                     aria-label="AI insight output language"
-                    className="h-7 min-w-48 text-xs"
+                    className="min-w-48"
+                    size="sm"
                   >
                     <SelectValue />
                   </SelectTrigger>

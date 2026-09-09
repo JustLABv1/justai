@@ -161,7 +161,7 @@ export function PlatformAdminDashboard({
                   const Icon = attentionIcon(item.severity)
                   return (
                     <button
-                      className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-muted/40 active:scale-[0.99]"
+                      className="flex min-h-14 items-start gap-3 rounded-lg border p-3 text-left transition-[background-color,border-color,transform] duration-150 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.99]"
                       key={item.id}
                       onClick={() => onTabChange(item.tab)}
                       type="button"

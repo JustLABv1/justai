@@ -1,10 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import {
-  ImageGeneration,
-  type ImageGenerationHandle,
-} from "img-fx"
+import { ImageGeneration, type ImageGenerationHandle } from "img-fx"
 import {
   Check,
   ChevronDown,
@@ -537,11 +534,12 @@ export const ToolFallback: ToolCallMessagePartComponent = (
 
   return (
     <div className="my-2 w-full max-w-xl overflow-hidden rounded-xl border bg-muted/30 text-sm">
-      <button
+      <Button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/50"
+        className="h-auto min-h-9 w-full justify-start rounded-none px-3 py-2 text-left hover:bg-muted/50"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
+        variant="ghost"
       >
         {requiresApproval ? (
           <Shield
@@ -584,7 +582,7 @@ export const ToolFallback: ToolCallMessagePartComponent = (
           className={cn("size-4 transition-transform", open && "rotate-180")}
           aria-hidden="true"
         />
-      </button>
+      </Button>
       {open && (
         <div className="space-y-2 border-t px-3 py-3 text-xs">
           {argsText && (

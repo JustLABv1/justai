@@ -337,7 +337,8 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                 <div className="flex flex-col gap-1">
                   {notes.map((note) => (
                     <button
-                      className={`rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted ${
+                      aria-pressed={note.id === selectedId}
+                      className={`min-h-11 rounded-lg px-3 py-2 text-left transition-[background-color,color,transform] duration-150 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.99] ${
                         note.id === selectedId ? "bg-muted" : ""
                       }`}
                       key={note.id}

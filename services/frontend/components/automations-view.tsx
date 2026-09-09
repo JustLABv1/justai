@@ -301,12 +301,15 @@ export function AutomationsView({
                   )}
                 </CardContent>
                 <CardFooter className="justify-between border-t pt-4">
-                  <button
-                    className="text-xs text-muted-foreground hover:text-foreground"
+                  <Button
+                    className="h-auto min-h-8 px-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground"
                     onClick={() => void loadRuns(item)}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
                   >
                     Run history
-                  </button>
+                  </Button>
                   <div className="flex gap-1">
                     <Button
                       size="sm"

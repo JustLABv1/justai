@@ -26,6 +26,7 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@/components/ui/attachment"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 type ChatAttachment = PendingAttachment | CompleteAttachment
@@ -269,21 +270,23 @@ export function ChatAttachmentPreview({
         {showRemove && (
           <AttachmentPrimitive.Remove
             aria-label={`Remove ${attachment.name}`}
-            className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity group-focus-within/thumbnail:opacity-100 group-hover/thumbnail:opacity-100 [@media(hover:none)]:opacity-100"
+            className="absolute -top-2 -right-2 flex size-8 items-center justify-center rounded-full border bg-background text-muted-foreground opacity-0 shadow-sm transition-[opacity,box-shadow] duration-150 group-focus-within/thumbnail:opacity-100 group-hover/thumbnail:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none [@media(hover:none)]:opacity-100"
           >
-            <HugeiconsIcon icon={Cancel01Icon} className="size-3" />
+            <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
           </AttachmentPrimitive.Remove>
         )}
         {canRetry && (
-          <button
+          <Button
             type="button"
             onClick={() => void retryAttachment()}
             disabled={retrying}
             aria-label={`Retry ${attachment.name}`}
-            className="absolute inset-x-1 bottom-1 rounded-md bg-background/95 px-1 py-0.5 text-[10px] text-destructive"
+            className="absolute inset-x-1 bottom-1 h-8 rounded-md bg-background/95 px-1 text-[10px] text-destructive shadow-sm hover:bg-background hover:text-destructive"
+            size="sm"
+            variant="outline"
           >
             {retrying ? "Retrying…" : "Retry"}
-          </button>
+          </Button>
         )}
         {status === "error" && (
           <span role="alert" className="sr-only">
@@ -319,24 +322,26 @@ export function ChatAttachmentPreview({
       {showRemove && (
         <AttachmentActions className="gap-0.5">
           {canRetry && (
-            <button
+            <Button
               aria-label={`Retry ${attachment.name}`}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+              className="text-muted-foreground hover:bg-muted hover:text-foreground"
               disabled={retrying}
               onClick={() => void retryAttachment()}
+              size="icon-sm"
               title={`Retry ${attachment.name}`}
               type="button"
+              variant="ghost"
             >
               <HugeiconsIcon
                 className={retrying ? "animate-spin" : ""}
                 icon={ReloadIcon}
                 size={16}
               />
-            </button>
+            </Button>
           )}
           <AttachmentPrimitive.Remove
             aria-label={`Remove ${attachment.name}`}
-            className="size-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="size-8 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
           >
             <HugeiconsIcon icon={Cancel01Icon} className="size-4" />
           </AttachmentPrimitive.Remove>

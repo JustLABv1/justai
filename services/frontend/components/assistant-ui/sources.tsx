@@ -7,6 +7,8 @@ import {
   type SourceMessagePartComponent,
 } from "@assistant-ui/react"
 
+import { Button } from "@/components/ui/button"
+
 export const AssistantSource: SourceMessagePartComponent = (part) => {
   const aui = useAui()
   const messageId = useAuiState((state) => state.message.id)
@@ -63,18 +65,20 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
         {locator && <p>Location: {locator}</p>}
         {chunkIndex !== undefined && <p>Chunk {chunkIndex + 1}</p>}
         {snippet && <p className="max-w-md">{snippet}</p>}
-        <button
-          className="mt-1 rounded-md border px-2 py-1 font-medium text-foreground hover:bg-muted"
+        <Button
+          className="mt-1"
           onClick={() =>
             aui.thread.composer().setQuote({
               messageId,
               text: quoteText,
             })
           }
+          size="sm"
           type="button"
+          variant="outline"
         >
           Ask about this source
-        </button>
+        </Button>
       </div>
     </details>
   )

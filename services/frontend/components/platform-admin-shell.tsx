@@ -80,6 +80,7 @@ import {
   PageHeading,
   PageTitle,
 } from "@/components/ui/page"
+import { FilterBar } from "@/components/ui/filter-bar"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -529,19 +530,28 @@ export function PlatformAdminShell({
           )}
           {(activeTab === "users" || activeTab === "workspaces") && (
             <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-full max-w-md">
-                  <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    className="pl-8"
-                    onChange={(event) => {
-                      setListPage(1)
-                      setQuery(event.target.value)
-                    }}
-                    placeholder={`Search ${activeTab}…`}
-                    value={query}
-                  />
-                </div>
+              <FilterBar
+                hasActiveFilters={Boolean(query.trim() || listStatus)}
+                onClear={() => {
+                  setListPage(1)
+                  setQuery("")
+                  setListStatus("")
+                }}
+                resultCount={
+                  activeTab === "users" ? users.length : workspaces.length
+                }
+                resultLabel={activeTab === "users" ? "users" : "workspaces"}
+                resultTotal={listTotal || undefined}
+                search={{
+                  label: `Search ${activeTab}`,
+                  onChange: (value) => {
+                    setListPage(1)
+                    setQuery(value)
+                  },
+                  placeholder: `Search ${activeTab}…`,
+                  value: query,
+                }}
+              >
                 <Select
                   value={listStatus || "all"}
                   onValueChange={(value) => {
@@ -552,7 +562,8 @@ export function PlatformAdminShell({
                 >
                   <SelectTrigger
                     aria-label={`${activeTab} status`}
-                    className="h-9 w-48"
+                    className="h-8 min-w-36 sm:min-w-40"
+                    size="sm"
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -571,7 +582,7 @@ export function PlatformAdminShell({
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-              </div>
+              </FilterBar>
               {activeTab === "users" ? (
                 <UsersView
                   users={users}

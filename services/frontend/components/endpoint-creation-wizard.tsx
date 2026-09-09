@@ -605,7 +605,7 @@ export function EndpointCreationWizard({
                     aria-current={active ? "step" : undefined}
                     onClick={() => available && goTo(item.id)}
                     className={cn(
-                      "group flex min-w-[8.75rem] items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors md:min-w-0",
+                      "group flex min-h-9 min-w-[8.75rem] items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-[background-color,color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.99] md:min-w-0",
                       active
                         ? "bg-primary/10 text-foreground"
                         : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -771,7 +771,7 @@ function TypeCard({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "flex min-h-40 flex-col items-start gap-4 rounded-xl border p-4 text-left transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
+        "flex min-h-40 flex-col items-start gap-4 rounded-xl border p-4 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none active:scale-[0.99]",
         active
           ? "border-primary bg-primary/5 ring-1 ring-primary/30"
           : "hover:bg-muted/50",

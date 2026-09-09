@@ -35,6 +35,7 @@ import {
   ToolResultContent,
 } from "@/components/assistant-ui/tool-fallback"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import { CompactMarkdown } from "@/components/ui/compact-markdown"
 import {
   ToolCallsSection,
@@ -255,23 +256,25 @@ function AgentRunPart({ data }: { data: unknown }) {
       )}
       {approvalId && !decision && status === "waiting_approval" && (
         <div className="mt-3 flex justify-end gap-2">
-          <button
-            className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 hover:bg-muted disabled:opacity-60"
+          <Button
             disabled={busy}
             onClick={() => void decide("rejected")}
+            size="sm"
             type="button"
+            variant="outline"
           >
-            <X className="size-3.5" aria-hidden="true" /> Reject
-          </button>
-          <button
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            <X data-icon="inline-start" aria-hidden="true" /> Reject
+          </Button>
+          <Button
             disabled={busy}
             onClick={() => void decide("approved")}
+            size="sm"
             type="button"
+            variant="default"
           >
-            <Check className="size-3.5" aria-hidden="true" /> Approve exact
+            <Check data-icon="inline-start" aria-hidden="true" /> Approve exact
             action
-          </button>
+          </Button>
         </div>
       )}
       {decision && (

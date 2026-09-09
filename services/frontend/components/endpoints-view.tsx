@@ -12,7 +12,6 @@ import {
   MoreHorizontal,
   Pencil,
   Radio,
-  Search,
   Server,
   Sparkles,
   Trash2,
@@ -52,7 +51,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -60,6 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { FilterBar } from "@/components/ui/filter-bar"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   DropdownMenu,
@@ -481,6 +480,12 @@ export function EndpointsView({
         onScopeChange={setScopeFilter}
         onStatusChange={setStatusFilter}
         onKindChange={setKindFilter}
+        onClearFilters={() => {
+          setSearch("")
+          setScopeFilter("all")
+          setStatusFilter("all")
+          setKindFilter("all")
+        }}
         canManageEndpoint={canManageEndpoint}
         onTest={testEndpoint}
         onSetDefault={setDefaultEndpoint}
@@ -559,6 +564,7 @@ function EndpointTable({
   onScopeChange,
   onStatusChange,
   onKindChange,
+  onClearFilters,
   canManageEndpoint,
   onTest,
   onSetDefault,
@@ -579,6 +585,7 @@ function EndpointTable({
   onScopeChange: (value: string) => void
   onStatusChange: (value: string) => void
   onKindChange: (value: "all" | EndpointKind) => void
+  onClearFilters: () => void
   canManageEndpoint: (endpoint: Endpoint) => boolean
   onTest: (endpoint: Endpoint) => Promise<void>
   onSetDefault: (endpoint: Endpoint) => void
@@ -593,9 +600,7 @@ function EndpointTable({
         <div>
           <CardTitle>Endpoint inventory</CardTitle>
           <CardDescription>
-            {visibleEndpoints.length} of {endpoints.length} endpoint
-            {endpoints.length === 1 ? "" : "s"} shown. Open a row to edit
-            connection details.
+            Open a row to edit connection details.
           </CardDescription>
         </div>
         <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
@@ -603,8 +608,26 @@ function EndpointTable({
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="border-y px-4 pt-3">
+        <FilterBar
+          hasActiveFilters={
+            Boolean(search.trim()) ||
+            scopeFilter !== "all" ||
+            statusFilter !== "all" ||
+            kindFilter !== "all"
+          }
+          onClear={onClearFilters}
+          resultCount={visibleEndpoints.length}
+          resultLabel="endpoints"
+          resultTotal={endpoints.length}
+          search={{
+            label: "Search endpoints",
+            onChange: onSearchChange,
+            placeholder: "Search name, provider, model…",
+            value: search,
+          }}
+        >
           <Tabs
+            className="shrink-0"
             value={kindFilter}
             onValueChange={(value) =>
               onKindChange((value as "all" | EndpointKind) ?? "all")
@@ -620,28 +643,14 @@ function EndpointTable({
               </TabsTrigger>
             </TabsList>
           </Tabs>
-        </div>
-        <div className="flex flex-wrap gap-2 border-y px-4 py-3">
-          <div className="relative min-w-56 flex-1">
-            <Search
-              className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <Input
-              aria-label="Search endpoints"
-              className="h-9 pl-8"
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Search name, provider, model…"
-              value={search}
-            />
-          </div>
           <Select
             value={scopeFilter}
             onValueChange={(value) => onScopeChange(value ?? "all")}
           >
             <SelectTrigger
               aria-label="Filter endpoint scope"
-              className="h-9 w-36"
+              className="h-8 min-w-32 sm:min-w-36"
+              size="sm"
             >
               <SelectValue />
             </SelectTrigger>
@@ -658,7 +667,8 @@ function EndpointTable({
           >
             <SelectTrigger
               aria-label="Filter endpoint status"
-              className="h-9 w-36"
+              className="h-8 min-w-32 sm:min-w-36"
+              size="sm"
             >
               <SelectValue />
             </SelectTrigger>
@@ -668,7 +678,7 @@ function EndpointTable({
               <SelectItem value="disabled">Disabled</SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </FilterBar>
         {visibleEndpoints.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-xs">

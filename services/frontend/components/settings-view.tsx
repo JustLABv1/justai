@@ -333,7 +333,7 @@ export function SettingsView({
                   <button
                     aria-pressed={selected}
                     aria-label={`${selected ? "Current" : "Switch to"} workspace ${organization.name}`}
-                    className={`cursor-pointer rounded-xl border p-4 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${selected ? "border-primary bg-primary/5 shadow-sm" : "bg-card"}`}
+                    className={`cursor-pointer rounded-xl border p-4 text-left transition-[background-color,border-color,box-shadow,color,transform] duration-150 hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none active:scale-[0.99] ${selected ? "border-primary bg-primary/5 shadow-sm" : "bg-card"}`}
                     onClick={() => onOrganizationSelect(organization.id)}
                     type="button"
                     key={organization.id}

@@ -658,7 +658,7 @@ export function WorkspaceContext({
           <button
             aria-selected={activeTab === id}
             className={cn(
-              "rounded-md px-2 py-1.5 text-[11px] text-muted-foreground transition-colors",
+              "min-h-8 rounded-md px-2 py-1.5 text-[11px] text-muted-foreground transition-[background-color,color,box-shadow,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.98]",
               activeTab === id && "bg-card text-foreground shadow-xs"
             )}
             key={id}
@@ -692,7 +692,7 @@ export function WorkspaceContext({
                       aria-label={`Remove ${item.title} from this chat; keep it indexed for future chats`}
                       disabled={busy === item.id}
                       onClick={() => void removeRepository(item)}
-                      size="icon-xs"
+                      size="icon-sm"
                       title="Remove from this chat (keep indexed for future chats)"
                       variant="ghost"
                     >
@@ -707,7 +707,7 @@ export function WorkspaceContext({
                       aria-label={`Add ${item.title} to this chat`}
                       disabled={busy === item.id}
                       onClick={() => void attachRepository(item)}
-                      size="icon-xs"
+                      size="icon-sm"
                       title="Add to this chat"
                       variant="ghost"
                     >
@@ -764,7 +764,7 @@ export function WorkspaceContext({
                           aria-label={`Keep ${source.title} in conversation context`}
                           disabled={busy === source.id}
                           onClick={() => void pinKnowledge(source.id)}
-                          size="icon-xs"
+                          size="icon-sm"
                           title="Keep in conversation context"
                           variant="ghost"
                         >
@@ -789,7 +789,7 @@ export function WorkspaceContext({
                           )
                         )
                       }
-                      size="icon-xs"
+                      size="icon-sm"
                       variant="ghost"
                     >
                       {busy === source.id ? (
@@ -839,7 +839,7 @@ export function WorkspaceContext({
                         aria-label={`${attached ? "Detach" : "Attach"} ${note.title}`}
                         disabled={busy === note.id}
                         onClick={() => void toggle("note", note.id, attached)}
-                        size="icon-xs"
+                        size="icon-sm"
                         variant="ghost"
                       >
                         {busy === note.id ? (
@@ -906,7 +906,7 @@ export function WorkspaceContext({
                         )
                       )
                     }
-                    size="icon-xs"
+                    size="icon-sm"
                     variant="ghost"
                   >
                     {busy === server.id ? (
@@ -970,7 +970,7 @@ export function WorkspaceContext({
                         )
                       )
                     }
-                    size="icon-xs"
+                    size="icon-sm"
                     variant="ghost"
                   >
                     {busy === session.id ? (

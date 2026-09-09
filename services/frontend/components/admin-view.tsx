@@ -56,7 +56,9 @@ export function AdminView({
     endpointId: null,
     mcpServerIds: [],
   })
-  const [analytics, setAnalytics] = useState<AdminAnalyticsResponse | null>(null)
+  const [analytics, setAnalytics] = useState<AdminAnalyticsResponse | null>(
+    null
+  )
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingGlobal, setSavingGlobal] = useState(false)
@@ -148,7 +150,13 @@ export function AdminView({
       setNotice("Workspace defaults saved.")
       notifySuccess("Workspace defaults saved")
     } catch (caught) {
-      setNotice(notifyError("Workspace defaults could not be saved", caught, "Defaults could not be saved."))
+      setNotice(
+        notifyError(
+          "Workspace defaults could not be saved",
+          caught,
+          "Defaults could not be saved."
+        )
+      )
     } finally {
       setSaving(false)
     }
@@ -166,7 +174,13 @@ export function AdminView({
       setNotice("Platform defaults saved.")
       notifySuccess("Platform defaults saved")
     } catch (caught) {
-      setNotice(notifyError("Platform defaults could not be saved", caught, "Platform defaults could not be saved."))
+      setNotice(
+        notifyError(
+          "Platform defaults could not be saved",
+          caught,
+          "Platform defaults could not be saved."
+        )
+      )
     } finally {
       setSavingGlobal(false)
     }
@@ -262,7 +276,8 @@ export function AdminView({
                   const selected = defaults.mcpServerIds.includes(server.id)
                   return (
                     <button
-                      className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${selected ? "border-primary/50 bg-primary/10 text-foreground" : "border-border/70 bg-card hover:border-border hover:bg-muted/40"}`}
+                      aria-pressed={selected}
+                      className={`flex min-h-9 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-[background-color,border-color,color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.99] ${selected ? "border-primary/50 bg-primary/10 text-foreground" : "border-border/70 bg-card hover:border-border hover:bg-muted/40"}`}
                       key={server.id}
                       onClick={() =>
                         setDefaults((current) => ({

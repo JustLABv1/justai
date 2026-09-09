@@ -132,6 +132,7 @@ import {
   FieldLegend,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { FilterBar } from "@/components/ui/filter-bar"
 import {
   Page,
   PageActions,
@@ -4325,17 +4326,26 @@ function RunsPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <Input
-              aria-label="Search runs"
-              placeholder="Search workflows, run IDs, or results…"
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value)
+          <FilterBar
+            hasActiveFilters={Boolean(query.trim()) || statusFilter !== "all"}
+            onClear={() => {
+              setQuery("")
+              setStatusFilter("all")
+              setPage(0)
+            }}
+            resultCount={filteredRuns.length}
+            resultLabel="runs"
+            resultTotal={runs.length}
+            search={{
+              label: "Search runs",
+              onChange: (value) => {
+                setQuery(value)
                 setPage(0)
-              }}
-              className="max-w-md"
-            />
+              },
+              placeholder: "Search workflows, run IDs, or results…",
+              value: query,
+            }}
+          >
             <Select
               value={statusFilter}
               onValueChange={(value) => {
@@ -4343,7 +4353,11 @@ function RunsPanel({
                 setPage(0)
               }}
             >
-              <SelectTrigger aria-label="Filter run status">
+              <SelectTrigger
+                aria-label="Filter run status"
+                className="h-8 min-w-36 sm:min-w-40"
+                size="sm"
+              >
                 <SelectValue>
                   {statusFilter === "all"
                     ? "All statuses"
@@ -4363,10 +4377,7 @@ function RunsPanel({
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <span className="text-xs text-muted-foreground">
-              {filteredRuns.length} matches in {runs.length} loaded runs
-            </span>
-          </div>
+          </FilterBar>
           <Table>
             <TableHeader>
               <TableRow>

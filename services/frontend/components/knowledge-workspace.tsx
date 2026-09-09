@@ -73,6 +73,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
+import { FilterBar } from "@/components/ui/filter-bar"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import {
@@ -1439,27 +1440,38 @@ export function KnowledgeWorkspace({
                 </Button>
               )}
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
-              <div className="relative min-w-0 sm:col-span-2 xl:col-span-1">
-                <Search
-                  className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Input
-                  className="w-full pl-7"
-                  placeholder="Search this folder"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  aria-label="Search this folder"
-                />
-              </div>
+            <FilterBar
+              className="-mx-4 -mb-3 px-4 sm:-mx-0 sm:px-0"
+              search={{
+                value: query,
+                onChange: setQuery,
+                placeholder: "Search this folder",
+                label: "Search this folder",
+              }}
+              resultCount={visibleItems.length + childSpaces.length}
+              resultLabel="items"
+              hasActiveFilters={
+                Boolean(query.trim()) ||
+                typeFilter !== "all" ||
+                statusFilter !== "all" ||
+                ownershipFilter !== "all" ||
+                sortBy !== "updated"
+              }
+              onClear={() => {
+                setQuery("")
+                setTypeFilter("all")
+                setStatusFilter("all")
+                setOwnershipFilter("all")
+                setSortBy("updated")
+              }}
+            >
               <Select
                 value={typeFilter}
                 onValueChange={(value) =>
                   setTypeFilter((value as ItemFilter) || "all")
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger aria-label="Filter by type" className="min-w-32">
                   <SelectValue>
                     {typeFilter === "all"
                       ? "All types"
@@ -1479,7 +1491,10 @@ export function KnowledgeWorkspace({
                 value={statusFilter}
                 onValueChange={(value) => setStatusFilter(value ?? "all")}
               >
-                <SelectTrigger className="w-full" aria-label="Filter by status">
+                <SelectTrigger
+                  className="min-w-36"
+                  aria-label="Filter by status"
+                >
                   <Settings2 data-icon="inline-start" />
                   <SelectValue>
                     {statusFilter === "all"
@@ -1501,7 +1516,7 @@ export function KnowledgeWorkspace({
                 onValueChange={(value) => setOwnershipFilter(value ?? "all")}
               >
                 <SelectTrigger
-                  className="w-full"
+                  className="min-w-36"
                   aria-label="Filter by ownership"
                 >
                   <SelectValue>
@@ -1526,7 +1541,7 @@ export function KnowledgeWorkspace({
                   )
                 }
               >
-                <SelectTrigger className="w-full" aria-label="Sort knowledge">
+                <SelectTrigger className="min-w-40" aria-label="Sort knowledge">
                   <SelectValue>
                     {sortBy === "updated"
                       ? "Recently updated"
@@ -1541,7 +1556,7 @@ export function KnowledgeWorkspace({
                   <SelectItem value="type">Type</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </FilterBar>
           </CardHeader>
           <ContextMenu>
             <ContextMenuTrigger className="block min-h-96">
@@ -1618,7 +1633,7 @@ export function KnowledgeWorkspace({
                       childSpaces.map((folder) => (
                         <ContextMenu key={folder.id}>
                           <ContextMenuTrigger
-                            className="group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+                            className="group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
                             onDoubleClick={() => setSpaceId(folder.id)}
                           >
                             <div className="mb-3 flex items-start justify-between gap-2">
@@ -1728,7 +1743,7 @@ export function KnowledgeWorkspace({
                         <ContextMenu key={item.id}>
                           <ContextMenuTrigger
                             className={cn(
-                              "group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                              "group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
                               selected?.id === item.id &&
                                 "ring-2 ring-primary/30"
                             )}

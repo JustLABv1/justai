@@ -297,14 +297,16 @@ export function ToolCallsSection({
   return (
     <div className={cn("w-fit max-w-[35rem]", className)}>
       {/* Collapsible Header */}
-      <button
+      <Button
         type="button"
         aria-expanded={isGroupExpanded}
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex cursor-pointer items-center gap-2 py-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+        className="h-auto min-h-9 cursor-pointer justify-start gap-2 px-1 py-2 text-zinc-500 hover:bg-transparent hover:text-zinc-900 dark:hover:bg-transparent dark:hover:text-white"
+        size="sm"
+        variant="ghost"
       >
         {renderStackedIcons()}
-        <span className="text-xs font-medium transition-all duration-200">
+        <span className="text-xs font-medium">
           Used {toolCalls.length} tool
           {toolCalls.length > 1 ? "s" : ""}
         </span>
@@ -329,12 +331,12 @@ export function ToolCallsSection({
           </span>
         )}
         <ChevronIcon isExpanded={isGroupExpanded} />
-      </button>
+      </Button>
 
       {/* Collapsible Content */}
       <div
         className={cn(
-          "overflow-hidden transition-all duration-200",
+          "overflow-hidden transition-[max-height,opacity] duration-200 ease-out",
           isGroupExpanded ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
         )}
       >
@@ -386,14 +388,17 @@ export function ToolCallsSection({
 
                 {/* Content column */}
                 <div className="min-w-0 flex-1">
-                  <button
+                  <Button
                     type="button"
+                    disabled={!hasDetails}
                     className={cn(
-                      "group/parent flex items-center gap-1",
-                      hasDetails ? "cursor-pointer" : "",
+                      "group/parent h-auto min-h-8 justify-start rounded-md px-1 py-1 text-left disabled:pointer-events-auto disabled:opacity-100",
+                      hasDetails ? "cursor-pointer" : "cursor-default",
                       !hasCategoryText ? "pt-2" : ""
                     )}
                     onClick={() => hasDetails && toggleCallExpansion(index)}
+                    size="sm"
+                    variant="ghost"
                     aria-expanded={hasDetails ? isCallExpanded : undefined}
                     aria-controls={
                       hasDetails
@@ -424,7 +429,7 @@ export function ToolCallsSection({
                     {hasDetails && (
                       <ChevronIcon isExpanded={isCallExpanded} size={14} />
                     )}
-                  </button>
+                  </Button>
 
                   {hasCategoryText && (
                     <p className="text-[11px] text-zinc-400 capitalize dark:text-zinc-500">

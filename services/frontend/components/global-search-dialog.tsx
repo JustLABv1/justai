@@ -34,6 +34,7 @@ import type {
   ViewId,
 } from "@/lib/types"
 import { api } from "@/lib/api"
+import { Button } from "@/components/ui/button"
 
 type GlobalSearchDialogProps = {
   open: boolean
@@ -372,13 +373,15 @@ export function GlobalSearchDialog({
             role="alert"
           >
             <span className="min-w-0">{error}</span>
-            <button
-              className="shrink-0 rounded-md border border-destructive/30 px-2 py-1 font-medium hover:bg-destructive/10"
+            <Button
+              className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={() => setRetryToken((value) => value + 1)}
+              size="sm"
               type="button"
+              variant="outline"
             >
               Retry
-            </button>
+            </Button>
           </div>
         )}
         {groupedResults.map((group) => {
