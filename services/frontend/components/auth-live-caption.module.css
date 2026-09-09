@@ -7,29 +7,60 @@
   overflow: hidden;
   padding: clamp(1.5rem, 3vw, 3rem) clamp(2rem, 5vw, 5rem);
   background:
-    linear-gradient(
-      color-mix(in oklch, var(--foreground) 4%, transparent) 1px,
-      transparent 1px
+    radial-gradient(
+      ellipse 70% 52% at 18% 12%,
+      color-mix(in oklch, var(--primary) 14%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 58% 48% at 88% 78%,
+      color-mix(in oklch, #9f6bff 9%, transparent),
+      transparent 76%
     ),
     linear-gradient(
-      90deg,
-      color-mix(in oklch, var(--foreground) 4%, transparent) 1px,
-      transparent 1px
-    ),
-    color-mix(in oklch, var(--muted) 78%, var(--background));
-  background-size: 44px 44px;
+      145deg,
+      color-mix(in oklch, var(--muted) 88%, var(--background)) 0%,
+      color-mix(in oklch, var(--background) 70%, var(--muted)) 52%,
+      color-mix(in oklch, var(--muted) 76%, var(--background)) 100%
+    );
   color: var(--foreground);
   isolation: isolate;
+}
+.showcase::before {
+  position: absolute;
+  top: 22%;
+  left: -18%;
+  z-index: -1;
+  width: 90%;
+  height: 48%;
+  border-radius: 50%;
+  background: linear-gradient(
+    105deg,
+    transparent 16%,
+    color-mix(in oklch, var(--primary) 7%, transparent) 50%,
+    transparent 82%
+  );
+  filter: blur(22px);
+  content: "";
+  opacity: 0.8;
+  pointer-events: none;
+  transform: rotate(-11deg);
 }
 .showcase::after {
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: linear-gradient(
-    to bottom,
-    transparent 62%,
-    color-mix(in oklch, var(--background) 55%, transparent)
-  );
+  background:
+    radial-gradient(
+      ellipse 60% 35% at 48% 48%,
+      transparent 45%,
+      color-mix(in oklch, var(--background) 18%, transparent) 100%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 58%,
+      color-mix(in oklch, var(--background) 48%, transparent)
+    );
   content: "";
   pointer-events: none;
 }
