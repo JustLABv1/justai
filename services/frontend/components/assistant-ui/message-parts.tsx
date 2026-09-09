@@ -300,6 +300,7 @@ const toolLabels: Record<string, string> = {
   generate_image: "Generate image",
   edit_image: "Edit image",
   create_pdf: "Create PDF",
+  create_file: "Create file",
 }
 
 function toolCategory(toolName: string, serverName?: string) {
@@ -310,7 +311,7 @@ function toolCategory(toolName: string, serverName?: string) {
   if (toolName === "browse_url") return "browse_url"
   if (toolName === "generate_image") return "generate_image"
   if (toolName === "edit_image") return "edit_image"
-  if (toolName === "create_pdf") return "documents"
+  if (toolName === "create_pdf" || toolName === "create_file") return "documents"
   if (toolName.toLowerCase().includes("memory")) return "memory"
   return "integrations"
 }
@@ -521,7 +522,7 @@ function GeneratedFiles() {
     () =>
       messageParts.flatMap((part) =>
         part.type === "tool-call" &&
-        part.toolName === "create_pdf" &&
+        ["create_pdf", "create_file"].includes(part.toolName) &&
         part.result !== undefined &&
         !part.isError &&
         part.status.type !== "incomplete"

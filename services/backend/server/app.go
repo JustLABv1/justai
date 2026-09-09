@@ -361,6 +361,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/images/edit", a.scopedRateLimit("image", 20), a.editImage)
 	org.GET("/images/:id", a.serveGeneratedImage)
 	org.GET("/pdfs/:id", a.serveGeneratedPDF)
+	org.GET("/files/:id", a.serveGeneratedChatFile)
 	org.GET("/conversations/:id/context", a.getConversationContext)
 	org.POST("/conversations/:id/repositories", a.platformFeature("knowledge"), a.createRepositoryContext)
 	org.DELETE("/conversations/:id/context/repositories/:repositoryId", a.platformFeature("knowledge"), a.deleteRepositoryContext)

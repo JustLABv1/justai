@@ -369,6 +369,16 @@ type GeneratedPDF struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type GeneratedFile struct {
+	ID        uuid.UUID `json:"id"`
+	URL       string    `json:"url"`
+	Filename  string    `json:"filename"`
+	Title     string    `json:"title"`
+	MimeType  string    `json:"mimeType"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type Message struct {
 	ID             uuid.UUID  `json:"id"`
 	ConversationID uuid.UUID  `json:"conversationId"`

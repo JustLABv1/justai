@@ -71,6 +71,7 @@ const normalizeCategoryName = (name: string): string => {
 const iconAliases: Record<string, string> = {
   calendar: "google_calendar",
   create_pdf: "documents",
+  create_file: "documents",
 }
 
 // Tool category icon configs - matches gaia repo pattern
@@ -396,6 +397,7 @@ export const formatToolName = (name: string): string => {
   const builtInLabels: Record<string, string> = {
     browse_url: "Browse URL",
     create_pdf: "Create PDF",
+    create_file: "Create file",
     edit_image: "Edit image",
     generate_image: "Generate image",
     web_search: "Web search",

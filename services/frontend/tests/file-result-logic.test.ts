@@ -4,6 +4,7 @@ import test from "node:test"
 import {
   formatFileSize,
   hasFileResultShape,
+  isGeneratedFileURL,
   isGeneratedPDFURL,
   parseGeneratedFileResult,
 } from "../lib/file-result-logic.ts"
@@ -76,6 +77,30 @@ test("recognizes only scoped JustAI PDF download URLs", () => {
   assert.equal(
     isGeneratedPDFURL("https://attacker.example/api/v1/pdfs/file.pdf"),
     false
+  )
+})
+
+test("recognizes scoped generated chat file download URLs", () => {
+  assert.equal(
+    isGeneratedFileURL(
+      "/api/v1/files/da7de815-6cf6-4e27-a35c-066f1c790452"
+    ),
+    true
+  )
+  assert.equal(
+    isGeneratedFileURL("/api/v1/files/not-a-uuid"),
+    false
+  )
+  assert.equal(
+    parseGeneratedFileResult({
+      file: {
+        filename: "revenue.csv",
+        mimeType: "text/csv",
+        title: "Revenue",
+        url: "/api/v1/files/da7de815-6cf6-4e27-a35c-066f1c790452",
+      },
+    })?.filename,
+    "revenue.csv"
   )
 })
 

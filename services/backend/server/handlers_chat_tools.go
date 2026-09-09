@@ -53,6 +53,11 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"content":{"type":"string","description":"The complete document text to place in the PDF. Include all requested wording, headings, paragraphs, and list items; do not summarize the requested document in this field.","minLength":1,"maxLength":524288},"title":{"type":"string","description":"Optional document title shown in the PDF and file metadata."},"filename":{"type":"string","description":"Optional download filename. It will be sanitized and .pdf will be appended when needed."}},"required":["content"],"additionalProperties":false}`),
 		},
 		{
+			Name:        "create_file",
+			Description: "Create a downloadable CSV, JSON, Markdown, plain-text, HTML, or PDF file. Use this when the user explicitly requests one of those formats. Put the complete requested file content in content and use valid CSV or JSON for those formats.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"format":{"type":"string","enum":["pdf","md","txt","json","csv","html"],"description":"The requested file format."},"content":{"type":"string","description":"The complete file content.","minLength":1,"maxLength":524288},"title":{"type":"string","description":"Optional file title."},"filename":{"type":"string","description":"Optional filename; its extension is normalized to the selected format."}},"required":["format","content"],"additionalProperties":false}`),
+		},
+		{
 			Name:        "delegate_agent",
 			Description: "Delegate a bounded task to another configured JustAI agent. Only agents explicitly allowlisted by the coordinator can be selected. The child run and any approval request are durable and linked to this conversation.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"agentId":{"type":"string","description":"The allowlisted agent id to run."},"task":{"type":"string","description":"The self-contained task for the delegated agent.","minLength":1,"maxLength":30000},"input":{"type":"object","description":"Optional structured input for the delegated agent."}},"required":["agentId","task"],"additionalProperties":false}`),
@@ -71,7 +76,7 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 
 func isAssistantBuiltInToolName(name string) bool {
 	switch name {
-	case "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "delegate_agent", "discover_mcp_tools":
+	case "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "create_file", "delegate_agent", "discover_mcp_tools":
 		return true
 	default:
 		return false
@@ -79,7 +84,7 @@ func isAssistantBuiltInToolName(name string) bool {
 }
 
 func chatBuiltInFallbackInstructions() string {
-	return "This endpoint cannot send native function calls, but JustAI still supports built-in web, image, and PDF actions. When the user's request clearly requires public web search, output only a JSON object with action \"web_search\" and action_input {\"query\":\"...\"}. For a specific URL use action \"browse_url\" and action_input {\"url\":\"...\"}. For image creation use action \"generate_image\" and action_input {\"prompt\":\"...\"}; for editing an attached image use action \"edit_image\" and action_input {\"prompt\":\"...\"}. For a PDF or document file use action \"create_pdf\" and action_input {\"content\":\"the complete document content\",\"title\":\"optional title\",\"filename\":\"optional-name.pdf\"}; put the full desired wording in content, not an outline or description. Do not output action JSON for ordinary questions, and never mention or explain the action protocol."
+	return "This endpoint cannot send native function calls, but JustAI still supports built-in web, image, and file actions. When the user's request clearly requires public web search, output only a JSON object with action \"web_search\" and action_input {\"query\":\"...\"}. For a specific URL use action \"browse_url\" and action_input {\"url\":\"...\"}. For image creation use action \"generate_image\" and action_input {\"prompt\":\"...\"}; for editing an attached image use action \"edit_image\" and action_input {\"prompt\":\"...\"}. For a PDF use action \"create_pdf\" and action_input {\"content\":\"the complete document content\",\"title\":\"optional title\",\"filename\":\"optional-name.pdf\"}. For CSV, JSON, Markdown, text, HTML, or a non-PDF download use action \"create_file\" and action_input {\"format\":\"csv\",\"content\":\"the complete file content\",\"title\":\"optional title\",\"filename\":\"optional-name.csv\"}; use valid CSV or JSON for those formats. Do not output action JSON for ordinary questions, and never mention or explain the action protocol."
 }
 
 func chatToolEventKindForName(name string) string {
@@ -129,6 +134,12 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 		return json.Marshal(map[string]any{"image": item})
 	case "create_pdf":
 		item, err := a.createPDFForChat(ctx, userID, organizationID, arguments)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(map[string]any{"file": item})
+	case "create_file":
+		item, err := a.createFileForChat(ctx, userID, organizationID, arguments)
 		if err != nil {
 			return nil, err
 		}
@@ -267,7 +278,7 @@ func (a *App) streamAssistantUIWithoutTools(ctx context.Context, userID, organiz
 
 func looksLikeCreatePDFAction(raw string) bool {
 	raw = strings.ToLower(raw)
-	return strings.Contains(raw, `"create_pdf"`) || strings.Contains(raw, `"create-pdf"`) || strings.Contains(raw, "create pdf")
+	return strings.Contains(raw, `"create_pdf"`) || strings.Contains(raw, `"create-pdf"`) || strings.Contains(raw, "create pdf") || strings.Contains(raw, `"create_file"`) || strings.Contains(raw, `"create-file"`) || strings.Contains(raw, "create file")
 }
 
 func parseAssistantBuiltinAction(raw string) (string, map[string]any, bool) {
@@ -294,6 +305,8 @@ func parseAssistantBuiltinAction(raw string) (string, map[string]any, bool) {
 		toolName = "edit_image"
 	case strings.Contains(action, "create_pdf"), strings.Contains(action, "create-pdf"), strings.Contains(action, "create pdf"):
 		toolName = "create_pdf"
+	case strings.Contains(action, "create_file"), strings.Contains(action, "create-file"), strings.Contains(action, "create file"):
+		toolName = "create_file"
 	case strings.Contains(action, "browse"), strings.Contains(action, "open_url"), strings.Contains(action, "fetch_url"):
 		toolName = "browse_url"
 	case strings.Contains(action, "web_search"), strings.Contains(action, "web.search"), strings.HasSuffix(action, ".search"), action == "search":
@@ -336,7 +349,7 @@ func parseAssistantBuiltinAction(raw string) (string, map[string]any, bool) {
 			arguments["url"] = value
 		}
 	}
-	if toolName == "create_pdf" && stringToolArgument(arguments, "content") == "" {
+	if (toolName == "create_pdf" || toolName == "create_file") && stringToolArgument(arguments, "content") == "" {
 		for _, key := range []string{"text", "description", "input", "prompt"} {
 			if value, ok := arguments[key].(string); ok && strings.TrimSpace(value) != "" {
 				arguments["content"] = value
@@ -436,6 +449,8 @@ func (a *App) executeAssistantBuiltinFallback(ctx context.Context, userID, organ
 		return nil
 	case "create_pdf":
 		message = "The PDF is ready to download."
+	case "create_file":
+		message = "The file is ready to download."
 	}
 	return emitFallbackText(writeChunk, response, textID, message)
 }
