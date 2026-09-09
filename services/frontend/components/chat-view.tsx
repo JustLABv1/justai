@@ -9,6 +9,12 @@ import {
   type ReactNode,
 } from "react"
 import {
+  IconBrandOpenai,
+  IconBrandGoogle,
+  IconAsterisk,
+  IconServer,
+} from "@tabler/icons-react"
+import {
   ArrowUp,
   Bot,
   BrainCircuit,
@@ -18,7 +24,9 @@ import {
   Copy,
   FileText,
   History,
-  Paperclip,
+  Plus,
+  Search,
+  ShieldCheck,
   Pencil,
   Plug,
   RefreshCw,
@@ -91,7 +99,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { APIError, api, API_URL } from "@/lib/api"
@@ -114,22 +121,6 @@ type EnsureConversationOptions = {
   activate?: boolean
   assistantId?: string | null
   inheritRepositories?: boolean
-}
-
-const FAVORITE_ENDPOINTS_STORAGE_KEY = "justai.favorite-endpoints"
-const FAVORITE_MODELS_STORAGE_KEY = "justai.favorite-models"
-
-function readStoredIds(key: string) {
-  if (typeof window === "undefined") return [] as string[]
-  try {
-    const stored = window.localStorage.getItem(key)
-    const parsed: unknown = stored ? JSON.parse(stored) : []
-    return Array.isArray(parsed)
-      ? parsed.filter((value): value is string => typeof value === "string")
-      : []
-  } catch {
-    return [] as string[]
-  }
 }
 
 type Props = {
@@ -1163,7 +1154,7 @@ function ContextDisplay({
   if (!items.length && !removeError && !leading) return null
 
   return (
-    <div className="relative z-10 mx-auto -mb-px flex min-h-7 w-[calc(100%-2.5rem)] min-w-0 items-center gap-1.5 overflow-x-auto rounded-t-[1.35rem] border border-b-0 bg-background/95 px-2.5 py-0.5 text-[11px] text-muted-foreground shadow-[0_-10px_24px_-22px_rgba(0,0,0,0.5)] backdrop-blur supports-[backdrop-filter]:bg-background/80">
+    <div className="relative z-10 mx-auto -mb-px flex min-h-7 w-[calc(100%-2.5rem)] min-w-0 items-center gap-1.5 overflow-x-auto rounded-t-[1.35rem] border border-b-0 border-transparent bg-[#ebebeb] px-2.5 py-0.5 text-[11px] text-[#777777] dark:bg-[#2b2b2b] dark:text-[#777777]">
       {leading}
       {leading && items.length ? (
         <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border/70" />
@@ -1172,7 +1163,7 @@ function ContextDisplay({
         <span className="sr-only">Attached context</span>
         {items.map((item) => (
           <div
-            className="inline-flex max-w-52 shrink-0 items-center gap-1.5 rounded-lg border border-border/70 bg-muted/30 px-2 py-0.5 text-[11px]"
+            className="inline-flex max-w-52 shrink-0 items-center gap-1.5 rounded-lg bg-muted/50 px-2 py-0.5 text-[11px]"
             key={item.id}
             title={`${item.label} · ${item.detail}`}
           >
@@ -1341,7 +1332,7 @@ function UserMessage() {
   return (
     <MessagePrimitive.Root className="group/message flex justify-end px-1 py-3 sm:px-4">
       <div className="flex max-w-[min(44rem,90%)] flex-col items-end">
-        <div className="rounded-[1.35rem] rounded-br-md border border-accent-foreground/15 bg-accent px-4 py-2.5 text-[15px] leading-6 text-accent-foreground shadow-sm dark:border-primary/40 dark:bg-primary dark:text-primary-foreground">
+        <div className="rounded-[1.35rem] rounded-br-md bg-card px-4 py-2.5 text-[15px] leading-6 text-card-foreground">
           <MessagePrimitive.Quote>
             {({ text }) => (
               <blockquote className="mb-2 border-l-2 border-accent-foreground/40 pl-3 text-xs leading-5 text-accent-foreground/80 dark:border-primary-foreground/50 dark:text-primary-foreground/80">
@@ -1853,6 +1844,24 @@ function EmptyThread({ children }: { children?: ReactNode }) {
   )
 }
 
+function EndpointIcon({
+  provider,
+  className,
+}: {
+  provider?: string
+  className?: string
+}) {
+  const Icon =
+    provider === "openai"
+      ? IconBrandOpenai
+      : provider === "gemini"
+        ? IconBrandGoogle
+        : provider === "anthropic"
+          ? IconAsterisk
+          : IconServer
+  return <Icon className={className} stroke={1.5} aria-hidden="true" />
+}
+
 export function ModelEndpointPicker({
   endpoints,
   endpointId,
@@ -1872,112 +1881,156 @@ export function ModelEndpointPicker({
   onModelChange: (id: string) => void
   compact: boolean
 }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
   const endpoint = endpoints.find((item) => item.id === endpointId)
   const selectedModel = models.find((model) => model.id === modelId)
-  const endpointLabel = endpoint?.name ?? "Select endpoint"
   const modelLabel = selectedModel?.name || modelId || "Select model"
+  const filteredModels = models.filter((model) =>
+    `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase())
+  )
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            aria-label="Select LLM endpoint and chat model"
-            className={cn(
-              "h-9 max-w-56 min-w-0 justify-start gap-1.5 rounded-full border-0 bg-transparent px-2 text-xs font-normal text-foreground hover:bg-muted/70",
-              compact && "max-w-40 px-1.5"
-            )}
-            size="sm"
-            type="button"
-            variant="ghost"
-          />
-        }
+    <PopoverPrimitive.Root
+      open={open}
+      onOpenChange={(value) => {
+        setOpen(value)
+        if (!value) setQuery("")
+      }}
+    >
+      <PopoverPrimitive.Trigger
+        render={<Button variant="ghost" type="button" />}
+        aria-label="Select LLM endpoint and chat model"
+        title={endpoint?.name}
+        className={cn(
+          "h-8 max-w-64 min-w-0 gap-1.5 rounded-full px-2 text-sm font-normal text-muted-foreground",
+          compact && "max-w-24 sm:max-w-56"
+        )}
       >
-        <span className="max-w-24 truncate text-muted-foreground">
-          {endpointLabel}
-        </span>
-        <span className="text-muted-foreground/60">·</span>
-        <span className="max-w-28 truncate">{modelLabel}</span>
-        <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80">
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-          LLM endpoint
-        </div>
-        <DropdownMenuGroup>
-          {endpoints.map((item) => (
-            <DropdownMenuItem
-              className="items-start py-2"
-              key={item.id}
-              onClick={() => onEndpointChange(item.id)}
+        <span className="truncate">{modelLabel}</span>
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Positioner
+          side="top"
+          align="end"
+          sideOffset={12}
+          className="z-50"
+        >
+          <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] bg-popover p-1 text-popover-foreground shadow-sm outline-none">
+            <div
+              aria-label="Endpoints"
+              className="flex max-h-80 w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1"
             >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium">
-                  {item.name}
-                </span>
-                <span className="block truncate text-[11px] text-muted-foreground">
-                  {item.providerType} · {item.chatModel || "No default model"}
-                  {item.capabilities?.vision && (
-                    <> · Vision: {item.visionModel || "chat model"}</>
-                  )}
-                </span>
-              </span>
-              <Check
-                className={cn(
-                  "mt-0.5 size-3.5 shrink-0",
-                  item.id === endpointId ? "opacity-100" : "opacity-0"
-                )}
-              />
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-          Chat model
-          {modelDiscoveryLoading && (
-            <span className="ml-2 font-normal text-muted-foreground">
-              Discovering…
-            </span>
-          )}
-        </div>
-        <DropdownMenuGroup>
-          {models.length > 0 ? (
-            models.map((model) => (
-              <DropdownMenuItem
-                className="items-start py-2"
-                key={model.id}
-                onClick={() => onModelChange(model.id)}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium">
-                    {model.name && model.name !== model.id
-                      ? model.name
-                      : model.id}
-                  </span>
-                  {model.name && model.name !== model.id && (
-                    <span className="block truncate text-[11px] text-muted-foreground">
-                      {model.id}
-                    </span>
-                  )}
-                </span>
-                <Check
+              {endpoints.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-label={item.name}
+                  aria-pressed={item.id === endpointId}
+                  title={item.name}
+                  onClick={() => {
+                    onEndpointChange(item.id)
+                    setQuery("")
+                  }}
                   className={cn(
-                    "mt-0.5 size-3.5 shrink-0",
-                    model.id === modelId ? "opacity-100" : "opacity-0"
+                    "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    item.id === endpointId
+                      ? "bg-primary text-primary-foreground hover:bg-primary/85"
+                      : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
                   )}
-                />
-              </DropdownMenuItem>
-            ))
-          ) : (
-            <p className="px-2 py-2 text-xs text-muted-foreground">
-              {modelDiscoveryLoading
-                ? "Discovering models for this endpoint…"
-                : "No discovered models. Configure one in Settings."}
-            </p>
-          )}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+                >
+                  <span className="text-sm font-medium" aria-hidden="true">
+                    {item.name
+                      .trim()
+                      .split(/\s+/)
+                      .map((word) => Array.from(word)[0])
+                      .slice(0, 2)
+                      .join("")
+                      .toUpperCase()}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="min-w-0 flex-1 p-1.5">
+              <div className="flex items-center justify-between gap-3 px-2 pt-0.5 pb-1.5">
+                <PopoverPrimitive.Title className="text-sm font-medium text-muted-foreground">
+                  Models
+                </PopoverPrimitive.Title>
+                <label className="flex max-w-40 min-w-0 items-center gap-1 text-muted-foreground">
+                  <input
+                    aria-label="Search models"
+                    placeholder="Quick Search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    className="w-full min-w-0 bg-transparent text-right text-sm outline-none placeholder:text-muted-foreground/60"
+                  />
+                  <Search className="size-4 shrink-0" />
+                </label>
+              </div>
+              <div
+                className="max-h-72 overflow-y-auto"
+                role="group"
+                aria-label={`Models for ${endpoint?.name ?? "endpoint"}`}
+              >
+                {modelDiscoveryLoading ? (
+                  <p
+                    role="status"
+                    className="p-3 text-sm text-muted-foreground"
+                  >
+                    Discovering models…
+                  </p>
+                ) : filteredModels.length ? (
+                  filteredModels.map((model) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      aria-pressed={model.id === modelId}
+                      onClick={() => {
+                        onModelChange(model.id)
+                        setOpen(false)
+                        setQuery("")
+                      }}
+                      className={cn(
+                        "flex min-h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring",
+                        model.id === modelId && "bg-muted/50"
+                      )}
+                    >
+                      <EndpointIcon
+                        provider={endpoint?.providerType}
+                        className="size-4 shrink-0 text-muted-foreground/50"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        {model.name || model.id}
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "size-4 shrink-0 rounded-full border shadow-xs",
+                          model.id === modelId &&
+                            "border-[var(--composer-accent)] bg-[var(--composer-accent)] ring-3 ring-popover ring-inset"
+                        )}
+                      />
+                    </button>
+                  ))
+                ) : (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {query
+                      ? "No matching models."
+                      : "No models available. Configure an endpoint in Settings."}
+                  </p>
+                )}
+              </div>
+            </div>
+          </PopoverPrimitive.Popup>
+        </PopoverPrimitive.Positioner>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
   )
 }
 
@@ -2134,7 +2187,7 @@ export function DeepContextToggle({
           sideOffset={8}
         >
           <PopoverPrimitive.Popup
-            className="w-[min(22rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            className="w-[min(22rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl bg-popover p-3 text-popover-foreground shadow-xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
             initialFocus={false}
           >
             <PopoverPrimitive.Arrow className="-mb-1 size-2.5 rotate-45 border-r border-b bg-popover" />
@@ -2159,7 +2212,7 @@ export function DeepContextToggle({
                 <X className="size-3.5" />
               </PopoverPrimitive.Close>
             </div>
-            <div className="mt-3 rounded-lg border bg-muted/30 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+            <div className="mt-3 rounded-xl bg-muted/50 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
               <span className="font-medium text-foreground">
                 {enabled ? "On" : "Off"}
               </span>
@@ -2182,13 +2235,6 @@ function ResponseSetupPopover({
   assistantId,
   assistantLocked,
   onAssistantChange,
-  endpoints,
-  endpointId,
-  onEndpointChange,
-  models,
-  modelId,
-  modelDiscoveryLoading,
-  onModelChange,
   deepContext,
   deepContextAvailable,
   onDeepContextChange,
@@ -2198,85 +2244,19 @@ function ResponseSetupPopover({
   assistantId: string
   assistantLocked: boolean
   onAssistantChange: (id: string) => void
-  endpoints: Endpoint[]
-  endpointId: string
-  onEndpointChange: (id: string) => void
-  models: DiscoveredChatModel[]
-  modelId: string
-  modelDiscoveryLoading?: boolean
-  onModelChange: (id: string) => void
   deepContext: boolean
   deepContextAvailable: boolean
   onDeepContextChange: (enabled: boolean) => void
   deepContextTitle: string
 }) {
-  const [view, setView] = useState<"main" | "agent" | "model">("main")
-  const [favoriteEndpointIds, setFavoriteEndpointIds] = useState<string[]>(() =>
-    readStoredIds(FAVORITE_ENDPOINTS_STORAGE_KEY)
-  )
-  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() =>
-    readStoredIds(FAVORITE_MODELS_STORAGE_KEY)
-  )
+  const [view, setView] = useState<"main" | "agent">("main")
   const selectedAssistant = assistants.find(
     (assistant) => assistant.id === assistantId
   )
-  const endpoint = endpoints.find((item) => item.id === endpointId)
-  const selectedModel = models.find((model) => model.id === modelId)
   const assistantLabel = selectedAssistant?.name ?? "JustAI default"
-  const modelLabel = selectedModel?.name || modelId || "Select model"
-  const endpointLabel = endpoint?.name ?? "Select endpoint"
-  const setupLabel = `${modelLabel} · ${endpointLabel}`
-  const favoriteEndpointIdSet = new Set(favoriteEndpointIds)
-  const favoriteModelIdSet = new Set(favoriteModelIds)
-  const sortedEndpoints = [...endpoints].sort(
-    (left, right) =>
-      Number(favoriteEndpointIdSet.has(right.id)) -
-      Number(favoriteEndpointIdSet.has(left.id))
-  )
-  const sortedModels = [...models].sort(
-    (left, right) =>
-      Number(favoriteModelIdSet.has(right.id)) -
-      Number(favoriteModelIdSet.has(left.id))
-  )
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        FAVORITE_ENDPOINTS_STORAGE_KEY,
-        JSON.stringify(favoriteEndpointIds)
-      )
-    } catch {
-      // Preferences are optional; the popover still works without storage.
-    }
-  }, [favoriteEndpointIds])
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        FAVORITE_MODELS_STORAGE_KEY,
-        JSON.stringify(favoriteModelIds)
-      )
-    } catch {
-      // Preferences are optional; the popover still works without storage.
-    }
-  }, [favoriteModelIds])
-
-  const toggleFavorite = (
-    id: string,
-    setFavoriteIds: React.Dispatch<React.SetStateAction<string[]>>
-  ) => {
-    setFavoriteIds((ids) =>
-      ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]
-    )
-  }
 
   const selectAgent = (id: string) => {
     onAssistantChange(id)
-    setView("main")
-  }
-
-  const selectModel = (id: string) => {
-    onModelChange(id)
     setView("main")
   }
 
@@ -2286,21 +2266,16 @@ function ResponseSetupPopover({
         aria-label="Open response setup"
         render={
           <Button
-            className="h-8 max-w-64 min-w-0 justify-start gap-1.5 rounded-full px-2.5 text-xs font-medium text-foreground hover:bg-muted active:scale-[0.97]"
+            className="h-8 max-w-64 min-w-0 justify-start gap-1.5 rounded-full px-2.5 text-sm font-normal text-muted-foreground hover:bg-muted active:scale-[0.97]"
             size="sm"
-            title={setupLabel}
+            title="Agent and context settings"
             type="button"
             variant="ghost"
           />
         }
       >
-        <span
-          className="flex size-4 shrink-0 items-center justify-center rounded-md bg-muted text-[9px] font-semibold text-muted-foreground"
-          aria-hidden="true"
-        >
-          AI
-        </span>
-        <span className="truncate">{setupLabel}</span>
+        <ShieldCheck className="size-4 shrink-0" aria-hidden="true" />
+        <span className="hidden truncate sm:inline">Response setup</span>
         {deepContext && (
           <span
             aria-label="Deep context enabled"
@@ -2317,7 +2292,7 @@ function ResponseSetupPopover({
           sideOffset={8}
         >
           <PopoverPrimitive.Popup
-            className="w-[min(21rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl border bg-popover p-2 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            className="w-[min(21rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl bg-popover p-2 text-popover-foreground shadow-xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
             initialFocus={false}
           >
             {view === "main" ? (
@@ -2352,22 +2327,6 @@ function ResponseSetupPopover({
                       <ChevronDown className="size-3.5 -rotate-90 text-muted-foreground" />
                     )}
                   </button>
-                  <button
-                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-muted"
-                    onClick={() => setView("model")}
-                    type="button"
-                  >
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                      <span className="text-[11px] font-semibold">AI</span>
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-xs font-medium">Model</span>
-                      <span className="block truncate text-[11px] text-muted-foreground">
-                        {modelLabel} · {endpointLabel}
-                      </span>
-                    </span>
-                    <ChevronDown className="size-3.5 -rotate-90 text-muted-foreground" />
-                  </button>
                   <div className="flex items-center gap-2.5 rounded-xl px-2.5 py-2">
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                       <BrainCircuit className="size-3.5" aria-hidden="true" />
@@ -2400,7 +2359,7 @@ function ResponseSetupPopover({
                   </div>
                 </div>
               </>
-            ) : view === "agent" ? (
+            ) : (
               <>
                 <SetupPopoverHeader
                   label="Choose agent"
@@ -2429,65 +2388,6 @@ function ResponseSetupPopover({
                       selected={assistant.id === assistantId}
                     />
                   ))}
-                </div>
-              </>
-            ) : (
-              <>
-                <SetupPopoverHeader
-                  label="Choose model"
-                  onBack={() => setView("main")}
-                />
-                <div className="max-h-64 overflow-y-auto p-1">
-                  <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-medium text-muted-foreground">
-                    Endpoint
-                  </p>
-                  {sortedEndpoints.map((item) => (
-                    <SetupOption
-                      description={`${item.providerType} · ${item.chatModel || "No default model"}`}
-                      favorite={favoriteEndpointIdSet.has(item.id)}
-                      icon={
-                        <span className="text-[10px] font-semibold">↗</span>
-                      }
-                      key={item.id}
-                      label={item.name}
-                      onClick={() => onEndpointChange(item.id)}
-                      onFavoriteToggle={() =>
-                        toggleFavorite(item.id, setFavoriteEndpointIds)
-                      }
-                      selected={item.id === endpointId}
-                    />
-                  ))}
-                  <p className="px-2.5 pt-3 pb-1.5 text-[11px] font-medium text-muted-foreground">
-                    Chat model{modelDiscoveryLoading ? " · Discovering…" : ""}
-                  </p>
-                  {models.length > 0 ? (
-                    sortedModels.map((model) => (
-                      <SetupOption
-                        description={
-                          model.name && model.name !== model.id
-                            ? model.id
-                            : undefined
-                        }
-                        favorite={favoriteModelIdSet.has(model.id)}
-                        icon={
-                          <span className="text-[10px] font-semibold">AI</span>
-                        }
-                        key={model.id}
-                        label={model.name || model.id}
-                        onClick={() => selectModel(model.id)}
-                        onFavoriteToggle={() =>
-                          toggleFavorite(model.id, setFavoriteModelIds)
-                        }
-                        selected={model.id === modelId}
-                      />
-                    ))
-                  ) : (
-                    <p className="px-2.5 py-3 text-xs text-muted-foreground">
-                      {modelDiscoveryLoading
-                        ? "Discovering models for this endpoint…"
-                        : "No models are available. Configure one in Settings."}
-                    </p>
-                  )}
                 </div>
               </>
             )}
@@ -2696,7 +2596,7 @@ function Composer({
         aria-label="Choose storage folders for the next message"
         render={
           <button
-            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary/15 bg-primary/5 px-1.5 py-0.5 text-left text-[10px] font-medium text-foreground/80 transition-colors hover:bg-primary/10"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-muted/50 px-1.5 py-0.5 text-left text-[10px] font-medium text-foreground/80 transition-colors hover:bg-primary/10"
             type="button"
           />
         }
@@ -2714,7 +2614,7 @@ function Composer({
           side="top"
           sideOffset={8}
         >
-          <PopoverPrimitive.Popup className="w-[min(24rem,calc(100vw-2rem))] rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none">
+          <PopoverPrimitive.Popup className="w-[min(24rem,calc(100vw-2rem))] rounded-2xl bg-popover p-3 text-popover-foreground shadow-xl outline-none">
             <PopoverPrimitive.Title className="text-xs font-semibold">
               Storage folders
             </PopoverPrimitive.Title>
@@ -3090,13 +2990,13 @@ function Composer({
             <ComposerPrimitive.AttachmentDropzone className="rounded-[2rem] transition-colors data-[dragging=true]:ring-2 data-[dragging=true]:ring-primary/40">
               <ComposerPrimitive.Root
                 className={cn(
-                  "group/composer relative rounded-[2rem] border bg-background/95 p-2 shadow-[0_16px_48px_-24px_rgba(0,0,0,0.5)] ring-1 ring-border/40 backdrop-blur supports-[backdrop-filter]:bg-background/80",
+                  "composer-surface group/composer relative rounded-[1.75rem] bg-background p-3 shadow-[0_2px_6px_rgba(0,0,0,0.05)]",
                   compact &&
-                    "flex flex-wrap items-center gap-2 overflow-hidden rounded-[1.75rem] bg-muted/30 p-2 ring-border/60"
+                    "flex flex-wrap items-center gap-2 rounded-[1.75rem]"
                 )}
                 data-running={isThreadRunning}
               >
-                <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
                   <Quote className="size-3.5 shrink-0" aria-hidden="true" />
                   <ComposerPrimitive.QuoteText className="min-w-0 flex-1 truncate" />
                   <ComposerPrimitive.QuoteDismiss
@@ -3108,7 +3008,7 @@ function Composer({
                 </ComposerPrimitive.Quote>
                 <ComposerPrimitive.Queue>
                   {() => (
-                    <div className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <div className="mx-2 mb-1 flex items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
                       <span className="size-1.5 shrink-0 rounded-full bg-primary" />
                       <QueueItemPrimitive.Text className="min-w-0 flex-1 truncate" />
                       <QueueItemPrimitive.Steer className="rounded px-1.5 py-0.5 text-[11px] hover:bg-muted hover:text-foreground">
@@ -3197,15 +3097,10 @@ function Composer({
                 )}
                 <ComposerPrimitive.Input
                   className={cn(
-                    "max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground",
-                    compact &&
-                      "order-1 min-h-10 min-w-0 flex-none basis-full px-2 py-2 leading-6"
+                    "max-h-40 min-h-16 w-full resize-none border-0 bg-transparent px-1.5 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground/65 dark:placeholder:text-[#555555]",
+                    compact && "order-1 min-h-16 min-w-0 flex-none basis-full"
                   )}
-                  placeholder={
-                    compact
-                      ? "What do you want to know? (type @ for a specific item)"
-                      : "Message JustAI… (type @ for a specific item; / and $ for MCPs)"
-                  }
+                  placeholder="Hi, what do you need today?"
                   submitMode="enter"
                 />
                 <div
@@ -3222,10 +3117,10 @@ function Composer({
                   >
                     <ComposerPrimitive.AddAttachment
                       aria-label="Attach a file"
-                      className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-foreground hover:bg-muted/80 dark:bg-[#3d3d3d] dark:hover:bg-[#474747]"
                       multiple
                     >
-                      <Paperclip className="size-4" />
+                      <Plus className="size-4" />
                     </ComposerPrimitive.AddAttachment>
                     {onOpenHistory && (
                       <Button
@@ -3246,15 +3141,8 @@ function Composer({
                       deepContext={deepContext}
                       deepContextAvailable={deepContextAvailable}
                       deepContextTitle={deepContextTitle}
-                      endpointId={endpointId}
-                      endpoints={endpoints}
-                      modelDiscoveryLoading={modelDiscoveryLoading}
-                      modelId={modelId}
-                      models={models}
                       onAssistantChange={onAssistantChange}
                       onDeepContextChange={onDeepContextChange}
-                      onEndpointChange={onEndpointChange}
-                      onModelChange={onModelChange}
                     />
                   </div>
                   <div
@@ -3264,6 +3152,16 @@ function Composer({
                         "ml-auto max-w-full min-w-0 flex-wrap justify-end"
                     )}
                   >
+                    <ModelEndpointPicker
+                      endpoints={endpoints}
+                      endpointId={endpointId}
+                      onEndpointChange={onEndpointChange}
+                      models={models}
+                      modelId={modelId}
+                      modelDiscoveryLoading={modelDiscoveryLoading}
+                      onModelChange={onModelChange}
+                      compact={compact}
+                    />
                     <VoiceControl
                       className="shrink-0"
                       compact
@@ -3272,14 +3170,14 @@ function Composer({
                     {isThreadRunning ? (
                       <ComposerPrimitive.Cancel
                         aria-label="Cancel response"
-                        className="flex size-9 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
+                        className="flex size-8 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
                       >
                         <RotateCcw className="size-4" />
                       </ComposerPrimitive.Cancel>
                     ) : (
                       <ComposerPrimitive.Send
                         aria-label="Send message"
-                        className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 disabled:opacity-40"
+                        className="flex size-8 items-center justify-center rounded-full bg-[var(--composer-accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                         disabled={hasUnreadyAttachments}
                       >
                         <ArrowUp className="size-4" />
@@ -3846,7 +3744,7 @@ function AssistantChatSurface({
         hostInfo: { name: "JustAI", version: "0.1.0" },
         maxHeight: 720,
         fallback: (
-          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          <div className="rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
             This MCP app is unavailable.
           </div>
         ),

@@ -221,7 +221,7 @@ function CapabilitySwitch({
   return (
     <label
       className={cn(
-        "flex items-start justify-between gap-3 rounded-lg border bg-card px-3 py-2.5",
+        "flex items-start justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5",
         disabled && "opacity-55"
       )}
     >
@@ -584,12 +584,12 @@ export function EndpointCreationWizard({
 
         <form
           id="endpoint-creation-form"
-          className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-cols-[13rem_minmax(0,1fr)] md:grid-rows-1"
+          className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background md:grid-cols-[13rem_minmax(0,1fr)] md:grid-rows-1"
           onSubmit={handleSubmit}
         >
           <nav
             aria-label="Endpoint setup steps"
-            className="border-b px-4 py-3 md:border-r md:border-b-0 md:px-3 md:py-5"
+            className="border-b bg-muted/20 px-4 py-3 md:border-r md:border-b-0 md:px-3 md:py-5"
           >
             <div className="flex gap-1 overflow-x-auto md:flex-col md:gap-1.5">
               {steps.map((item, index) => {
@@ -605,7 +605,7 @@ export function EndpointCreationWizard({
                     aria-current={active ? "step" : undefined}
                     onClick={() => available && goTo(item.id)}
                     className={cn(
-                      "group flex min-w-[8.75rem] items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors md:min-w-0",
+                      "group flex min-h-9 min-w-[8.75rem] items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-[background-color,color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.99] md:min-w-0",
                       active
                         ? "bg-primary/10 text-foreground"
                         : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -640,7 +640,7 @@ export function EndpointCreationWizard({
             </div>
           </nav>
 
-          <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+          <div className="min-h-0 overflow-y-auto bg-background px-4 py-4 sm:px-6 sm:py-5">
             <div className="mx-auto w-full max-w-3xl">
               {validationMessage && step !== "review" && (
                 <Alert variant="destructive" className="mb-5">
@@ -771,7 +771,7 @@ function TypeCard({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "flex min-h-40 flex-col items-start gap-4 rounded-xl border p-4 text-left transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
+        "flex min-h-40 flex-col items-start gap-4 rounded-xl border p-4 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none active:scale-[0.99]",
         active
           ? "border-primary bg-primary/5 ring-1 ring-primary/30"
           : "hover:bg-muted/50",
@@ -1800,7 +1800,7 @@ function ReviewStep({
             </Alert>
           )}
           {preflightState === "checking" && (
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
               <Spinner aria-hidden="true" /> Checking provider and looking for
               models…
             </div>

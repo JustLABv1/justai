@@ -941,7 +941,7 @@ export function MCPView({
           </Card>
         ))}
         {mode === "advanced" && visibleServers.length === 0 && (
-          <Card className="border-dashed lg:col-span-2">
+          <Card className="bg-muted/30 lg:col-span-2">
             <CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 text-center">
               <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
                 <Plug aria-hidden="true" />
@@ -993,7 +993,7 @@ export function MCPView({
                   connection.
                 </li>
               </ol>
-              <div className="rounded-lg border bg-muted/30 px-3 py-2 font-mono text-xs">
+              <div className="rounded-xl bg-muted/50 px-3 py-2 font-mono text-xs">
                 {setupGuide.endpointUrl}
               </div>
               <p className="text-xs text-muted-foreground">
@@ -1023,7 +1023,7 @@ export function MCPView({
                   scope and configure its client ID in JustAI.
                 </li>
               </ol>
-              <div className="rounded-lg border bg-muted/30 px-3 py-2 font-mono text-xs">
+              <div className="rounded-xl bg-muted/50 px-3 py-2 font-mono text-xs">
                 {setupGuide.endpointUrl}
               </div>
               <p className="text-xs text-muted-foreground">
@@ -1165,7 +1165,7 @@ export function MCPView({
               </Field>
               <Field>
                 <FieldLabel htmlFor="mcp-icon">Logo</FieldLabel>
-                <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-2">
+                <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
                   <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
                     {iconPreview && !iconRemoved ? (
                       // Uploaded MCP icons are served by JustAI and do not need

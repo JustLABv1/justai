@@ -73,8 +73,18 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
+import { FilterBar } from "@/components/ui/filter-bar"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
+import {
+  Page,
+  PageActions,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
 import {
   Select,
   SelectContent,
@@ -356,6 +366,7 @@ export function KnowledgeWorkspace({
   const requestedItemId = searchParams.get("item") ?? searchParams.get("source")
   const requestedType = searchParams.get("type")
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState("")
   const [query, setQuery] = useState("")
   const [typeFilter, setTypeFilter] = useState<ItemFilter>(() =>
     requestedType && requestedType in typeLabels
@@ -370,6 +381,7 @@ export function KnowledgeWorkspace({
   const [selected, setSelected] = useState<KnowledgeItem | null>(null)
   const [selectedDetail, setSelectedDetail] =
     useState<KnowledgeItemDetail | null>(null)
+  const [selectedDetailLoading, setSelectedDetailLoading] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [notice, setNotice] = useState("")
   const [error, setError] = useState("")
@@ -431,6 +443,11 @@ export function KnowledgeWorkspace({
         transcriptionSessions,
         memoryResult.status === "fulfilled" ? memoryResult.value.memories : []
       )
+      const failures = [
+        itemResult.status === "rejected" ? "items" : null,
+        spaceResult.status === "rejected" ? "folders" : null,
+        memoryResult.status === "rejected" ? "memories" : null,
+      ].filter(Boolean) as string[]
       const nextItems =
         itemResult.status === "fulfilled" ? itemResult.value.items : fallback
       const nextSpaces =
@@ -458,7 +475,14 @@ export function KnowledgeWorkspace({
       if (memoryResult.status === "fulfilled") {
         setMemories(memoryResult.value.memories)
       }
-      setError("")
+      if (failures.length) {
+        const message = `Some Knowledge data could not be loaded (${failures.join(", ")}). Showing the latest available data.`
+        setLoadError(message)
+        setError(message)
+      } else {
+        setLoadError("")
+        setError("")
+      }
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -505,14 +529,17 @@ export function KnowledgeWorkspace({
     const timer = window.setTimeout(() => {
       if (!selected) {
         setSelectedDetail(null)
+        setSelectedDetailLoading(false)
         return
       }
+      setSelectedDetailLoading(true)
       void api
         .get<{ item: KnowledgeItemDetail }>(
           `/api/v1/knowledge/items/${selected.id}`
         )
         .then((result) => setSelectedDetail(result.item))
         .catch(() => setSelectedDetail(null))
+        .finally(() => setSelectedDetailLoading(false))
     }, 0)
     return () => window.clearTimeout(timer)
   }, [selected])
@@ -634,12 +661,33 @@ export function KnowledgeWorkspace({
 
   async function uploadFile(file: File) {
     if (!file || busy) return
+    const acceptedExtensions = new Set([
+      "pdf",
+      "csv",
+      "md",
+      "markdown",
+      "txt",
+      "html",
+      "htm",
+      "json",
+    ])
+    const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
+    const acceptedMime =
+      file.type === "application/pdf" ||
+      file.type === "application/json" ||
+      file.type === "text/csv" ||
+      file.type.startsWith("text/")
+    if (!acceptedExtensions.has(extension) && !acceptedMime) {
+      setError("Choose a PDF, CSV, Markdown, text, HTML, or JSON file.")
+      return
+    }
     if (file.size > 25 * 1024 * 1024) {
-      setNotice("Files are limited to 25 MB.")
+      setError("Files are limited to 25 MB.")
       return
     }
     setBusy(true)
     setNotice("")
+    setError("")
     const form = new FormData()
     form.append("file", file)
     form.append("title", file.name)
@@ -673,6 +721,7 @@ export function KnowledgeWorkspace({
     event.preventDefault()
     if (!url.trim() || busy) return
     setBusy(true)
+    setError("")
     try {
       const result = await api.post<KnowledgeSource>(
         "/api/v1/knowledge/sources",
@@ -704,6 +753,7 @@ export function KnowledgeWorkspace({
     event.preventDefault()
     if (!repositoryURL.trim() || busy) return
     setBusy(true)
+    setError("")
     try {
       await api.post<{ repositoryId: string }>(
         "/api/v1/knowledge/repositories",
@@ -736,6 +786,7 @@ export function KnowledgeWorkspace({
     event.preventDefault()
     if (!spaceName.trim() || busy) return
     setBusy(true)
+    setError("")
     try {
       const result = await api.post<{ space: KnowledgeSpace }>(
         "/api/v1/knowledge/spaces",
@@ -774,8 +825,9 @@ export function KnowledgeWorkspace({
 
   async function createNote(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!noteTitle.trim() && !noteContent.trim()) return
+    if ((!noteTitle.trim() && !noteContent.trim()) || busy) return
     setBusy(true)
+    setError("")
     try {
       const result = await api.post<{ note: Note }>("/api/v1/notes", {
         title: noteTitle.trim() || "Untitled note",
@@ -800,8 +852,9 @@ export function KnowledgeWorkspace({
 
   async function createMemory(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!memoryContent.trim()) return
+    if (!memoryContent.trim() || busy) return
     setBusy(true)
+    setError("")
     try {
       const result = await api.post<{ memory: Memory }>("/api/v1/memories", {
         content: memoryContent.trim(),
@@ -827,6 +880,7 @@ export function KnowledgeWorkspace({
     event.preventDefault()
     if (!transcriptSessionId || busy) return
     setBusy(true)
+    setError("")
     try {
       let item = items.find(
         (candidate) =>
@@ -897,27 +951,6 @@ export function KnowledgeWorkspace({
         caught instanceof Error
           ? caught.message
           : "The note could not be updated."
-      )
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function removeSelectedSource() {
-    if (!selectedSource || busy) return
-    setBusy(true)
-    try {
-      await api.delete(`/api/v1/knowledge/sources/${selectedSource.id}`)
-      onSourcesChange(
-        sources.filter((source) => source.id !== selectedSource.id)
-      )
-      closeInspector()
-      await load()
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The source could not be removed."
       )
     } finally {
       setBusy(false)
@@ -1283,8 +1316,9 @@ export function KnowledgeWorkspace({
   }
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-[1500px] flex-1 flex-col gap-4 p-4 sm:p-6 lg:p-8">
+    <Page className="min-h-0 max-w-[1500px] flex-1 gap-4">
       <input
+        aria-label="Upload knowledge file"
         ref={fileInputRef}
         type="file"
         accept=".pdf,.csv,.md,.markdown,.txt,.html,.htm,.json,text/*,application/pdf,application/json,application/vnd.ms-excel"
@@ -1294,18 +1328,16 @@ export function KnowledgeWorkspace({
           if (file) void uploadFile(file)
         }}
       />
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <FolderKanban className="text-primary" />
-            <h1 className="text-xl font-semibold tracking-tight">Storage</h1>
-          </div>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow>Workspace context</PageEyebrow>
+          <PageTitle>Storage</PageTitle>
+          <PageDescription>
             Organize files, notes, repositories, and transcripts in folders that
             chats and agent workflows can use as live context.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+          </PageDescription>
+        </PageHeading>
+        <PageActions>
           <Button
             variant="outline"
             disabled={busy}
@@ -1325,11 +1357,15 @@ export function KnowledgeWorkspace({
           <Button onClick={() => setAddOpen(true)}>
             <Plus data-icon="inline-start" /> Add knowledge
           </Button>
-        </div>
-      </div>
+        </PageActions>
+      </PageHeader>
 
       {(error || notice) && (
-        <Alert variant={error ? "destructive" : "default"}>
+        <Alert
+          aria-live="polite"
+          role={error ? "alert" : "status"}
+          variant={error ? "destructive" : "default"}
+        >
           {error ? <X /> : <Check />}
           <AlertTitle>
             {error ? "Knowledge action failed" : "Knowledge updated"}
@@ -1432,27 +1468,38 @@ export function KnowledgeWorkspace({
                 </Button>
               )}
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
-              <div className="relative min-w-0 sm:col-span-2 xl:col-span-1">
-                <Search
-                  className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Input
-                  className="w-full pl-7"
-                  placeholder="Search this folder"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  aria-label="Search this folder"
-                />
-              </div>
+            <FilterBar
+              className="-mx-4 -mb-3 px-4 sm:-mx-0 sm:px-0"
+              search={{
+                value: query,
+                onChange: setQuery,
+                placeholder: "Search this folder",
+                label: "Search this folder",
+              }}
+              resultCount={visibleItems.length + childSpaces.length}
+              resultLabel="items"
+              hasActiveFilters={
+                Boolean(query.trim()) ||
+                typeFilter !== "all" ||
+                statusFilter !== "all" ||
+                ownershipFilter !== "all" ||
+                sortBy !== "updated"
+              }
+              onClear={() => {
+                setQuery("")
+                setTypeFilter("all")
+                setStatusFilter("all")
+                setOwnershipFilter("all")
+                setSortBy("updated")
+              }}
+            >
               <Select
                 value={typeFilter}
                 onValueChange={(value) =>
                   setTypeFilter((value as ItemFilter) || "all")
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger aria-label="Filter by type" className="min-w-32">
                   <SelectValue>
                     {typeFilter === "all"
                       ? "All types"
@@ -1472,7 +1519,10 @@ export function KnowledgeWorkspace({
                 value={statusFilter}
                 onValueChange={(value) => setStatusFilter(value ?? "all")}
               >
-                <SelectTrigger className="w-full" aria-label="Filter by status">
+                <SelectTrigger
+                  className="min-w-36"
+                  aria-label="Filter by status"
+                >
                   <Settings2 data-icon="inline-start" />
                   <SelectValue>
                     {statusFilter === "all"
@@ -1494,7 +1544,7 @@ export function KnowledgeWorkspace({
                 onValueChange={(value) => setOwnershipFilter(value ?? "all")}
               >
                 <SelectTrigger
-                  className="w-full"
+                  className="min-w-36"
                   aria-label="Filter by ownership"
                 >
                   <SelectValue>
@@ -1519,7 +1569,7 @@ export function KnowledgeWorkspace({
                   )
                 }
               >
-                <SelectTrigger className="w-full" aria-label="Sort knowledge">
+                <SelectTrigger className="min-w-40" aria-label="Sort knowledge">
                   <SelectValue>
                     {sortBy === "updated"
                       ? "Recently updated"
@@ -1534,7 +1584,7 @@ export function KnowledgeWorkspace({
                   <SelectItem value="type">Type</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </FilterBar>
           </CardHeader>
           <ContextMenu>
             <ContextMenuTrigger className="block min-h-96">
@@ -1563,7 +1613,7 @@ export function KnowledgeWorkspace({
               >
                 <button
                   className={cn(
-                    "mb-5 flex w-full items-center justify-center gap-3 rounded-lg border border-border/80 bg-background/80 px-4 py-5 text-left shadow-xs transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                    "mb-5 flex w-full items-center justify-center gap-3 rounded-xl bg-card px-4 py-5 text-left shadow-xs transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
                     draggingFiles && "border-primary bg-primary/5"
                   )}
                   disabled={busy}
@@ -1588,8 +1638,28 @@ export function KnowledgeWorkspace({
                 </button>
 
                 {loading ? (
-                  <div className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground">
+                  <div
+                    aria-live="polite"
+                    className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground"
+                    role="status"
+                  >
                     <LoaderCircle className="animate-spin" /> Loading files…
+                  </div>
+                ) : loadError &&
+                  visibleItems.length === 0 &&
+                  childSpaces.length === 0 ? (
+                  <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">
+                    <p className="text-sm text-destructive" role="alert">
+                      Knowledge could not be loaded completely.
+                    </p>
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                      onClick={() => void load()}
+                    >
+                      Try again
+                    </Button>
                   </div>
                 ) : visibleItems.length === 0 && childSpaces.length === 0 ? (
                   <Empty className="min-h-64 border-0">
@@ -1611,7 +1681,7 @@ export function KnowledgeWorkspace({
                       childSpaces.map((folder) => (
                         <ContextMenu key={folder.id}>
                           <ContextMenuTrigger
-                            className="group flex min-w-0 cursor-pointer flex-col rounded-lg border border-border/80 bg-background/80 p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+                            className="group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
                             onDoubleClick={() => setSpaceId(folder.id)}
                           >
                             <div className="mb-3 flex items-start justify-between gap-2">
@@ -1721,7 +1791,7 @@ export function KnowledgeWorkspace({
                         <ContextMenu key={item.id}>
                           <ContextMenuTrigger
                             className={cn(
-                              "group flex min-w-0 cursor-pointer flex-col rounded-lg border border-border/80 bg-background/80 p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                              "group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
                               selected?.id === item.id &&
                                 "ring-2 ring-primary/30"
                             )}
@@ -1899,7 +1969,7 @@ export function KnowledgeWorkspace({
                   </CardHeader>
                   <CardContent className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
                     {spaces.length > 0 && (
-                      <div className="rounded-lg border bg-muted/20 p-3">
+                      <div className="rounded-xl bg-muted/50 p-3">
                         <div className="flex items-center justify-between gap-3">
                           <div>
                             <p className="text-sm font-medium">Spaces</p>
@@ -1968,7 +2038,7 @@ export function KnowledgeWorkspace({
                     )}
                     {selectedSource && (
                       <>
-                        <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                        <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
                           <p className="flex items-center gap-2 font-medium text-foreground">
                             {selectedSource.sourceType === "url" ? (
                               <Globe2 />
@@ -1986,11 +2056,20 @@ export function KnowledgeWorkspace({
                               : ""}
                           </p>
                           {selectedSource.error && (
-                            <p className="mt-2 text-destructive">
+                            <p className="mt-2 text-destructive" role="alert">
                               {selectedSource.error}
                             </p>
                           )}
                         </div>
+                        {selectedDetailLoading && (
+                          <p
+                            aria-live="polite"
+                            className="text-xs text-muted-foreground"
+                            role="status"
+                          >
+                            Loading item details…
+                          </p>
+                        )}
                         {selectedDetail?.content && (
                           <pre className="max-h-64 overflow-auto rounded-lg border bg-background p-3 text-xs leading-5 whitespace-pre-wrap">
                             {selectedDetail.content}
@@ -2035,7 +2114,7 @@ export function KnowledgeWorkspace({
                             size="sm"
                             variant="ghost"
                             disabled={busy}
-                            onClick={() => void removeSelectedSource()}
+                            onClick={() => setDeleteTarget(selected)}
                           >
                             <Trash2 data-icon="inline-start" /> Remove
                           </Button>
@@ -2088,6 +2167,8 @@ export function KnowledgeWorkspace({
                             </p>
                           </div>
                           <Switch
+                            aria-label="Use memory in chats"
+                            id="inspector-memory-enabled"
                             checked={selectedMemory.enabled}
                             onCheckedChange={(checked) =>
                               void toggleSelectedMemory(checked)
@@ -2102,7 +2183,7 @@ export function KnowledgeWorkspace({
                     )}
                     {selected.resourceType === "repository" && (
                       <div className="flex flex-col gap-3">
-                        <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                        <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
                           <p className="flex items-center gap-2 font-medium text-foreground">
                             <GitBranch />{" "}
                             {String(
@@ -2129,7 +2210,7 @@ export function KnowledgeWorkspace({
                         </div>
                         {selectedDetail?.files &&
                           selectedDetail.files.length > 0 && (
-                            <div className="overflow-hidden rounded-lg border bg-muted/20">
+                            <div className="overflow-hidden rounded-xl bg-muted/50">
                               <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
                                 <p className="text-sm font-medium">
                                   Indexed files
@@ -2249,13 +2330,13 @@ export function KnowledgeWorkspace({
                           workspace for the full recording.
                         </p>
                         {selectedDetail?.content && (
-                          <pre className="max-h-64 overflow-auto rounded-lg border bg-muted/20 p-3 text-xs leading-5 whitespace-pre-wrap">
+                          <pre className="max-h-64 overflow-auto rounded-xl bg-muted/50 p-3 text-xs leading-5 whitespace-pre-wrap">
                             {selectedDetail.content}
                           </pre>
                         )}
                       </>
                     )}
-                    <div className="mt-auto rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    <div className="mt-auto rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
                       <p>
                         Added{" "}
                         {new Date(selected.createdAt).toLocaleDateString()}
@@ -2365,6 +2446,12 @@ export function KnowledgeWorkspace({
                 Create it at the root or inside another folder.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not create folder</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="space-name">Name</Label>
               <Input
@@ -2380,12 +2467,12 @@ export function KnowledgeWorkspace({
                 onChange={(event) => setSpaceDescription(event.target.value)}
                 placeholder="What belongs in this space?"
               />
-              <Label>Parent folder</Label>
+              <Label htmlFor="space-parent">Parent folder</Label>
               <Select
                 value={spaceParentId}
                 onValueChange={(value) => setSpaceParentId(value ?? "root")}
               >
-                <SelectTrigger>
+                <SelectTrigger id="space-parent">
                   <SelectValue>
                     {spaceParentId === "root"
                       ? "Storage root"
@@ -2402,7 +2489,7 @@ export function KnowledgeWorkspace({
                   ))}
                 </SelectContent>
               </Select>
-              <Label>Visibility</Label>
+              <Label htmlFor="space-visibility">Visibility</Label>
               <Select
                 value={spaceVisibility}
                 onValueChange={(value) =>
@@ -2411,7 +2498,7 @@ export function KnowledgeWorkspace({
                   )
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger id="space-visibility">
                   <SelectValue>
                     {spaceVisibility === "workspace" ? "Workspace" : "Private"}
                   </SelectValue>
@@ -2447,6 +2534,12 @@ export function KnowledgeWorkspace({
                 Notes are durable context and can be updated from the inspector.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not save note</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="knowledge-note-title">Title</Label>
               <Input
@@ -2492,9 +2585,16 @@ export function KnowledgeWorkspace({
                 Keep it concise. You can disable or delete it any time.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not save memory</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="py-4">
+              <Label htmlFor="knowledge-memory-content">Memory</Label>
               <Textarea
-                autoFocus
+                id="knowledge-memory-content"
                 maxLength={2000}
                 value={memoryContent}
                 onChange={(event) => setMemoryContent(event.target.value)}
@@ -2527,6 +2627,12 @@ export function KnowledgeWorkspace({
                 space.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not import transcript</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="knowledge-transcript-session">Transcript</Label>
               <Select
@@ -2604,6 +2710,12 @@ export function KnowledgeWorkspace({
                 Public HTTP(S) pages are fetched and indexed asynchronously.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not index URL</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="knowledge-url">URL</Label>
               <Input
@@ -2650,6 +2762,12 @@ export function KnowledgeWorkspace({
                 private Knowledge library.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not connect repository</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="knowledge-repository-url">Repository URL</Label>
               <Input
@@ -2733,7 +2851,7 @@ export function KnowledgeWorkspace({
             return deleteKnowledgeFolder(folderDeleteTarget)
         }}
       />
-    </div>
+    </Page>
   )
 }
 

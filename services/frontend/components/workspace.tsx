@@ -1066,7 +1066,7 @@ export function Workspace() {
 
   return (
     <>
-      <div className="relative flex h-full min-h-0 flex-1 overflow-hidden bg-background">
+      <div className="relative flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
         <FocusWorkspaceSidebar
           activeConversationId={activeConversationId}
           activeOrganization={activeOrganization}
@@ -1113,7 +1113,7 @@ export function Workspace() {
           user={user}
           userInitials={initials}
         />
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <main className="flex min-h-0 w-0 min-w-0 flex-1 flex-col overflow-hidden">
           {Object.keys(featureErrors).length > 0 && (
             <Alert className="m-4 mb-0 shrink-0" variant="destructive">
               <AlertTitle>Some workspace features need attention</AlertTitle>

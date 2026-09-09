@@ -8,6 +8,14 @@ import type { User } from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  Page,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
+import {
   Card,
   CardContent,
   CardDescription,
@@ -31,16 +39,16 @@ export function ProfileView({ user }: ProfileViewProps) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl">
-      <div className="mb-6">
-        <Badge variant="secondary">Account</Badge>
-        <h2 className="font-heading mt-3 text-2xl font-semibold tracking-tight">
-          Profile
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage your JustAI identity and session.
-        </p>
-      </div>
+    <Page className="max-w-4xl">
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow>Account</PageEyebrow>
+          <PageTitle>Profile</PageTitle>
+          <PageDescription>
+            Manage your JustAI identity and session.
+          </PageDescription>
+        </PageHeading>
+      </PageHeader>
 
       <Card size="sm">
         <CardHeader className="flex-row items-start gap-3">
@@ -79,6 +87,6 @@ export function ProfileView({ user }: ProfileViewProps) {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </Page>
   )
 }

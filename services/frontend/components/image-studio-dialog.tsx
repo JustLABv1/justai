@@ -19,7 +19,13 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -29,7 +35,11 @@ type ImageStudioDialogProps = {
 
 export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
   const imageEndpoints = useMemo(
-    () => endpoints.filter((endpoint) => endpoint.enabled && endpoint.capabilities["image-generation"]),
+    () =>
+      endpoints.filter(
+        (endpoint) =>
+          endpoint.enabled && endpoint.capabilities["image-generation"]
+      ),
     [endpoints]
   )
   const [open, setOpen] = useState(false)
@@ -51,13 +61,17 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
   async function loadImagePreview(value: GeneratedImage) {
     const blob = await api.getBlob(value.url)
     const nextURL = URL.createObjectURL(blob)
+    if (imageSrc.startsWith("blob:")) URL.revokeObjectURL(imageSrc)
     setImageSrc(nextURL)
   }
 
-  async function submit() {
+  async function submit(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     if (!prompt.trim() || saving) return
     if (imageEndpoints.length === 0) {
-      setError("Configure an enabled image-generation endpoint in Settings first.")
+      setError(
+        "Configure an enabled image-generation endpoint in Settings first."
+      )
       return
     }
     const selectedEndpointId = endpointId || imageEndpoints[0].id
@@ -65,10 +79,13 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
     setError("")
     try {
       if (mode === "generate") {
-        const response = await api.post<{ image: GeneratedImage }>("/api/v1/images/generate", {
-          endpointId: selectedEndpointId,
-          prompt: prompt.trim(),
-        })
+        const response = await api.post<{ image: GeneratedImage }>(
+          "/api/v1/images/generate",
+          {
+            endpointId: selectedEndpointId,
+            prompt: prompt.trim(),
+          }
+        )
         await loadImagePreview(response.image)
         setImage(response.image)
       } else {
@@ -80,12 +97,19 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
         body.set("endpointId", selectedEndpointId)
         body.set("prompt", prompt.trim())
         body.set("image", file)
-        const response = await api.upload<{ image: GeneratedImage }>("/api/v1/images/edit", body)
+        const response = await api.upload<{ image: GeneratedImage }>(
+          "/api/v1/images/edit",
+          body
+        )
         await loadImagePreview(response.image)
         setImage(response.image)
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The image could not be created.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The image could not be created."
+      )
     } finally {
       setSaving(false)
     }
@@ -98,11 +122,39 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
     setError("")
   }
 
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const nextFile = event.target.files?.[0] ?? null
+    if (!nextFile) {
+      setFile(null)
+      return
+    }
+    const acceptedTypes = new Set(["image/png", "image/jpeg", "image/webp"])
+    if (!acceptedTypes.has(nextFile.type)) {
+      setFile(null)
+      event.target.value = ""
+      setError("Choose a PNG, JPEG, or WebP image.")
+      return
+    }
+    if (nextFile.size > 15 * 1024 * 1024) {
+      setFile(null)
+      event.target.value = ""
+      setError("Images are limited to 15 MB.")
+      return
+    }
+    setError("")
+    setFile(nextFile)
+  }
+
   return (
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger
         render={
-          <Button aria-label="Open image studio" size="icon-sm" title="Image studio" variant="ghost" />
+          <Button
+            aria-label="Open image studio"
+            size="icon-sm"
+            title="Image studio"
+            variant="ghost"
+          />
         }
       >
         <ImagePlus />
@@ -120,102 +172,132 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
             <Sparkles />
             <AlertTitle>No image endpoint configured</AlertTitle>
             <AlertDescription>
-              Add an OpenAI-compatible endpoint with the image-generation capability in Settings → Endpoints.
+              Add an OpenAI-compatible endpoint with the image-generation
+              capability in Settings → Endpoints.
             </AlertDescription>
           </Alert>
         )}
         {error && (
-          <Alert variant="destructive">
+          <Alert aria-live="polite" role="alert" variant="destructive">
             <AlertTitle>Image action failed</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
-        <Tabs onValueChange={changeMode} value={mode}>
-          <TabsList>
-            <TabsTrigger value="generate">Generate</TabsTrigger>
-            <TabsTrigger value="edit">Edit</TabsTrigger>
-          </TabsList>
-          <TabsContent className="mt-4 space-y-4" value="generate">
-            <p className="text-sm text-muted-foreground">
-              Describe the image, composition, style, and any important constraints.
-            </p>
-          </TabsContent>
-          <TabsContent className="mt-4 space-y-4" value="edit">
+        <form onSubmit={(event) => void submit(event)}>
+          <Tabs onValueChange={changeMode} value={mode}>
+            <TabsList aria-label="Image operation">
+              <TabsTrigger value="generate">Generate</TabsTrigger>
+              <TabsTrigger value="edit">Edit</TabsTrigger>
+            </TabsList>
+            <TabsContent className="mt-4 space-y-4" value="generate">
+              <p className="text-sm text-muted-foreground">
+                Describe the image, composition, style, and any important
+                constraints.
+              </p>
+            </TabsContent>
+            <TabsContent className="mt-4 space-y-4" value="edit">
+              <Field>
+                <FieldLabel htmlFor="image-edit-file">Source image</FieldLabel>
+                <Input
+                  accept="image/png,image/jpeg,image/webp"
+                  id="image-edit-file"
+                  disabled={saving}
+                  onChange={handleFileChange}
+                  type="file"
+                />
+                <FieldDescription>
+                  PNG, JPEG, or WebP up to 15 MB.
+                </FieldDescription>
+              </Field>
+            </TabsContent>
+          </Tabs>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="image-edit-file">Source image</FieldLabel>
-              <Input
-                accept="image/png,image/jpeg,image/webp"
-                id="image-edit-file"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-                type="file"
-              />
-              <FieldDescription>PNG, JPEG, or WebP up to 15 MB.</FieldDescription>
-            </Field>
-          </TabsContent>
-        </Tabs>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field>
-            <FieldLabel>Image endpoint</FieldLabel>
-            <Select onValueChange={(value) => setEndpointId(value ?? "")} value={endpointId || imageEndpoints[0]?.id || ""}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose an endpoint" />
-              </SelectTrigger>
-              <SelectContent>
-                {imageEndpoints.map((endpoint) => (
-                  <SelectItem key={endpoint.id} value={endpoint.id}>
-                    {endpoint.name} · {endpoint.imageModel || "image model"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field>
-            <FieldLabel>Prompt</FieldLabel>
-            <Textarea
-              className="min-h-24"
-              maxLength={4000}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder={mode === "edit" ? "Remove the background and add…" : "A cinematic…"}
-              value={prompt}
-            />
-          </Field>
-        </div>
-
-        {image && imageSrc && (
-          <div className="overflow-hidden rounded-xl border bg-muted/20">
-            <Image
-              alt={image.prompt}
-              className="max-h-[32rem] w-full object-contain"
-              height={1024}
-              src={imageSrc}
-              unoptimized
-              width={1024}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-3 py-2">
-              <span className="text-xs text-muted-foreground">{image.mode === "edit" ? "Edited image" : "Generated image"}</span>
-              <a
-                className="inline-flex h-6 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-input/50"
-                download
-                href={imageSrc}
+              <FieldLabel htmlFor="image-endpoint">Image endpoint</FieldLabel>
+              <Select
+                onValueChange={(value) => setEndpointId(value ?? "")}
+                value={endpointId || imageEndpoints[0]?.id || ""}
               >
-                <Download className="size-3" data-icon="inline-start" />
-                Download
-              </a>
-            </div>
+                <SelectTrigger disabled={saving} id="image-endpoint">
+                  <SelectValue placeholder="Choose an endpoint" />
+                </SelectTrigger>
+                <SelectContent>
+                  {imageEndpoints.map((endpoint) => (
+                    <SelectItem key={endpoint.id} value={endpoint.id}>
+                      {endpoint.name} · {endpoint.imageModel || "image model"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="image-prompt">Prompt</FieldLabel>
+              <Textarea
+                className="min-h-24"
+                disabled={saving}
+                id="image-prompt"
+                maxLength={4000}
+                required
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder={
+                  mode === "edit"
+                    ? "Remove the background and add…"
+                    : "A cinematic…"
+                }
+                value={prompt}
+              />
+            </Field>
           </div>
-        )}
 
-        <DialogFooter>
-          <Button onClick={() => setOpen(false)} variant="outline">
-            Close
-          </Button>
-          <Button disabled={saving || !prompt.trim() || imageEndpoints.length === 0} onClick={() => void submit()}>
-            {saving ? <Loader2 className="animate-spin" /> : <Sparkles />}
-            {saving ? "Creating…" : mode === "edit" ? "Edit image" : "Generate image"}
-          </Button>
-        </DialogFooter>
+          {image && imageSrc && (
+            <div className="overflow-hidden rounded-xl bg-muted/50">
+              <Image
+                alt={image.prompt}
+                className="max-h-[32rem] w-full object-contain"
+                height={1024}
+                src={imageSrc}
+                unoptimized
+                width={1024}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t px-3 py-2">
+                <span className="text-xs text-muted-foreground">
+                  {image.mode === "edit" ? "Edited image" : "Generated image"}
+                </span>
+                <a
+                  className="inline-flex h-6 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-input/50"
+                  download
+                  href={imageSrc}
+                >
+                  <Download className="size-3" data-icon="inline-start" />
+                  Download
+                </a>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              onClick={() => setOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              Close
+            </Button>
+            <Button
+              disabled={saving || !prompt.trim() || imageEndpoints.length === 0}
+              type="submit"
+            >
+              {saving ? <Loader2 className="animate-spin" /> : <Sparkles />}
+              {saving
+                ? "Creating…"
+                : mode === "edit"
+                  ? "Edit image"
+                  : "Generate image"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

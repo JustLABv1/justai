@@ -56,7 +56,9 @@ export function AdminView({
     endpointId: null,
     mcpServerIds: [],
   })
-  const [analytics, setAnalytics] = useState<AdminAnalyticsResponse | null>(null)
+  const [analytics, setAnalytics] = useState<AdminAnalyticsResponse | null>(
+    null
+  )
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingGlobal, setSavingGlobal] = useState(false)
@@ -148,7 +150,13 @@ export function AdminView({
       setNotice("Workspace defaults saved.")
       notifySuccess("Workspace defaults saved")
     } catch (caught) {
-      setNotice(notifyError("Workspace defaults could not be saved", caught, "Defaults could not be saved."))
+      setNotice(
+        notifyError(
+          "Workspace defaults could not be saved",
+          caught,
+          "Defaults could not be saved."
+        )
+      )
     } finally {
       setSaving(false)
     }
@@ -166,7 +174,13 @@ export function AdminView({
       setNotice("Platform defaults saved.")
       notifySuccess("Platform defaults saved")
     } catch (caught) {
-      setNotice(notifyError("Platform defaults could not be saved", caught, "Platform defaults could not be saved."))
+      setNotice(
+        notifyError(
+          "Platform defaults could not be saved",
+          caught,
+          "Platform defaults could not be saved."
+        )
+      )
     } finally {
       setSavingGlobal(false)
     }
@@ -215,7 +229,7 @@ export function AdminView({
         </CardHeader>
         <CardContent className="space-y-5 pt-4">
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border bg-card p-4">
+            <div className="rounded-xl bg-muted/40 p-4">
               <label className="block space-y-2 text-sm font-medium">
                 <span className="block">Default chat endpoint</span>
                 <Select
@@ -250,9 +264,9 @@ export function AdminView({
                 </Select>
               </label>
             </div>
-            <div className="rounded-xl border bg-card p-4">
+            <div className="rounded-xl bg-muted/40 p-4">
               <span className="text-sm font-medium">Default MCP servers</span>
-              <div className="mt-2 grid gap-1 rounded-lg border bg-muted/20 p-1">
+              <div className="mt-2 grid gap-1 rounded-xl bg-muted/50 p-1">
                 {enabledServers.length === 0 && (
                   <p className="text-xs text-muted-foreground">
                     No enabled MCP servers.
@@ -262,7 +276,8 @@ export function AdminView({
                   const selected = defaults.mcpServerIds.includes(server.id)
                   return (
                     <button
-                      className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${selected ? "border-primary/50 bg-primary/10 text-foreground" : "border-border/70 bg-card hover:border-border hover:bg-muted/40"}`}
+                      aria-pressed={selected}
+                      className={`flex min-h-9 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-[background-color,border-color,color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.99] ${selected ? "border-primary/50 bg-primary/10 text-foreground" : "border-border/70 bg-card hover:border-border hover:bg-muted/40"}`}
                       key={server.id}
                       onClick={() =>
                         setDefaults((current) => ({
@@ -404,13 +419,13 @@ export function AdminView({
               ["Tool calls", analytics?.summary.toolCalls ?? 0],
               ["Total tokens", analytics?.summary.totalTokens ?? "—"],
             ].map(([label, value]) => (
-              <div className="rounded-lg border bg-muted/20 p-3" key={label}>
+              <div className="rounded-xl bg-muted/50 p-3" key={label}>
                 <p className="text-xs text-muted-foreground">{label}</p>
                 <p className="mt-1 text-xl font-semibold">{value}</p>
               </div>
             ))}
           </div>
-          <div className="mt-6">
+          <div className="mt-6 rounded-2xl bg-muted/40 p-3 sm:p-4">
             <AdminUsageCharts analytics={analytics} />
           </div>
           {analytics?.byEndpoint && analytics.byEndpoint.length > 0 && (

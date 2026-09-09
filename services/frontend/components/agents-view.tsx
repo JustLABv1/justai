@@ -65,6 +65,7 @@ import {
 } from "@/components/ui/table"
 import { RunFiles } from "@/components/agent-run-files"
 import { api, resolveAPIURL } from "@/lib/api"
+import { notifyError, notifySuccess } from "@/lib/feedback"
 import { StaticAssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import {
   formatWorkflowNextRun,
@@ -97,16 +98,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import {
   Card,
   CardAction,
   CardContent,
@@ -132,6 +123,16 @@ import {
   FieldLegend,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { FilterBar } from "@/components/ui/filter-bar"
+import {
+  Page,
+  PageActions,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
 import {
   Sheet,
   SheetContent,
@@ -157,6 +158,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 type AgentsViewProps = {
   activeTab: AgentTab
@@ -632,7 +634,7 @@ const AgentFlowNode = memo(function AgentFlowNode({
   return (
     <div
       className={cn(
-        "w-60 rounded-xl border bg-card px-3 py-2 shadow-sm",
+        "w-60 rounded-xl bg-card px-3 py-2 shadow-sm",
         data.selected && "border-primary ring-2 ring-primary/20"
       )}
     >
@@ -795,6 +797,9 @@ export function AgentsView({
     Record<string, { x: number; y: number }>
   >({})
   const [validating, setValidating] = useState(false)
+  const [discovering, setDiscovering] = useState(false)
+  const [testingConnectionId, setTestingConnectionId] = useState("")
+  const [updatingConnectionId, setUpdatingConnectionId] = useState("")
   const [validationMessage, setValidationMessage] = useState("")
   const [discoveryMessage, setDiscoveryMessage] = useState("")
 
@@ -902,7 +907,12 @@ export function AgentsView({
     [openNative, openRemote]
   )
 
-  async function saveNative() {
+  async function saveNative(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
+    if (!nativeForm.name.trim() || !nativeForm.instructions.trim() || saving) {
+      setError("Name and instructions are required for a native agent.")
+      return
+    }
     setSaving(true)
     setError("")
     try {
@@ -925,12 +935,18 @@ export function AgentsView({
             )
           : [result.agent, ...agents]
       )
+      notifySuccess(
+        editingAgent ? "Native agent updated" : "Native agent created",
+        result.agent.name
+      )
       setNativeOpen(false)
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The native agent could not be saved."
+        notifyError(
+          "Native agent could not be saved",
+          caught,
+          "The native agent could not be saved."
+        )
       )
     } finally {
       setSaving(false)
@@ -942,7 +958,8 @@ export function AgentsView({
   }
 
   async function discoverRemote() {
-    if (!remoteForm.endpointUrl.trim()) return
+    if (!remoteForm.endpointUrl.trim() || discovering) return
+    setDiscovering(true)
     setDiscoveryMessage("Discovering Agent Card…")
     try {
       const result = await api.post<{ name?: string; description?: string }>(
@@ -963,10 +980,13 @@ export function AgentsView({
           ? caught.message
           : "Agent Card discovery failed."
       )
+    } finally {
+      setDiscovering(false)
     }
   }
 
-  async function saveRemote() {
+  async function saveRemote(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     if (!remoteForm.name.trim() || !remoteForm.endpointUrl.trim()) {
       setError("Give the remote agent a name and endpoint URL.")
       return
@@ -1046,6 +1066,10 @@ export function AgentsView({
       setEditingAgent(null)
       setEditingConnection(null)
       setDiscoveryMessage("")
+      notifySuccess(
+        editingAgent ? "Remote agent updated" : "Remote agent connected",
+        agent.name
+      )
       if (shouldStartOAuth) {
         const oauth = await api.get<{ authorizationUrl: string }>(
           `/api/v1/agent-connections/${connection.id}/oauth/start`
@@ -1054,9 +1078,11 @@ export function AgentsView({
       }
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The remote agent could not be connected."
+        notifyError(
+          "Remote agent could not be connected",
+          caught,
+          "The remote agent could not be connected."
+        )
       )
     } finally {
       setSaving(false)
@@ -1064,14 +1090,23 @@ export function AgentsView({
   }
 
   async function testConnection(connection: AgentConnection) {
+    if (testingConnectionId) return
+    setTestingConnectionId(connection.id)
     try {
       await api.post(`/api/v1/agent-connections/${connection.id}/test`)
+      notifySuccess("Connection test passed", connection.name)
       await refresh()
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "The connection test failed."
+        notifyError(
+          "Connection test failed",
+          caught,
+          "The connection test failed."
+        )
       )
       await refresh()
+    } finally {
+      setTestingConnectionId("")
     }
   }
 
@@ -1079,6 +1114,8 @@ export function AgentsView({
     connection: AgentConnection,
     enabled: boolean
   ) {
+    if (updatingConnectionId) return
+    setUpdatingConnectionId(connection.id)
     try {
       const result = await api.patch<{ connection: AgentConnection }>(
         `/api/v1/agent-connections/${connection.id}`,
@@ -1091,10 +1128,14 @@ export function AgentsView({
       )
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The connection could not be updated."
+        notifyError(
+          "Connection could not be updated",
+          caught,
+          "The connection could not be updated."
+        )
       )
+    } finally {
+      setUpdatingConnectionId("")
     }
   }
 
@@ -1360,7 +1401,11 @@ export function AgentsView({
     setRunDialogOpen(true)
   }
 
-  async function runWorkflow(input: WorkflowRunInput) {
+  async function runWorkflow(
+    input: WorkflowRunInput,
+    event?: React.FormEvent<HTMLFormElement>
+  ) {
+    event?.preventDefault()
     if (!workflowDraft?.id || running) return
     setRunning(true)
     try {
@@ -1374,9 +1419,11 @@ export function AgentsView({
       updateAgentRunURL(result.run.id)
     } catch (caught) {
       setValidationMessage(
-        caught instanceof Error
-          ? caught.message
-          : "The workflow could not be started."
+        notifyError(
+          "Workflow could not be started",
+          caught,
+          "The workflow could not be started."
+        )
       )
     } finally {
       setRunning(false)
@@ -1408,19 +1455,32 @@ export function AgentsView({
         )
         if (workflowDraft?.id === target.item.id) setWorkflowDraft(null)
       }
+      notifySuccess(
+        target.kind === "agent"
+          ? "Agent deleted"
+          : target.kind === "connection"
+            ? "Connection removed"
+            : "Workflow deleted"
+      )
+      setDeleteTarget(null)
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : target.kind === "agent"
+        notifyError(
+          target.kind === "agent"
+            ? "Agent could not be deleted"
+            : target.kind === "connection"
+              ? "Connection could not be removed"
+              : "Workflow could not be deleted",
+          caught,
+          target.kind === "agent"
             ? "The agent could not be deleted."
             : target.kind === "connection"
               ? "The connection could not be removed."
               : "The workflow could not be deleted."
+        )
       )
     } finally {
       setDeleting(false)
-      setDeleteTarget(null)
     }
   }
 
@@ -1462,7 +1522,7 @@ export function AgentsView({
     : []
 
   return (
-    <div className="flex w-full flex-col gap-6">
+    <Page>
       {disabled && (
         <Alert role="status">
           <ShieldCheck data-icon="inline-start" />
@@ -1473,42 +1533,41 @@ export function AgentsView({
           </AlertDescription>
         </Alert>
       )}
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-primary">
-            <GitBranch data-icon="inline-start" />
-            <span className="text-sm font-medium">Agents</span>
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow className="flex items-center gap-2">
+            Agents
             <Badge variant="secondary">Native + A2A</Badge>
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Agent workspace
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          </PageEyebrow>
+          <PageTitle>Agent workspace</PageTitle>
+          <PageDescription>
             Manage your team of agents, design workflows, and monitor execution.
-          </p>
-        </div>
-        {activeTab === "agents" && !disabled && (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => openRemote()}>
-              <Link2 data-icon="inline-start" />
-              Connect remote
-            </Button>
-            <Button onClick={() => openNative()}>
+          </PageDescription>
+        </PageHeading>
+        <PageActions>
+          {activeTab === "agents" && !disabled && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => openRemote()}>
+                <Link2 data-icon="inline-start" />
+                Connect remote
+              </Button>
+              <Button onClick={() => openNative()}>
+                <Plus data-icon="inline-start" />
+                New native agent
+              </Button>
+            </div>
+          )}
+          {activeTab === "workflows" && !disabled && (
+            <Button onClick={() => openWorkflow()}>
               <Plus data-icon="inline-start" />
-              New native agent
+              New workflow
             </Button>
-          </div>
-        )}
-        {activeTab === "workflows" && !disabled && (
-          <Button onClick={() => openWorkflow()}>
-            <Plus data-icon="inline-start" />
-            New workflow
-          </Button>
-        )}
-      </header>
+          )}
+        </PageActions>
+      </PageHeader>
 
       {error && (
-        <Alert variant="destructive">
+        <Alert aria-live="polite" role="alert" variant="destructive">
           <CircleAlert data-icon="inline-start" />
           <AlertTitle>Agent workspace needs attention</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
@@ -1519,7 +1578,11 @@ export function AgentsView({
         value={activeTab}
         onValueChange={(value) => onTabChange(value as AgentTab)}
       >
-        <TabsList variant="line" className="w-full justify-start border-b pb-0">
+        <TabsList
+          aria-label="Agent workspace sections"
+          variant="line"
+          className="w-full justify-start border-b pb-0"
+        >
           <TabsTrigger value="agents">
             <Bot data-icon="inline-start" />
             Agents{" "}
@@ -1550,6 +1613,8 @@ export function AgentsView({
               onTest={testConnection}
               onToggleConnection={toggleConnection}
               onDeleteConnection={deleteConnection}
+              testingConnectionId={testingConnectionId}
+              updatingConnectionId={updatingConnectionId}
               disabled={disabled}
             />
           )}
@@ -1602,7 +1667,12 @@ export function AgentsView({
         </TabsContent>
       </Tabs>
 
-      <Dialog open={nativeOpen} onOpenChange={setNativeOpen}>
+      <Dialog
+        open={nativeOpen}
+        onOpenChange={(open) => {
+          if (!saving) setNativeOpen(open)
+        }}
+      >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
@@ -1613,235 +1683,257 @@ export function AgentsView({
               permissions, and conversation runtime.
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <div className="grid gap-4 sm:grid-cols-2">
+          {error && (
+            <Alert aria-live="polite" role="alert" variant="destructive">
+              <AlertTitle>Could not save native agent</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <form onSubmit={(event) => void saveNative(event)}>
+            <FieldGroup>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="native-agent-name">Name</FieldLabel>
+                  <Input
+                    id="native-agent-name"
+                    value={nativeForm.name}
+                    onChange={(event) =>
+                      setNativeForm({ ...nativeForm, name: event.target.value })
+                    }
+                    placeholder="Research lead"
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="native-agent-visibility">
+                    Visibility
+                  </FieldLabel>
+                  <Select
+                    value={nativeForm.visibility}
+                    onValueChange={(value) =>
+                      setNativeForm({
+                        ...nativeForm,
+                        visibility: (value ??
+                          "private") as NativeAgentForm["visibility"],
+                      })
+                    }
+                  >
+                    <SelectTrigger id="native-agent-visibility">
+                      <SelectValue>
+                        {visibilityLabel(nativeForm.visibility)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="private">Private</SelectItem>
+                        <SelectItem value="workspace">
+                          Workspace shared
+                        </SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
               <Field>
-                <FieldLabel htmlFor="native-agent-name">Name</FieldLabel>
-                <Input
-                  id="native-agent-name"
-                  value={nativeForm.name}
-                  onChange={(event) =>
-                    setNativeForm({ ...nativeForm, name: event.target.value })
-                  }
-                  placeholder="Research lead"
-                />
-              </Field>
-              <Field>
-                <FieldLabel>Visibility</FieldLabel>
-                <Select
-                  value={nativeForm.visibility}
-                  onValueChange={(value) =>
-                    setNativeForm({
-                      ...nativeForm,
-                      visibility: (value ??
-                        "private") as NativeAgentForm["visibility"],
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue>
-                      {visibilityLabel(nativeForm.visibility)}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="private">Private</SelectItem>
-                      <SelectItem value="workspace">
-                        Workspace shared
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
-            <Field>
-              <FieldLabel htmlFor="native-agent-description">
-                Description
-              </FieldLabel>
-              <Input
-                id="native-agent-description"
-                value={nativeForm.description}
-                onChange={(event) =>
-                  setNativeForm({
-                    ...nativeForm,
-                    description: event.target.value,
-                  })
-                }
-                placeholder="What this agent is good at"
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="native-agent-instructions">
-                Instructions
-              </FieldLabel>
-              <Textarea
-                id="native-agent-instructions"
-                rows={7}
-                value={nativeForm.instructions}
-                onChange={(event) =>
-                  setNativeForm({
-                    ...nativeForm,
-                    instructions: event.target.value,
-                  })
-                }
-                placeholder="Act as a careful research editor…"
-              />
-              <FieldDescription>
-                These instructions are versioned. Existing conversations keep
-                their pinned version.
-              </FieldDescription>
-            </Field>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field>
-                <FieldLabel>Chat endpoint</FieldLabel>
-                <Select
-                  value={nativeForm.endpointId || "default"}
-                  onValueChange={(value) =>
-                    setNativeForm({
-                      ...nativeForm,
-                      endpointId: value === "default" ? "" : (value ?? ""),
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue>
-                      {nativeForm.endpointId
-                        ? (endpoints.find(
-                            (endpoint) => endpoint.id === nativeForm.endpointId
-                          )?.name ?? "Selected endpoint")
-                        : "Workspace default"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="default">Workspace default</SelectItem>
-                      {endpoints
-                        .filter(
-                          (endpoint) =>
-                            endpoint.enabled && endpoint.capabilities?.chat
-                        )
-                        .map((endpoint) => (
-                          <SelectItem key={endpoint.id} value={endpoint.id}>
-                            {endpoint.name}
-                          </SelectItem>
-                        ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="native-agent-model">
-                  Model override
+                <FieldLabel htmlFor="native-agent-description">
+                  Description
                 </FieldLabel>
                 <Input
-                  id="native-agent-model"
-                  value={nativeForm.model}
+                  id="native-agent-description"
+                  value={nativeForm.description}
                   onChange={(event) =>
-                    setNativeForm({ ...nativeForm, model: event.target.value })
+                    setNativeForm({
+                      ...nativeForm,
+                      description: event.target.value,
+                    })
                   }
-                  placeholder="Use endpoint default"
+                  placeholder="What this agent is good at"
                 />
               </Field>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field orientation="horizontal">
-                <Switch
-                  aria-label="Use memory"
-                  checked={nativeForm.useMemory}
-                  onCheckedChange={(checked) =>
-                    setNativeForm({ ...nativeForm, useMemory: checked })
+              <Field>
+                <FieldLabel htmlFor="native-agent-instructions">
+                  Instructions
+                </FieldLabel>
+                <Textarea
+                  id="native-agent-instructions"
+                  rows={7}
+                  value={nativeForm.instructions}
+                  onChange={(event) =>
+                    setNativeForm({
+                      ...nativeForm,
+                      instructions: event.target.value,
+                    })
                   }
+                  placeholder="Act as a careful research editor…"
                 />
-                <div>
-                  <FieldLabel>Use memory</FieldLabel>
-                  <FieldDescription>
-                    Include the user’s approved persistent preferences.
-                  </FieldDescription>
-                </div>
+                <FieldDescription>
+                  These instructions are versioned. Existing conversations keep
+                  their pinned version.
+                </FieldDescription>
               </Field>
-              <Field orientation="horizontal">
-                <Switch
-                  aria-label="Use deep context"
-                  checked={nativeForm.deepContext}
-                  onCheckedChange={(checked) =>
-                    setNativeForm({ ...nativeForm, deepContext: checked })
-                  }
-                />
-                <div>
-                  <FieldLabel>Deep context</FieldLabel>
-                  <FieldDescription>
-                    Use attached workspace context when available.
-                  </FieldDescription>
-                </div>
-              </Field>
-            </div>
-            <FieldSet>
-              <FieldLegend variant="label">Delegation allowlist</FieldLegend>
-              <FieldDescription>
-                Only these agents may be selected by <code>delegate_agent</code>
-                .
-              </FieldDescription>
-              {agents.filter((agent) => agent.id !== editingAgent?.id)
-                .length ? (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {agents
-                    .filter((agent) => agent.id !== editingAgent?.id)
-                    .map((agent) => (
-                      <label
-                        key={agent.id}
-                        className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm has-[:checked]:border-primary/50 has-[:checked]:bg-primary/[0.06]"
-                      >
-                        <input
-                          className="size-4 accent-primary"
-                          type="checkbox"
-                          checked={nativeForm.delegationAgentIds.includes(
-                            agent.id
-                          )}
-                          onChange={() =>
-                            setNativeForm((current) => ({
-                              ...current,
-                              delegationAgentIds:
-                                current.delegationAgentIds.includes(agent.id)
-                                  ? current.delegationAgentIds.filter(
-                                      (id) => id !== agent.id
-                                    )
-                                  : [...current.delegationAgentIds, agent.id],
-                            }))
-                          }
-                        />
-                        <span className="truncate">{agent.name}</span>
-                        <Badge className="ml-auto" variant="outline">
-                          {agent.kind}
-                        </Badge>
-                      </label>
-                    ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Create another agent to enable delegation.
-                </p>
-              )}
-            </FieldSet>
-          </FieldGroup>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNativeOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={
-                saving ||
-                !nativeForm.name.trim() ||
-                !nativeForm.instructions.trim()
-              }
-              onClick={() => void saveNative()}
-            >
-              {saving
-                ? "Saving…"
-                : editingAgent
-                  ? "Save changes"
-                  : "Create agent"}
-            </Button>
-          </DialogFooter>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="native-agent-endpoint">
+                    Chat endpoint
+                  </FieldLabel>
+                  <Select
+                    value={nativeForm.endpointId || "default"}
+                    onValueChange={(value) =>
+                      setNativeForm({
+                        ...nativeForm,
+                        endpointId: value === "default" ? "" : (value ?? ""),
+                      })
+                    }
+                  >
+                    <SelectTrigger id="native-agent-endpoint">
+                      <SelectValue>
+                        {nativeForm.endpointId
+                          ? (endpoints.find(
+                              (endpoint) =>
+                                endpoint.id === nativeForm.endpointId
+                            )?.name ?? "Selected endpoint")
+                          : "Workspace default"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="default">
+                          Workspace default
+                        </SelectItem>
+                        {endpoints
+                          .filter(
+                            (endpoint) =>
+                              endpoint.enabled && endpoint.capabilities?.chat
+                          )
+                          .map((endpoint) => (
+                            <SelectItem key={endpoint.id} value={endpoint.id}>
+                              {endpoint.name}
+                            </SelectItem>
+                          ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="native-agent-model">
+                    Model override
+                  </FieldLabel>
+                  <Input
+                    id="native-agent-model"
+                    value={nativeForm.model}
+                    onChange={(event) =>
+                      setNativeForm({
+                        ...nativeForm,
+                        model: event.target.value,
+                      })
+                    }
+                    placeholder="Use endpoint default"
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field orientation="horizontal">
+                  <Switch
+                    aria-label="Use memory"
+                    checked={nativeForm.useMemory}
+                    onCheckedChange={(checked) =>
+                      setNativeForm({ ...nativeForm, useMemory: checked })
+                    }
+                  />
+                  <div>
+                    <FieldLabel>Use memory</FieldLabel>
+                    <FieldDescription>
+                      Include the user’s approved persistent preferences.
+                    </FieldDescription>
+                  </div>
+                </Field>
+                <Field orientation="horizontal">
+                  <Switch
+                    aria-label="Use deep context"
+                    checked={nativeForm.deepContext}
+                    onCheckedChange={(checked) =>
+                      setNativeForm({ ...nativeForm, deepContext: checked })
+                    }
+                  />
+                  <div>
+                    <FieldLabel>Deep context</FieldLabel>
+                    <FieldDescription>
+                      Use attached workspace context when available.
+                    </FieldDescription>
+                  </div>
+                </Field>
+              </div>
+              <FieldSet>
+                <FieldLegend variant="label">Delegation allowlist</FieldLegend>
+                <FieldDescription>
+                  Only these agents may be selected by{" "}
+                  <code>delegate_agent</code>.
+                </FieldDescription>
+                {agents.filter((agent) => agent.id !== editingAgent?.id)
+                  .length ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {agents
+                      .filter((agent) => agent.id !== editingAgent?.id)
+                      .map((agent) => (
+                        <label
+                          key={agent.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm has-[:checked]:border-primary/50 has-[:checked]:bg-primary/[0.06]"
+                        >
+                          <input
+                            className="size-4 accent-primary"
+                            type="checkbox"
+                            checked={nativeForm.delegationAgentIds.includes(
+                              agent.id
+                            )}
+                            onChange={() =>
+                              setNativeForm((current) => ({
+                                ...current,
+                                delegationAgentIds:
+                                  current.delegationAgentIds.includes(agent.id)
+                                    ? current.delegationAgentIds.filter(
+                                        (id) => id !== agent.id
+                                      )
+                                    : [...current.delegationAgentIds, agent.id],
+                              }))
+                            }
+                          />
+                          <span className="truncate">{agent.name}</span>
+                          <Badge className="ml-auto" variant="outline">
+                            {agent.kind}
+                          </Badge>
+                        </label>
+                      ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Create another agent to enable delegation.
+                  </p>
+                )}
+              </FieldSet>
+            </FieldGroup>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setNativeOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={
+                  saving ||
+                  !nativeForm.name.trim() ||
+                  !nativeForm.instructions.trim()
+                }
+                type="submit"
+              >
+                {saving
+                  ? "Saving…"
+                  : editingAgent
+                    ? "Save changes"
+                    : "Create agent"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -1866,365 +1958,394 @@ export function AgentsView({
               details.
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <div className="grid gap-4 sm:grid-cols-2">
+          {error && (
+            <Alert aria-live="polite" role="alert" variant="destructive">
+              <AlertTitle>Could not save remote agent</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <form onSubmit={(event) => void saveRemote(event)}>
+            <FieldGroup>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="remote-agent-name">
+                    Display name
+                  </FieldLabel>
+                  <Input
+                    id="remote-agent-name"
+                    value={remoteForm.name}
+                    onChange={(event) =>
+                      setRemoteForm({ ...remoteForm, name: event.target.value })
+                    }
+                    placeholder="Vendor research agent"
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="remote-agent-visibility">
+                    Visibility
+                  </FieldLabel>
+                  <Select
+                    value={remoteForm.visibility}
+                    onValueChange={(value) =>
+                      setRemoteForm({
+                        ...remoteForm,
+                        visibility: (value ??
+                          "private") as RemoteAgentForm["visibility"],
+                        connectionScope:
+                          value === "workspace"
+                            ? "organization"
+                            : remoteForm.connectionScope,
+                      })
+                    }
+                  >
+                    <SelectTrigger id="remote-agent-visibility">
+                      <SelectValue>
+                        {visibilityLabel(remoteForm.visibility)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="private">Private</SelectItem>
+                        <SelectItem value="workspace">
+                          Workspace shared
+                        </SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="remote-connection-scope">
+                    Connection scope
+                  </FieldLabel>
+                  <Select
+                    value={remoteForm.connectionScope}
+                    disabled={remoteForm.visibility === "workspace"}
+                    onValueChange={(value) =>
+                      setRemoteForm({
+                        ...remoteForm,
+                        connectionScope: (value ??
+                          "user") as RemoteAgentForm["connectionScope"],
+                      })
+                    }
+                  >
+                    <SelectTrigger id="remote-connection-scope">
+                      <SelectValue>
+                        {connectionScopeLabel(remoteForm.connectionScope)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="user">Private connection</SelectItem>
+                        <SelectItem value="organization">
+                          Workspace connection
+                        </SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    Workspace agents require a workspace connection. Shared
+                    connections are managed by owners and admins.
+                  </FieldDescription>
+                </Field>
+              </div>
               <Field>
-                <FieldLabel htmlFor="remote-agent-name">
-                  Display name
+                <FieldLabel htmlFor="remote-agent-url">
+                  A2A endpoint URL
                 </FieldLabel>
-                <Input
-                  id="remote-agent-name"
-                  value={remoteForm.name}
-                  onChange={(event) =>
-                    setRemoteForm({ ...remoteForm, name: event.target.value })
-                  }
-                  placeholder="Vendor research agent"
-                />
-              </Field>
-              <Field>
-                <FieldLabel>Visibility</FieldLabel>
-                <Select
-                  value={remoteForm.visibility}
-                  onValueChange={(value) =>
-                    setRemoteForm({
-                      ...remoteForm,
-                      visibility: (value ??
-                        "private") as RemoteAgentForm["visibility"],
-                      connectionScope:
-                        value === "workspace"
-                          ? "organization"
-                          : remoteForm.connectionScope,
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue>
-                      {visibilityLabel(remoteForm.visibility)}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="private">Private</SelectItem>
-                      <SelectItem value="workspace">
-                        Workspace shared
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel>Connection scope</FieldLabel>
-                <Select
-                  value={remoteForm.connectionScope}
-                  disabled={remoteForm.visibility === "workspace"}
-                  onValueChange={(value) =>
-                    setRemoteForm({
-                      ...remoteForm,
-                      connectionScope: (value ??
-                        "user") as RemoteAgentForm["connectionScope"],
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue>
-                      {connectionScopeLabel(remoteForm.connectionScope)}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="user">Private connection</SelectItem>
-                      <SelectItem value="organization">
-                        Workspace connection
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
+                <div className="flex gap-2">
+                  <Input
+                    id="remote-agent-url"
+                    value={remoteForm.endpointUrl}
+                    onChange={(event) =>
+                      setRemoteForm({
+                        ...remoteForm,
+                        endpointUrl: event.target.value,
+                      })
+                    }
+                    placeholder="https://agent.example/a2a"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void discoverRemote()}
+                    disabled={discovering || !remoteForm.endpointUrl.trim()}
+                  >
+                    <Cloud
+                      className={discovering ? "animate-pulse" : ""}
+                      data-icon="inline-start"
+                    />
+                    {discovering ? "Discovering…" : "Discover"}
+                  </Button>
+                </div>
                 <FieldDescription>
-                  Workspace agents require a workspace connection. Shared
-                  connections are managed by owners and admins.
+                  Private network targets are controlled by the backend
+                  safe-dial policy.
                 </FieldDescription>
               </Field>
-            </div>
-            <Field>
-              <FieldLabel htmlFor="remote-agent-url">
-                A2A endpoint URL
-              </FieldLabel>
-              <div className="flex gap-2">
-                <Input
-                  id="remote-agent-url"
-                  value={remoteForm.endpointUrl}
-                  onChange={(event) =>
-                    setRemoteForm({
-                      ...remoteForm,
-                      endpointUrl: event.target.value,
-                    })
-                  }
-                  placeholder="https://agent.example/a2a"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void discoverRemote()}
-                  disabled={!remoteForm.endpointUrl.trim()}
-                >
+              {discoveryMessage && (
+                <Alert aria-live="polite" role="status">
                   <Cloud data-icon="inline-start" />
-                  Discover
-                </Button>
-              </div>
-              <FieldDescription>
-                Private network targets are controlled by the backend safe-dial
-                policy.
-              </FieldDescription>
-            </Field>
-            {discoveryMessage && (
-              <Alert>
-                <Cloud data-icon="inline-start" />
-                <AlertDescription>{discoveryMessage}</AlertDescription>
-              </Alert>
-            )}
-            <Field>
-              <FieldLabel>Authentication</FieldLabel>
-              <Select
-                value={remoteForm.authType}
-                onValueChange={(value) =>
-                  setRemoteForm({
-                    ...remoteForm,
-                    authType: (value ?? "none") as RemoteAgentForm["authType"],
-                  })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue>
-                    {authTypeLabel(remoteForm.authType)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="none">No authentication</SelectItem>
-                    <SelectItem value="api_key">API key</SelectItem>
-                    <SelectItem value="http">
-                      HTTP Basic / auth header
-                    </SelectItem>
-                    <SelectItem value="oauth2">OAuth2</SelectItem>
-                    <SelectItem value="oidc">OIDC</SelectItem>
-                    <SelectItem value="mtls">mTLS certificate</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-            {remoteForm.authType === "api_key" && (
+                  <AlertDescription>{discoveryMessage}</AlertDescription>
+                </Alert>
+              )}
               <Field>
-                <FieldLabel htmlFor="remote-api-key">API key</FieldLabel>
-                <Input
-                  id="remote-api-key"
-                  type="password"
-                  value={remoteForm.credential}
-                  onChange={(event) =>
+                <FieldLabel htmlFor="remote-authentication">
+                  Authentication
+                </FieldLabel>
+                <Select
+                  value={remoteForm.authType}
+                  onValueChange={(value) =>
                     setRemoteForm({
                       ...remoteForm,
-                      credential: event.target.value,
+                      authType: (value ??
+                        "none") as RemoteAgentForm["authType"],
                     })
                   }
-                  autoComplete="new-password"
-                />
+                >
+                  <SelectTrigger id="remote-authentication">
+                    <SelectValue>
+                      {authTypeLabel(remoteForm.authType)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="none">No authentication</SelectItem>
+                      <SelectItem value="api_key">API key</SelectItem>
+                      <SelectItem value="http">
+                        HTTP Basic / auth header
+                      </SelectItem>
+                      <SelectItem value="oauth2">OAuth2</SelectItem>
+                      <SelectItem value="oidc">OIDC</SelectItem>
+                      <SelectItem value="mtls">mTLS certificate</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </Field>
-            )}
-            {remoteForm.authType === "http" && (
-              <div className="grid gap-4 sm:grid-cols-2">
+              {remoteForm.authType === "api_key" && (
                 <Field>
-                  <FieldLabel htmlFor="remote-username">Username</FieldLabel>
+                  <FieldLabel htmlFor="remote-api-key">API key</FieldLabel>
                   <Input
-                    id="remote-username"
-                    value={remoteForm.username}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        username: event.target.value,
-                      })
-                    }
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="remote-password">Password</FieldLabel>
-                  <Input
-                    id="remote-password"
+                    id="remote-api-key"
                     type="password"
-                    value={remoteForm.password}
+                    value={remoteForm.credential}
                     onChange={(event) =>
                       setRemoteForm({
                         ...remoteForm,
-                        password: event.target.value,
+                        credential: event.target.value,
                       })
                     }
                     autoComplete="new-password"
                   />
                 </Field>
-              </div>
-            )}
-            {(remoteForm.authType === "oauth2" ||
-              remoteForm.authType === "oidc") && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="remote-oauth-client">
-                    Client ID
-                  </FieldLabel>
-                  <Input
-                    id="remote-oauth-client"
-                    value={remoteForm.oauthClientId}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        oauthClientId: event.target.value,
-                      })
-                    }
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="remote-oauth-scopes">Scopes</FieldLabel>
-                  <Input
-                    id="remote-oauth-scopes"
-                    value={remoteForm.oauthScopes}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        oauthScopes: event.target.value,
-                      })
-                    }
-                    placeholder="openid agent:run"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="remote-oauth-auth">
-                    Authorization URL
-                  </FieldLabel>
-                  <Input
-                    id="remote-oauth-auth"
-                    value={remoteForm.oauthAuthorizationUrl}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        oauthAuthorizationUrl: event.target.value,
-                      })
-                    }
-                    placeholder="https://idp.example/authorize"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="remote-oauth-token">
-                    Token URL
-                  </FieldLabel>
-                  <Input
-                    id="remote-oauth-token"
-                    value={remoteForm.oauthTokenUrl}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        oauthTokenUrl: event.target.value,
-                      })
-                    }
-                    placeholder="https://idp.example/token"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="remote-client-secret">
-                    Client secret
-                  </FieldLabel>
-                  <Input
-                    id="remote-client-secret"
-                    type="password"
-                    value={remoteForm.clientSecret}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        clientSecret: event.target.value,
-                      })
-                    }
-                    autoComplete="new-password"
-                  />
-                </Field>
-              </div>
-            )}
-            {remoteForm.authType === "mtls" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="remote-certificate">
-                    Client certificate
-                  </FieldLabel>
-                  <Textarea
-                    id="remote-certificate"
-                    rows={5}
-                    value={remoteForm.certificate}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        certificate: event.target.value,
-                      })
-                    }
-                    placeholder="-----BEGIN CERTIFICATE-----"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="remote-private-key">
-                    Private key
-                  </FieldLabel>
-                  <Textarea
-                    id="remote-private-key"
-                    rows={5}
-                    value={remoteForm.privateKey}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        privateKey: event.target.value,
-                      })
-                    }
-                    placeholder="-----BEGIN PRIVATE KEY-----"
-                  />
-                </Field>
-              </div>
-            )}
-            <Field orientation="horizontal">
-              <Switch
-                aria-label="Trust read-only operations"
-                checked={remoteForm.trustedReadOnly}
-                onCheckedChange={(checked) =>
-                  setRemoteForm({ ...remoteForm, trustedReadOnly: checked })
+              )}
+              {remoteForm.authType === "http" && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="remote-username">Username</FieldLabel>
+                    <Input
+                      id="remote-username"
+                      value={remoteForm.username}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          username: event.target.value,
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="remote-password">Password</FieldLabel>
+                    <Input
+                      id="remote-password"
+                      type="password"
+                      value={remoteForm.password}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          password: event.target.value,
+                        })
+                      }
+                      autoComplete="new-password"
+                    />
+                  </Field>
+                </div>
+              )}
+              {(remoteForm.authType === "oauth2" ||
+                remoteForm.authType === "oidc") && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="remote-oauth-client">
+                      Client ID
+                    </FieldLabel>
+                    <Input
+                      id="remote-oauth-client"
+                      value={remoteForm.oauthClientId}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          oauthClientId: event.target.value,
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="remote-oauth-scopes">
+                      Scopes
+                    </FieldLabel>
+                    <Input
+                      id="remote-oauth-scopes"
+                      value={remoteForm.oauthScopes}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          oauthScopes: event.target.value,
+                        })
+                      }
+                      placeholder="openid agent:run"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="remote-oauth-auth">
+                      Authorization URL
+                    </FieldLabel>
+                    <Input
+                      id="remote-oauth-auth"
+                      value={remoteForm.oauthAuthorizationUrl}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          oauthAuthorizationUrl: event.target.value,
+                        })
+                      }
+                      placeholder="https://idp.example/authorize"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="remote-oauth-token">
+                      Token URL
+                    </FieldLabel>
+                    <Input
+                      id="remote-oauth-token"
+                      value={remoteForm.oauthTokenUrl}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          oauthTokenUrl: event.target.value,
+                        })
+                      }
+                      placeholder="https://idp.example/token"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="remote-client-secret">
+                      Client secret
+                    </FieldLabel>
+                    <Input
+                      id="remote-client-secret"
+                      type="password"
+                      value={remoteForm.clientSecret}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          clientSecret: event.target.value,
+                        })
+                      }
+                      autoComplete="new-password"
+                    />
+                  </Field>
+                </div>
+              )}
+              {remoteForm.authType === "mtls" && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="remote-certificate">
+                      Client certificate
+                    </FieldLabel>
+                    <Textarea
+                      id="remote-certificate"
+                      rows={5}
+                      value={remoteForm.certificate}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          certificate: event.target.value,
+                        })
+                      }
+                      placeholder="-----BEGIN CERTIFICATE-----"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="remote-private-key">
+                      Private key
+                    </FieldLabel>
+                    <Textarea
+                      id="remote-private-key"
+                      rows={5}
+                      value={remoteForm.privateKey}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          privateKey: event.target.value,
+                        })
+                      }
+                      placeholder="-----BEGIN PRIVATE KEY-----"
+                    />
+                  </Field>
+                </div>
+              )}
+              <Field orientation="horizontal">
+                <Switch
+                  aria-label="Trust read-only operations"
+                  checked={remoteForm.trustedReadOnly}
+                  onCheckedChange={(checked) =>
+                    setRemoteForm({ ...remoteForm, trustedReadOnly: checked })
+                  }
+                />
+                <div>
+                  <FieldLabel>Trust read-only operations</FieldLabel>
+                  <FieldDescription>
+                    Only enable this for a connection you control. Otherwise
+                    remote runs pause for approval.
+                  </FieldDescription>
+                </div>
+              </Field>
+            </FieldGroup>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setRemoteOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={
+                  saving ||
+                  !remoteForm.name.trim() ||
+                  !remoteForm.endpointUrl.trim()
                 }
-              />
-              <div>
-                <FieldLabel>Trust read-only operations</FieldLabel>
-                <FieldDescription>
-                  Only enable this for a connection you control. Otherwise
-                  remote runs pause for approval.
-                </FieldDescription>
-              </div>
-            </Field>
-          </FieldGroup>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRemoteOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={
-                saving ||
-                !remoteForm.name.trim() ||
-                !remoteForm.endpointUrl.trim()
-              }
-              onClick={() => void saveRemote()}
-            >
-              <LockKeyhole data-icon="inline-start" />
-              {saving
-                ? editingAgent
-                  ? "Saving…"
-                  : "Connecting…"
-                : editingAgent
-                  ? "Save changes"
-                  : "Save encrypted connection"}
-            </Button>
-          </DialogFooter>
+                type="submit"
+              >
+                <LockKeyhole data-icon="inline-start" />
+                {saving
+                  ? editingAgent
+                    ? "Saving…"
+                    : "Connecting…"
+                  : editingAgent
+                    ? "Save changes"
+                    : "Save encrypted connection"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={runDialogOpen} onOpenChange={setRunDialogOpen}>
+      <Dialog
+        open={runDialogOpen}
+        onOpenChange={(open) => {
+          if (!running) setRunDialogOpen(open)
+        }}
+      >
         <DialogContent className="max-h-[min(720px,calc(100svh-2rem))] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Run workflow</DialogTitle>
@@ -2233,98 +2354,96 @@ export function AgentsView({
               with the immutable run snapshot and passed only to mapped nodes.
             </DialogDescription>
           </DialogHeader>
-          {currentRunInputNames.length ? (
-            <FieldGroup>
-              {currentRunInputNames.map((name) => (
-                <Field key={name}>
-                  <FieldLabel htmlFor={`workflow-run-input-${name}`}>
-                    {name}
-                  </FieldLabel>
-                  <Textarea
-                    id={`workflow-run-input-${name}`}
-                    rows={3}
-                    value={runInput[name] ?? ""}
-                    onChange={(event) =>
-                      setRunInput((current) => ({
-                        ...current,
-                        [name]: event.target.value,
-                      }))
-                    }
-                    placeholder="Enter a value"
-                  />
-                </Field>
-              ))}
-            </FieldGroup>
-          ) : (
-            <Alert>
-              <ListChecks data-icon="inline-start" />
-              <AlertDescription>
-                This workflow has no declared inputs. Add a “Workflow input”
-                binding to a node if the run should accept a value.
-              </AlertDescription>
-            </Alert>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setRunDialogOpen(false)}
-              disabled={running}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => void runWorkflow(runInput)}
-              disabled={running}
-            >
-              {running ? "Starting…" : "Start run"}
-            </Button>
-          </DialogFooter>
+          <form onSubmit={(event) => void runWorkflow(runInput, event)}>
+            {currentRunInputNames.length ? (
+              <FieldGroup>
+                {currentRunInputNames.map((name) => (
+                  <Field key={name}>
+                    <FieldLabel htmlFor={`workflow-run-input-${name}`}>
+                      {name}
+                    </FieldLabel>
+                    <Textarea
+                      id={`workflow-run-input-${name}`}
+                      rows={3}
+                      value={runInput[name] ?? ""}
+                      onChange={(event) =>
+                        setRunInput((current) => ({
+                          ...current,
+                          [name]: event.target.value,
+                        }))
+                      }
+                      placeholder="Enter a value"
+                    />
+                  </Field>
+                ))}
+              </FieldGroup>
+            ) : (
+              <Alert>
+                <ListChecks data-icon="inline-start" />
+                <AlertDescription>
+                  This workflow has no declared inputs. Add a “Workflow input”
+                  binding to a node if the run should accept a value.
+                </AlertDescription>
+              </Alert>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setRunDialogOpen(false)}
+                type="button"
+                disabled={running}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={running}>
+                {running ? "Starting…" : "Start run"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
-      <AlertDialog
+      <ConfirmActionDialog
         open={deleteTarget !== null}
+        title={
+          deleteTarget?.kind === "agent"
+            ? `Delete ${deleteTarget.item.name}?`
+            : deleteTarget?.kind === "connection"
+              ? `Remove the ${deleteTarget.item.name} connection?`
+              : `Delete ${deleteTarget?.item.name ?? "this workflow"}?`
+        }
+        description={
+          deleteTarget?.kind === "agent"
+            ? "Existing conversations keep their pinned agent version. New runs will no longer be able to select this agent."
+            : deleteTarget?.kind === "connection"
+              ? "Remote agents using this connection may stop working. This cannot be undone."
+              : "Existing runs stay inspectable, but this workflow will no longer be available for new runs or schedules."
+        }
+        confirmLabel={
+          deleteTarget?.kind === "connection"
+            ? "Remove connection"
+            : deleteTarget?.kind === "agent"
+              ? "Delete agent"
+              : "Delete workflow"
+        }
+        pending={deleting}
         onOpenChange={(open) => {
           if (!open && !deleting) setDeleteTarget(null)
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {deleteTarget?.kind === "agent"
-                ? `Delete ${deleteTarget.item.name}?`
-                : deleteTarget?.kind === "connection"
-                  ? `Remove the ${deleteTarget.item.name} connection?`
-                  : `Delete ${deleteTarget?.item.name ?? "this workflow"}?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteTarget?.kind === "agent"
-                ? "Existing conversations keep their pinned agent version. New runs will no longer be able to select this agent."
-                : deleteTarget?.kind === "connection"
-                  ? "Remote agents using this connection may stop working. This cannot be undone."
-                  : "Existing runs stay inspectable, but this workflow will no longer be available for new runs or schedules."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={deleting}
-              onClick={() => void confirmDelete()}
-            >
-              {deleting ? "Removing…" : "Confirm deletion"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+        onConfirm={() => void confirmDelete()}
+      />
+    </Page>
   )
 }
 
 function LoadingState({ label }: { label: string }) {
   return (
-    <Card className="border-dashed">
-      <CardContent className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
+    <Card aria-busy="true" className="border-dashed">
+      <CardContent
+        aria-live="polite"
+        className="flex min-h-48 items-center justify-center text-sm text-muted-foreground"
+        role="status"
+      >
         <RefreshCw className="mr-2 animate-spin" data-icon="inline-start" />
         {label}
       </CardContent>
@@ -2340,6 +2459,8 @@ function AgentsPanel({
   onTest,
   onToggleConnection,
   onDeleteConnection,
+  testingConnectionId,
+  updatingConnectionId,
   disabled = false,
 }: {
   agents: Agent[]
@@ -2349,6 +2470,8 @@ function AgentsPanel({
   onTest: (connection: AgentConnection) => void
   onToggleConnection: (connection: AgentConnection, enabled: boolean) => void
   onDeleteConnection: (connection: AgentConnection) => void
+  testingConnectionId: string
+  updatingConnectionId: string
   disabled?: boolean
 }) {
   const [query, setQuery] = useState("")
@@ -2557,7 +2680,7 @@ function AgentsPanel({
                   <div className="flex items-center gap-1">
                     <Switch
                       checked={connection.enabled}
-                      disabled={disabled}
+                      disabled={disabled || Boolean(updatingConnectionId)}
                       onCheckedChange={(checked) =>
                         onToggleConnection(connection, checked)
                       }
@@ -2566,11 +2689,18 @@ function AgentsPanel({
                     <Button
                       size="icon"
                       variant="ghost"
-                      disabled={disabled}
+                      disabled={disabled || Boolean(testingConnectionId)}
                       onClick={() => onTest(connection)}
                       aria-label={`Test ${connection.name}`}
                     >
-                      <RefreshCw data-icon="inline-start" />
+                      <RefreshCw
+                        className={
+                          testingConnectionId === connection.id
+                            ? "animate-spin"
+                            : ""
+                        }
+                        data-icon="inline-start"
+                      />
                     </Button>
                     <Button
                       size="icon"
@@ -2897,7 +3027,7 @@ function WorkflowsPanel({
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <Tabs defaultValue="build">
-              <TabsList variant="line">
+              <TabsList aria-label="Workflow editor sections" variant="line">
                 <TabsTrigger value="build">Build</TabsTrigger>
                 <TabsTrigger value="settings">Settings</TabsTrigger>
                 <TabsTrigger value="schedule">Schedule</TabsTrigger>
@@ -2905,7 +3035,7 @@ function WorkflowsPanel({
               <TabsContent value="build" className="pt-4">
                 {" "}
                 <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_23rem]">
-                  <div className="flex h-[620px] flex-col gap-2 overflow-hidden rounded-xl border bg-muted/20">
+                  <div className="flex h-[620px] flex-col gap-2 overflow-hidden rounded-xl bg-muted/50">
                     <div className="flex items-center justify-between border-b px-3 py-2">
                       <div>
                         <p className="text-xs font-medium">Execution graph</p>
@@ -3027,7 +3157,9 @@ function WorkflowsPanel({
                     />
                   </Field>
                   <Field>
-                    <FieldLabel>Visibility</FieldLabel>
+                    <FieldLabel htmlFor="workflow-visibility">
+                      Visibility
+                    </FieldLabel>
                     <Select
                       value={draft.visibility}
                       disabled={disabled}
@@ -3038,7 +3170,7 @@ function WorkflowsPanel({
                         })
                       }
                     >
-                      <SelectTrigger>
+                      <SelectTrigger id="workflow-visibility">
                         <SelectValue>
                           {visibilityLabel(draft.visibility)}
                         </SelectValue>
@@ -3054,8 +3186,11 @@ function WorkflowsPanel({
                     </Select>
                   </Field>
                   <Field>
-                    <FieldLabel>Timezone</FieldLabel>
+                    <FieldLabel htmlFor="workflow-timezone">
+                      Timezone
+                    </FieldLabel>
                     <Input
+                      id="workflow-timezone"
                       value={draft.timezone}
                       disabled={disabled}
                       onChange={(event) =>
@@ -3249,7 +3384,7 @@ function NodeInspector({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <Field>
-          <FieldLabel>Agent</FieldLabel>
+          <FieldLabel htmlFor={`agent-${node.id}`}>Agent</FieldLabel>
           <Select
             value={node.agentId}
             disabled={disabled}
@@ -3259,7 +3394,7 @@ function NodeInspector({
               })
             }
           >
-            <SelectTrigger>
+            <SelectTrigger id={`agent-${node.id}`}>
               <SelectValue>
                 {selectedAgent
                   ? `${agentToSavedLabel(selectedAgent)} · ${
@@ -3308,7 +3443,9 @@ function NodeInspector({
           />
         </Field>
         <Field>
-          <FieldLabel>Output format</FieldLabel>
+          <FieldLabel htmlFor={`output-format-${node.id}`}>
+            Output format
+          </FieldLabel>
           <Select
             value={node.outputFormat || "response"}
             disabled={disabled}
@@ -3320,7 +3457,11 @@ function NodeInspector({
               })
             }
           >
-            <SelectTrigger aria-label="Output format" className="w-full">
+            <SelectTrigger
+              aria-label="Output format"
+              className="w-full"
+              id={`output-format-${node.id}`}
+            >
               <SelectValue>{outputFormatLabel(node.outputFormat)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -3343,7 +3484,7 @@ function NodeInspector({
           {" "}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field>
-              <FieldLabel>Approval</FieldLabel>
+              <FieldLabel htmlFor={`approval-${node.id}`}>Approval</FieldLabel>
               <Select
                 value={node.approvalMode || "review"}
                 disabled={disabled}
@@ -3351,7 +3492,7 @@ function NodeInspector({
                   onUpdate(node.id, { approvalMode: value ?? "review" })
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger id={`approval-${node.id}`}>
                   <SelectValue>
                     {approvalModeLabel(node.approvalMode || "review")}
                   </SelectValue>
@@ -3367,8 +3508,11 @@ function NodeInspector({
               </Select>
             </Field>
             <Field>
-              <FieldLabel>Max attempts</FieldLabel>
+              <FieldLabel htmlFor={`max-attempts-${node.id}`}>
+                Max attempts
+              </FieldLabel>
               <Input
+                id={`max-attempts-${node.id}`}
                 type="number"
                 min={1}
                 max={3}
@@ -3388,8 +3532,11 @@ function NodeInspector({
             </Field>
           </div>
           <Field>
-            <FieldLabel>Node timeout (seconds)</FieldLabel>
+            <FieldLabel htmlFor={`timeout-${node.id}`}>
+              Node timeout (seconds)
+            </FieldLabel>
             <Input
+              id={`timeout-${node.id}`}
               type="number"
               min={1}
               max={600}
@@ -3437,7 +3584,7 @@ function NodeInspector({
                   return (
                     <div
                       key={`${node.id}-binding-${index}`}
-                      className="rounded-lg border bg-muted/20 p-3"
+                      className="rounded-xl bg-muted/50 p-3"
                     >
                       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
                         <Field>
@@ -3457,7 +3604,11 @@ function NodeInspector({
                           />
                         </Field>
                         <Field>
-                          <FieldLabel>Source</FieldLabel>
+                          <FieldLabel
+                            htmlFor={`binding-source-${node.id}-${index}`}
+                          >
+                            Source
+                          </FieldLabel>
                           <Select
                             value={source === "node" ? "node" : "input"}
                             disabled={disabled}
@@ -3471,7 +3622,9 @@ function NodeInspector({
                               })
                             }
                           >
-                            <SelectTrigger>
+                            <SelectTrigger
+                              id={`binding-source-${node.id}-${index}`}
+                            >
                               <SelectValue>
                                 {source === "node"
                                   ? "Previous output"
@@ -3505,7 +3658,11 @@ function NodeInspector({
                       {source === "node" && (
                         <div className="mt-3 grid gap-3 sm:grid-cols-2">
                           <Field>
-                            <FieldLabel>Previous node</FieldLabel>
+                            <FieldLabel
+                              htmlFor={`binding-node-${node.id}-${index}`}
+                            >
+                              Previous node
+                            </FieldLabel>
                             <Select
                               value={binding.nodeId ?? "none"}
                               disabled={disabled || !otherNodes.length}
@@ -3518,7 +3675,9 @@ function NodeInspector({
                                 })
                               }
                             >
-                              <SelectTrigger>
+                              <SelectTrigger
+                                id={`binding-node-${node.id}-${index}`}
+                              >
                                 <SelectValue>
                                   {otherNodes.find(
                                     (candidate) =>
@@ -3837,7 +3996,7 @@ function ScheduleEditor({
 }) {
   const kind = schedule.kind || "manual"
   return (
-    <section className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4">
+    <section className="flex flex-col gap-3 rounded-xl bg-muted/50 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium">Schedule</h3>
@@ -3848,16 +4007,17 @@ function ScheduleEditor({
         <Field orientation="horizontal">
           <Switch
             aria-label="Enable schedule"
+            id="schedule-enabled"
             checked={enabled}
             disabled={disabled}
             onCheckedChange={onEnabledChange}
           />
-          <FieldLabel>Enabled</FieldLabel>
+          <FieldLabel htmlFor="schedule-enabled">Enabled</FieldLabel>
         </Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-4">
         <Field>
-          <FieldLabel>Recurrence</FieldLabel>
+          <FieldLabel htmlFor="schedule-recurrence">Recurrence</FieldLabel>
           <Select
             value={kind}
             disabled={disabled}
@@ -3876,7 +4036,7 @@ function ScheduleEditor({
               )
             }
           >
-            <SelectTrigger>
+            <SelectTrigger id="schedule-recurrence">
               <SelectValue>{scheduleKindLabel(kind)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -3892,8 +4052,9 @@ function ScheduleEditor({
         {kind !== "manual" && (
           <>
             <Field>
-              <FieldLabel>Every</FieldLabel>
+              <FieldLabel htmlFor="schedule-interval">Every</FieldLabel>
               <Input
+                id="schedule-interval"
                 type="number"
                 min={1}
                 max={365}
@@ -3909,7 +4070,7 @@ function ScheduleEditor({
             </Field>
             {kind === "weekly" && (
               <Field>
-                <FieldLabel>Weekday</FieldLabel>
+                <FieldLabel htmlFor="schedule-weekday">Weekday</FieldLabel>
                 <Select
                   value={String(schedule.weekday ?? 1)}
                   disabled={disabled}
@@ -3920,7 +4081,7 @@ function ScheduleEditor({
                     })
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="schedule-weekday">
                     <SelectValue>{weekdayLabel(schedule.weekday)}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -3945,8 +4106,11 @@ function ScheduleEditor({
             )}
             {kind === "monthly" && (
               <Field>
-                <FieldLabel>Day of month</FieldLabel>
+                <FieldLabel htmlFor="schedule-day-of-month">
+                  Day of month
+                </FieldLabel>
                 <Input
+                  id="schedule-day-of-month"
                   type="number"
                   min={1}
                   max={31}
@@ -3965,8 +4129,9 @@ function ScheduleEditor({
               </Field>
             )}
             <Field>
-              <FieldLabel>Time</FieldLabel>
+              <FieldLabel htmlFor="schedule-time">Time</FieldLabel>
               <Input
+                id="schedule-time"
                 type="time"
                 value={schedule.time ?? "09:00"}
                 disabled={disabled}
@@ -4317,17 +4482,26 @@ function RunsPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <Input
-              aria-label="Search runs"
-              placeholder="Search workflows, run IDs, or results…"
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value)
+          <FilterBar
+            hasActiveFilters={Boolean(query.trim()) || statusFilter !== "all"}
+            onClear={() => {
+              setQuery("")
+              setStatusFilter("all")
+              setPage(0)
+            }}
+            resultCount={filteredRuns.length}
+            resultLabel="runs"
+            resultTotal={runs.length}
+            search={{
+              label: "Search runs",
+              onChange: (value) => {
+                setQuery(value)
                 setPage(0)
-              }}
-              className="max-w-md"
-            />
+              },
+              placeholder: "Search workflows, run IDs, or results…",
+              value: query,
+            }}
+          >
             <Select
               value={statusFilter}
               onValueChange={(value) => {
@@ -4335,7 +4509,11 @@ function RunsPanel({
                 setPage(0)
               }}
             >
-              <SelectTrigger aria-label="Filter run status">
+              <SelectTrigger
+                aria-label="Filter run status"
+                className="h-8 min-w-36 sm:min-w-40"
+                size="sm"
+              >
                 <SelectValue>
                   {statusFilter === "all"
                     ? "All statuses"
@@ -4355,10 +4533,7 @@ function RunsPanel({
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <span className="text-xs text-muted-foreground">
-              {filteredRuns.length} matches in {runs.length} loaded runs
-            </span>
-          </div>
+          </FilterBar>
           <Table>
             <TableHeader>
               <TableRow>
@@ -4727,7 +4902,7 @@ function RunDetail({
           description="Inspect the workflow graph, prompts, intermediate responses, and raw values."
         >
           {flowNodes.length > 0 && (
-            <div className="mb-5 h-80 overflow-hidden rounded-xl border bg-muted/20">
+            <div className="mb-5 h-80 overflow-hidden rounded-xl bg-muted/50">
               <WorkflowCanvas
                 nodes={flowNodes}
                 edges={flowEdges}

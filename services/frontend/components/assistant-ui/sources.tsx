@@ -7,6 +7,8 @@ import {
   type SourceMessagePartComponent,
 } from "@assistant-ui/react"
 
+import { Button } from "@/components/ui/button"
+
 export const AssistantSource: SourceMessagePartComponent = (part) => {
   const aui = useAui()
   const messageId = useAuiState((state) => state.message.id)
@@ -28,7 +30,7 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
   const trustLabel = isExternal ? "Linked source" : "Attached context"
 
   return (
-    <details className="my-2 max-w-xl rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs">
+    <details className="my-2 max-w-xl rounded-xl bg-card px-2.5 py-1.5 text-xs text-card-foreground">
       <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
         <FileText
           className="size-3.5 text-muted-foreground"
@@ -40,7 +42,7 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
           {trustLabel}
         </span>
       </summary>
-      <div className="mt-2 space-y-1 whitespace-pre-wrap text-muted-foreground">
+      <div className="mt-2 flex flex-col gap-1 whitespace-pre-wrap text-muted-foreground">
         <div className="flex items-center gap-1.5 text-[11px]">
           {isExternal ? (
             <ExternalLink className="size-3" aria-hidden="true" />
@@ -63,18 +65,20 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
         {locator && <p>Location: {locator}</p>}
         {chunkIndex !== undefined && <p>Chunk {chunkIndex + 1}</p>}
         {snippet && <p className="max-w-md">{snippet}</p>}
-        <button
-          className="mt-1 rounded-md border px-2 py-1 font-medium text-foreground hover:bg-muted"
+        <Button
+          className="mt-1"
           onClick={() =>
             aui.thread.composer().setQuote({
               messageId,
               text: quoteText,
             })
           }
+          size="sm"
           type="button"
+          variant="outline"
         >
           Ask about this source
-        </button>
+        </Button>
       </div>
     </details>
   )

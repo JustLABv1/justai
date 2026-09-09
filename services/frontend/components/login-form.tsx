@@ -164,27 +164,25 @@ export function LoginForm({
               <div
                 aria-label="Authentication mode"
                 className={styles.authModeSwitch}
-                role="tablist"
+                role="group"
               >
                 <button
-                  aria-selected={!isRegister}
+                  aria-pressed={!isRegister}
                   className={cn(
                     styles.authModeButton,
                     !isRegister && styles.authModeButtonActive
                   )}
-                  role="tab"
                   type="button"
                   onClick={() => switchMode("login")}
                 >
                   Sign in
                 </button>
                 <button
-                  aria-selected={isRegister}
+                  aria-pressed={isRegister}
                   className={cn(
                     styles.authModeButton,
                     isRegister && styles.authModeButtonActive
                   )}
-                  role="tab"
                   type="button"
                   onClick={() => switchMode("register")}
                 >

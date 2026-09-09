@@ -35,6 +35,7 @@ import {
   ToolResultContent,
 } from "@/components/assistant-ui/tool-fallback"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import { CompactMarkdown } from "@/components/ui/compact-markdown"
 import {
   ToolCallsSection,
@@ -66,14 +67,18 @@ type ContextSelection = {
 function ContextSelectionPart({ data }: { data: unknown }) {
   const value = (data ?? {}) as ContextSelection
   const names = Array.isArray(value.spaceNames)
-    ? value.spaceNames.filter((name): name is string => typeof name === "string")
+    ? value.spaceNames.filter(
+        (name): name is string => typeof name === "string"
+      )
     : []
   const label = names.length > 0 ? names.join(" · ") : "Automatic Knowledge"
   return (
-    <div className="my-1 inline-flex max-w-full items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs text-muted-foreground">
+    <div className="my-1 inline-flex max-w-full items-center gap-2 rounded-full bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
       <BrainCircuit className="size-3.5 text-primary" aria-hidden="true" />
       <span className="truncate">Knowledge · {label}</span>
-      {value.status === "started" && <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />}
+      {value.status === "started" && (
+        <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
+      )}
     </div>
   )
 }
@@ -106,25 +111,24 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
   const deepContext =
     value.mode === "deep-context" || value.mode === "repository-analysis"
   const noMatches = status === "completed" && sourceCount === 0
-  const label =
-    noMatches
-      ? "No matching Knowledge"
-      : status === "completed"
-        ? `${deepContext ? "Deep context ready" : "Grounding ready"} · ${sourceLabel}${passageLabel}`
-        : status === "failed"
-          ? "Grounding unavailable"
-          : status === "disabled"
-            ? "Knowledge grounding is disabled"
-            : deepContext
-              ? "Analyzing deeper context…"
-              : "Searching attached context…"
+  const label = noMatches
+    ? "No matching Knowledge"
+    : status === "completed"
+      ? `${deepContext ? "Deep context ready" : "Grounding ready"} · ${sourceLabel}${passageLabel}`
+      : status === "failed"
+        ? "Grounding unavailable"
+        : status === "disabled"
+          ? "Knowledge grounding is disabled"
+          : deepContext
+            ? "Analyzing deeper context…"
+            : "Searching attached context…"
 
   return (
     <div
       className={cn(
-        "my-2 inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-xs text-muted-foreground",
+        "my-2 inline-flex max-w-full items-center gap-2 rounded-full border border-transparent bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground",
         status === "failed" && "border-destructive/30 text-destructive",
-        status === "completed" && "border-primary/30 text-foreground"
+        status === "completed" && "text-foreground"
       )}
       title={value.query ? `Query: ${value.query}` : undefined}
     >
@@ -179,9 +183,7 @@ function AgentRunPart({ data }: { data: unknown }) {
     typeof value.approvalId === "string" ? value.approvalId : ""
   const argumentHash =
     typeof value.argumentHash === "string" ? value.argumentHash : ""
-  const [decision, setDecision] = useState<"approved" | "rejected" | null>(
-    null
-  )
+  const [decision, setDecision] = useState<"approved" | "rejected" | null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const action = value.action
@@ -216,7 +218,10 @@ function AgentRunPart({ data }: { data: unknown }) {
   return (
     <div className="my-2 w-full max-w-2xl rounded-xl border border-primary/30 bg-primary/[0.03] p-3 text-xs">
       <div className="flex items-start gap-2">
-        <ShieldCheck className="mt-0.5 size-4 text-primary" aria-hidden="true" />
+        <ShieldCheck
+          className="mt-0.5 size-4 text-primary"
+          aria-hidden="true"
+        />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-foreground">
             {status === "waiting_approval"
@@ -245,28 +250,31 @@ function AgentRunPart({ data }: { data: unknown }) {
         </pre>
       )}
       {argumentHash && (
-        <p className="mt-2 break-all text-[10px] text-muted-foreground">
+        <p className="mt-2 text-[10px] break-all text-muted-foreground">
           Exact action hash: {argumentHash}
         </p>
       )}
       {approvalId && !decision && status === "waiting_approval" && (
         <div className="mt-3 flex justify-end gap-2">
-          <button
-            className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 hover:bg-muted disabled:opacity-60"
+          <Button
             disabled={busy}
             onClick={() => void decide("rejected")}
+            size="sm"
             type="button"
+            variant="outline"
           >
-            <X className="size-3.5" aria-hidden="true" /> Reject
-          </button>
-          <button
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            <X data-icon="inline-start" aria-hidden="true" /> Reject
+          </Button>
+          <Button
             disabled={busy}
             onClick={() => void decide("approved")}
+            size="sm"
             type="button"
+            variant="default"
           >
-            <Check className="size-3.5" aria-hidden="true" /> Approve exact action
-          </button>
+            <Check data-icon="inline-start" aria-hidden="true" /> Approve exact
+            action
+          </Button>
         </div>
       )}
       {decision && (
@@ -282,7 +290,7 @@ function AgentRunPart({ data }: { data: unknown }) {
 
 function ReasoningPart({ text }: { text: string }) {
   return (
-    <div className="my-2 rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+    <div className="my-2 rounded-xl bg-card px-3 py-2 text-xs text-muted-foreground">
       <div className="flex items-center gap-2 font-medium text-foreground">
         <Sparkles className="size-3.5" aria-hidden="true" />
         Thinking
@@ -311,7 +319,8 @@ function toolCategory(toolName: string, serverName?: string) {
   if (toolName === "browse_url") return "browse_url"
   if (toolName === "generate_image") return "generate_image"
   if (toolName === "edit_image") return "edit_image"
-  if (toolName === "create_pdf" || toolName === "create_file") return "documents"
+  if (toolName === "create_pdf" || toolName === "create_file")
+    return "documents"
   if (toolName.toLowerCase().includes("memory")) return "memory"
   return "integrations"
 }
@@ -440,7 +449,10 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
         return [
           {
             tool_name: part.toolName,
-            tool_category: toolCategory(part.toolName, displayMetadata.serverName),
+            tool_category: toolCategory(
+              part.toolName,
+              displayMetadata.serverName
+            ),
             message: toolLabel(part.toolName, displayMetadata.toolName),
             show_category: true,
             tool_call_id: part.toolCallId,
@@ -556,7 +568,7 @@ function SourceGroup({ indices }: { indices: readonly number[] }) {
   }
 
   return (
-    <details className="my-2 w-full max-w-2xl overflow-hidden rounded-xl border bg-muted/20 text-xs">
+    <details className="my-2 w-full max-w-2xl overflow-hidden rounded-xl bg-muted/40 text-xs">
       <summary className="group flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 font-medium text-foreground [&::-webkit-details-marker]:hidden">
         <Files className="size-3.5 text-muted-foreground" aria-hidden="true" />
         <span>Sources used</span>
@@ -568,7 +580,7 @@ function SourceGroup({ indices }: { indices: readonly number[] }) {
           aria-hidden="true"
         />
       </summary>
-      <div className="space-y-1 border-t p-2">
+      <div className="flex flex-col gap-1 border-t p-2">
         {sourceParts.map((part) => (
           <AssistantSource key={part.id} {...part} />
         ))}
@@ -609,7 +621,7 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
       return <AssistantSource {...part} />
     case "image":
       return (
-        <div className="my-2 overflow-hidden rounded-xl border bg-muted/20">
+        <div className="my-2 overflow-hidden rounded-xl bg-card">
           <Image
             alt={part.filename ?? "Attached image"}
             className="h-auto max-h-96 w-auto max-w-full object-contain"
@@ -628,7 +640,7 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
     case "file":
       if (part.data.startsWith("justai-source:")) {
         return (
-          <span className="my-2 inline-flex items-center gap-2 rounded-xl border bg-muted/20 px-3 py-2 text-xs text-foreground">
+          <span className="my-2 inline-flex items-center gap-2 rounded-xl bg-card px-3 py-2 text-xs text-foreground">
             <FileText className="size-4" aria-hidden="true" />
             {part.filename ?? "Attached file"}
           </span>
@@ -636,7 +648,7 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
       }
       return (
         <a
-          className="my-2 inline-flex items-center gap-2 rounded-xl border bg-muted/20 px-3 py-2 text-xs text-foreground hover:bg-muted"
+          className="my-2 inline-flex items-center gap-2 rounded-xl bg-card px-3 py-2 text-xs text-foreground hover:bg-muted"
           download={part.filename}
           href={part.data}
           rel="noreferrer"
@@ -663,7 +675,7 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
       return part.toolUI
     case "generative-ui":
       return (
-        <div className="my-2 rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        <div className="my-2 rounded-xl bg-card px-3 py-2 text-xs text-muted-foreground">
           <Quote className="mb-1 size-3.5" aria-hidden="true" />
           Structured result is available in this response.
         </div>
@@ -683,7 +695,7 @@ export function AssistantMessageParts() {
         {({ part, children }) => {
           if (part.type === "group-reasoning") {
             return (
-              <details className="my-2 rounded-xl border bg-muted/20" open>
+              <details className="my-2 rounded-xl bg-muted/40" open>
                 <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
                   <Sparkles className="size-3.5" aria-hidden="true" />
                   Thinking

@@ -194,7 +194,7 @@ function FieldError({
       ...new Map(errors.map((error) => [error?.message, error])).values(),
     ]
 
-    if (uniqueErrors?.length == 1) {
+    if (uniqueErrors.length === 1) {
       return uniqueErrors[0]?.message
     }
 
@@ -215,6 +215,8 @@ function FieldError({
   return (
     <div
       role="alert"
+      aria-atomic="true"
+      aria-live="assertive"
       data-slot="field-error"
       className={cn("text-xs/relaxed font-normal text-destructive", className)}
       {...props}

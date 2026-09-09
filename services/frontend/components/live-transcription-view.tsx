@@ -25,6 +25,7 @@ import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-
 import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
 import { TranscriptWorkspace } from "@/components/transcript-workspace"
+import { WorkspaceDetailHeader } from "@/components/workspace-detail-header"
 import {
   Dialog,
   DialogContent,
@@ -51,6 +52,13 @@ import {
   FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -281,8 +289,9 @@ export function LiveTranscriptionView({
     captureMode === "system-audio" ? "Browser tab audio" : "This laptop"
   const effectiveGrammarEndpoint = selectedGrammarEndpoint
   const selectedGrammarName =
-    grammarEndpoints.find((endpoint) => endpoint.id === effectiveGrammarEndpoint)
-      ?.name || "Off"
+    grammarEndpoints.find(
+      (endpoint) => endpoint.id === effectiveGrammarEndpoint
+    )?.name || "Off"
 
   const refreshDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return
@@ -636,9 +645,13 @@ export function LiveTranscriptionView({
           TranscriptionSession["polishStatus"]
         >
         if (
-          !["not_requested", "queued", "processing", "completed", "failed"].includes(
-            status
-          )
+          ![
+            "not_requested",
+            "queued",
+            "processing",
+            "completed",
+            "failed",
+          ].includes(status)
         ) {
           return
         }
@@ -1739,7 +1752,7 @@ export function LiveTranscriptionView({
       : ("none" as const)
 
   return (
-    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
+    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
       {error && (
         <Alert variant="destructive">
           <AlertTitle>Live transcription needs attention</AlertTitle>
@@ -1748,55 +1761,56 @@ export function LiveTranscriptionView({
       )}
 
       {!snapshot ? (
-        <Empty className="min-h-[calc(100svh-8rem)] border-0">
-          <EmptyHeader>
-            <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <Radio aria-hidden="true" />
-            </div>
-            <EmptyTitle>Listen to the room</EmptyTitle>
-            <EmptyDescription>
-              {sessions.length > 0
-                ? "Select a session from the sidebar, or start a new room."
-                : "Start a named session, capture browser audio, or connect an external stream or meeting bot."}
-            </EmptyDescription>
-          </EmptyHeader>
-          <Button onClick={openCreateWizard}>
-            <Play data-icon="inline-start" />
-            New live session
-          </Button>
-        </Empty>
+        <>
+          <PageHeader className="shrink-0">
+            <PageHeading>
+              <PageEyebrow>Capture</PageEyebrow>
+              <PageTitle>Live transcription</PageTitle>
+              <PageDescription>
+                Capture conversations, meetings, and live sources in a shared
+                transcription workspace.
+              </PageDescription>
+            </PageHeading>
+          </PageHeader>
+          <Empty className="min-h-[calc(100svh-14rem)] border-0">
+            <EmptyHeader>
+              <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Radio aria-hidden="true" />
+              </div>
+              <EmptyTitle>Listen to the room</EmptyTitle>
+              <EmptyDescription>
+                {sessions.length > 0
+                  ? "Select a session from the sidebar, or start a new room."
+                  : "Start a named session, capture browser audio, or connect an external stream or meeting bot."}
+              </EmptyDescription>
+            </EmptyHeader>
+            <Button onClick={openCreateWizard}>
+              <Play data-icon="inline-start" />
+              New live session
+            </Button>
+          </Empty>
+        </>
       ) : snapshot.session.status === "completed" ? (
         <>
-          <section className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5">
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                <Check aria-hidden="true" />
-              </div>
-              <div className="min-w-0">
-                <Badge className="mb-2" variant="secondary">
-                  Capture complete
+          <WorkspaceDetailHeader
+            className="rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5"
+            eyebrow={<Badge variant="secondary">Capture complete</Badge>}
+            icon={<Check aria-hidden="true" />}
+            meta={
+              <>
+                <Badge variant="outline">
+                  {snapshot.segments.length} segments
                 </Badge>
-                <h1 className="text-lg font-semibold tracking-tight">
-                  Your transcript is ready to review
-                </h1>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                  Edit the wording, add notes, inspect speakers, generate
-                  insights, or export the finished transcript from one shared
-                  workspace.
-                </p>
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Badge variant="outline">
-                {snapshot.segments.length} segments
-              </Badge>
-              <Badge variant="outline">
-                {snapshot.recordings.length > 0
-                  ? "Audio recording available"
-                  : "Transcript only"}
-              </Badge>
-            </div>
-          </section>
+                <Badge variant="outline">
+                  {snapshot.recordings.length > 0
+                    ? "Audio recording available"
+                    : "Transcript only"}
+                </Badge>
+              </>
+            }
+            title="Your transcript is ready to review"
+            description="Edit the wording, add notes, inspect speakers, generate insights, or export the finished transcript from one shared workspace."
+          />
           <TranscriptWorkspace
             key={snapshot.session.id}
             currentTimeMs={workspaceTimeMs}
@@ -1821,31 +1835,31 @@ export function LiveTranscriptionView({
       ) : (
         <>
           <LiveTranscriptionConversationView
-              capturing={capturing}
-              canStartCapture
-              joinRequests={joinRequests}
-              level={level}
-              loading={loading}
-              onPauseOrResume={pauseOrResume}
-              onRefreshJoinRequests={refreshJoinRequests}
-              onRenameSpeaker={(speakerId, name) => {
-                void renameSpeaker(speakerId, name)
-              }}
-              onSetJoinRequest={setJoinRequest}
-              onShare={() =>
-                void (snapshot.session.joinCode
-                  ? setShareOpen(true)
-                  : rotateJoinCode())
-              }
-              onStartCapture={ensureCapture}
-              onStopSession={stopSession}
-              partial={partial}
-              partialSourceId={partialSourceId}
-              partialSpeakerId={partialSpeakerId}
-              snapshot={snapshot}
-              user={user}
-              mode={captureViewMode}
-            />
+            capturing={capturing}
+            canStartCapture
+            joinRequests={joinRequests}
+            level={level}
+            loading={loading}
+            onPauseOrResume={pauseOrResume}
+            onRefreshJoinRequests={refreshJoinRequests}
+            onRenameSpeaker={(speakerId, name) => {
+              void renameSpeaker(speakerId, name)
+            }}
+            onSetJoinRequest={setJoinRequest}
+            onShare={() =>
+              void (snapshot.session.joinCode
+                ? setShareOpen(true)
+                : rotateJoinCode())
+            }
+            onStartCapture={ensureCapture}
+            onStopSession={stopSession}
+            partial={partial}
+            partialSourceId={partialSourceId}
+            partialSpeakerId={partialSpeakerId}
+            snapshot={snapshot}
+            user={user}
+            mode={captureViewMode}
+          />
         </>
       )}
 
@@ -2321,7 +2335,7 @@ export function LiveTranscriptionView({
                     workspace after capture.
                   </FieldDescription>
                 </Field>
-                <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-3">
+                <div className="flex items-center justify-between rounded-xl bg-muted/50 p-3">
                   <div>
                     <p className="text-sm font-medium">Record source audio</p>
                     <p className="text-xs text-muted-foreground">
@@ -2355,7 +2369,7 @@ export function LiveTranscriptionView({
                 </div>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                <div className="flex min-w-0 items-start gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
                   <AudioLines className="mt-0.5 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">
@@ -2375,7 +2389,7 @@ export function LiveTranscriptionView({
                     </p>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-start gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
                   <Settings2 className="mt-0.5 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">
@@ -2385,12 +2399,12 @@ export function LiveTranscriptionView({
                       {selectedEndpointName}
                     </p>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {language || "auto"} · speakers {selectedDiarizationName} ·
-                      polish {selectedGrammarName}
+                      {language || "auto"} · speakers {selectedDiarizationName}{" "}
+                      · polish {selectedGrammarName}
                     </p>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-start gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
                   <Users className="mt-0.5 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Room</p>
@@ -2404,7 +2418,7 @@ export function LiveTranscriptionView({
                     </div>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-start gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
                   <ShieldCheck className="mt-0.5 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">
@@ -2566,7 +2580,7 @@ export function LiveTranscriptionView({
           </DialogHeader>
           {botSetup ? (
             <div className="flex flex-col gap-4">
-              <div className="rounded-xl border bg-muted/30 p-4">
+              <div className="rounded-xl bg-muted/50 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium">Ingest token</p>
@@ -2700,7 +2714,7 @@ export function LiveTranscriptionView({
             </DialogDescription>
           </DialogHeader>
           {snapshot?.session.joinCode ? (
-            <div className="flex min-w-0 items-center gap-2 rounded-xl border bg-muted/30 p-3">
+            <div className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/50 p-3">
               <code className="min-w-0 flex-1 text-xs break-all text-muted-foreground">
                 {new URL(
                   transcriptionJoinPath(snapshot.session.joinCode),
@@ -2719,7 +2733,7 @@ export function LiveTranscriptionView({
               </Button>
             </div>
           ) : null}
-          <div className="flex items-center justify-between rounded-xl border bg-muted/30 p-4">
+          <div className="flex items-center justify-between rounded-xl bg-muted/50 p-4">
             <span className="font-mono text-2xl font-semibold tracking-[0.32em]">
               {snapshot?.session.joinCode ?? "--------"}
             </span>
@@ -2769,7 +2783,9 @@ export function LiveTranscriptionView({
               <Input
                 autoFocus
                 id="workspace-speaker-name"
-                onChange={(event) => setWorkspaceSpeakerName(event.target.value)}
+                onChange={(event) =>
+                  setWorkspaceSpeakerName(event.target.value)
+                }
                 value={workspaceSpeakerName}
               />
             </Field>

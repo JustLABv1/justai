@@ -166,7 +166,8 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
     setDialogOpen(true)
   }
 
-  async function save() {
+  async function save(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     setError("")
     if (!form.message.trim()) {
       setError("Announcement message is required.")
@@ -246,7 +247,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
   return (
     <div className="flex flex-col gap-4">
       {error && (
-        <Alert variant="destructive">
+        <Alert aria-live="polite" role="alert" variant="destructive">
           <AlertTitle>Announcement request failed</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -264,7 +265,10 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {loading ? (
-            <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
+            <div
+              aria-live="polite"
+              className="flex items-center justify-center py-10 text-sm text-muted-foreground"
+            >
               <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading
               announcements…
             </div>
@@ -321,7 +325,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                       Edit
                     </Button>
                     <Button
-                      aria-label="Delete announcement"
+                      aria-label={`Delete announcement: ${banner.message.slice(0, 60)}`}
                       onClick={() => setRemoveTarget(banner)}
                       size="icon-sm"
                       variant="ghost"
@@ -336,7 +340,12 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
         </CardContent>
       </Card>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          if (!saving) setDialogOpen(open)
+        }}
+      >
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>
@@ -347,12 +356,27 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               users.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-xs font-medium sm:col-span-2">
+          {error && (
+            <Alert aria-live="polite" role="alert" variant="destructive">
+              <AlertTitle>Could not save announcement</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <form
+            className="grid gap-3 sm:grid-cols-2"
+            onSubmit={(event) => void save(event)}
+          >
+            <label
+              className="grid gap-1.5 text-xs font-medium sm:col-span-2"
+              htmlFor="announcement-message"
+            >
               Message
               <Textarea
                 className="min-h-24"
+                disabled={saving}
+                id="announcement-message"
                 maxLength={1000}
+                required
                 value={form.message}
                 onChange={(event) =>
                   setForm({ ...form, message: event.target.value })
@@ -360,7 +384,10 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                 placeholder="Scheduled maintenance begins at 22:00 UTC."
               />
             </label>
-            <label className="grid gap-1.5 text-xs font-medium">
+            <label
+              className="grid gap-1.5 text-xs font-medium"
+              htmlFor="announcement-severity"
+            >
               Severity
               <Select
                 value={form.severity}
@@ -372,7 +399,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                   })
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger disabled={saving} id="announcement-severity">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -383,9 +410,14 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                 </SelectContent>
               </Select>
             </label>
-            <label className="grid gap-1.5 text-xs font-medium">
+            <label
+              className="grid gap-1.5 text-xs font-medium"
+              htmlFor="announcement-priority"
+            >
               Priority
               <Input
+                disabled={saving}
+                id="announcement-priority"
                 min="-1000"
                 step="1"
                 type="number"
@@ -395,9 +427,14 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                 }
               />
             </label>
-            <label className="grid gap-1.5 text-xs font-medium sm:col-span-2">
+            <label
+              className="grid gap-1.5 text-xs font-medium sm:col-span-2"
+              htmlFor="announcement-link"
+            >
               Optional link
               <Input
+                disabled={saving}
+                id="announcement-link"
                 type="url"
                 value={form.linkUrl}
                 onChange={(event) =>
@@ -406,19 +443,30 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                 placeholder="https://status.example.com"
               />
             </label>
-            <label className="grid gap-1.5 text-xs font-medium">
+            <label
+              className="grid gap-1.5 text-xs font-medium"
+              htmlFor="announcement-starts-at"
+            >
               Starts at
               <Input
+                disabled={saving}
+                id="announcement-starts-at"
                 type="datetime-local"
+                required
                 value={form.startsAt}
                 onChange={(event) =>
                   setForm({ ...form, startsAt: event.target.value })
                 }
               />
             </label>
-            <label className="grid gap-1.5 text-xs font-medium">
+            <label
+              className="grid gap-1.5 text-xs font-medium"
+              htmlFor="announcement-ends-at"
+            >
               Ends at (optional)
               <Input
+                disabled={saving}
+                id="announcement-ends-at"
                 type="datetime-local"
                 value={form.endsAt}
                 onChange={(event) =>
@@ -436,6 +484,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               <Switch
                 aria-label="Announcement enabled"
                 checked={form.enabled}
+                disabled={saving}
                 onCheckedChange={(enabled) => setForm({ ...form, enabled })}
               />
             </div>
@@ -449,21 +498,26 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               <Switch
                 aria-label="Allow announcement dismissal"
                 checked={form.dismissible}
+                disabled={saving}
                 onCheckedChange={(dismissible) =>
                   setForm({ ...form, dismissible })
                 }
               />
             </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setDialogOpen(false)} variant="outline">
-              Cancel
-            </Button>
-            <Button disabled={saving} onClick={() => void save()}>
-              {saving && <LoaderCircle className="animate-spin" />}{" "}
-              {saving ? "Saving…" : "Save announcement"}
-            </Button>
-          </DialogFooter>
+            <DialogFooter className="sm:col-span-2">
+              <Button
+                onClick={() => setDialogOpen(false)}
+                type="button"
+                variant="outline"
+              >
+                Cancel
+              </Button>
+              <Button disabled={saving} type="submit">
+                {saving && <LoaderCircle className="animate-spin" />}{" "}
+                {saving ? "Saving…" : "Save announcement"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
       <ConfirmActionDialog

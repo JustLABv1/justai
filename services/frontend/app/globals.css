@@ -6,38 +6,39 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(0.985 0.006 50);
-  --foreground: oklch(0.255 0.012 45);
-  --card: oklch(0.994 0.004 50);
-  --card-foreground: oklch(0.255 0.012 45);
-  --popover: oklch(0.994 0.004 50);
-  --popover-foreground: oklch(0.255 0.012 45);
-  --primary: oklch(0.4341 0.0392 41.9938);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.947 0.018 45);
-  --secondary-foreground: oklch(0.3499 0.03 42);
-  --muted: oklch(0.963 0.009 50);
-  --muted-foreground: oklch(0.52 0.014 45);
-  --accent: oklch(0.932 0.018 45);
-  --accent-foreground: oklch(0.255 0.012 45);
+  --background: #f7f7f7;
+  --foreground: #202020;
+  --card: #ffffff;
+  --card-foreground: #202020;
+  --popover: #ffffff;
+  --popover-foreground: #202020;
+  --primary: #1764ef;
+  --primary-foreground: #ffffff;
+  --secondary: #ebebeb;
+  --secondary-foreground: #404040;
+  --muted: #eeeeee;
+  --muted-foreground: #707070;
+  --accent: #e8e8e8;
+  --accent-foreground: #202020;
   --destructive: oklch(0.6271 0.1936 33.339);
   --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.89 0.015 47);
-  --input: oklch(0.89 0.015 47);
-  --ring: oklch(0.4341 0.0392 41.9938);
-  --chart-1: oklch(0.4341 0.0392 41.9938);
-  --chart-2: oklch(0.947 0.018 45);
-  --chart-3: oklch(0.932 0.018 45);
-  --chart-4: oklch(0.9367 0.0523 75.5009);
-  --chart-5: oklch(0.4338 0.0437 41.6746);
-  --sidebar: oklch(0.99 0.005 50);
-  --sidebar-foreground: oklch(0.265 0.012 45);
-  --sidebar-primary: oklch(0.325 0.02 42);
-  --sidebar-primary-foreground: oklch(0.99 0.005 50);
-  --sidebar-accent: oklch(0.972 0.01 50);
-  --sidebar-accent-foreground: oklch(0.325 0.02 42);
-  --sidebar-border: oklch(0.944 0.009 50);
-  --sidebar-ring: oklch(0.7731 0.02 45);
+  --border: rgb(0 0 0 / 6%);
+  --input: #ebebeb;
+  --ring: #2675ff;
+  --chart-1: #2675ff;
+  --chart-2: #23a394;
+  --chart-3: #9470dc;
+  --chart-4: #dd9c36;
+  --chart-5: #da668d;
+  --sidebar: #ebebeb;
+  --sidebar-secondary: #f0f0f0;
+  --sidebar-foreground: #404040;
+  --sidebar-primary: #1764ef;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e3e3e3;
+  --sidebar-accent-foreground: #202020;
+  --sidebar-border: rgb(0 0 0 / 4%);
+  --sidebar-ring: #2675ff;
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
@@ -77,38 +78,39 @@
 }
 
 .dark {
-  --background: oklch(0.1776 0 0);
-  --foreground: oklch(0.9491 0 0);
-  --card: oklch(0.2134 0 0);
-  --card-foreground: oklch(0.9491 0 0);
-  --popover: oklch(0.2134 0 0);
-  --popover-foreground: oklch(0.9491 0 0);
-  --primary: oklch(0.9247 0.0524 66.1732);
-  --primary-foreground: oklch(0.2029 0.024 200.1962);
-  --secondary: oklch(0.3163 0.019 63.6992);
-  --secondary-foreground: oklch(0.9247 0.0524 66.1732);
-  --muted: oklch(0.252 0 0);
-  --muted-foreground: oklch(0.7699 0 0);
-  --accent: oklch(0.285 0 0);
-  --accent-foreground: oklch(0.9491 0 0);
+  --background: #171717;
+  --foreground: #f5f5f5;
+  --card: #252525;
+  --card-foreground: #f5f5f5;
+  --popover: #2b2b2b;
+  --popover-foreground: #f5f5f5;
+  --primary: #2675ff;
+  --primary-foreground: #ffffff;
+  --secondary: #333333;
+  --secondary-foreground: #dddddd;
+  --muted: #2b2b2b;
+  --muted-foreground: #a0a0a0;
+  --accent: #353535;
+  --accent-foreground: #f5f5f5;
   --destructive: oklch(0.6271 0.1936 33.339);
   --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.2351 0.0115 91.7467);
-  --input: oklch(0.4017 0 0);
-  --ring: oklch(0.9247 0.0524 66.1732);
-  --chart-1: oklch(0.9247 0.0524 66.1732);
-  --chart-2: oklch(0.3163 0.019 63.6992);
-  --chart-3: oklch(0.285 0 0);
-  --chart-4: oklch(0.3481 0.0219 67.0001);
-  --chart-5: oklch(0.9245 0.0533 67.0855);
-  --sidebar: oklch(0.2103 0.0059 285.8852);
-  --sidebar-foreground: oklch(0.9674 0.0013 286.3752);
-  --sidebar-primary: oklch(0.4882 0.2172 264.3763);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.2739 0.0055 286.0326);
-  --sidebar-accent-foreground: oklch(0.9674 0.0013 286.3752);
-  --sidebar-border: oklch(0.2739 0.0055 286.0326);
-  --sidebar-ring: oklch(0.8711 0.0055 286.286);
+  --border: rgb(255 255 255 / 6%);
+  --input: #333333;
+  --ring: #669eff;
+  --chart-1: #669eff;
+  --chart-2: #5ec9b7;
+  --chart-3: #b596ee;
+  --chart-4: #e8b661;
+  --chart-5: #ee8fad;
+  --sidebar: #252525;
+  --sidebar-secondary: #202020;
+  --sidebar-foreground: #b0b0b0;
+  --sidebar-primary: #2675ff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #292929;
+  --sidebar-accent-foreground: #f5f5f5;
+  --sidebar-border: rgb(255 255 255 / 4%);
+  --sidebar-ring: #669eff;
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
@@ -637,4 +639,17 @@
   .video-worker-queue-flow {
     animation: none;
   }
+}
+
+:root {
+  --composer-accent: #2675ff;
+}
+
+/* The composer is a raised neutral surface in the dark reference. */
+.dark .composer-surface {
+  --background: #252525;
+  --foreground: #f5f5f5;
+  --muted: #252525;
+  --muted-foreground: #777777;
+  --border: #414141;
 }

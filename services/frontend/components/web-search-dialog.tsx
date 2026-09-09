@@ -32,7 +32,10 @@ export function WebSearchDialog({
   const [query, setQuery] = useState("")
   const [urlInput, setURLInput] = useState("")
   const [results, setResults] = useState<WebSearchResult[]>([])
-  const [preview, setPreview] = useState<{ url: string; content: string } | null>(null)
+  const [preview, setPreview] = useState<{
+    url: string
+    content: string
+  } | null>(null)
   const [searching, setSearching] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [attaching, setAttaching] = useState("")
@@ -65,7 +68,11 @@ export function WebSearchDialog({
       )
       setPreview(response)
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "This URL could not be browsed.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "This URL could not be browsed."
+      )
     } finally {
       setPreviewing(false)
     }
@@ -85,13 +92,20 @@ export function WebSearchDialog({
     setError("")
     try {
       const conversationId = await onEnsureConversation()
-      await api.post(`/api/v1/conversations/${conversationId}/attachments/url`, {
-        title: result.title,
-        url: result.url,
-      })
+      await api.post(
+        `/api/v1/conversations/${conversationId}/attachments/url`,
+        {
+          title: result.title,
+          url: result.url,
+        }
+      )
       onAttached?.()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The URL could not be attached.")
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The URL could not be attached."
+      )
     } finally {
       setAttaching("")
     }
@@ -101,7 +115,12 @@ export function WebSearchDialog({
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger
         render={
-          <Button aria-label="Search the web" size="icon-sm" title="Search the web" variant="ghost" />
+          <Button
+            aria-label="Search the web"
+            size="icon-sm"
+            title="Search the web"
+            variant="ghost"
+          />
         }
       >
         <Globe2 />
@@ -110,12 +129,13 @@ export function WebSearchDialog({
         <DialogHeader>
           <DialogTitle>Web search and browsing</DialogTitle>
           <DialogDescription>
-            Search the public web, preview a page, or attach it as durable chat context.
+            Search the public web, preview a page, or attach it as durable chat
+            context.
           </DialogDescription>
         </DialogHeader>
 
         {error && (
-          <Alert variant="destructive">
+          <Alert aria-live="polite" role="alert" variant="destructive">
             <AlertTitle>Web action failed</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
@@ -131,6 +151,7 @@ export function WebSearchDialog({
           <Input
             aria-label="Web search query"
             autoFocus
+            id="web-search-query"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search the web…"
             value={query}
@@ -149,12 +170,17 @@ export function WebSearchDialog({
         >
           <Input
             aria-label="URL to browse"
+            id="web-browse-url"
             onChange={(event) => setURLInput(event.target.value)}
             placeholder="Or browse a URL directly, e.g. https://example.com"
             type="url"
             value={urlInput}
           />
-          <Button disabled={previewing || !urlInput.trim()} type="submit" variant="outline">
+          <Button
+            disabled={previewing || !urlInput.trim()}
+            type="submit"
+            variant="outline"
+          >
             {previewing ? <Loader2 className="animate-spin" /> : <Globe2 />}
             Browse URL
           </Button>
@@ -169,7 +195,10 @@ export function WebSearchDialog({
                 </p>
               ) : (
                 results.map((result) => (
-                  <article className="rounded-lg p-3 hover:bg-muted/60" key={result.url}>
+                  <article
+                    className="rounded-lg p-3 hover:bg-muted/60"
+                    key={result.url}
+                  >
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <a
@@ -188,17 +217,35 @@ export function WebSearchDialog({
                         </Badge>
                       </div>
                       <div className="flex shrink-0 flex-col gap-1">
-                        <Button onClick={() => void browse(result)} size="icon-sm" title="Preview page" variant="ghost">
-                          {previewing && preview?.url === result.url ? <Loader2 className="animate-spin" /> : <Globe2 />}
+                        <Button
+                          aria-label={`Preview ${result.title}`}
+                          disabled={previewing}
+                          onClick={() => void browse(result)}
+                          size="icon-sm"
+                          title="Preview page"
+                          type="button"
+                          variant="ghost"
+                        >
+                          {previewing && preview?.url === result.url ? (
+                            <Loader2 className="animate-spin" />
+                          ) : (
+                            <Globe2 />
+                          )}
                         </Button>
                         <Button
+                          aria-label={`Attach ${result.title} to chat`}
                           disabled={attaching === result.url}
                           onClick={() => void attach(result)}
                           size="icon-sm"
                           title="Attach to chat"
+                          type="button"
                           variant="ghost"
                         >
-                          {attaching === result.url ? <Loader2 className="animate-spin" /> : <Plus />}
+                          {attaching === result.url ? (
+                            <Loader2 className="animate-spin" />
+                          ) : (
+                            <Plus />
+                          )}
                         </Button>
                       </div>
                     </div>
@@ -208,37 +255,57 @@ export function WebSearchDialog({
             </div>
           </div>
 
-          <div className="min-h-0 overflow-y-auto rounded-lg border bg-muted/20">
+          <div className="min-h-0 overflow-y-auto rounded-xl bg-muted/50">
             {preview ? (
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs font-medium text-muted-foreground">Page preview</p>
-                    <p className="mt-1 break-all text-xs">{preview.url}</p>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Page preview
+                    </p>
+                    <p className="mt-1 text-xs break-all">{preview.url}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <Button
+                      aria-label="Attach preview to chat"
                       disabled={attaching === preview.url}
                       onClick={() =>
-                        void attach({ title: preview.url, url: preview.url, snippet: "" })
+                        void attach({
+                          title: preview.url,
+                          url: preview.url,
+                          snippet: "",
+                        })
                       }
                       size="icon-sm"
                       title="Attach page to chat"
+                      type="button"
                       variant="ghost"
                     >
-                      {attaching === preview.url ? <Loader2 className="animate-spin" /> : <Plus />}
+                      {attaching === preview.url ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <Plus />
+                      )}
                     </Button>
                     <Button
-                      onClick={() => window.open(preview.url, "_blank", "noopener,noreferrer")}
+                      aria-label="Open preview in a new tab"
+                      onClick={() =>
+                        window.open(
+                          preview.url,
+                          "_blank",
+                          "noopener,noreferrer"
+                        )
+                      }
                       size="icon-sm"
                       title="Open page"
+                      type="button"
                       variant="ghost"
                     >
                       <ExternalLink />
                     </Button>
                   </div>
                 </div>
-                <p className="mt-4 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                <p className="mt-4 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
                   {preview.content}
                 </p>
               </div>
@@ -251,7 +318,11 @@ export function WebSearchDialog({
         </div>
 
         <DialogFooter>
-          <Button onClick={() => setOpen(false)} variant="outline">
+          <Button
+            onClick={() => setOpen(false)}
+            type="button"
+            variant="outline"
+          >
             Done
           </Button>
         </DialogFooter>

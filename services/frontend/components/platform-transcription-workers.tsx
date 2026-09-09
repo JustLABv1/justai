@@ -48,7 +48,7 @@ function WorkerMetric({
   detail: string
 }) {
   return (
-    <div className="rounded-lg border bg-muted/20 p-3">
+    <div className="rounded-xl bg-muted/50 p-3">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Icon aria-hidden="true" className="size-3.5" />
         {label}
@@ -113,7 +113,7 @@ export function PlatformTranscriptionWorkers({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <div className="rounded-lg border bg-muted/20 p-3.5">
+        <div className="rounded-xl bg-muted/50 p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="font-medium">Live worker consumption</span>
             <span className="font-mono text-xs text-muted-foreground tabular-nums">

@@ -26,6 +26,7 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@/components/ui/attachment"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 type ChatAttachment = PendingAttachment | CompleteAttachment
@@ -203,20 +204,107 @@ export function ChatAttachmentPreview({
     }
   }
 
+  if (variant === "composer") {
+    const uploading = attachment.status.type === "running"
+    const progress =
+      attachment.status.type === "running"
+        ? Math.round(
+            Math.max(0, Math.min(100, attachment.status.progress ?? 0))
+          )
+        : 0
+    return (
+      <div
+        className="group/thumbnail relative shrink-0"
+        title={
+          retryError ||
+          `${attachment.name} · ${getStatusLabel(attachment, variant)}`
+        }
+      >
+        <div
+          className={cn(
+            "relative size-14 overflow-hidden rounded-[13px] border bg-muted",
+            status === "error" && "border-destructive"
+          )}
+        >
+          {hasImagePreview ? (
+            <AttachmentImagePreview attachment={attachment} />
+          ) : (
+            <AttachmentMediaIcon attachment={attachment} />
+          )}
+          {uploading && (
+            <>
+              <div className="absolute inset-0 bg-background/20" />
+              <span className="absolute top-1 right-1.5 text-[11px] font-medium text-white drop-shadow">
+                {progress}%
+              </span>
+            </>
+          )}
+          {!hasImagePreview && (
+            <span className="absolute inset-x-0 bottom-0 truncate bg-background/90 px-1 py-0.5 text-center text-[9px] dark:text-muted-foreground">
+              {attachment.name}
+            </span>
+          )}
+        </div>
+        {uploading && (
+          <svg
+            className="pointer-events-none absolute inset-0 size-14 text-[var(--composer-accent)]"
+            viewBox="0 0 64 64"
+            role="progressbar"
+            aria-label={`Uploading ${attachment.name}`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progress}
+          >
+            <path
+              d="M 32 1.5 H 49 A 13.5 13.5 0 0 1 62.5 15 V 49 A 13.5 13.5 0 0 1 49 62.5 H 15 A 13.5 13.5 0 0 1 1.5 49 V 15 A 13.5 13.5 0 0 1 15 1.5 H 32"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              pathLength="100"
+              strokeDasharray={`${progress} 100`}
+              className="transition-[stroke-dasharray] duration-150 motion-reduce:transition-none"
+            />
+          </svg>
+        )}
+        {showRemove && (
+          <AttachmentPrimitive.Remove
+            aria-label={`Remove ${attachment.name}`}
+            className="absolute -top-2 -right-2 flex size-8 items-center justify-center rounded-full border bg-background text-muted-foreground opacity-0 shadow-sm transition-[opacity,box-shadow] duration-150 group-focus-within/thumbnail:opacity-100 group-hover/thumbnail:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none [@media(hover:none)]:opacity-100"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
+          </AttachmentPrimitive.Remove>
+        )}
+        {canRetry && (
+          <Button
+            type="button"
+            onClick={() => void retryAttachment()}
+            disabled={retrying}
+            aria-label={`Retry ${attachment.name}`}
+            className="absolute inset-x-1 bottom-1 h-8 rounded-md bg-background/95 px-1 text-[10px] text-destructive shadow-sm hover:bg-background hover:text-destructive"
+            size="sm"
+            variant="outline"
+          >
+            {retrying ? "Retrying…" : "Retry"}
+          </Button>
+        )}
+        {status === "error" && (
+          <span role="alert" className="sr-only">
+            {retryError || getStatusLabel(attachment, variant)}
+          </span>
+        )}
+      </div>
+    )
+  }
+
   return (
     <Attachment
-      className={cn(
-        "max-w-full",
-        variant === "composer" ? "w-full sm:w-auto sm:max-w-80" : "max-w-96"
-      )}
+      className={cn("max-w-full", "max-w-96")}
       size="sm"
       state={status}
     >
       <AttachmentMedia
-        className={cn(
-          "overflow-hidden rounded-lg border",
-          variant === "message" ? "size-14!" : "size-12!"
-        )}
+        className="size-14! overflow-hidden rounded-lg"
         variant={hasImagePreview ? "image" : "icon"}
       >
         {hasImagePreview ? (
@@ -234,24 +322,26 @@ export function ChatAttachmentPreview({
       {showRemove && (
         <AttachmentActions className="gap-0.5">
           {canRetry && (
-            <button
+            <Button
               aria-label={`Retry ${attachment.name}`}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+              className="text-muted-foreground hover:bg-muted hover:text-foreground"
               disabled={retrying}
               onClick={() => void retryAttachment()}
+              size="icon-sm"
               title={`Retry ${attachment.name}`}
               type="button"
+              variant="ghost"
             >
               <HugeiconsIcon
                 className={retrying ? "animate-spin" : ""}
                 icon={ReloadIcon}
                 size={16}
               />
-            </button>
+            </Button>
           )}
           <AttachmentPrimitive.Remove
             aria-label={`Remove ${attachment.name}`}
-            className="size-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="size-8 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
           >
             <HugeiconsIcon icon={Cancel01Icon} className="size-4" />
           </AttachmentPrimitive.Remove>

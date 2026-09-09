@@ -11,18 +11,9 @@ import {
 } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { Organization, OrganizationMember, User } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -54,6 +45,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 type MemberRole = OrganizationMember["role"]
 
@@ -91,6 +83,8 @@ export function SettingsView({
   const [memberEmail, setMemberEmail] = useState("")
   const [memberRole, setMemberRole] = useState<MemberRole>("member")
   const [saving, setSaving] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [updatingMemberId, setUpdatingMemberId] = useState("")
   const [removeTarget, setRemoveTarget] = useState<OrganizationMember | null>(
     null
   )
@@ -154,12 +148,14 @@ export function SettingsView({
 
   const openWorkspaceDialog = useCallback(() => {
     setWorkspaceName("")
+    setActionError("")
     setWorkspaceDialogOpen(true)
   }, [])
 
   const openMemberDialog = useCallback(() => {
     setMemberEmail("")
     setMemberRole("member")
+    setActionError("")
     setMemberDialogOpen(true)
   }, [])
 
@@ -170,10 +166,12 @@ export function SettingsView({
 
   function openRenameDialog() {
     setWorkspaceName(activeOrganization?.name ?? "")
+    setActionError("")
     setRenameDialogOpen(true)
   }
 
-  async function createWorkspace() {
+  async function createWorkspace(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     const name = workspaceName.trim()
     if (!name) return
     setSaving(true)
@@ -184,19 +182,23 @@ export function SettingsView({
         { name }
       )
       onOrganizationCreated(result.organization)
+      notifySuccess("Workspace created", result.organization.name)
       resetWorkspaceDialog()
     } catch (caught) {
       setActionError(
-        caught instanceof Error
-          ? caught.message
-          : "The workspace could not be created."
+        notifyError(
+          "Workspace could not be created",
+          caught,
+          "The workspace could not be created."
+        )
       )
     } finally {
       setSaving(false)
     }
   }
 
-  async function renameWorkspace() {
+  async function renameWorkspace(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     if (!activeOrganization) return
     const name = workspaceName.trim()
     if (!name) return
@@ -208,19 +210,23 @@ export function SettingsView({
         { name }
       )
       onOrganizationUpdated(result.organization)
+      notifySuccess("Workspace renamed", result.organization.name)
       setRenameDialogOpen(false)
     } catch (caught) {
       setActionError(
-        caught instanceof Error
-          ? caught.message
-          : "The workspace could not be renamed."
+        notifyError(
+          "Workspace could not be renamed",
+          caught,
+          "The workspace could not be renamed."
+        )
       )
     } finally {
       setSaving(false)
     }
   }
 
-  async function addMember() {
+  async function addMember(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     if (!activeOrganization || !memberEmail.trim()) return
     setSaving(true)
     setActionError("")
@@ -232,12 +238,15 @@ export function SettingsView({
       setMemberEmail("")
       setMemberRole("member")
       setMemberDialogOpen(false)
+      notifySuccess("Member added")
       await loadMembers()
     } catch (caught) {
       setActionError(
-        caught instanceof Error
-          ? caught.message
-          : "The member could not be added."
+        notifyError(
+          "Member could not be added",
+          caught,
+          "The member could not be added."
+        )
       )
     } finally {
       setSaving(false)
@@ -249,6 +258,8 @@ export function SettingsView({
     role: MemberRole
   ) {
     if (!activeOrganization || member.role === role) return
+    if (updatingMemberId) return
+    setUpdatingMemberId(member.id)
     setActionError("")
     try {
       await api.patch(
@@ -258,29 +269,39 @@ export function SettingsView({
       await loadMembers()
     } catch (caught) {
       setActionError(
-        caught instanceof Error
-          ? caught.message
-          : "The member role could not be updated."
+        notifyError(
+          "Member role could not be updated",
+          caught,
+          "The member role could not be updated."
+        )
       )
+    } finally {
+      setUpdatingMemberId("")
     }
   }
 
   async function removeMember() {
     if (!activeOrganization || !removeTarget) return
     const target = removeTarget
-    setRemoveTarget(null)
+    setRemoving(true)
     setActionError("")
     try {
       await api.delete(
         `/api/v1/organizations/${activeOrganization.id}/members/${target.id}`
       )
+      setRemoveTarget(null)
+      notifySuccess("Member removed", target.displayName || target.email)
       await loadMembers()
     } catch (caught) {
       setActionError(
-        caught instanceof Error
-          ? caught.message
-          : "The member could not be removed."
+        notifyError(
+          "Member could not be removed",
+          caught,
+          "The member could not be removed."
+        )
       )
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -307,7 +328,7 @@ export function SettingsView({
   return (
     <div className="mx-auto w-full max-w-7xl space-y-5">
       {actionError && (
-        <Alert variant="destructive">
+        <Alert aria-live="polite" role="alert" variant="destructive">
           <AlertTitle>Could not save changes</AlertTitle>
           <AlertDescription>{actionError}</AlertDescription>
         </Alert>
@@ -333,7 +354,7 @@ export function SettingsView({
                   <button
                     aria-pressed={selected}
                     aria-label={`${selected ? "Current" : "Switch to"} workspace ${organization.name}`}
-                    className={`cursor-pointer rounded-xl border p-4 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${selected ? "border-primary bg-primary/5 shadow-sm" : "bg-card"}`}
+                    className={`cursor-pointer rounded-xl border p-4 text-left transition-[background-color,border-color,box-shadow,color,transform] duration-150 hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none active:scale-[0.99] ${selected ? "border-primary bg-primary/5 shadow-sm" : "bg-card"}`}
                     onClick={() => onOrganizationSelect(organization.id)}
                     type="button"
                     key={organization.id}
@@ -414,15 +435,33 @@ export function SettingsView({
                   </Alert>
                 )}
                 {membersLoading ? (
-                  <div className="flex items-center gap-2 rounded-xl border p-4 text-sm text-muted-foreground">
+                  <div
+                    aria-live="polite"
+                    className="flex items-center gap-2 rounded-xl border p-4 text-sm text-muted-foreground"
+                    role="status"
+                  >
                     <LoaderCircle className="animate-spin" /> Loading members…
+                  </div>
+                ) : membersError ? (
+                  <div className="flex flex-col items-start gap-3 rounded-xl border border-destructive/30 p-4 text-sm">
+                    <p className="text-destructive">
+                      Members could not be loaded.
+                    </p>
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                      onClick={() => void loadMembers()}
+                    >
+                      Try again
+                    </Button>
                   </div>
                 ) : members.length === 0 ? (
                   <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
                     No members found.
                   </div>
                 ) : (
-                  <div className="divide-y rounded-xl border bg-card">
+                  <div className="divide-y rounded-xl bg-card">
                     {members.map((member) => (
                       <div
                         className="flex flex-wrap items-center gap-4 p-4"
@@ -447,6 +486,7 @@ export function SettingsView({
                         <Select
                           disabled={
                             !canManageMembers ||
+                            Boolean(updatingMemberId) ||
                             (!user.platformAdmin &&
                               activeOrganization.role === "admin" &&
                               member.role !== "member")
@@ -493,183 +533,204 @@ export function SettingsView({
         </Card>
       )}
 
-      <Dialog open={workspaceDialogOpen} onOpenChange={setWorkspaceDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Create workspace</DialogTitle>
-            <DialogDescription>
-              Start a separate workspace for another team, project, or
-              environment.
-            </DialogDescription>
-          </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="workspace-name">Workspace name</FieldLabel>
-              <Input
-                autoFocus
-                id="workspace-name"
-                onChange={(event) => setWorkspaceName(event.target.value)}
-                placeholder="Product team"
-                value={workspaceName}
-              />
-            </Field>
-            <FieldDescription>
-              Everyone you add will see the workspace’s conversations and shared
-              integrations.
-            </FieldDescription>
-          </FieldGroup>
-          <DialogFooter>
-            <Button onClick={resetWorkspaceDialog} variant="outline">
-              Cancel
-            </Button>
-            <Button
-              disabled={saving || !workspaceName.trim()}
-              onClick={() => void createWorkspace()}
-            >
-              {saving ? (
-                <>
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />{" "}
-                  Creating…
-                </>
-              ) : (
-                "Create workspace"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Rename workspace</DialogTitle>
-            <DialogDescription>
-              Use a clear name so members can identify this workspace.
-            </DialogDescription>
-          </DialogHeader>
-          <Field>
-            <FieldLabel htmlFor="rename-workspace-name">
-              Workspace name
-            </FieldLabel>
-            <Input
-              id="rename-workspace-name"
-              onChange={(event) => setWorkspaceName(event.target.value)}
-              value={workspaceName}
-            />
-          </Field>
-          <DialogFooter>
-            <Button
-              onClick={() => setRenameDialogOpen(false)}
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={saving || !workspaceName.trim()}
-              onClick={() => void renameWorkspace()}
-            >
-              {saving ? "Saving…" : "Save changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={memberDialogOpen} onOpenChange={setMemberDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add workspace member</DialogTitle>
-            <DialogDescription>
-              The person must already have a JustAI account. Invitations by
-              email can be added once mail delivery is configured.
-            </DialogDescription>
-          </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="member-email">Account email</FieldLabel>
-              <Input
-                autoComplete="email"
-                id="member-email"
-                onChange={(event) => setMemberEmail(event.target.value)}
-                placeholder="teammate@example.com"
-                type="email"
-                value={memberEmail}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>Role</FieldLabel>
-              <Select
-                onValueChange={(value) =>
-                  value && setMemberRole(value as MemberRole)
-                }
-                value={memberRole}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="member">Member</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-          </FieldGroup>
-          <DialogFooter>
-            <Button
-              onClick={() => setMemberDialogOpen(false)}
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={saving || !memberEmail.trim()}
-              onClick={() => void addMember()}
-            >
-              {saving ? (
-                <>
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />{" "}
-                  Adding…
-                </>
-              ) : (
-                <>
-                  <UserPlus data-icon="inline-start" /> Add member
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog
-        open={removeTarget !== null}
-        onOpenChange={(open) => !open && setRemoveTarget(null)}
+      <Dialog
+        open={workspaceDialogOpen}
+        onOpenChange={(open) => {
+          if (!saving) setWorkspaceDialogOpen(open)
+        }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Remove {removeTarget?.displayName}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This person will lose access to {activeOrganization?.name}. Their
-              existing workspace data remains available to the workspace.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => void removeMember()}
-            >
-              Remove member
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <DialogContent className="sm:max-w-md">
+          <form onSubmit={(event) => void createWorkspace(event)}>
+            <DialogHeader>
+              <DialogTitle>Create workspace</DialogTitle>
+              <DialogDescription>
+                Start a separate workspace for another team, project, or
+                environment.
+              </DialogDescription>
+            </DialogHeader>
+            {actionError && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertDescription>{actionError}</AlertDescription>
+              </Alert>
+            )}
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="workspace-name">Workspace name</FieldLabel>
+                <Input
+                  id="workspace-name"
+                  onChange={(event) => setWorkspaceName(event.target.value)}
+                  placeholder="Product team"
+                  required
+                  value={workspaceName}
+                />
+              </Field>
+              <FieldDescription>
+                Everyone you add will see the workspace’s conversations and
+                shared integrations.
+              </FieldDescription>
+            </FieldGroup>
+            <DialogFooter>
+              <Button
+                onClick={resetWorkspaceDialog}
+                type="button"
+                variant="outline"
+              >
+                Cancel
+              </Button>
+              <Button disabled={saving || !workspaceName.trim()} type="submit">
+                {saving ? (
+                  <>
+                    <LoaderCircle
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />{" "}
+                    Creating…
+                  </>
+                ) : (
+                  "Create workspace"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={renameDialogOpen}
+        onOpenChange={(open) => {
+          if (!saving) setRenameDialogOpen(open)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <form onSubmit={(event) => void renameWorkspace(event)}>
+            <DialogHeader>
+              <DialogTitle>Rename workspace</DialogTitle>
+              <DialogDescription>
+                Use a clear name so members can identify this workspace.
+              </DialogDescription>
+            </DialogHeader>
+            {actionError && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertDescription>{actionError}</AlertDescription>
+              </Alert>
+            )}
+            <Field>
+              <FieldLabel htmlFor="rename-workspace-name">
+                Workspace name
+              </FieldLabel>
+              <Input
+                id="rename-workspace-name"
+                onChange={(event) => setWorkspaceName(event.target.value)}
+                value={workspaceName}
+                required
+              />
+            </Field>
+            <DialogFooter>
+              <Button
+                onClick={() => setRenameDialogOpen(false)}
+                type="button"
+                variant="outline"
+              >
+                Cancel
+              </Button>
+              <Button disabled={saving || !workspaceName.trim()} type="submit">
+                {saving ? "Saving…" : "Save changes"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={memberDialogOpen}
+        onOpenChange={(open) => {
+          if (!saving) setMemberDialogOpen(open)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <form onSubmit={(event) => void addMember(event)}>
+            <DialogHeader>
+              <DialogTitle>Add workspace member</DialogTitle>
+              <DialogDescription>
+                The person must already have a JustAI account. Invitations by
+                email can be added once mail delivery is configured.
+              </DialogDescription>
+            </DialogHeader>
+            {actionError && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertDescription>{actionError}</AlertDescription>
+              </Alert>
+            )}
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="member-email">Account email</FieldLabel>
+                <Input
+                  autoComplete="email"
+                  id="member-email"
+                  onChange={(event) => setMemberEmail(event.target.value)}
+                  placeholder="teammate@example.com"
+                  type="email"
+                  value={memberEmail}
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="member-role">Role</FieldLabel>
+                <Select
+                  onValueChange={(value) =>
+                    value && setMemberRole(value as MemberRole)
+                  }
+                  value={memberRole}
+                >
+                  <SelectTrigger className="w-full" id="member-role">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="member">Member</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </FieldGroup>
+            <DialogFooter>
+              <Button
+                onClick={() => setMemberDialogOpen(false)}
+                type="button"
+                variant="outline"
+              >
+                Cancel
+              </Button>
+              <Button disabled={saving || !memberEmail.trim()} type="submit">
+                {saving ? (
+                  <>
+                    <LoaderCircle
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />{" "}
+                    Adding…
+                  </>
+                ) : (
+                  <>
+                    <UserPlus data-icon="inline-start" /> Add member
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmActionDialog
+        open={removeTarget !== null}
+        title={`Remove ${removeTarget?.displayName || removeTarget?.email || "this member"}?`}
+        description={`This person will lose access to ${activeOrganization?.name ?? "this workspace"}. Their existing workspace data remains available to the workspace.`}
+        confirmLabel="Remove member"
+        pending={removing}
+        onOpenChange={(open) => {
+          if (!open && !removing) setRemoveTarget(null)
+        }}
+        onConfirm={removeMember}
+      />
     </div>
   )
 }

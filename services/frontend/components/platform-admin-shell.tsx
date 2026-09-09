@@ -17,7 +17,9 @@ import {
   BarChart3,
   Ban,
   CheckCircle2,
+  ChevronDown,
   Database,
+  SlidersHorizontal,
   Globe2,
   ImagePlus,
   KeyRound,
@@ -50,6 +52,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { notifyError, notifySuccess } from "@/lib/feedback"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
 import {
   AdminUsageCharts,
@@ -71,6 +74,21 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import {
+  Page,
+  PageActions,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
+import { FilterBar } from "@/components/ui/filter-bar"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -210,6 +228,14 @@ export function PlatformAdminShell({
   const [authenticationCreateRequest, setAuthenticationCreateRequest] =
     useState(0)
   const [announcementCreateRequest, setAnnouncementCreateRequest] = useState(0)
+  const activeNavItemRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    activeNavItemRef.current?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    })
+  }, [activeTab])
 
   const load = useCallback(async () => {
     setError("")
@@ -417,21 +443,17 @@ export function PlatformAdminShell({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-[0.65rem] font-medium tracking-[0.24em] text-muted-foreground uppercase">
-            Platform administration
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-            {title}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+    <Page className="max-w-7xl">
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow>Platform administration</PageEyebrow>
+          <PageTitle>{title}</PageTitle>
+          <PageDescription>
             Global controls for JustAI users, workspaces, integrations, and
             reliability.
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-2">
+          </PageDescription>
+        </PageHeading>
+        <PageActions>
           {pageAction}
           <Button
             aria-label="Refresh admin data"
@@ -441,13 +463,13 @@ export function PlatformAdminShell({
           >
             <RefreshCw data-icon="inline-start" /> Refresh
           </Button>
-        </div>
-      </header>
+        </PageActions>
+      </PageHeader>
 
       <div className="grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start">
         <nav
           aria-label="Platform administration"
-          className="flex gap-4 overflow-x-auto rounded-xl border bg-card p-2 lg:sticky lg:top-4 lg:flex-col lg:gap-5"
+          className="flex min-w-0 gap-4 overflow-x-auto rounded-xl bg-card p-2 lg:sticky lg:top-4 lg:flex-col lg:gap-5"
         >
           {tabGroups.map((group) => (
             <div
@@ -465,6 +487,7 @@ export function PlatformAdminShell({
                   return (
                     <button
                       aria-current={tab.id === activeTab ? "page" : undefined}
+                      aria-label={tab.label}
                       className={cn(
                         "inline-flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
                         tab.id === activeTab &&
@@ -476,6 +499,7 @@ export function PlatformAdminShell({
                         setListStatus("")
                         onTabChange(tab.id)
                       }}
+                      ref={tab.id === activeTab ? activeNavItemRef : undefined}
                       type="button"
                     >
                       <Icon className="size-3.5 shrink-0" /> {tab.label}
@@ -524,19 +548,28 @@ export function PlatformAdminShell({
           )}
           {(activeTab === "users" || activeTab === "workspaces") && (
             <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-full max-w-md">
-                  <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    className="pl-8"
-                    onChange={(event) => {
-                      setListPage(1)
-                      setQuery(event.target.value)
-                    }}
-                    placeholder={`Search ${activeTab}…`}
-                    value={query}
-                  />
-                </div>
+              <FilterBar
+                hasActiveFilters={Boolean(query.trim() || listStatus)}
+                onClear={() => {
+                  setListPage(1)
+                  setQuery("")
+                  setListStatus("")
+                }}
+                resultCount={
+                  activeTab === "users" ? users.length : workspaces.length
+                }
+                resultLabel={activeTab === "users" ? "users" : "workspaces"}
+                resultTotal={listTotal || undefined}
+                search={{
+                  label: `Search ${activeTab}`,
+                  onChange: (value) => {
+                    setListPage(1)
+                    setQuery(value)
+                  },
+                  placeholder: `Search ${activeTab}…`,
+                  value: query,
+                }}
+              >
                 <Select
                   value={listStatus || "all"}
                   onValueChange={(value) => {
@@ -547,7 +580,8 @@ export function PlatformAdminShell({
                 >
                   <SelectTrigger
                     aria-label={`${activeTab} status`}
-                    className="h-9 w-48"
+                    className="h-8 min-w-36 sm:min-w-40"
+                    size="sm"
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -566,7 +600,7 @@ export function PlatformAdminShell({
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-              </div>
+              </FilterBar>
               {activeTab === "users" ? (
                 <UsersView
                   users={users}
@@ -641,7 +675,7 @@ export function PlatformAdminShell({
           )}
         </div>
       </div>
-    </div>
+    </Page>
   )
 }
 
@@ -767,11 +801,11 @@ function Pagination({
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   if (pageCount <= 1) return null
   return (
-    <div className="flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">
-      <span>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1">
         Page {page} of {pageCount} · {total} total
       </span>
-      <div className="flex gap-1">
+      <div className="flex shrink-0 gap-1">
         <Button
           disabled={page <= 1}
           onClick={() => onPageChange(Math.max(1, page - 1))}
@@ -863,7 +897,9 @@ function UsersView({
     try {
       await api.delete(`/api/v1/admin/users/${deleteCandidate.item.id}`, {
         confirm: true,
-        deleteOrganizationIds: deleteCandidate.owned.map((organization) => organization.id),
+        deleteOrganizationIds: deleteCandidate.owned.map(
+          (organization) => organization.id
+        ),
       })
       setDetail(null)
       setDeleteCandidate(null)
@@ -892,7 +928,7 @@ function UsersView({
               <AlertDescription>{actionError}</AlertDescription>
             </Alert>
           )}
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[36rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">User</th>
@@ -1183,7 +1219,9 @@ function UsersView({
                 const userToRevoke = revokeCandidate
                 if (!userToRevoke) return
                 void api
-                  .post(`/api/v1/admin/users/${userToRevoke.id}/revoke-sessions`)
+                  .post(
+                    `/api/v1/admin/users/${userToRevoke.id}/revoke-sessions`
+                  )
                   .then(onReload)
                   .catch((caught) =>
                     setActionError(
@@ -1258,7 +1296,7 @@ function WorkspacesView({
               <AlertDescription>{actionError}</AlertDescription>
             </Alert>
           )}
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[36rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">Workspace</th>
@@ -1465,7 +1503,8 @@ function WorkspacesView({
           <DialogHeader>
             <DialogTitle>Transfer workspace ownership</DialogTitle>
             <DialogDescription>
-              Enter the user ID of the new owner for {transferCandidate?.name ?? "this workspace"}.
+              Enter the user ID of the new owner for{" "}
+              {transferCandidate?.name ?? "this workspace"}.
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -1476,7 +1515,10 @@ function WorkspacesView({
             value={newOwnerID}
           />
           <DialogFooter>
-            <Button onClick={() => setTransferCandidate(null)} variant="outline">
+            <Button
+              onClick={() => setTransferCandidate(null)}
+              variant="outline"
+            >
               Cancel
             </Button>
             <Button
@@ -1486,7 +1528,10 @@ function WorkspacesView({
                 const newOwnerId = newOwnerID.trim()
                 if (!workspace || !newOwnerId) return
                 void api
-                  .post(`/api/v1/admin/organizations/${workspace.id}/transfer-ownership`, { newOwnerId })
+                  .post(
+                    `/api/v1/admin/organizations/${workspace.id}/transfer-ownership`,
+                    { newOwnerId }
+                  )
                   .then(() => onUpdate(workspace.id, {}))
                   .catch((caught) =>
                     setActionError(
@@ -1511,7 +1556,8 @@ function WorkspacesView({
           <DialogHeader>
             <DialogTitle>Permanently delete workspace</DialogTitle>
             <DialogDescription>
-              Type {deleteCandidate?.name ?? "the workspace name"} to permanently delete this workspace and its data.
+              Type {deleteCandidate?.name ?? "the workspace name"} to
+              permanently delete this workspace and its data.
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -1531,7 +1577,9 @@ function WorkspacesView({
                 const workspace = deleteCandidate
                 if (!workspace || deletePhrase !== workspace.name) return
                 void api
-                  .delete(`/api/v1/admin/organizations/${workspace.id}`, { confirmName: deletePhrase })
+                  .delete(`/api/v1/admin/organizations/${workspace.id}`, {
+                    confirmName: deletePhrase,
+                  })
                   .then(onReload)
                   .catch((caught) =>
                     setActionError(
@@ -1893,7 +1941,7 @@ function InventoryView({
               {actionNotice}
             </div>
           )}
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[48rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">Name</th>
@@ -2193,7 +2241,9 @@ function InventoryView({
                     stoppedMessage: `${resourceLabel} deletion was stopped.`,
                   },
                   async () => {
-                    await api.delete(`/api/v1/admin/${resourcePath}/${resource.id}`)
+                    await api.delete(
+                      `/api/v1/admin/${resourcePath}/${resource.id}`
+                    )
                   }
                 )
               }}
@@ -2245,7 +2295,7 @@ function InventoryView({
             {kind === "mcp" && (
               <label className="grid gap-1 text-sm">
                 Logo (optional)
-                <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-2">
+                <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
                   <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
                     {createIconPreview ? (
                       // Uploaded MCP icons are served by JustAI and do not need
@@ -2618,7 +2668,7 @@ function HealthMetric({
   detail?: string
 }) {
   return (
-    <div className="rounded-lg border bg-muted/20 px-3 py-2.5">
+    <div className="rounded-xl bg-muted/50 px-3 py-2.5">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-base font-semibold tracking-tight">{value}</p>
       {detail && (
@@ -2821,7 +2871,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
           <div className="grid gap-2 sm:grid-cols-2">
             {workerEntries.map(([label, value]) => (
               <div
-                className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5"
+                className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5"
                 key={label}
               >
                 <span className="text-sm">{label}</span>
@@ -2979,7 +3029,7 @@ function AnalyticsView({
           <CardTitle>Endpoint and model breakdown</CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[44rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">Endpoint</th>
@@ -3021,7 +3071,7 @@ function AnalyticsView({
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[44rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">Date</th>
@@ -3077,8 +3127,16 @@ function AuditView({
   total: number
   onPageChange: (page: number) => void
 }) {
+  const isMobile = useIsMobile()
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false)
   const setFilter = (key: string, value: string) =>
     onFiltersChange({ ...filters, [key]: value })
+  const advancedFilterCount = Object.entries(filters).filter(
+    ([key, value]) => key !== "search" && Boolean(value.trim())
+  ).length
+  const hasActiveFilters = Object.values(filters).some((value) =>
+    Boolean(value.trim())
+  )
   return (
     <Card>
       <CardHeader>
@@ -3088,52 +3146,104 @@ function AuditView({
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <Input
-            aria-label="Audit search"
-            onChange={(event) => setFilter("search", event.target.value)}
-            placeholder="Search actions or details"
-            value={filters.search}
-          />
-          <Input
-            aria-label="Audit action"
-            onChange={(event) => setFilter("action", event.target.value)}
-            placeholder="Action"
-            value={filters.action}
-          />
-          <Input
-            aria-label="Audit resource type"
-            onChange={(event) => setFilter("resourceType", event.target.value)}
-            placeholder="Resource type"
-            value={filters.resourceType}
-          />
-          <Input
-            aria-label="Audit actor"
-            onChange={(event) => setFilter("actorId", event.target.value)}
-            placeholder="Actor user ID"
-            value={filters.actorId}
-          />
-          <Input
-            aria-label="Audit organization"
-            onChange={(event) =>
-              setFilter("organizationId", event.target.value)
-            }
-            placeholder="Organization ID"
-            value={filters.organizationId}
-          />
-          <Input
-            aria-label="Audit from"
-            onChange={(event) => setFilter("from", event.target.value)}
-            placeholder="From (YYYY-MM-DD)"
-            value={filters.from}
-          />
-          <Input
-            aria-label="Audit to"
-            onChange={(event) => setFilter("to", event.target.value)}
-            placeholder="To (YYYY-MM-DD)"
-            value={filters.to}
-          />
-        </div>
+        <Collapsible
+          className="flex flex-col gap-2"
+          onOpenChange={setMoreFiltersOpen}
+          open={!isMobile || moreFiltersOpen}
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              aria-label="Audit search"
+              className="min-w-0 flex-1"
+              onChange={(event) => setFilter("search", event.target.value)}
+              placeholder="Search actions or details"
+              value={filters.search}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <CollapsibleTrigger
+                className="gap-1.5 sm:w-auto lg:hidden"
+                render={<Button size="sm" variant="outline" />}
+              >
+                <SlidersHorizontal data-icon="inline-start" />
+                {moreFiltersOpen ? "Hide filters" : "More filters"}
+                {advancedFilterCount > 0 ? (
+                  <span className="ml-0.5 rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">
+                    {advancedFilterCount}
+                  </span>
+                ) : null}
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn(
+                    "size-3.5 transition-transform",
+                    moreFiltersOpen && "rotate-180"
+                  )}
+                />
+              </CollapsibleTrigger>
+              {hasActiveFilters ? (
+                <Button
+                  className="shrink-0"
+                  onClick={() =>
+                    onFiltersChange({
+                      search: "",
+                      action: "",
+                      resourceType: "",
+                      actorId: "",
+                      organizationId: "",
+                      from: "",
+                      to: "",
+                    })
+                  }
+                  size="sm"
+                  variant="ghost"
+                >
+                  <X data-icon="inline-start" /> Clear filters
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          <CollapsibleContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <Input
+              aria-label="Audit action"
+              onChange={(event) => setFilter("action", event.target.value)}
+              placeholder="Action"
+              value={filters.action}
+            />
+            <Input
+              aria-label="Audit resource type"
+              onChange={(event) =>
+                setFilter("resourceType", event.target.value)
+              }
+              placeholder="Resource type"
+              value={filters.resourceType}
+            />
+            <Input
+              aria-label="Audit actor"
+              onChange={(event) => setFilter("actorId", event.target.value)}
+              placeholder="Actor user ID"
+              value={filters.actorId}
+            />
+            <Input
+              aria-label="Audit organization"
+              onChange={(event) =>
+                setFilter("organizationId", event.target.value)
+              }
+              placeholder="Organization ID"
+              value={filters.organizationId}
+            />
+            <Input
+              aria-label="Audit from"
+              onChange={(event) => setFilter("from", event.target.value)}
+              placeholder="From (YYYY-MM-DD)"
+              value={filters.from}
+            />
+            <Input
+              aria-label="Audit to"
+              onChange={(event) => setFilter("to", event.target.value)}
+              placeholder="To (YYYY-MM-DD)"
+              value={filters.to}
+            />
+          </CollapsibleContent>
+        </Collapsible>
         {events.map((event) => (
           <div
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-xs"

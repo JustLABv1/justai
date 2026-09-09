@@ -1,117 +1,132 @@
 import {
-  AudioLines,
+  ArrowUpRight,
+  Bot,
   Check,
+  CircleCheck,
   FileText,
-  Mic2,
-  Radio,
+  Search,
   Sparkles,
+  WandSparkles,
 } from "lucide-react"
 
 import { BrandMark } from "@/components/brand-mark"
 
 import styles from "./auth-live-caption.module.css"
 
-const waveformHeights = [
-  34, 54, 28, 70, 48, 82, 38, 62, 30, 76, 44, 58, 35, 66, 42, 88, 40, 61, 32,
-  73, 49, 58, 36, 68,
-]
-
 export function AuthLiveCaption() {
   return (
-    <section
-      aria-label="JustAI live transcription preview"
-      className={styles.captionPreview}
-    >
-      <header className={styles.captionTopbar}>
-        <div className={styles.captionWordmark}>
-          <BrandMark className={styles.captionLogoMark} />
-          <span>JustAI / Capture</span>
+    <section aria-label="JustAI workspace preview" className={styles.showcase}>
+      <div aria-hidden="true" className={styles.ambientOrb} />
+      <div aria-hidden="true" className={styles.ambientOrbSecondary} />
+
+      <header className={styles.topbar}>
+        <div className={styles.wordmark}>
+          <BrandMark className={styles.logoMark} />
+          <span>JustAI</span>
         </div>
-        <span className={styles.captionSession}>Session 04 / Internal</span>
+        <span className={styles.status}>
+          <span /> Workspace online
+        </span>
       </header>
 
-      <div className={styles.captionContent}>
-        <div className={styles.captionEyebrow}>
-          <span className={styles.captionEyebrowRule} />
-          Live transcription
+      <div className={styles.content}>
+        <div className={styles.copy}>
+          <p className={styles.eyebrow}>
+            <Sparkles aria-hidden="true" /> One intelligent workspace
+          </p>
+          <h1 className={styles.headline}>
+            Turn conversation
+            <br />
+            into <span>momentum.</span>
+          </h1>
+          <p className={styles.lead}>
+            Chat with your knowledge, coordinate agents, and move work forward
+            without losing the context that matters.
+          </p>
         </div>
-        <h1 className={styles.captionHeadline}>
-          Every voice, <span>in focus.</span>
-        </h1>
-        <p className={styles.captionLead}>
-          Capture the room, find the signal, and leave every meeting with the
-          important parts already in motion.
-        </p>
 
-        <div className={styles.captionConsole}>
-          <div className={styles.captionConsoleHeader}>
-            <div className={styles.captionLiveLabel}>
-              <Radio aria-hidden="true" />
-              <span>LIVE CAPTURE</span>
+        <div aria-hidden="true" className={styles.scene}>
+          <div className={`${styles.card} ${styles.chatCard}`}>
+            <div className={styles.cardHeader}>
+              <span className={styles.cardIdentity}>
+                <span className={styles.iconTile}>
+                  <Sparkles />
+                </span>
+                JustAI
+              </span>
+              <span className={styles.livePill}>Live</span>
             </div>
-            <span className={styles.captionTimer}>00:18:42</span>
-          </div>
-
-          <div className={styles.captionWaveform} aria-label="Audio waveform">
-            {waveformHeights.map((height, index) => (
-              <span
-                key={index}
-                style={{
-                  height: `${height}%`,
-                  animationDelay: `${index * 55}ms`,
-                }}
-              />
-            ))}
-          </div>
-
-          <div className={styles.captionTranscript}>
-            <div className={styles.captionLine}>
-              <span className={styles.captionTime}>18:41</span>
-              <div>
-                <strong>Maya Chen</strong>
-                <p>
-                  We need a clearer handoff between the{" "}
-                  <span className={styles.captionWordActive}>conversation</span>{" "}
-                  and the work that follows.
-                </p>
+            <div className={styles.messages}>
+              <div className={`${styles.message} ${styles.userMessage}`}>
+                Summarize today&apos;s customer calls and flag follow-ups.
               </div>
-            </div>
-            <div className={styles.captionLine}>
-              <span className={styles.captionTime}>18:42</span>
-              <div>
-                <strong className={styles.captionSpeakerAi}>
-                  <Sparkles aria-hidden="true" />
-                  JustAI
-                </strong>
-                <p>
-                  I can turn that into a shared brief with{" "}
-                  <span className={styles.captionWordActive}>owners</span>,{" "}
-                  <span className={styles.captionWordActive}>next steps</span>,
-                  and a follow-up list.
-                </p>
+              <div className={`${styles.message} ${styles.agentMessage}`}>
+                <span className={styles.typingLine} />
+                <span className={styles.typingLineShort} />
+              </div>
+              <div className={styles.resultRow}>
+                <CircleCheck /> 6 follow-ups found <ArrowUpRight />
               </div>
             </div>
           </div>
 
-          <div className={styles.captionConsoleFooter}>
-            <span>
-              <Mic2 aria-hidden="true" />3 speakers detected
-            </span>
-            <span>
-              <AudioLines aria-hidden="true" />
-              96% clarity
-            </span>
+          <div className={`${styles.card} ${styles.agentCard}`}>
+            <div className={styles.cardHeader}>
+              <span className={styles.cardIdentity}>
+                <span className={`${styles.iconTile} ${styles.agentIcon}`}>
+                  <Bot />
+                </span>
+                Research agent
+              </span>
+              <span className={styles.agentPulse} />
+            </div>
+            <div className={styles.agentSteps}>
+              <div className={styles.agentStep}>
+                <span>
+                  <Search />
+                </span>
+                <div>
+                  <strong>Search workspace</strong>
+                  <small>28 sources</small>
+                </div>
+                <Check />
+              </div>
+              <div className={styles.agentStep}>
+                <span>
+                  <FileText />
+                </span>
+                <div>
+                  <strong>Build brief</strong>
+                  <small>Generating</small>
+                </div>
+                <span className={styles.miniLoader} />
+              </div>
+            </div>
           </div>
+
+          <div className={`${styles.card} ${styles.actionCard}`}>
+            <span className={styles.actionIcon}>
+              <WandSparkles />
+            </span>
+            <div>
+              <strong>Brief ready</strong>
+              <small>Shared with Product team</small>
+            </div>
+            <CircleCheck />
+          </div>
+          <div className={styles.connectionLine} />
+          <div className={styles.connectionDot} />
         </div>
 
-        <div className={styles.captionTrustRow}>
+        <div className={styles.trustRow}>
           <span>
-            <Check aria-hidden="true" />
-            Searchable transcripts
+            <Check aria-hidden="true" /> Private by design
           </span>
           <span>
-            <FileText aria-hidden="true" />
-            Automatic briefs
+            <Check aria-hidden="true" /> Your tools, connected
+          </span>
+          <span>
+            <Check aria-hidden="true" /> Context that compounds
           </span>
         </div>
       </div>
