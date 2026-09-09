@@ -709,7 +709,11 @@ func (e *AgentEngine) executeNode(ctx context.Context, run models.AgentRun, defi
 	if err != nil {
 		return e.nodeFailure(ctx, run.ID, runNode.ID, attempt, maxAttempts, err)
 	}
-	result, err := e.executeAgent(operationContext, agentExecutionRequest{UserID: run.UserID, OrganizationID: run.OrganizationID, ConversationID: run.ConversationID, RunID: run.ID, NodeID: runNode.ID, Agent: agent, Instruction: node.Instruction, Input: input, Scope: node.Context, ApprovalGranted: approvalGranted, OnProgress: func(delta string) error {
+	instruction := node.Instruction
+	if node.OutputFormat != "" {
+		instruction += "\nReturn the final response as content for a " + node.OutputFormat + " file. For JSON and CSV, output only valid raw data without code fences. The system will create the file from your final response."
+	}
+	result, err := e.executeAgent(operationContext, agentExecutionRequest{UserID: run.UserID, OrganizationID: run.OrganizationID, ConversationID: run.ConversationID, RunID: run.ID, NodeID: runNode.ID, Agent: agent, Instruction: instruction, Input: input, Scope: node.Context, ApprovalGranted: approvalGranted, OnProgress: func(delta string) error {
 		e.emitEvent(ctx, run.ID, &runNode.ID, "node.progress", map[string]any{"nodeKey": node.ID, "delta": truncateAgentText(delta, 4000)})
 		return nil
 	}})
@@ -720,12 +724,24 @@ func (e *AgentEngine) executeNode(ctx context.Context, run models.AgentRun, defi
 		}
 		return e.nodeFailure(ctx, run.ID, runNode.ID, attempt, maxAttempts, err)
 	}
+	if node.OutputFormat != "" {
+		artifact, fileErr := makeAgentFile(map[string]any{"format": node.OutputFormat, "filename": node.ID, "content": result.Summary, "title": node.ID})
+		if fileErr != nil {
+			return e.nodeFailure(ctx, run.ID, runNode.ID, attempt, maxAttempts, fileErr)
+		}
+		result.Artifacts = append(result.Artifacts, artifact)
+	}
 	output := map[string]any{"summary": result.Summary}
 	if result.ProviderTask != "" {
 		output["providerTaskId"] = result.ProviderTask
 	}
 	encodedOutput, _ := json.Marshal(output)
-	completed, err := e.app.DB.ExecContext(ctx, `UPDATE agent_run_nodes SET status = 'completed', output = $2, error = '', provider_task_id = $3, finished_at = now(), updated_at = now() WHERE id = $1 AND status = 'running'`, runNode.ID, encodedOutput, result.ProviderTask)
+	transaction, err := e.app.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	completed, err := transaction.ExecContext(ctx, `UPDATE agent_run_nodes SET status = 'completed', output = $2, error = '', provider_task_id = $3, finished_at = now(), updated_at = now() WHERE id = $1 AND status = 'running'`, runNode.ID, encodedOutput, result.ProviderTask)
 	if err != nil {
 		return err
 	}
@@ -734,9 +750,12 @@ func (e *AgentEngine) executeNode(ctx context.Context, run models.AgentRun, defi
 		return nil
 	}
 	for _, artifact := range result.Artifacts {
-		if err := e.storeAgentArtifact(ctx, run.ID, &runNode.ID, artifact); err != nil {
+		if err := e.storeAgentArtifact(ctx, transaction, run.ID, &runNode.ID, artifact); err != nil {
 			return err
 		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return err
 	}
 	e.emitEvent(ctx, run.ID, &runNode.ID, "node.completed", map[string]any{"nodeKey": node.ID, "summary": truncateAgentText(result.Summary, 4000)})
 	e.maybeQueueAgentRun(ctx, run.ID)
@@ -830,7 +849,8 @@ func (executor *nativeAgentExecutor) Execute(ctx context.Context, request agentE
 	if err != nil {
 		return agentExecutionResult{}, err
 	}
-	if len(definitions) > 0 && provider.SupportsToolCalling(endpoint) {
+	definitions = append(definitions, agentFileTool())
+	if provider.SupportsToolCalling(endpoint) {
 		result, loopErr := e.nativeAgentToolLoop(ctx, request, endpoint, history, definitions, bindings)
 		if loopErr != nil {
 			return agentExecutionResult{}, loopErr
@@ -1165,13 +1185,13 @@ func truncateAgentText(value string, limit int) string {
 	return value
 }
 
-func (e *AgentEngine) storeAgentArtifact(ctx context.Context, runID uuid.UUID, nodeID *uuid.UUID, artifact a2aArtifact) error {
+func (e *AgentEngine) storeAgentArtifact(ctx context.Context, transaction *sql.Tx, runID uuid.UUID, nodeID *uuid.UUID, artifact a2aArtifact) error {
 	if len(artifact.Content) > 8*1024*1024 {
 		return fmt.Errorf("agent artifact exceeds the 8 MB limit")
 	}
 	hash := sha256.Sum256(artifact.Content)
 	metadata, _ := json.Marshal(redactAgentValue(artifact.Metadata))
-	_, err := e.app.DB.ExecContext(ctx, `INSERT INTO agent_run_artifacts (run_id,node_id,name,kind,mime_type,content,metadata,size_bytes,sha256) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, runID, nodeID, truncateAgentText(firstNonEmptyString(artifact.Name, "artifact"), 120), firstNonEmptyString(artifact.Kind, "text"), firstNonEmptyString(artifact.MimeType, "text/plain"), artifact.Content, metadata, len(artifact.Content), hex.EncodeToString(hash[:]))
+	_, err := transaction.ExecContext(ctx, `INSERT INTO agent_run_artifacts (run_id,node_id,name,kind,mime_type,content,metadata,size_bytes,sha256) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, runID, nodeID, truncateAgentText(firstNonEmptyString(artifact.Name, "artifact"), 120), firstNonEmptyString(artifact.Kind, "text"), firstNonEmptyString(artifact.MimeType, "text/plain"), artifact.Content, metadata, len(artifact.Content), hex.EncodeToString(hash[:]))
 	return err
 }
 

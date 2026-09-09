@@ -162,6 +162,11 @@ func (a *App) createUploadedSource(c *gin.Context, userID, organizationID uuid.U
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	if _, err := a.DB.ExecContext(c, `INSERT INTO knowledge_source_files (source_id,filename,mime_type,content) VALUES ($1,$2,$3,$4)`, item.ID, fileHeader.Filename, mimeType, body); err != nil {
+		_, _ = a.DB.ExecContext(c, `DELETE FROM knowledge_sources WHERE id=$1`, item.ID)
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 	if requestedSpaceID != uuid.Nil {
 		if err := a.syncKnowledgeCatalog(c); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
@@ -280,4 +285,29 @@ func (a *App) authorizeSource(c *gin.Context, id uuid.UUID) error {
 		return nil
 	}
 	return fmt.Errorf("source belongs to another scope")
+}
+
+// Original bytes are retained separately from the extracted/indexed text.
+func (a *App) downloadKnowledgeSourceFile(c *gin.Context) {
+	principal, organizationID, err := workspaceScope(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid source id"))
+		return
+	}
+	var name, mimeType string
+	var content []byte
+	err = a.DB.QueryRowContext(c, `SELECT f.filename,f.mime_type,f.content FROM knowledge_source_files f JOIN knowledge_sources s ON s.id=f.source_id WHERE s.id=$1 AND ((s.scope_type='user' AND s.scope_id=$2) OR (s.scope_type='organization' AND s.scope_id=$3))`, id, principal.UserID, organizationID).Scan(&name, &mimeType, &content)
+	if err != nil {
+		writeError(c, http.StatusNotFound, fmt.Errorf("original file is not available; older uploads may only contain extracted text"))
+		return
+	}
+	c.Header("Content-Disposition", `attachment; filename="`+safeDownloadName(name)+`"`)
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Cache-Control", "private, no-store")
+	c.Data(http.StatusOK, mimeType, content)
 }

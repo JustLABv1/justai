@@ -91,3 +91,25 @@ For Kubernetes, provide a Secret containing `database-url`, `jwt-secret`, and
 - MCP uses outbound remote HTTP transports only. Tool names are allowlisted, tool calls require explicit approval by default, and only explicitly annotated read-only/non-destructive calls on trusted servers can run automatically. OAuth uses a backend-generated PKCE flow.
 - MCP servers can be marked “Available automatically.” Chat and voice then rank the cached catalog against the current request and expose at most eight relevant tools without attaching the server to the conversation. Automatically surfaced calls always require explicit approval.
 - The RAG worker stores chunks in PostgreSQL with full-text retrieval and optional provider-dimension embeddings; unavailable embeddings are reported as an explicit lexical-only state.
+
+## Agent file outputs
+
+Workflow nodes have an **Output format** setting: PDF, Markdown, plain text,
+JSON, CSV, or HTML. The selected format creates a run artifact from the node's
+final response. JSON and CSV must be valid raw data, without Markdown fences.
+With a tool-capable model, native agents can also use `justai_create_file` to
+create multiple files when requested in their instructions. Remote A2A file
+artifacts continue to appear in the same run file list.
+
+In run details, **Output files** offers authenticated downloads and **Save to
+knowledge** with a destination-folder picker. Saving uses the existing knowledge
+upload permissions and text-extraction pipeline. Personal storage is the default;
+workspace folders require the existing organization upload permissions. Remote
+URL references are downloadable references, not automatically fetched files.
+
+Migration `047_knowledge_original_files.sql` retains original bytes for new
+knowledge uploads, alongside the extracted text. Restart the updated backend to
+apply it automatically. **Download original** in knowledge storage retrieves these
+bytes; uploads created before this migration may only have extracted text.
+Generated content is limited to 512 KiB per file, generated artifacts to 8 MiB,
+and native tool output to 16 files / 8 MiB total per node execution.

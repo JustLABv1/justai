@@ -135,6 +135,7 @@ type AgentRetryPolicy struct {
 }
 
 type AgentWorkflowNode struct {
+	OutputFormat       string              `json:"outputFormat,omitempty"`
 	ID                 string              `json:"id"`
 	Type               string              `json:"type"`
 	AgentID            *uuid.UUID          `json:"agentId,omitempty"`

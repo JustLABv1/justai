@@ -30,6 +30,7 @@ import {
 import { AssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import { AssistantSource } from "@/components/assistant-ui/sources"
 import {
+  GeneratedFileCard,
   GeneratedImageCard,
   ToolResultContent,
 } from "@/components/assistant-ui/tool-fallback"
@@ -514,6 +515,27 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
   )
 }
 
+function GeneratedFiles() {
+  const messageParts = useAuiState((state) => state.message.parts)
+  const files = useMemo(
+    () =>
+      messageParts.flatMap((part) =>
+        part.type === "tool-call" &&
+        part.toolName === "create_pdf" &&
+        part.result !== undefined &&
+        !part.isError &&
+        part.status.type !== "incomplete"
+          ? [{ id: part.toolCallId, value: part.result }]
+          : []
+      ),
+    [messageParts]
+  )
+
+  return files.map((file) => (
+    <GeneratedFileCard key={file.id} value={file.value} />
+  ))
+}
+
 type SourcePart = Extract<PartState, { type: "source" }>
 
 function SourceGroup({ indices }: { indices: readonly number[] }) {
@@ -652,46 +674,49 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
 
 export function AssistantMessageParts() {
   return (
-    <MessagePrimitive.GroupedParts
-      groupBy={groupAssistantParts}
-      indicator="never"
-    >
-      {({ part, children }) => {
-        if (part.type === "group-reasoning") {
-          return (
-            <details className="my-2 rounded-xl border bg-muted/20" open>
-              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
-                <Sparkles className="size-3.5" aria-hidden="true" />
-                Thinking
-              </summary>
-              <div className="border-t px-3 py-2">{children}</div>
-            </details>
-          )
-        }
-        if (part.type === "group-tool") {
-          return <ToolActivityGroup indices={part.indices} />
-        }
-        if (part.type === "group-retrieval") {
-          const statuses = Children.toArray(children)
-          return statuses[statuses.length - 1] ?? null
-        }
-        if (part.type === "group-sources") {
-          return <SourceGroup indices={part.indices} />
-        }
-        if (part.type === "indicator") {
-          return (
-            <span className="my-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
-              <LoaderCircle
-                className="size-3.5 animate-spin"
-                aria-hidden="true"
-              />
-              Working…
-            </span>
-          )
-        }
-        return renderPart(part as EnrichedPartState)
-      }}
-    </MessagePrimitive.GroupedParts>
+    <>
+      <MessagePrimitive.GroupedParts
+        groupBy={groupAssistantParts}
+        indicator="never"
+      >
+        {({ part, children }) => {
+          if (part.type === "group-reasoning") {
+            return (
+              <details className="my-2 rounded-xl border bg-muted/20" open>
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+                  <Sparkles className="size-3.5" aria-hidden="true" />
+                  Thinking
+                </summary>
+                <div className="border-t px-3 py-2">{children}</div>
+              </details>
+            )
+          }
+          if (part.type === "group-tool") {
+            return <ToolActivityGroup indices={part.indices} />
+          }
+          if (part.type === "group-retrieval") {
+            const statuses = Children.toArray(children)
+            return statuses[statuses.length - 1] ?? null
+          }
+          if (part.type === "group-sources") {
+            return <SourceGroup indices={part.indices} />
+          }
+          if (part.type === "indicator") {
+            return (
+              <span className="my-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
+                <LoaderCircle
+                  className="size-3.5 animate-spin"
+                  aria-hidden="true"
+                />
+                Working…
+              </span>
+            )
+          }
+          return renderPart(part as EnrichedPartState)
+        }}
+      </MessagePrimitive.GroupedParts>
+      <GeneratedFiles />
+    </>
   )
 }
 

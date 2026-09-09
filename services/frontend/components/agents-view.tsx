@@ -63,6 +63,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { RunFiles } from "@/components/agent-run-files"
 import { api, resolveAPIURL } from "@/lib/api"
 import { StaticAssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import {
@@ -507,6 +508,25 @@ function statusLabel(status: string) {
   return status
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function outputFormatLabel(format: AgentWorkflowNode["outputFormat"]) {
+  switch (format) {
+    case "pdf":
+      return "PDF file"
+    case "md":
+      return "Markdown file"
+    case "txt":
+      return "Plain text file"
+    case "json":
+      return "JSON file"
+    case "csv":
+      return "CSV file"
+    case "html":
+      return "HTML file"
+    default:
+      return "Response only"
+  }
 }
 
 function knowledgeSpacePath(space: KnowledgeSpace, spaces: KnowledgeSpace[]) {
@@ -2360,13 +2380,13 @@ function AgentsPanel({
         </p>
       )}
       {agents.length ? (
-        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {visibleAgents.map((agent) => {
             const connection = connections.find(
               (item) => item.id === agent.connectionId
             )
             return (
-              <Card key={agent.id} className="min-h-56">
+              <Card key={agent.id} className="h-fit pb-0">
                 <CardHeader>
                   <div className="flex items-start gap-3">
                     <div
@@ -2390,7 +2410,7 @@ function AgentsPanel({
                             : "Native JustAI agent")}
                       </CardDescription>
                     </div>
-                    <CardAction>
+                    <CardAction className="ml-auto shrink-0">
                       <Badge variant={badgeVariant(agent.status)}>
                         {agent.kind === "remote" ? "A2A" : "Native"} ·{" "}
                         {statusLabel(agent.status)}
@@ -2452,7 +2472,7 @@ function AgentsPanel({
                     </p>
                   )}
                 </CardContent>
-                <CardFooter className="justify-end gap-1 border-t">
+                <CardFooter className="justify-end gap-1 border-t pt-3 pb-0">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -2706,7 +2726,7 @@ function WorkflowsPanel({
                 <button
                   key={workflow.id}
                   className={cn(
-                    "rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted/50",
+                    "rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-left transition-colors hover:border-border hover:bg-muted/65",
                     "focus-visible:border-primary"
                   )}
                   onClick={() => onOpen(workflow)}
@@ -2741,7 +2761,7 @@ function WorkflowsPanel({
                 {workflowTemplates.map((template) => (
                   <button
                     key={template.id}
-                    className="rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-muted/60"
+                    className="rounded-lg border border-border/50 bg-muted/25 px-2.5 py-2 text-left text-xs transition-colors hover:border-border hover:bg-muted/60"
                     onClick={() => onOpenTemplate(template.id)}
                     type="button"
                   >
@@ -3286,6 +3306,38 @@ function NodeInspector({
               onUpdate(node.id, { instruction: event.target.value })
             }
           />
+        </Field>
+        <Field>
+          <FieldLabel>Output format</FieldLabel>
+          <Select
+            value={node.outputFormat || "response"}
+            disabled={disabled}
+            onValueChange={(value) =>
+              onUpdate(node.id, {
+                outputFormat: (value === "response"
+                  ? ""
+                  : value) as AgentWorkflowNode["outputFormat"],
+              })
+            }
+          >
+            <SelectTrigger aria-label="Output format" className="w-full">
+              <SelectValue>{outputFormatLabel(node.outputFormat)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="response">Response only</SelectItem>
+                {["pdf", "md", "txt", "json", "csv", "html"].map((format) => (
+                  <SelectItem key={format} value={format}>
+                    {format.toUpperCase()} file
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <FieldDescription>
+            The final response is saved as a downloadable file. Agents can also
+            create files when instructed.
+          </FieldDescription>
         </Field>
         <InspectorSection title="Safety & execution">
           {" "}
@@ -4668,28 +4720,7 @@ function RunDetail({
           </div>
         )}
 
-        {run.artifacts?.length ? (
-          <section className="flex flex-col gap-2">
-            <Separator />
-            <h3 className="font-medium">Artifacts</h3>
-            {run.artifacts.map((artifact) => (
-              <a
-                className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm hover:bg-muted/50"
-                key={artifact.id}
-                href={resolveAPIURL(
-                  `/api/v1/agent-runs/${run.id}/artifacts/${artifact.id}`
-                )}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <span className="truncate">{artifact.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {Math.ceil(artifact.sizeBytes / 1024)} KB
-                </span>
-              </a>
-            ))}
-          </section>
-        ) : null}
+        <RunFiles run={run} />
 
         <RunDisclosure
           title="Flow and execution details"

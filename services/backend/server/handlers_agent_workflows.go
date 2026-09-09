@@ -677,6 +677,8 @@ func (a *App) downloadAgentArtifact(c *gin.Context) {
 		return
 	}
 	c.Header("Content-Disposition", `attachment; filename="`+safeDownloadName(name)+`"`)
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Cache-Control", "private, no-store")
 	c.Data(http.StatusOK, mime, content)
 }
 

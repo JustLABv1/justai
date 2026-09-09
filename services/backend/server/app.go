@@ -260,6 +260,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/recordings/:id/start", a.platformFeature("transcription"), a.startTranscriptionRecording)
 	org.PUT("/transcription/recordings/:id/parts/:part", a.platformFeature("transcription"), a.appendTranscriptionRecordingPart)
 	org.POST("/transcription/recordings/:id/complete", a.platformFeature("transcription"), a.completeTranscriptionRecording)
+	org.GET("/knowledge/sources/:id/file", a.platformFeature("unified_knowledge"), a.downloadKnowledgeSourceFile)
 	org.GET("/knowledge/sources", a.platformFeature("unified_knowledge"), a.listKnowledgeSources)
 	org.POST("/knowledge/sources", a.platformFeature("unified_knowledge"), a.scopedRateLimit("knowledge", 30), a.createKnowledgeSource)
 	org.POST("/knowledge/sources/:id/reindex", a.platformFeature("unified_knowledge"), a.reindexKnowledgeSource)

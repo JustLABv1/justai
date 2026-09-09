@@ -274,7 +274,7 @@ export function GeneratedImageCard({
   )
 }
 
-function GeneratedFileResult({ value }: { value: unknown }) {
+export function GeneratedFileCard({ value }: { value: unknown }) {
   const file = parseGeneratedFileResult(value)
   const fileURL = file?.url ?? ""
   const [preview, setPreview] = useState({ source: "", url: "" })
@@ -495,7 +495,7 @@ export function ToolResultContent({
     return <GeneratedImageCard value={value} />
   }
   if (toolName === "create_pdf") {
-    return <GeneratedFileResult value={value} />
+    return <GeneratedFileCard value={value} />
   }
   if (toolName === "web_search" || toolName === "browse_url") {
     return <WebSearchResult value={value} />
