@@ -5,6 +5,7 @@ import {
   Archive,
   Bot,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   FileVideo,
   FolderKanban,
@@ -401,7 +402,6 @@ export function FocusWorkspaceSidebar({
       className={cn(
         "relative mx-2 my-2 flex h-[calc(100%-1rem)] min-h-0 w-14 shrink-0 gap-2 overflow-visible",
         isSecondaryHistoryRail && "w-28",
-        secondaryHistoryExpanded && "md:w-80",
         historyRailPinned && "lg:w-80"
       )}
       aria-label="Workspace navigation"
@@ -595,7 +595,8 @@ export function FocusWorkspaceSidebar({
           isSecondaryHistoryRail
             ? "relative flex h-full w-12 shrink-0 overflow-visible rounded-[1.5rem] bg-[var(--sidebar-secondary)] transition-[width] duration-200 md:overflow-hidden"
             : "contents",
-          secondaryHistoryExpanded && "md:w-64",
+          secondaryHistoryExpanded &&
+            "md:absolute md:inset-y-0 md:left-16 md:z-30 md:w-64 md:shadow-xl",
           historyRailPinned && "lg:contents"
         )}
         onBlurCapture={(event) => {
@@ -607,14 +608,12 @@ export function FocusWorkspaceSidebar({
             setChatHistoryExpanded(false)
           }
         }}
-        onFocusCapture={() => {
-          if (isSecondaryHistoryRail) setChatHistoryExpanded(true)
-        }}
-        onMouseEnter={() => {
-          if (isSecondaryHistoryRail) setChatHistoryExpanded(true)
-        }}
-        onMouseLeave={() => {
-          if (isSecondaryHistoryRail && !historyRailPinned) {
+        onKeyDown={(event) => {
+          if (
+            event.key === "Escape" &&
+            isSecondaryHistoryRail &&
+            !historyRailPinned
+          ) {
             setChatHistoryExpanded(false)
           }
         }}
@@ -630,7 +629,7 @@ export function FocusWorkspaceSidebar({
               <TooltipTrigger
                 render={
                   <Button
-                    aria-expanded={chatHistoryExpanded}
+                    aria-expanded={secondaryHistoryExpanded}
                     aria-label={`Open ${secondaryHistoryLabel.toLocaleLowerCase()}`}
                     className="size-9 rounded-xl bg-accent text-accent-foreground"
                     onClick={() => setChatHistoryExpanded(true)}
@@ -757,6 +756,26 @@ export function FocusWorkspaceSidebar({
               </h2>
             </div>
             <div className="flex items-center gap-1">
+              {isSecondaryHistoryRail && !historyRailPinned && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        aria-label={`Close ${secondaryHistoryLabel.toLocaleLowerCase()}`}
+                        className="size-7 rounded-lg text-muted-foreground"
+                        onClick={() => setChatHistoryExpanded(false)}
+                        size="icon"
+                        variant="ghost"
+                      >
+                        <ChevronLeft />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>
+                    Close {secondaryHistoryLabel.toLocaleLowerCase()}
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger
                   render={
