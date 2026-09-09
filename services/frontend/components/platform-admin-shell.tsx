@@ -71,6 +71,15 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import {
+  Page,
+  PageActions,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -417,21 +426,17 @@ export function PlatformAdminShell({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-[0.65rem] font-medium tracking-[0.24em] text-muted-foreground uppercase">
-            Platform administration
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-            {title}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+    <Page className="max-w-7xl">
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow>Platform administration</PageEyebrow>
+          <PageTitle>{title}</PageTitle>
+          <PageDescription>
             Global controls for JustAI users, workspaces, integrations, and
             reliability.
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-2">
+          </PageDescription>
+        </PageHeading>
+        <PageActions>
           {pageAction}
           <Button
             aria-label="Refresh admin data"
@@ -441,8 +446,8 @@ export function PlatformAdminShell({
           >
             <RefreshCw data-icon="inline-start" /> Refresh
           </Button>
-        </div>
-      </header>
+        </PageActions>
+      </PageHeader>
 
       <div className="grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start">
         <nav
@@ -641,7 +646,7 @@ export function PlatformAdminShell({
           )}
         </div>
       </div>
-    </div>
+    </Page>
   )
 }
 
@@ -863,7 +868,9 @@ function UsersView({
     try {
       await api.delete(`/api/v1/admin/users/${deleteCandidate.item.id}`, {
         confirm: true,
-        deleteOrganizationIds: deleteCandidate.owned.map((organization) => organization.id),
+        deleteOrganizationIds: deleteCandidate.owned.map(
+          (organization) => organization.id
+        ),
       })
       setDetail(null)
       setDeleteCandidate(null)
@@ -1183,7 +1190,9 @@ function UsersView({
                 const userToRevoke = revokeCandidate
                 if (!userToRevoke) return
                 void api
-                  .post(`/api/v1/admin/users/${userToRevoke.id}/revoke-sessions`)
+                  .post(
+                    `/api/v1/admin/users/${userToRevoke.id}/revoke-sessions`
+                  )
                   .then(onReload)
                   .catch((caught) =>
                     setActionError(
@@ -1465,7 +1474,8 @@ function WorkspacesView({
           <DialogHeader>
             <DialogTitle>Transfer workspace ownership</DialogTitle>
             <DialogDescription>
-              Enter the user ID of the new owner for {transferCandidate?.name ?? "this workspace"}.
+              Enter the user ID of the new owner for{" "}
+              {transferCandidate?.name ?? "this workspace"}.
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -1476,7 +1486,10 @@ function WorkspacesView({
             value={newOwnerID}
           />
           <DialogFooter>
-            <Button onClick={() => setTransferCandidate(null)} variant="outline">
+            <Button
+              onClick={() => setTransferCandidate(null)}
+              variant="outline"
+            >
               Cancel
             </Button>
             <Button
@@ -1486,7 +1499,10 @@ function WorkspacesView({
                 const newOwnerId = newOwnerID.trim()
                 if (!workspace || !newOwnerId) return
                 void api
-                  .post(`/api/v1/admin/organizations/${workspace.id}/transfer-ownership`, { newOwnerId })
+                  .post(
+                    `/api/v1/admin/organizations/${workspace.id}/transfer-ownership`,
+                    { newOwnerId }
+                  )
                   .then(() => onUpdate(workspace.id, {}))
                   .catch((caught) =>
                     setActionError(
@@ -1511,7 +1527,8 @@ function WorkspacesView({
           <DialogHeader>
             <DialogTitle>Permanently delete workspace</DialogTitle>
             <DialogDescription>
-              Type {deleteCandidate?.name ?? "the workspace name"} to permanently delete this workspace and its data.
+              Type {deleteCandidate?.name ?? "the workspace name"} to
+              permanently delete this workspace and its data.
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -1531,7 +1548,9 @@ function WorkspacesView({
                 const workspace = deleteCandidate
                 if (!workspace || deletePhrase !== workspace.name) return
                 void api
-                  .delete(`/api/v1/admin/organizations/${workspace.id}`, { confirmName: deletePhrase })
+                  .delete(`/api/v1/admin/organizations/${workspace.id}`, {
+                    confirmName: deletePhrase,
+                  })
                   .then(onReload)
                   .catch((caught) =>
                     setActionError(
@@ -2193,7 +2212,9 @@ function InventoryView({
                     stoppedMessage: `${resourceLabel} deletion was stopped.`,
                   },
                   async () => {
-                    await api.delete(`/api/v1/admin/${resourcePath}/${resource.id}`)
+                    await api.delete(
+                      `/api/v1/admin/${resourcePath}/${resource.id}`
+                    )
                   }
                 )
               }}

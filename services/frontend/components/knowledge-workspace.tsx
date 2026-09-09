@@ -76,6 +76,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import {
+  Page,
+  PageActions,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -1283,7 +1292,7 @@ export function KnowledgeWorkspace({
   }
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-[1500px] flex-1 flex-col gap-4 p-4 sm:p-6 lg:p-8">
+    <Page className="min-h-0 max-w-[1500px] flex-1 gap-4">
       <input
         ref={fileInputRef}
         type="file"
@@ -1294,18 +1303,16 @@ export function KnowledgeWorkspace({
           if (file) void uploadFile(file)
         }}
       />
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <FolderKanban className="text-primary" />
-            <h1 className="text-xl font-semibold tracking-tight">Storage</h1>
-          </div>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow>Workspace context</PageEyebrow>
+          <PageTitle>Storage</PageTitle>
+          <PageDescription>
             Organize files, notes, repositories, and transcripts in folders that
             chats and agent workflows can use as live context.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+          </PageDescription>
+        </PageHeading>
+        <PageActions>
           <Button
             variant="outline"
             disabled={busy}
@@ -1325,8 +1332,8 @@ export function KnowledgeWorkspace({
           <Button onClick={() => setAddOpen(true)}>
             <Plus data-icon="inline-start" /> Add knowledge
           </Button>
-        </div>
-      </div>
+        </PageActions>
+      </PageHeader>
 
       {(error || notice) && (
         <Alert variant={error ? "destructive" : "default"}>
@@ -2733,7 +2740,7 @@ export function KnowledgeWorkspace({
             return deleteKnowledgeFolder(folderDeleteTarget)
         }}
       />
-    </div>
+    </Page>
   )
 }
 

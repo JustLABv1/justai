@@ -133,6 +133,15 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
+  Page,
+  PageActions,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
+import {
   Sheet,
   SheetContent,
   SheetHeader,
@@ -1462,7 +1471,7 @@ export function AgentsView({
     : []
 
   return (
-    <div className="flex w-full flex-col gap-6">
+    <Page>
       {disabled && (
         <Alert role="status">
           <ShieldCheck data-icon="inline-start" />
@@ -1473,39 +1482,38 @@ export function AgentsView({
           </AlertDescription>
         </Alert>
       )}
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-primary">
-            <GitBranch data-icon="inline-start" />
-            <span className="text-sm font-medium">Agents</span>
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow className="flex items-center gap-2">
+            Agents
             <Badge variant="secondary">Native + A2A</Badge>
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Agent workspace
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          </PageEyebrow>
+          <PageTitle>Agent workspace</PageTitle>
+          <PageDescription>
             Manage your team of agents, design workflows, and monitor execution.
-          </p>
-        </div>
-        {activeTab === "agents" && !disabled && (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => openRemote()}>
-              <Link2 data-icon="inline-start" />
-              Connect remote
-            </Button>
-            <Button onClick={() => openNative()}>
+          </PageDescription>
+        </PageHeading>
+        <PageActions>
+          {activeTab === "agents" && !disabled && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => openRemote()}>
+                <Link2 data-icon="inline-start" />
+                Connect remote
+              </Button>
+              <Button onClick={() => openNative()}>
+                <Plus data-icon="inline-start" />
+                New native agent
+              </Button>
+            </div>
+          )}
+          {activeTab === "workflows" && !disabled && (
+            <Button onClick={() => openWorkflow()}>
               <Plus data-icon="inline-start" />
-              New native agent
+              New workflow
             </Button>
-          </div>
-        )}
-        {activeTab === "workflows" && !disabled && (
-          <Button onClick={() => openWorkflow()}>
-            <Plus data-icon="inline-start" />
-            New workflow
-          </Button>
-        )}
-      </header>
+          )}
+        </PageActions>
+      </PageHeader>
 
       {error && (
         <Alert variant="destructive">
@@ -2317,7 +2325,7 @@ export function AgentsView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </Page>
   )
 }
 

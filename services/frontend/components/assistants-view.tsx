@@ -8,6 +8,15 @@ import type { Endpoint, SavedAssistant } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Page,
+  PageActions,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 import {
   Card,
@@ -224,125 +233,118 @@ export function AssistantsView({
   }
 
   return (
-    <div className="min-h-full w-full bg-muted/10 p-4 sm:p-6 lg:p-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">
-              Reusable behavior
-            </p>
-            <h1 className="font-heading mt-2 text-3xl font-semibold tracking-tight">
-              Saved assistants
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              Save instructions, memory defaults, context behavior, and model
-              preferences for the kinds of work you repeat.
-            </p>
-          </div>
+    <Page>
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow>Reusable behavior</PageEyebrow>
+          <PageTitle>Saved assistants</PageTitle>
+          <PageDescription>
+            Save instructions, memory defaults, context behavior, and model
+            preferences for the kinds of work you repeat.
+          </PageDescription>
+        </PageHeading>
+        <PageActions>
           <Button onClick={() => openCreate()}>
             <Plus data-icon="inline-start" />
             New assistant
           </Button>
-        </div>
+        </PageActions>
+      </PageHeader>
 
-        {error && (
-          <Alert variant="destructive">
-            <AlertTitle>Assistant action failed</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
+      {error && (
+        <Alert variant="destructive">
+          <AlertTitle>Assistant action failed</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
-        {assistants.length === 0 ? (
-          <Card className="min-h-80">
-            <CardContent className="flex min-h-80 flex-col items-center justify-center gap-5 text-center">
-              <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                <Sparkles aria-hidden="true" />
-              </span>
-              <div className="flex max-w-md flex-col gap-1">
-                <h2 className="text-base font-semibold">
-                  Start with a focused role
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  These starters are editable. Pick one to make your first saved
-                  assistant, or build one from scratch.
-                </p>
-              </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                {templates.map((template) => (
-                  <Button
-                    key={template.name}
-                    variant="outline"
-                    onClick={() => openCreate(template)}
-                  >
-                    {template.name}
-                  </Button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {assistants.map((assistant) => (
-              <Card key={assistant.id}>
-                <CardHeader>
-                  <div className="flex items-start gap-3">
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
-                      <Bot aria-hidden="true" />
-                    </span>
-                    <div className="min-w-0">
-                      <CardTitle className="truncate">
-                        {assistant.name}
-                      </CardTitle>
-                      <CardDescription className="mt-1">
-                        {assistant.description || "No description yet."}
-                      </CardDescription>
-                    </div>
+      {assistants.length === 0 ? (
+        <Card className="min-h-80">
+          <CardContent className="flex min-h-80 flex-col items-center justify-center gap-5 text-center">
+            <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Sparkles aria-hidden="true" />
+            </span>
+            <div className="flex max-w-md flex-col gap-1">
+              <h2 className="text-base font-semibold">
+                Start with a focused role
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                These starters are editable. Pick one to make your first saved
+                assistant, or build one from scratch.
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              {templates.map((template) => (
+                <Button
+                  key={template.name}
+                  variant="outline"
+                  onClick={() => openCreate(template)}
+                >
+                  {template.name}
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {assistants.map((assistant) => (
+            <Card key={assistant.id}>
+              <CardHeader>
+                <div className="flex items-start gap-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
+                    <Bot aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <CardTitle className="truncate">{assistant.name}</CardTitle>
+                    <CardDescription className="mt-1">
+                      {assistant.description || "No description yet."}
+                    </CardDescription>
                   </div>
-                  <CardAction className="flex gap-1">
-                    <Button
-                      aria-label={`Edit ${assistant.name}`}
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={() => openEdit(assistant)}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button
-                      aria-label={`Delete ${assistant.name}`}
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={() => setDeleteTarget(assistant)}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </CardAction>
-                </CardHeader>
-                <CardContent className="flex flex-wrap gap-2">
-                  <Badge variant="outline">
-                    {assistant.visibility === "workspace"
-                      ? "Workspace"
-                      : "Private"}
-                  </Badge>
-                  <Badge variant="secondary">
-                    {endpointName(assistant.endpointId)}
-                  </Badge>
-                  {assistant.useMemory && (
-                    <Badge variant="secondary">Memory on</Badge>
-                  )}
-                  {assistant.deepContext && (
-                    <Badge variant="secondary">Deep context default</Badge>
-                  )}
-                </CardContent>
-                <CardFooter className="border-t text-muted-foreground">
-                  <span>Version {assistant.version}</span>
-                  <span className="ml-auto">Ready for new chats</span>
-                </CardFooter>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
-
+                </div>
+                <CardAction className="flex gap-1">
+                  <Button
+                    aria-label={`Edit ${assistant.name}`}
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => openEdit(assistant)}
+                  >
+                    <Pencil />
+                  </Button>
+                  <Button
+                    aria-label={`Delete ${assistant.name}`}
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => setDeleteTarget(assistant)}
+                  >
+                    <Trash2 />
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                <Badge variant="outline">
+                  {assistant.visibility === "workspace"
+                    ? "Workspace"
+                    : "Private"}
+                </Badge>
+                <Badge variant="secondary">
+                  {endpointName(assistant.endpointId)}
+                </Badge>
+                {assistant.useMemory && (
+                  <Badge variant="secondary">Memory on</Badge>
+                )}
+                {assistant.deepContext && (
+                  <Badge variant="secondary">Deep context default</Badge>
+                )}
+              </CardContent>
+              <CardFooter className="border-t text-muted-foreground">
+                <span>Version {assistant.version}</span>
+                <span className="ml-auto">Ready for new chats</span>
+              </CardFooter>
+            </Card>
+          ))}
+        </div>
+      )}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[min(860px,calc(100vh-2rem))] max-w-2xl overflow-y-auto">
           <DialogHeader>
@@ -511,6 +513,6 @@ export function AssistantsView({
         }}
         onConfirm={() => void deleteAssistant()}
       />
-    </div>
+    </Page>
   )
 }

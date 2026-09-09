@@ -78,6 +78,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import {
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
+import {
   Select,
   SelectContent,
   SelectGroup,
@@ -1143,22 +1150,34 @@ export function VideoTranscriptionView({
       )}
 
       {!snapshot ? (
-        <Empty className="min-h-0 flex-1 border-0">
-          <EmptyHeader>
-            <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <FileVideo aria-hidden="true" />
-            </div>
-            <EmptyTitle>Transcribe a video</EmptyTitle>
-            <EmptyDescription>
-              Upload a prerecorded video and receive a timestamped transcript.
-              Processing continues in the background.
-            </EmptyDescription>
-          </EmptyHeader>
-          <Button onClick={() => setCreateOpen(true)}>
-            <Upload data-icon="inline-start" />
-            New video transcription
-          </Button>
-        </Empty>
+        <>
+          <PageHeader className="shrink-0">
+            <PageHeading>
+              <PageEyebrow>Capture</PageEyebrow>
+              <PageTitle>Video transcription</PageTitle>
+              <PageDescription>
+                Upload recordings and turn them into searchable, editable
+                transcripts with speaker context.
+              </PageDescription>
+            </PageHeading>
+          </PageHeader>
+          <Empty className="min-h-0 flex-1 border-0">
+            <EmptyHeader>
+              <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <FileVideo aria-hidden="true" />
+              </div>
+              <EmptyTitle>Transcribe a video</EmptyTitle>
+              <EmptyDescription>
+                Upload a prerecorded video and receive a timestamped transcript.
+                Processing continues in the background.
+              </EmptyDescription>
+            </EmptyHeader>
+            <Button onClick={() => setCreateOpen(true)}>
+              <Upload data-icon="inline-start" />
+              New video transcription
+            </Button>
+          </Empty>
+        </>
       ) : (
         <>
           <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
@@ -2302,8 +2321,7 @@ function VideoPipeline({
     upload.pipeline?.some((step) => step.status === "failed")
   )
   const shouldAutoCollapse =
-    ["completed", "cancelled"].includes(upload.status) &&
-    !hasFailedStoredStep
+    ["completed", "cancelled"].includes(upload.status) && !hasFailedStoredStep
 
   useEffect(() => {
     if (!isActive) return

@@ -1,6 +1,14 @@
 "use client"
 
 import { MCPView } from "@/components/mcp-view"
+import {
+  Page,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
 import type { MCPServer, Organization, User } from "@/lib/types"
 
 type Props = {
@@ -10,20 +18,24 @@ type Props = {
   user: User
 }
 
-export function IntegrationsView({ servers, onChange, organization, user }: Props) {
+export function IntegrationsView({
+  servers,
+  onChange,
+  organization,
+  user,
+}: Props) {
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-6">
-      <header>
-        <p className="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">
-          Connected work
-        </p>
-        <h1 className="font-heading mt-2 text-3xl font-semibold tracking-tight">
-          Integrations
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          Connect the services JustAI can use in your everyday work. Technical MCP servers stay in Settings.
-        </p>
-      </header>
+    <Page>
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow>Connected work</PageEyebrow>
+          <PageTitle>Integrations</PageTitle>
+          <PageDescription>
+            Connect the services JustAI can use in your everyday work. Technical
+            MCP servers stay in Settings.
+          </PageDescription>
+        </PageHeading>
+      </PageHeader>
       <MCPView
         mode="integrations"
         servers={servers}
@@ -32,6 +44,6 @@ export function IntegrationsView({ servers, onChange, organization, user }: Prop
         platformAdmin={user.platformAdmin}
         userId={user.id}
       />
-    </div>
+    </Page>
   )
 }

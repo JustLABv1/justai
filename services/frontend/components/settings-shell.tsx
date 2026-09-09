@@ -17,6 +17,16 @@ import { MCPView } from "@/components/mcp-view"
 import { PrivacyView } from "@/components/privacy-view"
 import { SettingsView } from "@/components/settings-view"
 import { Button } from "@/components/ui/button"
+import {
+  Page,
+  PageActions,
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+  PageToolbar,
+} from "@/components/ui/page"
 import type {
   Endpoint,
   MCPServer,
@@ -144,83 +154,75 @@ export function SettingsShell({
     ) : null
 
   return (
-    <div className="min-h-full w-full bg-muted/10 p-4 sm:p-6 lg:p-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">
-              {currentPage.eyebrow}
-            </p>
-            <h1 className="font-heading mt-2 text-3xl font-semibold tracking-tight">
-              {currentPage.title}
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              {currentPage.description}
-            </p>
-          </div>
-          {pageAction}
-        </div>
+    <Page>
+      <PageHeader>
+        <PageHeading>
+          <PageEyebrow>{currentPage.eyebrow}</PageEyebrow>
+          <PageTitle>{currentPage.title}</PageTitle>
+          <PageDescription>{currentPage.description}</PageDescription>
+        </PageHeading>
+        {pageAction && <PageActions>{pageAction}</PageActions>}
+      </PageHeader>
 
-        <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl bg-muted p-1">
-          {visibleTabs.map(({ id, label, icon: Icon }) => (
-            <Button
-              aria-current={activeTab === id ? "page" : undefined}
-              className="gap-2"
-              key={id}
-              onClick={() => onTabChange(id)}
-              variant={activeTab === id ? "secondary" : "ghost"}
-            >
-              <Icon className="size-4" />
-              {label}
-            </Button>
-          ))}
-        </div>
+      <PageToolbar className="max-w-full overflow-x-auto">
+        {visibleTabs.map(({ id, label, icon: Icon }) => (
+          <Button
+            aria-current={activeTab === id ? "page" : undefined}
+            className="gap-2"
+            key={id}
+            onClick={() => onTabChange(id)}
+            variant={activeTab === id ? "secondary" : "ghost"}
+          >
+            <Icon className="size-4" />
+            {label}
+          </Button>
+        ))}
+      </PageToolbar>
 
-        {activeTab === "workspace" || activeTab === "members" ? (
-          <SettingsView
-            activeOrganizationId={activeOrganizationId}
-            onOrganizationSelect={onOrganizationSelect}
-            onOrganizationCreated={onOrganizationCreated}
-            onOrganizationUpdated={onOrganizationUpdated}
-            workspaceCreateRequest={workspaceCreateRequest}
-            memberCreateRequest={memberCreateRequest}
-            organizations={organizations}
-            section={activeTab === "members" ? "members" : "workspace"}
-            user={user}
-          />
-        ) : null}
-        {activeTab === "endpoints" ? (
-          <EndpointsView
-            endpoints={endpoints}
-            onChange={onEndpointsChange}
-            organizationRole={activeOrganization?.role}
-            platformAdmin={user.platformAdmin}
-            userId={user.id}
-            createRequest={endpointCreateRequest}
-          />
-        ) : null}
-        {activeTab === "mcp" ? (
-          <MCPView
-            mode="advanced"
-            servers={mcpServers}
-            onChange={onMCPChange}
-            organizationRole={activeOrganization?.role}
-            platformAdmin={user.platformAdmin}
-            userId={user.id}
-            createRequest={mcpCreateRequest}
-          />
-        ) : null}
-        {activeTab === "privacy" ? <PrivacyView /> : null}
-        {activeTab === "admin" ? (
-          <AdminView
-            endpoints={endpoints}
-            mcpServers={mcpServers}
-            organizationId={activeOrganization?.id ?? null}
-            organizationRole={activeOrganization?.role}
-            platformAdmin={user.platformAdmin}
-          />
-        ) : null}
-      </div>
-    </div>
+      {activeTab === "workspace" || activeTab === "members" ? (
+        <SettingsView
+          activeOrganizationId={activeOrganizationId}
+          onOrganizationSelect={onOrganizationSelect}
+          onOrganizationCreated={onOrganizationCreated}
+          onOrganizationUpdated={onOrganizationUpdated}
+          workspaceCreateRequest={workspaceCreateRequest}
+          memberCreateRequest={memberCreateRequest}
+          organizations={organizations}
+          section={activeTab === "members" ? "members" : "workspace"}
+          user={user}
+        />
+      ) : null}
+      {activeTab === "endpoints" ? (
+        <EndpointsView
+          endpoints={endpoints}
+          onChange={onEndpointsChange}
+          organizationRole={activeOrganization?.role}
+          platformAdmin={user.platformAdmin}
+          userId={user.id}
+          createRequest={endpointCreateRequest}
+        />
+      ) : null}
+      {activeTab === "mcp" ? (
+        <MCPView
+          mode="advanced"
+          servers={mcpServers}
+          onChange={onMCPChange}
+          organizationRole={activeOrganization?.role}
+          platformAdmin={user.platformAdmin}
+          userId={user.id}
+          createRequest={mcpCreateRequest}
+        />
+      ) : null}
+      {activeTab === "privacy" ? <PrivacyView /> : null}
+      {activeTab === "admin" ? (
+        <AdminView
+          endpoints={endpoints}
+          mcpServers={mcpServers}
+          organizationId={activeOrganization?.id ?? null}
+          organizationRole={activeOrganization?.role}
+          platformAdmin={user.platformAdmin}
+        />
+      ) : null}
+    </Page>
   )
 }

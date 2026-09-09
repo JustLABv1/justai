@@ -51,6 +51,13 @@ import {
   FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  PageDescription,
+  PageEyebrow,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@/components/ui/page"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -281,8 +288,9 @@ export function LiveTranscriptionView({
     captureMode === "system-audio" ? "Browser tab audio" : "This laptop"
   const effectiveGrammarEndpoint = selectedGrammarEndpoint
   const selectedGrammarName =
-    grammarEndpoints.find((endpoint) => endpoint.id === effectiveGrammarEndpoint)
-      ?.name || "Off"
+    grammarEndpoints.find(
+      (endpoint) => endpoint.id === effectiveGrammarEndpoint
+    )?.name || "Off"
 
   const refreshDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return
@@ -636,9 +644,13 @@ export function LiveTranscriptionView({
           TranscriptionSession["polishStatus"]
         >
         if (
-          !["not_requested", "queued", "processing", "completed", "failed"].includes(
-            status
-          )
+          ![
+            "not_requested",
+            "queued",
+            "processing",
+            "completed",
+            "failed",
+          ].includes(status)
         ) {
           return
         }
@@ -1748,23 +1760,35 @@ export function LiveTranscriptionView({
       )}
 
       {!snapshot ? (
-        <Empty className="min-h-[calc(100svh-8rem)] border-0">
-          <EmptyHeader>
-            <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <Radio aria-hidden="true" />
-            </div>
-            <EmptyTitle>Listen to the room</EmptyTitle>
-            <EmptyDescription>
-              {sessions.length > 0
-                ? "Select a session from the sidebar, or start a new room."
-                : "Start a named session, capture browser audio, or connect an external stream or meeting bot."}
-            </EmptyDescription>
-          </EmptyHeader>
-          <Button onClick={openCreateWizard}>
-            <Play data-icon="inline-start" />
-            New live session
-          </Button>
-        </Empty>
+        <>
+          <PageHeader className="shrink-0">
+            <PageHeading>
+              <PageEyebrow>Capture</PageEyebrow>
+              <PageTitle>Live transcription</PageTitle>
+              <PageDescription>
+                Capture conversations, meetings, and live sources in a shared
+                transcription workspace.
+              </PageDescription>
+            </PageHeading>
+          </PageHeader>
+          <Empty className="min-h-[calc(100svh-14rem)] border-0">
+            <EmptyHeader>
+              <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Radio aria-hidden="true" />
+              </div>
+              <EmptyTitle>Listen to the room</EmptyTitle>
+              <EmptyDescription>
+                {sessions.length > 0
+                  ? "Select a session from the sidebar, or start a new room."
+                  : "Start a named session, capture browser audio, or connect an external stream or meeting bot."}
+              </EmptyDescription>
+            </EmptyHeader>
+            <Button onClick={openCreateWizard}>
+              <Play data-icon="inline-start" />
+              New live session
+            </Button>
+          </Empty>
+        </>
       ) : snapshot.session.status === "completed" ? (
         <>
           <section className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5">
@@ -1821,31 +1845,31 @@ export function LiveTranscriptionView({
       ) : (
         <>
           <LiveTranscriptionConversationView
-              capturing={capturing}
-              canStartCapture
-              joinRequests={joinRequests}
-              level={level}
-              loading={loading}
-              onPauseOrResume={pauseOrResume}
-              onRefreshJoinRequests={refreshJoinRequests}
-              onRenameSpeaker={(speakerId, name) => {
-                void renameSpeaker(speakerId, name)
-              }}
-              onSetJoinRequest={setJoinRequest}
-              onShare={() =>
-                void (snapshot.session.joinCode
-                  ? setShareOpen(true)
-                  : rotateJoinCode())
-              }
-              onStartCapture={ensureCapture}
-              onStopSession={stopSession}
-              partial={partial}
-              partialSourceId={partialSourceId}
-              partialSpeakerId={partialSpeakerId}
-              snapshot={snapshot}
-              user={user}
-              mode={captureViewMode}
-            />
+            capturing={capturing}
+            canStartCapture
+            joinRequests={joinRequests}
+            level={level}
+            loading={loading}
+            onPauseOrResume={pauseOrResume}
+            onRefreshJoinRequests={refreshJoinRequests}
+            onRenameSpeaker={(speakerId, name) => {
+              void renameSpeaker(speakerId, name)
+            }}
+            onSetJoinRequest={setJoinRequest}
+            onShare={() =>
+              void (snapshot.session.joinCode
+                ? setShareOpen(true)
+                : rotateJoinCode())
+            }
+            onStartCapture={ensureCapture}
+            onStopSession={stopSession}
+            partial={partial}
+            partialSourceId={partialSourceId}
+            partialSpeakerId={partialSpeakerId}
+            snapshot={snapshot}
+            user={user}
+            mode={captureViewMode}
+          />
         </>
       )}
 
@@ -2385,8 +2409,8 @@ export function LiveTranscriptionView({
                       {selectedEndpointName}
                     </p>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {language || "auto"} · speakers {selectedDiarizationName} ·
-                      polish {selectedGrammarName}
+                      {language || "auto"} · speakers {selectedDiarizationName}{" "}
+                      · polish {selectedGrammarName}
                     </p>
                   </div>
                 </div>
@@ -2769,7 +2793,9 @@ export function LiveTranscriptionView({
               <Input
                 autoFocus
                 id="workspace-speaker-name"
-                onChange={(event) => setWorkspaceSpeakerName(event.target.value)}
+                onChange={(event) =>
+                  setWorkspaceSpeakerName(event.target.value)
+                }
                 value={workspaceSpeakerName}
               />
             </Field>
