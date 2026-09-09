@@ -135,6 +135,7 @@ type AgentRetryPolicy struct {
 }
 
 type AgentWorkflowNode struct {
+	OutputFormat       string              `json:"outputFormat,omitempty"`
 	ID                 string              `json:"id"`
 	Type               string              `json:"type"`
 	AgentID            *uuid.UUID          `json:"agentId,omitempty"`
@@ -359,6 +360,16 @@ type GeneratedImage struct {
 }
 
 type GeneratedPDF struct {
+	ID        uuid.UUID `json:"id"`
+	URL       string    `json:"url"`
+	Filename  string    `json:"filename"`
+	Title     string    `json:"title"`
+	MimeType  string    `json:"mimeType"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type GeneratedFile struct {
 	ID        uuid.UUID `json:"id"`
 	URL       string    `json:"url"`
 	Filename  string    `json:"filename"`

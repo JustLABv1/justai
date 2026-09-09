@@ -1,5 +1,6 @@
 "use client"
 
+import { downloadFile } from "@/lib/download-file"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
@@ -1996,6 +1997,32 @@ export function KnowledgeWorkspace({
                           </pre>
                         )}
                         <div className="flex flex-wrap gap-2">
+                          {selectedSource.sourceType === "upload" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={async () => {
+                                setBusy(true)
+                                try {
+                                  await downloadFile(
+                                    `/api/v1/knowledge/sources/${selectedSource.id}/file`,
+                                    selectedSource.title
+                                  )
+                                } catch (error) {
+                                  setNotice(
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Download failed."
+                                  )
+                                } finally {
+                                  setBusy(false)
+                                }
+                              }}
+                            >
+                              Download original
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"

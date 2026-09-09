@@ -529,6 +529,7 @@ export type AgentContextScope = {
 }
 
 export type AgentWorkflowNode = {
+  outputFormat?: "" | "pdf" | "md" | "txt" | "json" | "csv" | "html"
   id: string
   type: "agent" | string
   agentId?: string | null

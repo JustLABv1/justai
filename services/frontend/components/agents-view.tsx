@@ -54,6 +54,16 @@ import {
 
 import "@xyflow/react/dist/style.css"
 
+import { layoutAgentGraph } from "@/lib/agent-graph-layout"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { RunFiles } from "@/components/agent-run-files"
 import { api, resolveAPIURL } from "@/lib/api"
 import { StaticAssistantMarkdown } from "@/components/assistant-ui/markdown-text"
 import {
@@ -122,6 +132,13 @@ import {
   FieldLegend,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet"
 import { Progress } from "@/components/ui/progress"
 import {
   Collapsible,
@@ -493,6 +510,25 @@ function statusLabel(status: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+function outputFormatLabel(format: AgentWorkflowNode["outputFormat"]) {
+  switch (format) {
+    case "pdf":
+      return "PDF file"
+    case "md":
+      return "Markdown file"
+    case "txt":
+      return "Plain text file"
+    case "json":
+      return "JSON file"
+    case "csv":
+      return "CSV file"
+    case "html":
+      return "HTML file"
+    default:
+      return "Response only"
+  }
+}
+
 function knowledgeSpacePath(space: KnowledgeSpace, spaces: KnowledgeSpace[]) {
   const names = [space.name]
   const seen = new Set([space.id])
@@ -596,7 +632,7 @@ const AgentFlowNode = memo(function AgentFlowNode({
   return (
     <div
       className={cn(
-        "min-w-48 rounded-xl border bg-card px-3 py-2 shadow-sm",
+        "w-60 rounded-xl border bg-card px-3 py-2 shadow-sm",
         data.selected && "border-primary ring-2 ring-primary/20"
       )}
     >
@@ -660,7 +696,7 @@ function WorkflowCanvas({
         const currentByID = new Map(current.map((node) => [node.id, node]))
         const next = nodes.map((node) => {
           const existing = currentByID.get(node.id)
-          return existing ? { ...node, position: existing.position } : node
+          return existing ? { ...existing, ...node } : node
         })
         const unchanged =
           next.length === current.length &&
@@ -687,7 +723,7 @@ function WorkflowCanvas({
   )
 
   return (
-    <div className="h-full min-h-0 w-full flex-1">
+    <div className="h-[560px] min-h-0 w-full flex-1">
       <ReactFlow
         nodes={localNodes}
         edges={edges}
@@ -754,6 +790,7 @@ export function AgentsView({
   const [runInput, setRunInput] = useState<WorkflowRunInput>({})
   const [running, setRunning] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState("agent-1")
+  const [runsCursor, setRunsCursor] = useState("")
   const [positions, setPositions] = useState<
     Record<string, { x: number; y: number }>
   >({})
@@ -770,7 +807,9 @@ export function AgentsView({
             "/api/v1/agent-connections"
           ),
           api.get<{ workflows: AgentWorkflow[] }>("/api/v1/agent-workflows"),
-          api.get<{ runs: AgentRun[] }>("/api/v1/agent-runs"),
+          api.get<{ runs: AgentRun[]; nextCursor?: string }>(
+            "/api/v1/agent-runs"
+          ),
           api
             .get<{ spaces: KnowledgeSpace[] }>("/api/v1/knowledge/spaces")
             .catch(() => ({ spaces: [] })),
@@ -778,6 +817,7 @@ export function AgentsView({
       setConnections(connectionResult.connections ?? [])
       setWorkflows(workflowResult.workflows ?? [])
       setRuns(runResult.runs ?? [])
+      setRunsCursor(runResult.nextCursor ?? "")
       setKnowledgeSpaces(spaceResult.spaces ?? [])
       setError("")
     } catch (caught) {
@@ -1124,7 +1164,14 @@ export function AgentsView({
 
   function addWorkflowNode() {
     if (!workflowDraft || workflowDraft.definition.nodes.length >= 16) return
-    const id = `agent-${workflowDraft.definition.nodes.length + 1}`
+    let suffix = workflowDraft.definition.nodes.length + 1
+    while (
+      workflowDraft.definition.nodes.some(
+        (node) => node.id === `agent-${suffix}`
+      )
+    )
+      suffix++
+    const id = `agent-${suffix}`
     const node: AgentWorkflowNode = {
       id,
       type: "agent",
@@ -1382,13 +1429,14 @@ export function AgentsView({
   )
   const graphNodes = useMemo<Node<FlowNodeData>[]>(() => {
     if (!workflowDraft) return []
-    return workflowDraft.definition.nodes.map((node, index) => ({
+    const layout = layoutAgentGraph(
+      workflowDraft.definition.nodes.map((node) => node.id),
+      workflowDraft.definition.edges
+    )
+    return workflowDraft.definition.nodes.map((node) => ({
       id: node.id,
       type: "agent",
-      position: positions[node.id] ?? {
-        x: (index % 3) * 260 + 30,
-        y: Math.floor(index / 3) * 150 + 35,
-      },
+      position: positions[node.id] ?? layout[node.id],
       data: {
         label: node.id,
         agentName: agentToSavedLabel(
@@ -1433,12 +1481,10 @@ export function AgentsView({
             <Badge variant="secondary">Native + A2A</Badge>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            A home for work that can move.
+            Agent workspace
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Create JustAI agents, connect trusted remote agents, and compose
-            bounded workflows with durable approvals, artifacts, and run
-            history.
+            Manage your team of agents, design workflows, and monitor execution.
           </p>
         </div>
         {activeTab === "agents" && !disabled && (
@@ -1545,6 +1591,8 @@ export function AgentsView({
         </TabsContent>
         <TabsContent value="runs" className="pt-6">
           <RunsPanel
+            nextCursor={runsCursor}
+            onCursorChange={setRunsCursor}
             runs={runs}
             onRunsChange={setRuns}
             agents={agents}
@@ -2303,16 +2351,42 @@ function AgentsPanel({
   onDeleteConnection: (connection: AgentConnection) => void
   disabled?: boolean
 }) {
+  const [query, setQuery] = useState("")
+  const visibleAgents = agents.filter((agent) =>
+    `${agent.name} ${agent.description} ${agent.kind}`
+      .toLowerCase()
+      .includes(query.toLowerCase())
+  )
   return (
     <div className="flex flex-col gap-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Agent directory</h2>
+          <p className="text-sm text-muted-foreground">
+            Reusable specialists and connected remote agents.
+          </p>
+        </div>
+        <Input
+          aria-label="Search agents"
+          placeholder="Search agents…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          className="max-w-sm"
+        />
+      </div>
+      {agents.length > 0 && !visibleAgents.length && (
+        <p className="text-sm text-muted-foreground">
+          No agents match your search.
+        </p>
+      )}
       {agents.length ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {agents.map((agent) => {
+        <div className="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {visibleAgents.map((agent) => {
             const connection = connections.find(
               (item) => item.id === agent.connectionId
             )
             return (
-              <Card key={agent.id} className="min-h-56">
+              <Card key={agent.id} className="h-fit pb-0">
                 <CardHeader>
                   <div className="flex items-start gap-3">
                     <div
@@ -2336,7 +2410,7 @@ function AgentsPanel({
                             : "Native JustAI agent")}
                       </CardDescription>
                     </div>
-                    <CardAction>
+                    <CardAction className="ml-auto shrink-0">
                       <Badge variant={badgeVariant(agent.status)}>
                         {agent.kind === "remote" ? "A2A" : "Native"} ·{" "}
                         {statusLabel(agent.status)}
@@ -2398,7 +2472,7 @@ function AgentsPanel({
                     </p>
                   )}
                 </CardContent>
-                <CardFooter className="justify-end gap-1 border-t">
+                <CardFooter className="justify-end gap-1 border-t pt-3 pb-0">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -2583,6 +2657,7 @@ function WorkflowsPanel({
   onRun: () => void
   disabled?: boolean
 }) {
+  const [workflowQuery, setWorkflowQuery] = useState("")
   const editorRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
 
@@ -2623,58 +2698,70 @@ function WorkflowsPanel({
   }, [isFullscreen])
 
   return (
-    <div
-      className={cn(
-        "grid gap-5",
-        !draft && "xl:grid-cols-[18rem_minmax(0,1fr)]"
-      )}
-    >
+    <div className={cn("grid gap-5", !draft && "grid-cols-1")}>
       {!draft && (
         <Card className="h-fit max-h-[calc(100vh-13rem)] overflow-y-auto">
           <CardHeader>
             <CardTitle>Workflow library</CardTitle>
             <CardDescription>
-              Bounded DAGs keep runs replayable.
+              Reusable workflows for your team. Select a workflow to open the
+              builder.
             </CardDescription>
+            <Input
+              aria-label="Search workflows"
+              placeholder="Search workflows…"
+              value={workflowQuery}
+              onChange={(event) => setWorkflowQuery(event.target.value)}
+              className="mt-3 max-w-md"
+            />
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {workflows.map((workflow) => (
-              <button
-                key={workflow.id}
-                className={cn(
-                  "rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted/50",
-                  "focus-visible:border-primary"
-                )}
-                onClick={() => onOpen(workflow)}
-              >
-                <span className="block truncate text-sm font-medium">
-                  {workflow.name}
-                </span>
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  {workflow.definition.nodes.length} nodes ·{" "}
-                  {workflowScheduleDescription(workflow.schedule)}
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  Next run:{" "}
-                  {formatWorkflowNextRun(workflow.nextRunAt, workflow.timezone)}
-                </span>
-              </button>
-            ))}
+          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {workflows
+              .filter((workflow) =>
+                `${workflow.name} ${workflow.description}`
+                  .toLowerCase()
+                  .includes(workflowQuery.toLowerCase())
+              )
+              .map((workflow) => (
+                <button
+                  key={workflow.id}
+                  className={cn(
+                    "rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-left transition-colors hover:border-border hover:bg-muted/65",
+                    "focus-visible:border-primary"
+                  )}
+                  onClick={() => onOpen(workflow)}
+                >
+                  <span className="block truncate text-sm font-medium">
+                    {workflow.name}
+                  </span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {workflow.definition.nodes.length} nodes ·{" "}
+                    {workflowScheduleDescription(workflow.schedule)}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    Next run:{" "}
+                    {formatWorkflowNextRun(
+                      workflow.nextRunAt,
+                      workflow.timezone
+                    )}
+                  </span>
+                </button>
+              ))}
             {!workflows.length && (
               <p className="py-5 text-center text-xs text-muted-foreground">
                 No saved workflows.
               </p>
             )}
-            <div className="mt-2 border-t pt-3">
+            <div className="mt-2 border-t pt-5 md:col-span-2 xl:col-span-3">
               <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
                 <Sparkles className="size-3.5 text-primary" />
                 Start from a template
               </p>
-              <div className="flex flex-col gap-1.5">
+              <div className="grid gap-3 md:grid-cols-3">
                 {workflowTemplates.map((template) => (
                   <button
                     key={template.id}
-                    className="rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-muted/60"
+                    className="rounded-lg border border-border/50 bg-muted/25 px-2.5 py-2 text-left text-xs transition-colors hover:border-border hover:bg-muted/60"
                     onClick={() => onOpenTemplate(template.id)}
                     type="button"
                   >
@@ -2720,8 +2807,7 @@ function WorkflowsPanel({
                   </CardTitle>
                 </div>
                 <CardDescription>
-                  Connect agent nodes, bind outputs, and make every context
-                  grant explicit.
+                  Design the flow, configure each step, then validate and run.
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2810,138 +2896,217 @@ function WorkflowsPanel({
             )}
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
-            <div className="grid gap-4 md:grid-cols-3">
-              <Field>
-                <FieldLabel htmlFor="workflow-name">Name</FieldLabel>
-                <Input
-                  id="workflow-name"
-                  value={draft.name}
-                  disabled={disabled}
-                  onChange={(event) => onUpdate({ name: event.target.value })}
-                  placeholder="Research then synthesize"
-                />
-              </Field>
-              <Field>
-                <FieldLabel>Visibility</FieldLabel>
-                <Select
-                  value={draft.visibility}
-                  disabled={disabled}
-                  onValueChange={(value) =>
-                    onUpdate({
-                      visibility: (value ??
-                        "private") as WorkflowDraft["visibility"],
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue>
-                      {visibilityLabel(draft.visibility)}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="private">Private</SelectItem>
-                      <SelectItem value="workspace">
-                        Workspace shared
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel>Timezone</FieldLabel>
-                <Input
-                  value={draft.timezone}
-                  disabled={disabled}
-                  onChange={(event) =>
-                    onUpdate({ timezone: event.target.value })
-                  }
-                  placeholder="Europe/Berlin"
-                />
-              </Field>
-            </div>
-            <Field>
-              <FieldLabel htmlFor="workflow-description">
-                Description
-              </FieldLabel>
-              <Input
-                id="workflow-description"
-                value={draft.description}
-                disabled={disabled}
-                onChange={(event) =>
-                  onUpdate({ description: event.target.value })
-                }
-                placeholder="What this workflow produces"
-              />
-            </Field>
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
-              <div className="flex min-h-[430px] flex-col gap-2 overflow-hidden rounded-xl border bg-muted/20">
-                <div className="flex items-center justify-between border-b px-3 py-2">
-                  <div>
-                    <p className="text-xs font-medium">Execution graph</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      Drag nodes; connect bottom handles to top handles.
-                    </p>
+            <Tabs defaultValue="build">
+              <TabsList variant="line">
+                <TabsTrigger value="build">Build</TabsTrigger>
+                <TabsTrigger value="settings">Settings</TabsTrigger>
+                <TabsTrigger value="schedule">Schedule</TabsTrigger>
+              </TabsList>
+              <TabsContent value="build" className="pt-4">
+                {" "}
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_23rem]">
+                  <div className="flex h-[620px] flex-col gap-2 overflow-hidden rounded-xl border bg-muted/20">
+                    <div className="flex items-center justify-between border-b px-3 py-2">
+                      <div>
+                        <p className="text-xs font-medium">Execution graph</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Drag nodes; connect bottom handles to top handles.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={disabled}
+                          onClick={() => {
+                            const layout = layoutAgentGraph(
+                              draft.definition.nodes.map((node) => node.id),
+                              draft.definition.edges
+                            )
+                            Object.entries(layout).forEach(([id, position]) =>
+                              onPositionChange(id, position)
+                            )
+                          }}
+                        >
+                          Auto layout
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={onAddNode}
+                          disabled={
+                            disabled || draft.definition.nodes.length >= 16
+                          }
+                        >
+                          <Plus data-icon="inline-start" />
+                          Agent node
+                        </Button>
+                      </div>
+                    </div>
+                    <WorkflowCanvas
+                      key={draft.id || "new"}
+                      nodes={graphNodes}
+                      edges={graphEdges}
+                      disabled={disabled}
+                      onConnect={onConnect}
+                      onSelectNode={onSelectNode}
+                      onPositionChange={onPositionChange}
+                    />
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={onAddNode}
-                    disabled={disabled || draft.definition.nodes.length >= 16}
-                  >
-                    <Plus data-icon="inline-start" />
-                    Agent node
-                  </Button>
+                  <div className="max-h-[min(46rem,calc(100vh-12rem))] overflow-y-auto pr-1">
+                    <InspectorSection
+                      title={`Connections (${draft.definition.edges.length})`}
+                    >
+                      {draft.definition.edges.length ? (
+                        draft.definition.edges.map((edge) => (
+                          <div
+                            key={`${edge.from}-${edge.to}`}
+                            className="flex items-center justify-between gap-2 text-xs"
+                          >
+                            <span>
+                              {edge.from} → {edge.to}
+                            </span>
+                            <Button
+                              size="icon-sm"
+                              variant="ghost"
+                              disabled={disabled}
+                              aria-label={`Remove connection ${edge.from} to ${edge.to}`}
+                              onClick={() =>
+                                onUpdate({
+                                  definition: {
+                                    ...draft.definition,
+                                    edges: draft.definition.edges.filter(
+                                      (candidate) => candidate !== edge
+                                    ),
+                                  },
+                                })
+                              }
+                            >
+                              <X data-icon="inline-start" />
+                            </Button>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Connect nodes using the handles on the canvas.
+                        </p>
+                      )}
+                    </InspectorSection>
+                    <NodeInspector
+                      node={selectedNode}
+                      selectedNodeId={selectedNodeId}
+                      agents={agents}
+                      connections={connections}
+                      workflowNodes={draft.definition.nodes}
+                      mcpServers={mcpServers}
+                      knowledgeSpaces={knowledgeSpaces}
+                      knowledgeSources={knowledgeSources}
+                      onUpdate={onUpdateNode}
+                      onRemove={onRemoveNode}
+                      disabled={disabled}
+                    />
+                  </div>
                 </div>
-                <WorkflowCanvas
-                  key={draft.id || "new"}
-                  nodes={graphNodes}
-                  edges={graphEdges}
+              </TabsContent>
+              <TabsContent
+                value="settings"
+                className="flex flex-col gap-5 pt-4"
+              >
+                {" "}
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Field>
+                    <FieldLabel htmlFor="workflow-name">Name</FieldLabel>
+                    <Input
+                      id="workflow-name"
+                      value={draft.name}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        onUpdate({ name: event.target.value })
+                      }
+                      placeholder="Research then synthesize"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel>Visibility</FieldLabel>
+                    <Select
+                      value={draft.visibility}
+                      disabled={disabled}
+                      onValueChange={(value) =>
+                        onUpdate({
+                          visibility: (value ??
+                            "private") as WorkflowDraft["visibility"],
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue>
+                          {visibilityLabel(draft.visibility)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="private">Private</SelectItem>
+                          <SelectItem value="workspace">
+                            Workspace shared
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel>Timezone</FieldLabel>
+                    <Input
+                      value={draft.timezone}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        onUpdate({ timezone: event.target.value })
+                      }
+                      placeholder="Europe/Berlin"
+                    />
+                  </Field>
+                </div>
+                <Field>
+                  <FieldLabel htmlFor="workflow-description">
+                    Description
+                  </FieldLabel>
+                  <Input
+                    id="workflow-description"
+                    value={draft.description}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      onUpdate({ description: event.target.value })
+                    }
+                    placeholder="What this workflow produces"
+                  />
+                </Field>
+              </TabsContent>
+              <TabsContent value="schedule" className="pt-4">
+                {" "}
+                <ScheduleEditor
+                  schedule={draft.schedule}
+                  enabled={draft.enabled}
+                  nextRunAt={
+                    draft.id
+                      ? workflows.find((workflow) => workflow.id === draft.id)
+                          ?.nextRunAt
+                      : null
+                  }
+                  timezone={draft.timezone}
+                  onScheduleChange={(schedule) => onUpdate({ schedule })}
+                  onEnabledChange={(enabled) => onUpdate({ enabled })}
                   disabled={disabled}
-                  onConnect={onConnect}
-                  onSelectNode={onSelectNode}
-                  onPositionChange={onPositionChange}
                 />
-              </div>
-              <div className="max-h-[min(46rem,calc(100vh-12rem))] overflow-y-auto pr-1">
-                <NodeInspector
-                  node={selectedNode}
-                  selectedNodeId={selectedNodeId}
-                  agents={agents}
-                  connections={connections}
-                  workflowNodes={draft.definition.nodes}
-                  mcpServers={mcpServers}
-                  knowledgeSpaces={knowledgeSpaces}
-                  knowledgeSources={knowledgeSources}
-                  onUpdate={onUpdateNode}
-                  onRemove={onRemoveNode}
-                  disabled={disabled}
-                />
-              </div>
-            </div>
-            <ScheduleEditor
-              schedule={draft.schedule}
-              enabled={draft.enabled}
-              nextRunAt={
-                draft.id
-                  ? workflows.find((workflow) => workflow.id === draft.id)
-                      ?.nextRunAt
-                  : null
-              }
-              timezone={draft.timezone}
-              onScheduleChange={(schedule) => onUpdate({ schedule })}
-              onEnabledChange={(enabled) => onUpdate({ enabled })}
-              disabled={disabled}
-            />
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
-      ) : (
+      ) : !workflows.length ? (
         <Card className="border-dashed">
           <CardContent className="flex min-h-96 flex-col items-center justify-center text-center">
             <div className="rounded-full bg-muted p-3">
               <GitBranch />
             </div>
-            <h2 className="mt-4 font-medium">Build your first workflow</h2>
+            <h2 className="mt-4 font-medium">Create a custom workflow</h2>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
               Start with a node, add a second agent, connect them, and run a
               parallel or fan-in graph with durable progress.
@@ -2956,8 +3121,28 @@ function WorkflowsPanel({
             </Button>
           </CardContent>
         </Card>
-      )}
+      ) : null}
     </div>
+  )
+}
+
+function InspectorSection({
+  title,
+  children,
+}: {
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <Collapsible className="border-t pt-3">
+      <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm font-medium">
+        {title}
+        <ChevronDown className="size-4" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="flex flex-col gap-4 py-3">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -3122,465 +3307,512 @@ function NodeInspector({
             }
           />
         </Field>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field>
-            <FieldLabel>Approval</FieldLabel>
-            <Select
-              value={node.approvalMode || "review"}
-              disabled={disabled}
-              onValueChange={(value) =>
-                onUpdate(node.id, { approvalMode: value ?? "review" })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue>
-                  {approvalModeLabel(node.approvalMode || "review")}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="read_only_auto">
-                    Auto trusted read-only
+        <Field>
+          <FieldLabel>Output format</FieldLabel>
+          <Select
+            value={node.outputFormat || "response"}
+            disabled={disabled}
+            onValueChange={(value) =>
+              onUpdate(node.id, {
+                outputFormat: (value === "response"
+                  ? ""
+                  : value) as AgentWorkflowNode["outputFormat"],
+              })
+            }
+          >
+            <SelectTrigger aria-label="Output format" className="w-full">
+              <SelectValue>{outputFormatLabel(node.outputFormat)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="response">Response only</SelectItem>
+                {["pdf", "md", "txt", "json", "csv", "html"].map((format) => (
+                  <SelectItem key={format} value={format}>
+                    {format.toUpperCase()} file
                   </SelectItem>
-                  <SelectItem value="review">Always review</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </Field>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <FieldDescription>
+            The final response is saved as a downloadable file. Agents can also
+            create files when instructed.
+          </FieldDescription>
+        </Field>
+        <InspectorSection title="Safety & execution">
+          {" "}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field>
+              <FieldLabel>Approval</FieldLabel>
+              <Select
+                value={node.approvalMode || "review"}
+                disabled={disabled}
+                onValueChange={(value) =>
+                  onUpdate(node.id, { approvalMode: value ?? "review" })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {approvalModeLabel(node.approvalMode || "review")}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="read_only_auto">
+                      Auto trusted read-only
+                    </SelectItem>
+                    <SelectItem value="review">Always review</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel>Max attempts</FieldLabel>
+              <Input
+                type="number"
+                min={1}
+                max={3}
+                value={node.retry?.maxAttempts ?? 3}
+                disabled={disabled}
+                onChange={(event) =>
+                  onUpdate(node.id, {
+                    retry: {
+                      maxAttempts: Math.max(
+                        1,
+                        Math.min(3, Number(event.target.value) || 1)
+                      ),
+                    },
+                  })
+                }
+              />
+            </Field>
+          </div>
           <Field>
-            <FieldLabel>Max attempts</FieldLabel>
+            <FieldLabel>Node timeout (seconds)</FieldLabel>
             <Input
               type="number"
               min={1}
-              max={3}
-              value={node.retry?.maxAttempts ?? 3}
+              max={600}
+              value={node.timeoutSeconds ?? 600}
               disabled={disabled}
               onChange={(event) =>
                 onUpdate(node.id, {
-                  retry: {
-                    maxAttempts: Math.max(
-                      1,
-                      Math.min(3, Number(event.target.value) || 1)
-                    ),
-                  },
+                  timeoutSeconds: Math.max(
+                    1,
+                    Math.min(600, Number(event.target.value) || 600)
+                  ),
                 })
               }
             />
           </Field>
-        </div>
-        <Field>
-          <FieldLabel>Node timeout (seconds)</FieldLabel>
-          <Input
-            type="number"
-            min={1}
-            max={600}
-            value={node.timeoutSeconds ?? 600}
-            disabled={disabled}
-            onChange={(event) =>
-              onUpdate(node.id, {
-                timeoutSeconds: Math.max(
-                  1,
-                  Math.min(600, Number(event.target.value) || 600)
-                ),
-              })
-            }
-          />
-        </Field>
-        <FieldSet>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <FieldLegend variant="label">
-                Input and output mappings
-              </FieldLegend>
-              <FieldDescription>
-                Give this node named values from the workflow run or a connected
-                previous node.
-              </FieldDescription>
+        </InspectorSection>
+        <InspectorSection title="Input & output mappings">
+          {" "}
+          <FieldSet>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <FieldLegend variant="label">
+                  Input and output mappings
+                </FieldLegend>
+                <FieldDescription>
+                  Give this node named values from the workflow run or a
+                  connected previous node.
+                </FieldDescription>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={addBinding}
+                disabled={disabled}
+              >
+                <Plus data-icon="inline-start" />
+                Add mapping
+              </Button>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={addBinding}
-              disabled={disabled}
-            >
-              <Plus data-icon="inline-start" />
-              Add mapping
-            </Button>
-          </div>
-          {inputBindings.length ? (
-            <div className="flex flex-col gap-3">
-              {inputBindings.map((binding, index) => {
-                const source = binding.source.trim().toLowerCase()
-                return (
-                  <div
-                    key={`${node.id}-binding-${index}`}
-                    className="rounded-lg border bg-muted/20 p-3"
-                  >
-                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
-                      <Field>
-                        <FieldLabel
-                          htmlFor={`binding-name-${node.id}-${index}`}
-                        >
-                          Name
-                        </FieldLabel>
-                        <Input
-                          id={`binding-name-${node.id}-${index}`}
-                          value={binding.name}
-                          disabled={disabled}
-                          onChange={(event) =>
-                            updateBinding(index, { name: event.target.value })
-                          }
-                          placeholder="research_question"
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel>Source</FieldLabel>
-                        <Select
-                          value={source === "node" ? "node" : "input"}
-                          disabled={disabled}
-                          onValueChange={(value) =>
-                            updateBinding(index, {
-                              source: value === "node" ? "node" : "input",
-                              nodeId:
-                                value === "node" ? binding.nodeId : undefined,
-                              path: value === "node" ? binding.path : undefined,
-                            })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue>
-                              {source === "node"
-                                ? "Previous output"
-                                : "Workflow input"}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              <SelectItem value="input">
-                                Workflow input
-                              </SelectItem>
-                              <SelectItem value="node">
-                                Previous output
-                              </SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="self-end"
-                        onClick={() => removeBinding(index)}
-                        disabled={disabled}
-                        aria-label={`Remove ${binding.name || "input"} mapping`}
-                      >
-                        <X data-icon="inline-start" />
-                      </Button>
-                    </div>
-                    {source === "node" && (
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {inputBindings.length ? (
+              <div className="flex flex-col gap-3">
+                {inputBindings.map((binding, index) => {
+                  const source = binding.source.trim().toLowerCase()
+                  return (
+                    <div
+                      key={`${node.id}-binding-${index}`}
+                      className="rounded-lg border bg-muted/20 p-3"
+                    >
+                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
                         <Field>
-                          <FieldLabel>Previous node</FieldLabel>
+                          <FieldLabel
+                            htmlFor={`binding-name-${node.id}-${index}`}
+                          >
+                            Name
+                          </FieldLabel>
+                          <Input
+                            id={`binding-name-${node.id}-${index}`}
+                            value={binding.name}
+                            disabled={disabled}
+                            onChange={(event) =>
+                              updateBinding(index, { name: event.target.value })
+                            }
+                            placeholder="research_question"
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel>Source</FieldLabel>
                           <Select
-                            value={binding.nodeId ?? "none"}
-                            disabled={disabled || !otherNodes.length}
+                            value={source === "node" ? "node" : "input"}
+                            disabled={disabled}
                             onValueChange={(value) =>
                               updateBinding(index, {
+                                source: value === "node" ? "node" : "input",
                                 nodeId:
-                                  value === "none"
-                                    ? undefined
-                                    : (value ?? undefined),
+                                  value === "node" ? binding.nodeId : undefined,
+                                path:
+                                  value === "node" ? binding.path : undefined,
                               })
                             }
                           >
                             <SelectTrigger>
                               <SelectValue>
-                                {otherNodes.find(
-                                  (candidate) => candidate.id === binding.nodeId
-                                )?.id ?? "Choose a connected node"}
+                                {source === "node"
+                                  ? "Previous output"
+                                  : "Workflow input"}
                               </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
-                                <SelectItem value="none">
-                                  Choose a connected node
+                                <SelectItem value="input">
+                                  Workflow input
                                 </SelectItem>
-                                {otherNodes.map((candidate) => (
-                                  <SelectItem
-                                    key={candidate.id}
-                                    value={candidate.id}
-                                  >
-                                    {candidate.id}
-                                  </SelectItem>
-                                ))}
+                                <SelectItem value="node">
+                                  Previous output
+                                </SelectItem>
                               </SelectGroup>
                             </SelectContent>
                           </Select>
                         </Field>
-                        <Field>
-                          <FieldLabel
-                            htmlFor={`binding-path-${node.id}-${index}`}
-                          >
-                            Output path (optional)
-                          </FieldLabel>
-                          <Input
-                            id={`binding-path-${node.id}-${index}`}
-                            value={binding.path ?? ""}
-                            disabled={disabled}
-                            onChange={(event) =>
-                              updateBinding(index, {
-                                path: event.target.value || undefined,
-                              })
-                            }
-                            placeholder="result.summary"
-                          />
-                        </Field>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="self-end"
+                          onClick={() => removeBinding(index)}
+                          disabled={disabled}
+                          aria-label={`Remove ${binding.name || "input"} mapping`}
+                        >
+                          <X data-icon="inline-start" />
+                        </Button>
                       </div>
-                    )}
-                  </div>
-                )
-              })}
+                      {source === "node" && (
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <Field>
+                            <FieldLabel>Previous node</FieldLabel>
+                            <Select
+                              value={binding.nodeId ?? "none"}
+                              disabled={disabled || !otherNodes.length}
+                              onValueChange={(value) =>
+                                updateBinding(index, {
+                                  nodeId:
+                                    value === "none"
+                                      ? undefined
+                                      : (value ?? undefined),
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue>
+                                  {otherNodes.find(
+                                    (candidate) =>
+                                      candidate.id === binding.nodeId
+                                  )?.id ?? "Choose a connected node"}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  <SelectItem value="none">
+                                    Choose a connected node
+                                  </SelectItem>
+                                  {otherNodes.map((candidate) => (
+                                    <SelectItem
+                                      key={candidate.id}
+                                      value={candidate.id}
+                                    >
+                                      {candidate.id}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                          <Field>
+                            <FieldLabel
+                              htmlFor={`binding-path-${node.id}-${index}`}
+                            >
+                              Output path (optional)
+                            </FieldLabel>
+                            <Input
+                              id={`binding-path-${node.id}-${index}`}
+                              value={binding.path ?? ""}
+                              disabled={disabled}
+                              onChange={(event) =>
+                                updateBinding(index, {
+                                  path: event.target.value || undefined,
+                                })
+                              }
+                              placeholder="result.summary"
+                            />
+                          </Field>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No mappings yet. Nodes receive the workflow context by default.
+              </p>
+            )}
+          </FieldSet>
+        </InspectorSection>
+        <InspectorSection title="Context & permissions">
+          {" "}
+          <FieldSet>
+            <FieldLegend variant="label">Delegation allowlist</FieldLegend>
+            <FieldDescription>
+              These agents may be selected by this node when it delegates work.
+            </FieldDescription>
+            <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
+              {agents.length ? (
+                agents
+                  .filter((agent) => agent.id !== node.agentId)
+                  .map((agent) => (
+                    <label
+                      key={agent.id}
+                      className="flex items-center gap-2 text-xs"
+                    >
+                      <input
+                        className="size-3.5 accent-primary"
+                        type="checkbox"
+                        checked={
+                          node.delegationAgentIds?.includes(agent.id) ?? false
+                        }
+                        disabled={disabled}
+                        onChange={() => {
+                          const current = node.delegationAgentIds ?? []
+                          onUpdate(node.id, {
+                            delegationAgentIds: current.includes(agent.id)
+                              ? current.filter((id) => id !== agent.id)
+                              : [...current, agent.id],
+                          })
+                        }}
+                      />
+                      <span className="truncate">{agent.name}</span>
+                      <span className="text-muted-foreground">
+                        {agent.kind}
+                      </span>
+                    </label>
+                  ))
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  Add another agent to enable delegation.
+                </span>
+              )}
             </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              No mappings yet. Nodes receive the workflow context by default.
-            </p>
-          )}
-        </FieldSet>
-        <FieldSet>
-          <FieldLegend variant="label">Delegation allowlist</FieldLegend>
-          <FieldDescription>
-            These agents may be selected by this node when it delegates work.
-          </FieldDescription>
-          <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
-            {agents.length ? (
-              agents
-                .filter((agent) => agent.id !== node.agentId)
-                .map((agent) => (
+          </FieldSet>
+          <FieldSet>
+            <FieldLegend variant="label">MCP grants</FieldLegend>
+            <FieldDescription>
+              Only selected servers and tools enter this node’s immutable
+              context scope.
+            </FieldDescription>
+            <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
+              {mcpServers.length ? (
+                mcpServers.map((server) => (
                   <label
-                    key={agent.id}
+                    key={server.id}
                     className="flex items-center gap-2 text-xs"
                   >
                     <input
                       className="size-3.5 accent-primary"
                       type="checkbox"
                       checked={
-                        node.delegationAgentIds?.includes(agent.id) ?? false
+                        context.mcpServerIds?.includes(server.id) ?? false
                       }
                       disabled={disabled}
                       onChange={() => {
-                        const current = node.delegationAgentIds ?? []
+                        const current = context.mcpServerIds ?? []
                         onUpdate(node.id, {
-                          delegationAgentIds: current.includes(agent.id)
-                            ? current.filter((id) => id !== agent.id)
-                            : [...current, agent.id],
+                          context: updateContext(context, {
+                            mcpServerIds: current.includes(server.id)
+                              ? current.filter((id) => id !== server.id)
+                              : [...current, server.id],
+                          }),
                         })
                       }}
                     />
-                    <span className="truncate">{agent.name}</span>
-                    <span className="text-muted-foreground">{agent.kind}</span>
+                    <span className="truncate">{server.name}</span>
                   </label>
                 ))
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                Add another agent to enable delegation.
-              </span>
-            )}
-          </div>
-        </FieldSet>
-        <FieldSet>
-          <FieldLegend variant="label">MCP grants</FieldLegend>
-          <FieldDescription>
-            Only selected servers and tools enter this node’s immutable context
-            scope.
-          </FieldDescription>
-          <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
-            {mcpServers.length ? (
-              mcpServers.map((server) => (
-                <label
-                  key={server.id}
-                  className="flex items-center gap-2 text-xs"
-                >
-                  <input
-                    className="size-3.5 accent-primary"
-                    type="checkbox"
-                    checked={context.mcpServerIds?.includes(server.id) ?? false}
-                    disabled={disabled}
-                    onChange={() => {
-                      const current = context.mcpServerIds ?? []
-                      onUpdate(node.id, {
-                        context: updateContext(context, {
-                          mcpServerIds: current.includes(server.id)
-                            ? current.filter((id) => id !== server.id)
-                            : [...current, server.id],
-                        }),
-                      })
-                    }}
-                  />
-                  <span className="truncate">{server.name}</span>
-                </label>
-              ))
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                No MCP servers connected.
-              </span>
-            )}
-          </div>
-        </FieldSet>
-        <FieldSet>
-          <FieldLegend variant="label">Storage folder grants</FieldLegend>
-          <FieldDescription>
-            Every run reads the current contents of the selected folder and all
-            of its subfolders. The resolved files are frozen in the run snapshot
-            for auditability.
-          </FieldDescription>
-          <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
-            {knowledgeSpaces.length ? (
-              knowledgeSpaces.map((space) => (
-                <label
-                  key={space.id}
-                  className="flex items-center gap-2 text-xs"
-                >
-                  <input
-                    className="size-3.5 accent-primary"
-                    type="checkbox"
-                    checked={
-                      context.knowledgeSpaceIds?.includes(space.id) ?? false
-                    }
-                    disabled={disabled}
-                    onChange={() => {
-                      const current = context.knowledgeSpaceIds ?? []
-                      onUpdate(node.id, {
-                        context: updateContext(context, {
-                          knowledgeSpaceIds: current.includes(space.id)
-                            ? current.filter((id) => id !== space.id)
-                            : [...current, space.id],
-                        }),
-                      })
-                    }}
-                  />
-                  <span className="truncate">
-                    {knowledgeSpacePath(space, knowledgeSpaces)}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {space.itemCount}
-                  </span>
-                </label>
-              ))
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                Create a folder in Storage first.
-              </span>
-            )}
-          </div>
-        </FieldSet>
-        <FieldSet>
-          <FieldLegend variant="label">Individual file grants</FieldLegend>
-          <div className="flex max-h-24 flex-col gap-2 overflow-y-auto">
-            {knowledgeSources.length ? (
-              knowledgeSources.map((source) => (
-                <label
-                  key={source.id}
-                  className="flex items-center gap-2 text-xs"
-                >
-                  <input
-                    className="size-3.5 accent-primary"
-                    type="checkbox"
-                    checked={
-                      context.knowledgeSourceIds?.includes(source.id) ?? false
-                    }
-                    disabled={disabled}
-                    onChange={() => {
-                      const current = context.knowledgeSourceIds ?? []
-                      onUpdate(node.id, {
-                        context: updateContext(context, {
-                          knowledgeSourceIds: current.includes(source.id)
-                            ? current.filter((id) => id !== source.id)
-                            : [...current, source.id],
-                        }),
-                      })
-                    }}
-                  />
-                  <span className="truncate">{source.title}</span>
-                </label>
-              ))
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                No knowledge sources available.
-              </span>
-            )}
-          </div>
-        </FieldSet>
-        <FieldSet>
-          <FieldLegend variant="label">
-            Additional context references
-          </FieldLegend>
-          <FieldDescription>
-            Optional comma-separated IDs or tool names. Access is evaluated at
-            run time and remains scoped to this node.
-          </FieldDescription>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`repositories-${node.id}`}>
-                Repository IDs
-              </FieldLabel>
-              <Input
-                id={`repositories-${node.id}`}
-                value={formatDelimitedList(context.repositoryIds)}
-                disabled={disabled}
-                onChange={(event) =>
-                  updateDelimitedContext("repositoryIds", event.target.value)
-                }
-                placeholder="repo_123, repo_456"
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`notes-${node.id}`}>Note IDs</FieldLabel>
-              <Input
-                id={`notes-${node.id}`}
-                value={formatDelimitedList(context.noteIds)}
-                disabled={disabled}
-                onChange={(event) =>
-                  updateDelimitedContext("noteIds", event.target.value)
-                }
-                placeholder="note_123, note_456"
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`transcriptions-${node.id}`}>
-                Transcription session IDs
-              </FieldLabel>
-              <Input
-                id={`transcriptions-${node.id}`}
-                value={formatDelimitedList(context.transcriptionSessionIds)}
-                disabled={disabled}
-                onChange={(event) =>
-                  updateDelimitedContext(
-                    "transcriptionSessionIds",
-                    event.target.value
-                  )
-                }
-                placeholder="session_123"
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`mcp-tools-${node.id}`}>
-                MCP tool names
-              </FieldLabel>
-              <Input
-                id={`mcp-tools-${node.id}`}
-                value={formatDelimitedList(context.mcpTools)}
-                disabled={disabled}
-                onChange={(event) =>
-                  updateDelimitedContext("mcpTools", event.target.value)
-                }
-                placeholder="search, fetch"
-              />
-            </Field>
-          </FieldGroup>
-        </FieldSet>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  No MCP servers connected.
+                </span>
+              )}
+            </div>
+          </FieldSet>
+          <FieldSet>
+            <FieldLegend variant="label">Storage folder grants</FieldLegend>
+            <FieldDescription>
+              Every run reads the current contents of the selected folder and
+              all of its subfolders. The resolved files are frozen in the run
+              snapshot for auditability.
+            </FieldDescription>
+            <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
+              {knowledgeSpaces.length ? (
+                knowledgeSpaces.map((space) => (
+                  <label
+                    key={space.id}
+                    className="flex items-center gap-2 text-xs"
+                  >
+                    <input
+                      className="size-3.5 accent-primary"
+                      type="checkbox"
+                      checked={
+                        context.knowledgeSpaceIds?.includes(space.id) ?? false
+                      }
+                      disabled={disabled}
+                      onChange={() => {
+                        const current = context.knowledgeSpaceIds ?? []
+                        onUpdate(node.id, {
+                          context: updateContext(context, {
+                            knowledgeSpaceIds: current.includes(space.id)
+                              ? current.filter((id) => id !== space.id)
+                              : [...current, space.id],
+                          }),
+                        })
+                      }}
+                    />
+                    <span className="truncate">
+                      {knowledgeSpacePath(space, knowledgeSpaces)}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {space.itemCount}
+                    </span>
+                  </label>
+                ))
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  Create a folder in Storage first.
+                </span>
+              )}
+            </div>
+          </FieldSet>
+          <FieldSet>
+            <FieldLegend variant="label">Individual file grants</FieldLegend>
+            <div className="flex max-h-24 flex-col gap-2 overflow-y-auto">
+              {knowledgeSources.length ? (
+                knowledgeSources.map((source) => (
+                  <label
+                    key={source.id}
+                    className="flex items-center gap-2 text-xs"
+                  >
+                    <input
+                      className="size-3.5 accent-primary"
+                      type="checkbox"
+                      checked={
+                        context.knowledgeSourceIds?.includes(source.id) ?? false
+                      }
+                      disabled={disabled}
+                      onChange={() => {
+                        const current = context.knowledgeSourceIds ?? []
+                        onUpdate(node.id, {
+                          context: updateContext(context, {
+                            knowledgeSourceIds: current.includes(source.id)
+                              ? current.filter((id) => id !== source.id)
+                              : [...current, source.id],
+                          }),
+                        })
+                      }}
+                    />
+                    <span className="truncate">{source.title}</span>
+                  </label>
+                ))
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  No knowledge sources available.
+                </span>
+              )}
+            </div>
+          </FieldSet>
+          <FieldSet>
+            <FieldLegend variant="label">
+              Additional context references
+            </FieldLegend>
+            <FieldDescription>
+              Optional comma-separated IDs or tool names. Access is evaluated at
+              run time and remains scoped to this node.
+            </FieldDescription>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={`repositories-${node.id}`}>
+                  Repository IDs
+                </FieldLabel>
+                <Input
+                  id={`repositories-${node.id}`}
+                  value={formatDelimitedList(context.repositoryIds)}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    updateDelimitedContext("repositoryIds", event.target.value)
+                  }
+                  placeholder="repo_123, repo_456"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`notes-${node.id}`}>Note IDs</FieldLabel>
+                <Input
+                  id={`notes-${node.id}`}
+                  value={formatDelimitedList(context.noteIds)}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    updateDelimitedContext("noteIds", event.target.value)
+                  }
+                  placeholder="note_123, note_456"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`transcriptions-${node.id}`}>
+                  Transcription session IDs
+                </FieldLabel>
+                <Input
+                  id={`transcriptions-${node.id}`}
+                  value={formatDelimitedList(context.transcriptionSessionIds)}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    updateDelimitedContext(
+                      "transcriptionSessionIds",
+                      event.target.value
+                    )
+                  }
+                  placeholder="session_123"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`mcp-tools-${node.id}`}>
+                  MCP tool names
+                </FieldLabel>
+                <Input
+                  id={`mcp-tools-${node.id}`}
+                  value={formatDelimitedList(context.mcpTools)}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    updateDelimitedContext("mcpTools", event.target.value)
+                  }
+                  placeholder="search, fetch"
+                />
+              </Field>
+            </FieldGroup>
+          </FieldSet>
+        </InspectorSection>{" "}
       </CardContent>
     </Card>
   )
@@ -3757,12 +3989,16 @@ function ScheduleEditor({
 }
 
 function RunsPanel({
+  nextCursor,
+  onCursorChange,
   runs,
   onRunsChange,
   agents,
   workflows,
   disabled = false,
 }: {
+  nextCursor: string
+  onCursorChange: (cursor: string) => void
   runs: AgentRun[]
   onRunsChange: (runs: AgentRun[]) => void
   agents: Agent[]
@@ -3776,9 +4012,19 @@ function RunsPanel({
     }
     return runs[0]?.id ?? null
   })
+  const [page, setPage] = useState(0)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [query, setQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [showDetail, setShowDetail] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("run")
+  )
   const [detail, setDetail] = useState<AgentRun | null>(null)
   const [events, setEvents] = useState<AgentRunEvent[]>([])
   const [error, setError] = useState("")
+  const selectedIDRef = useRef(selectedID)
   const runsRef = useRef(runs)
   const onRunsChangeRef = useRef(onRunsChange)
   const runStatusRef = useRef<string | undefined>(undefined)
@@ -3786,9 +4032,8 @@ function RunsPanel({
   const selectedRunStatus = detail?.status ?? selectedSummary?.status
 
   useEffect(() => {
-    const runID = new URLSearchParams(window.location.search).get("run")
-    if (!runID && selectedID) updateAgentRunURL(selectedID)
-  }, [selectedID])
+    if (showDetail && selectedID) updateAgentRunURL(selectedID)
+  }, [selectedID, showDetail])
 
   useEffect(() => {
     runStatusRef.current = selectedRunStatus
@@ -3808,11 +4053,16 @@ function RunsPanel({
     return () => window.clearTimeout(timer)
   }, [runs, selectedID])
 
+  useEffect(() => {
+    selectedIDRef.current = selectedID
+  }, [selectedID])
+
   const reload = useCallback(async (id: string) => {
     try {
       const result = await api.get<{ run: AgentRun }>(
         `/api/v1/agent-runs/${id}`
       )
+      if (selectedIDRef.current !== id) return
       setDetail(result.run)
       onRunsChangeRef.current(
         runsRef.current.map((run) =>
@@ -3837,13 +4087,13 @@ function RunsPanel({
   }, [])
 
   useEffect(() => {
-    if (!selectedID) return
+    if (!selectedID || !showDetail) return
     const timer = window.setTimeout(() => void reload(selectedID), 0)
     return () => window.clearTimeout(timer)
-  }, [reload, selectedID])
+  }, [reload, selectedID, showDetail])
 
   useEffect(() => {
-    if (!selectedID) return
+    if (!selectedID || !showDetail) return
     let stopped = false
     let retryTimer: number | undefined
     let lastEventID = 0
@@ -3915,7 +4165,7 @@ function RunsPanel({
       controller.abort()
       if (retryTimer) window.clearTimeout(retryTimer)
     }
-  }, [appendEvent, reload, selectedID])
+  }, [appendEvent, reload, selectedID, showDetail])
 
   async function cancelRun() {
     if (!selectedID) return
@@ -3977,88 +4227,281 @@ function RunsPanel({
   )
 
   function selectRun(id: string) {
+    setShowDetail(true)
     if (id === selectedID) return
+    selectedIDRef.current = id
+    setError("")
     setDetail(null)
     setEvents([])
     setSelectedID(id)
     updateAgentRunURL(id)
   }
 
+  async function loadOlderRuns() {
+    if (!nextCursor || loadingOlder) return
+    setLoadingOlder(true)
+    try {
+      const result = await api.get<{ runs: AgentRun[]; nextCursor?: string }>(
+        `/api/v1/agent-runs?cursor=${encodeURIComponent(nextCursor)}`
+      )
+      const existing = new Set(runsRef.current.map((run) => run.id))
+      onRunsChange([
+        ...runsRef.current,
+        ...result.runs.filter((run) => !existing.has(run.id)),
+      ])
+      onCursorChange(result.nextCursor ?? "")
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Older runs could not be loaded."
+      )
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
+
+  const runName = (run: AgentRun) =>
+    workflows.find((workflow) => workflow.id === run.workflowId)?.name ??
+    (run.sourceType === "chat" ? "Chat delegation" : "Agent run")
+  const filteredRuns = [...runs]
+    .filter(
+      (run) =>
+        (statusFilter === "all" || run.status === statusFilter) &&
+        `${runName(run)} ${run.id} ${run.summary ?? ""} ${run.error ?? ""}`
+          .toLowerCase()
+          .includes(query.toLowerCase())
+    )
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+  const pageCount = Math.max(1, Math.ceil(filteredRuns.length / 25))
+  const currentPage = Math.min(page, pageCount - 1)
+  const pageRuns = filteredRuns.slice(currentPage * 25, (currentPage + 1) * 25)
   return (
-    <div className="grid gap-5 xl:grid-cols-[20rem_minmax(0,1fr)]">
+    <div className="flex min-w-0 flex-col gap-5">
       {error && (
-        <Alert className="xl:col-span-2" variant="destructive">
-          <CircleAlert data-icon="inline-start" />
+        <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      <Card className="h-fit">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {[
+          { label: "Loaded runs", value: runs.length },
+          {
+            label: "In progress",
+            value: runs.filter((run) =>
+              ["running", "queued"].includes(run.status)
+            ).length,
+          },
+          {
+            label: "Completed",
+            value: runs.filter((run) => run.status === "completed").length,
+          },
+          {
+            label: "Failed",
+            value: runs.filter((run) => run.status === "failed").length,
+          },
+        ].map((metric) => (
+          <Card key={metric.label}>
+            <CardHeader>
+              <CardDescription>{metric.label}</CardDescription>
+              <CardTitle className="tabular-nums">{metric.value}</CardTitle>
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+      <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <CardTitle>Run history</CardTitle>
-              <CardDescription>
-                Replayable events and immutable snapshots.
-              </CardDescription>
-            </div>
-            <Badge variant="outline">{runs.length}</Badge>
-          </div>
+          <CardTitle>Run history</CardTitle>
+          <CardDescription>
+            Track execution, investigate failures, and review approvals.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="flex max-h-[620px] flex-col gap-2 overflow-y-auto">
-          {runs.length ? (
-            runs.map((run) => (
-              <button
-                key={run.id}
-                className={cn(
-                  "rounded-lg border px-3 py-2 text-left hover:bg-muted/50",
-                  selectedID === run.id && "border-primary bg-primary/[0.04]"
-                )}
-                onClick={() => selectRun(run.id)}
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Input
+              aria-label="Search runs"
+              placeholder="Search workflows, run IDs, or results…"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                setPage(0)
+              }}
+              className="max-w-md"
+            />
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => {
+                setStatusFilter(value ?? "all")
+                setPage(0)
+              }}
+            >
+              <SelectTrigger aria-label="Filter run status">
+                <SelectValue>
+                  {statusFilter === "all"
+                    ? "All statuses"
+                    : statusLabel(statusFilter)}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  {[...new Set(runs.map((run) => run.status))]
+                    .sort()
+                    .map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {statusLabel(status)}
+                      </SelectItem>
+                    ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-muted-foreground">
+              {filteredRuns.length} matches in {runs.length} loaded runs
+            </span>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Workflow / run</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Started</TableHead>
+                <TableHead>Duration</TableHead>
+                <TableHead>Result</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pageRuns.map((run) => (
+                <TableRow
+                  key={run.id}
+                  data-state={
+                    showDetail && selectedID === run.id ? "selected" : undefined
+                  }
+                >
+                  <TableCell>
+                    <Button variant="link" onClick={() => selectRun(run.id)}>
+                      {runName(run)}
+                    </Button>
+                    <p className="px-2 font-mono text-xs text-muted-foreground">
+                      {run.id.slice(0, 12)}
+                    </p>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={badgeVariant(run.status)}>
+                      {statusLabel(run.status)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{run.sourceType}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {formatRunTime(run.createdAt)}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {formatRunDuration(run.startedAt, run.finishedAt)}
+                  </TableCell>
+                  <TableCell className="max-w-64 truncate text-muted-foreground">
+                    {run.error || run.summary || "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <nav
+            aria-label="Run history pagination"
+            className="flex flex-wrap items-center justify-between gap-3"
+          >
+            <span className="text-xs text-muted-foreground" aria-live="polite">
+              {filteredRuns.length ? currentPage * 25 + 1 : 0}–
+              {Math.min((currentPage + 1) * 25, filteredRuns.length)} of{" "}
+              {filteredRuns.length} · 25 per page
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage === 0}
+                onClick={() => setPage(currentPage - 1)}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium">
-                    {workflows.find(
-                      (workflow) => workflow.id === run.workflowId
-                    )?.name ??
-                      (run.sourceType === "chat"
-                        ? "Chat delegation"
-                        : "Agent run")}
-                  </span>
-                  <Badge variant={badgeVariant(run.status)}>
-                    {statusLabel(run.status)}
-                  </Badge>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {new Date(run.createdAt).toLocaleString()} · {run.sourceType}
-                </p>
-                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                  {run.summary || run.error || "Waiting for execution…"}
-                </p>
-              </button>
-            ))
-          ) : (
+                Previous
+              </Button>
+              <span className="text-xs">
+                Page {currentPage + 1} of {pageCount}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage >= pageCount - 1}
+                onClick={() => setPage(currentPage + 1)}
+              >
+                Next
+              </Button>
+              {nextCursor && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingOlder}
+                  onClick={() => void loadOlderRuns()}
+                >
+                  {loadingOlder ? "Loading…" : "Load older runs"}
+                </Button>
+              )}
+            </div>
+          </nav>
+          {!runs.length ? (
             <EmptyRuns />
-          )}
+          ) : !filteredRuns.length ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No runs match your search.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
-      {detail || selectedSummary ? (
-        <RunDetail
-          run={detail ?? selectedSummary!}
-          agents={agents}
-          workflow={selectedWorkflow}
-          events={events}
-          onCancel={() => void cancelRun()}
-          onRetry={() => void retryRun()}
-          onDecision={(approval, decision) => void decide(approval, decision)}
-          disabled={disabled}
-        />
-      ) : (
-        <Card className="border-dashed">
-          <CardContent className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
-            Select a run to inspect its graph and live events.
-          </CardContent>
-        </Card>
-      )}
+      <Sheet
+        open={showDetail}
+        onOpenChange={(open) => {
+          setShowDetail(open)
+          if (!open) updateAgentRunURL()
+        }}
+      >
+        <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-4xl">
+          <SheetHeader className="shrink-0 border-b pr-12">
+            <SheetTitle>Run details</SheetTitle>
+            <SheetDescription>
+              Execution, results, and approvals. Your place in the run history
+              is preserved.
+            </SheetDescription>
+          </SheetHeader>
+          <div
+            key={selectedID}
+            className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6"
+          >
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            {showDetail && (detail || selectedSummary) ? (
+              <RunDetail
+                run={detail ?? selectedSummary!}
+                agents={agents}
+                workflow={selectedWorkflow}
+                events={events}
+                onCancel={() => void cancelRun()}
+                onRetry={() => void retryRun()}
+                onDecision={(approval, decision) =>
+                  void decide(approval, decision)
+                }
+                disabled={disabled}
+              />
+            ) : showDetail ? (
+              <Card className="border-dashed">
+                <CardContent className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
+                  Loading run details…
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
@@ -4115,13 +4558,14 @@ function RunDetail({
         .map((event) => event.nodeId ?? "run")
     ).size
   const duration = formatRunDuration(run.startedAt, run.finishedAt)
-  const flowNodes: Node<FlowNodeData>[] = nodes.map((node, index) => ({
+  const runLayout = layoutAgentGraph(
+    nodes.map((node) => node.nodeKey),
+    workflow?.definition.edges ?? []
+  )
+  const flowNodes: Node<FlowNodeData>[] = nodes.map((node) => ({
     id: node.nodeKey,
     type: "agent",
-    position: {
-      x: (index % 3) * 260 + 30,
-      y: Math.floor(index / 3) * 150 + 35,
-    },
+    position: runLayout[node.nodeKey],
     data: {
       label: node.nodeKey,
       agentName: agentToSavedLabel(
@@ -4276,28 +4720,7 @@ function RunDetail({
           </div>
         )}
 
-        {run.artifacts?.length ? (
-          <section className="flex flex-col gap-2">
-            <Separator />
-            <h3 className="font-medium">Artifacts</h3>
-            {run.artifacts.map((artifact) => (
-              <a
-                className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm hover:bg-muted/50"
-                key={artifact.id}
-                href={resolveAPIURL(
-                  `/api/v1/agent-runs/${run.id}/artifacts/${artifact.id}`
-                )}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <span className="truncate">{artifact.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {Math.ceil(artifact.sizeBytes / 1024)} KB
-                </span>
-              </a>
-            ))}
-          </section>
-        ) : null}
+        <RunFiles run={run} />
 
         <RunDisclosure
           title="Flow and execution details"

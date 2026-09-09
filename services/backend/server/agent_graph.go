@@ -40,6 +40,9 @@ func ValidateAgentWorkflowDefinition(definition models.AgentWorkflowDefinition) 
 	}
 	nodes := make(map[string]models.AgentWorkflowNode, len(definition.Nodes))
 	for _, node := range definition.Nodes {
+		if !validAgentOutputFormat(node.OutputFormat) {
+			return fmt.Errorf("node %q has an unsupported output format", node.ID)
+		}
 		key := strings.TrimSpace(node.ID)
 		if key == "" {
 			return fmt.Errorf("workflow node id is required")

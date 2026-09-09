@@ -500,6 +500,8 @@ func (e *AgentEngine) executeNativeMCPTool(ctx context.Context, userID, organiza
 func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExecutionRequest, endpoint provider.Endpoint, history []provider.ToolMessage, definitions []provider.ToolDefinition, bindings map[string]voiceToolBinding) (agentExecutionResult, error) {
 	messages := append([]provider.ToolMessage(nil), history...)
 	var response strings.Builder
+	finalResponse := ""
+	artifacts := []a2aArtifact{}
 	toolLoopGuard := newChatToolLoopGuard(messages)
 	for round := 1; round <= maxNativeToolRounds; round++ {
 		if reason := toolLoopGuard.stopReason(); reason != chatToolLoopContinue {
@@ -530,6 +532,7 @@ func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExec
 			return agentExecutionResult{}, err
 		}
 		if len(calls) == 0 {
+			finalResponse = roundResponse.String()
 			break
 		}
 		messages = append(messages, provider.ToolMessage{Role: "assistant", ToolCalls: calls, Content: roundResponse.String()})
@@ -543,6 +546,30 @@ func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExec
 					messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: errorText})
 					continue
 				}
+			}
+			if call.Name == "justai_create_file" {
+				artifact, fileErr := makeAgentFile(arguments)
+				totalBytes := len(artifact.Content)
+				for _, existing := range artifacts {
+					totalBytes += len(existing.Content)
+				}
+				if totalBytes > maxA2AArtifactBytes {
+					fileErr = fmt.Errorf("node file outputs exceed 8 MB in total")
+				}
+				if len(artifacts) >= 16 {
+					fileErr = fmt.Errorf("a node can create at most 16 files")
+				}
+				toolResult := ""
+				if fileErr != nil {
+					toolResult = fileErr.Error()
+				} else {
+					artifacts = append(artifacts, artifact)
+					encoded, _ := json.Marshal(map[string]any{"filename": artifact.Name, "mimeType": artifact.MimeType, "sizeBytes": len(artifact.Content), "status": "prepared for this run"})
+					toolResult = string(encoded)
+				}
+				outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: toolResult, failed: fileErr != nil})
+				messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: toolResult})
+				continue
 			}
 			binding, ok := bindings[call.Name]
 			if !ok {
@@ -609,8 +636,8 @@ func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExec
 			}
 		}
 	}
-	if strings.TrimSpace(response.String()) == "" {
+	if strings.TrimSpace(response.String()) == "" && len(artifacts) == 0 {
 		return agentExecutionResult{}, provider.ErrNoChatContentOrToolCalls
 	}
-	return agentExecutionResult{Summary: strings.TrimSpace(response.String())}, nil
+	return agentExecutionResult{Summary: firstNonEmptyString(strings.TrimSpace(finalResponse), strings.TrimSpace(response.String()), "Files created."), Artifacts: artifacts}, nil
 }

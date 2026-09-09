@@ -538,7 +538,7 @@ function createAttachmentAdapter(
   const uploadControllers = new Map<string, AbortController>()
 
   return {
-    accept: `${supportsVision ? "image/*," : ""}text/plain,text/markdown,text/html,application/json,application/pdf`,
+    accept: `${supportsVision ? "image/*," : ""}text/plain,text/markdown,text/html,text/csv,application/json,application/pdf,.csv`,
     async *add({ file }) {
       const attachment: PendingAttachment = {
         id: crypto.randomUUID(),
@@ -1458,7 +1458,9 @@ function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
       if (["generate_image", "edit_image"].includes(toolCall.toolName)) {
         return "Creating image"
       }
-      if (toolCall.toolName === "create_pdf") return "Creating document"
+      if (["create_pdf", "create_file"].includes(toolCall.toolName)) {
+        return "Creating file"
+      }
       return `Using ${toolCall.toolName.replaceAll("_", " ")}`
     }
 

@@ -51,6 +51,8 @@ function toolLabel(toolName: string) {
       return "Edit image"
     case "create_pdf":
       return "Create PDF"
+    case "create_file":
+      return "Create file"
     default:
       return toolName
   }
@@ -274,7 +276,7 @@ export function GeneratedImageCard({
   )
 }
 
-function GeneratedFileResult({ value }: { value: unknown }) {
+export function GeneratedFileCard({ value }: { value: unknown }) {
   const file = parseGeneratedFileResult(value)
   const fileURL = file?.url ?? ""
   const [preview, setPreview] = useState({ source: "", url: "" })
@@ -308,7 +310,7 @@ function GeneratedFileResult({ value }: { value: unknown }) {
             message:
               caught instanceof Error
                 ? caught.message
-                : "The PDF could not be loaded.",
+                : "The file could not be loaded.",
           })
         }
       })
@@ -335,7 +337,7 @@ function GeneratedFileResult({ value }: { value: unknown }) {
           className="rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive"
           role="alert"
         >
-          The PDF result is incomplete and does not include a valid download
+          The file result is incomplete and does not include a valid download
           URL.
         </p>
         <StructuredToolResult value={value} />
@@ -350,7 +352,7 @@ function GeneratedFileResult({ value }: { value: unknown }) {
         className="rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive"
         role="alert"
       >
-        Unable to load this PDF: {loadError.message}
+        Unable to load this file: {loadError.message}
       </p>
     )
   }
@@ -363,7 +365,7 @@ function GeneratedFileResult({ value }: { value: unknown }) {
         role="status"
       >
         <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-        Loading PDF…
+        Loading file…
       </div>
     )
   }
@@ -398,7 +400,7 @@ function GeneratedFileResult({ value }: { value: unknown }) {
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
-        <span className="text-muted-foreground">Generated PDF</span>
+        <span className="text-muted-foreground">Generated file</span>
         <div className="flex flex-wrap items-center gap-1.5">
           {canOpen && (
             <a
@@ -494,8 +496,8 @@ export function ToolResultContent({
   if (toolName === "generate_image" || toolName === "edit_image") {
     return <GeneratedImageCard value={value} />
   }
-  if (toolName === "create_pdf") {
-    return <GeneratedFileResult value={value} />
+  if (toolName === "create_pdf" || toolName === "create_file") {
+    return <GeneratedFileCard value={value} />
   }
   if (toolName === "web_search" || toolName === "browse_url") {
     return <WebSearchResult value={value} />
@@ -528,8 +530,9 @@ export const ToolFallback: ToolCallMessagePartComponent = (
     props.isError === true
   const hasResult = props.result !== undefined
   const argsText =
-    props.toolName === "create_pdf" && (props.argsText?.length ?? 0) > 4_000
-      ? `${props.argsText?.slice(0, 4_000)}\n… PDF content truncated in this preview.`
+    ["create_pdf", "create_file"].includes(props.toolName) &&
+    (props.argsText?.length ?? 0) > 4_000
+      ? `${props.argsText?.slice(0, 4_000)}\n… File content truncated in this preview.`
       : props.argsText
 
   return (
@@ -586,7 +589,7 @@ export const ToolFallback: ToolCallMessagePartComponent = (
         <div className="space-y-2 border-t px-3 py-3 text-xs">
           {argsText && (
             <details
-              open={props.toolName !== "create_pdf"}
+              open={!["create_pdf", "create_file"].includes(props.toolName)}
               className="rounded-lg border bg-background/60 px-2 py-1.5"
             >
               <summary className="cursor-pointer font-medium">

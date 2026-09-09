@@ -11,9 +11,15 @@ export interface GeneratedFileResult {
 type RecordValue = Record<string, unknown>
 const generatedPDFURLPattern =
   /^\/api\/v1\/pdfs\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const generatedFileURLPattern =
+  /^\/api\/v1\/files\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export function isGeneratedPDFURL(value: string): boolean {
   return generatedPDFURLPattern.test(value)
+}
+
+export function isGeneratedFileURL(value: string): boolean {
+  return generatedPDFURLPattern.test(value) || generatedFileURLPattern.test(value)
 }
 
 function isRecord(value: unknown): value is RecordValue {
@@ -44,20 +50,28 @@ export function parseGeneratedFileResult(
 
   const file = parsed.file
   const url = typeof file.url === "string" ? file.url.trim() : ""
-  if (!isGeneratedPDFURL(url)) return null
+  if (!isGeneratedFileURL(url)) return null
+
+  const isPDF = isGeneratedPDFURL(url)
 
   const filename =
     typeof file.filename === "string" && file.filename.trim()
       ? file.filename.trim()
-      : "document.pdf"
+      : isPDF
+        ? "document.pdf"
+        : "document"
   const title =
     typeof file.title === "string" && file.title.trim()
       ? file.title.trim()
-      : "Generated PDF"
+      : isPDF
+        ? "Generated PDF"
+        : "Generated file"
   const mimeType =
     typeof file.mimeType === "string" && file.mimeType.trim()
       ? file.mimeType.trim()
-      : "application/pdf"
+      : isPDF
+        ? "application/pdf"
+        : "application/octet-stream"
   const size =
     typeof file.size === "number" &&
     Number.isFinite(file.size) &&
