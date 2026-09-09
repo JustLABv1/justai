@@ -1563,7 +1563,7 @@ export function KnowledgeWorkspace({
               >
                 <button
                   className={cn(
-                    "mb-5 flex w-full items-center justify-center gap-3 rounded-lg border border-border/80 bg-background/80 px-4 py-5 text-left shadow-xs transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                    "mb-5 flex w-full items-center justify-center gap-3 rounded-xl bg-card px-4 py-5 text-left shadow-xs transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
                     draggingFiles && "border-primary bg-primary/5"
                   )}
                   disabled={busy}
@@ -1611,7 +1611,7 @@ export function KnowledgeWorkspace({
                       childSpaces.map((folder) => (
                         <ContextMenu key={folder.id}>
                           <ContextMenuTrigger
-                            className="group flex min-w-0 cursor-pointer flex-col rounded-lg border border-border/80 bg-background/80 p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+                            className="group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
                             onDoubleClick={() => setSpaceId(folder.id)}
                           >
                             <div className="mb-3 flex items-start justify-between gap-2">
@@ -1721,7 +1721,7 @@ export function KnowledgeWorkspace({
                         <ContextMenu key={item.id}>
                           <ContextMenuTrigger
                             className={cn(
-                              "group flex min-w-0 cursor-pointer flex-col rounded-lg border border-border/80 bg-background/80 p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                              "group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
                               selected?.id === item.id &&
                                 "ring-2 ring-primary/30"
                             )}
@@ -1899,7 +1899,7 @@ export function KnowledgeWorkspace({
                   </CardHeader>
                   <CardContent className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
                     {spaces.length > 0 && (
-                      <div className="rounded-lg border bg-muted/20 p-3">
+                      <div className="rounded-xl bg-muted/50 p-3">
                         <div className="flex items-center justify-between gap-3">
                           <div>
                             <p className="text-sm font-medium">Spaces</p>
@@ -1968,7 +1968,7 @@ export function KnowledgeWorkspace({
                     )}
                     {selectedSource && (
                       <>
-                        <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                        <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
                           <p className="flex items-center gap-2 font-medium text-foreground">
                             {selectedSource.sourceType === "url" ? (
                               <Globe2 />
@@ -2102,7 +2102,7 @@ export function KnowledgeWorkspace({
                     )}
                     {selected.resourceType === "repository" && (
                       <div className="flex flex-col gap-3">
-                        <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                        <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
                           <p className="flex items-center gap-2 font-medium text-foreground">
                             <GitBranch />{" "}
                             {String(
@@ -2129,7 +2129,7 @@ export function KnowledgeWorkspace({
                         </div>
                         {selectedDetail?.files &&
                           selectedDetail.files.length > 0 && (
-                            <div className="overflow-hidden rounded-lg border bg-muted/20">
+                            <div className="overflow-hidden rounded-xl bg-muted/50">
                               <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
                                 <p className="text-sm font-medium">
                                   Indexed files
@@ -2249,13 +2249,13 @@ export function KnowledgeWorkspace({
                           workspace for the full recording.
                         </p>
                         {selectedDetail?.content && (
-                          <pre className="max-h-64 overflow-auto rounded-lg border bg-muted/20 p-3 text-xs leading-5 whitespace-pre-wrap">
+                          <pre className="max-h-64 overflow-auto rounded-xl bg-muted/50 p-3 text-xs leading-5 whitespace-pre-wrap">
                             {selectedDetail.content}
                           </pre>
                         )}
                       </>
                     )}
-                    <div className="mt-auto rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    <div className="mt-auto rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
                       <p>
                         Added{" "}
                         {new Date(selected.createdAt).toLocaleDateString()}

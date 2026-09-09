@@ -1163,7 +1163,7 @@ function ContextDisplay({
         <span className="sr-only">Attached context</span>
         {items.map((item) => (
           <div
-            className="inline-flex max-w-52 shrink-0 items-center gap-1.5 rounded-lg border border-border/70 bg-muted/30 px-2 py-0.5 text-[11px]"
+            className="inline-flex max-w-52 shrink-0 items-center gap-1.5 rounded-lg bg-muted/50 px-2 py-0.5 text-[11px]"
             key={item.id}
             title={`${item.label} · ${item.detail}`}
           >
@@ -1332,7 +1332,7 @@ function UserMessage() {
   return (
     <MessagePrimitive.Root className="group/message flex justify-end px-1 py-3 sm:px-4">
       <div className="flex max-w-[min(44rem,90%)] flex-col items-end">
-        <div className="rounded-[1.35rem] rounded-br-md border border-accent-foreground/15 bg-accent px-4 py-2.5 text-[15px] leading-6 text-accent-foreground shadow-sm dark:border-primary/40 dark:bg-primary dark:text-primary-foreground">
+        <div className="rounded-[1.35rem] rounded-br-md bg-card px-4 py-2.5 text-[15px] leading-6 text-card-foreground">
           <MessagePrimitive.Quote>
             {({ text }) => (
               <blockquote className="mb-2 border-l-2 border-accent-foreground/40 pl-3 text-xs leading-5 text-accent-foreground/80 dark:border-primary-foreground/50 dark:text-primary-foreground/80">
@@ -1922,7 +1922,7 @@ export function ModelEndpointPicker({
           sideOffset={12}
           className="z-50"
         >
-          <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] border bg-popover p-1 text-popover-foreground shadow-sm outline-none">
+          <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] bg-popover p-1 text-popover-foreground shadow-sm outline-none">
             <div
               aria-label="Endpoints"
               className="flex max-h-80 w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1"
@@ -1939,8 +1939,10 @@ export function ModelEndpointPicker({
                     setQuery("")
                   }}
                   className={cn(
-                    "flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring",
-                    item.id === endpointId && "bg-muted text-foreground"
+                    "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    item.id === endpointId
+                      ? "bg-primary text-primary-foreground hover:bg-primary/85"
+                      : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
                   )}
                 >
                   <span className="text-sm font-medium" aria-hidden="true">
@@ -2185,7 +2187,7 @@ export function DeepContextToggle({
           sideOffset={8}
         >
           <PopoverPrimitive.Popup
-            className="w-[min(22rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            className="w-[min(22rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl bg-popover p-3 text-popover-foreground shadow-xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
             initialFocus={false}
           >
             <PopoverPrimitive.Arrow className="-mb-1 size-2.5 rotate-45 border-r border-b bg-popover" />
@@ -2210,7 +2212,7 @@ export function DeepContextToggle({
                 <X className="size-3.5" />
               </PopoverPrimitive.Close>
             </div>
-            <div className="mt-3 rounded-lg border bg-muted/30 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+            <div className="mt-3 rounded-xl bg-muted/50 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
               <span className="font-medium text-foreground">
                 {enabled ? "On" : "Off"}
               </span>
@@ -2290,7 +2292,7 @@ function ResponseSetupPopover({
           sideOffset={8}
         >
           <PopoverPrimitive.Popup
-            className="w-[min(21rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl border bg-popover p-2 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            className="w-[min(21rem,calc(100vw-2rem))] origin-(--transform-origin) rounded-2xl bg-popover p-2 text-popover-foreground shadow-xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
             initialFocus={false}
           >
             {view === "main" ? (
@@ -2594,7 +2596,7 @@ function Composer({
         aria-label="Choose storage folders for the next message"
         render={
           <button
-            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary/15 bg-primary/5 px-1.5 py-0.5 text-left text-[10px] font-medium text-foreground/80 transition-colors hover:bg-primary/10"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-muted/50 px-1.5 py-0.5 text-left text-[10px] font-medium text-foreground/80 transition-colors hover:bg-primary/10"
             type="button"
           />
         }
@@ -2612,7 +2614,7 @@ function Composer({
           side="top"
           sideOffset={8}
         >
-          <PopoverPrimitive.Popup className="w-[min(24rem,calc(100vw-2rem))] rounded-2xl border bg-popover p-3 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none">
+          <PopoverPrimitive.Popup className="w-[min(24rem,calc(100vw-2rem))] rounded-2xl bg-popover p-3 text-popover-foreground shadow-xl outline-none">
             <PopoverPrimitive.Title className="text-xs font-semibold">
               Storage folders
             </PopoverPrimitive.Title>
@@ -2994,7 +2996,7 @@ function Composer({
                 )}
                 data-running={isThreadRunning}
               >
-                <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
                   <Quote className="size-3.5 shrink-0" aria-hidden="true" />
                   <ComposerPrimitive.QuoteText className="min-w-0 flex-1 truncate" />
                   <ComposerPrimitive.QuoteDismiss
@@ -3006,7 +3008,7 @@ function Composer({
                 </ComposerPrimitive.Quote>
                 <ComposerPrimitive.Queue>
                   {() => (
-                    <div className="mx-2 mb-1 flex items-center gap-2 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <div className="mx-2 mb-1 flex items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
                       <span className="size-1.5 shrink-0 rounded-full bg-primary" />
                       <QueueItemPrimitive.Text className="min-w-0 flex-1 truncate" />
                       <QueueItemPrimitive.Steer className="rounded px-1.5 py-0.5 text-[11px] hover:bg-muted hover:text-foreground">
@@ -3742,7 +3744,7 @@ function AssistantChatSurface({
         hostInfo: { name: "JustAI", version: "0.1.0" },
         maxHeight: 720,
         fallback: (
-          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          <div className="rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
             This MCP app is unavailable.
           </div>
         ),

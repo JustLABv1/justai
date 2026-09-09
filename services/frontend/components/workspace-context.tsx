@@ -587,7 +587,7 @@ export function WorkspaceContext({
         </p>
       )}
 
-      <div className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+      <div className="flex flex-col gap-2 rounded-xl bg-card p-3">
         <ContextHeading
           icon={FolderKanban}
           label="Project context"
@@ -1155,7 +1155,7 @@ export function WorkspaceContext({
 
   return (
     <>
-      <aside className="workspace-context-enter hidden w-[304px] min-w-0 shrink-0 flex-col overflow-hidden border-l border-border bg-muted/20 lg:flex">
+      <aside className="workspace-context-enter hidden w-[304px] min-w-0 shrink-0 flex-col overflow-hidden bg-sidebar lg:flex">
         {panel}
       </aside>
       {isMobileViewport && (
@@ -1229,7 +1229,7 @@ function ContextItem({
   action?: ReactNode
 }) {
   return (
-    <div className="flex min-w-0 items-start gap-2 rounded-lg border bg-card p-2.5">
+    <div className="flex min-w-0 items-start gap-2 rounded-xl bg-card p-2.5">
       <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
         <Icon className="size-4" />
       </span>

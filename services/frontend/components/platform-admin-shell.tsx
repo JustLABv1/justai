@@ -447,7 +447,7 @@ export function PlatformAdminShell({
       <div className="grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start">
         <nav
           aria-label="Platform administration"
-          className="flex gap-4 overflow-x-auto rounded-xl border bg-card p-2 lg:sticky lg:top-4 lg:flex-col lg:gap-5"
+          className="flex gap-4 overflow-x-auto rounded-xl bg-card p-2 lg:sticky lg:top-4 lg:flex-col lg:gap-5"
         >
           {tabGroups.map((group) => (
             <div
@@ -2245,7 +2245,7 @@ function InventoryView({
             {kind === "mcp" && (
               <label className="grid gap-1 text-sm">
                 Logo (optional)
-                <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-2">
+                <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
                   <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
                     {createIconPreview ? (
                       // Uploaded MCP icons are served by JustAI and do not need
@@ -2618,7 +2618,7 @@ function HealthMetric({
   detail?: string
 }) {
   return (
-    <div className="rounded-lg border bg-muted/20 px-3 py-2.5">
+    <div className="rounded-xl bg-muted/50 px-3 py-2.5">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-base font-semibold tracking-tight">{value}</p>
       {detail && (
@@ -2821,7 +2821,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
           <div className="grid gap-2 sm:grid-cols-2">
             {workerEntries.map(([label, value]) => (
               <div
-                className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5"
+                className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5"
                 key={label}
               >
                 <span className="text-sm">{label}</span>

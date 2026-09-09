@@ -399,15 +399,15 @@ export function FocusWorkspaceSidebar({
   return (
     <aside
       className={cn(
-        "relative flex h-full min-h-0 w-14 shrink-0 overflow-visible border-r border-border bg-background",
-        isSecondaryHistoryRail && "w-[6.5rem]",
-        secondaryHistoryExpanded && "md:w-[19.5rem]",
-        historyRailPinned && "lg:w-[19.5rem]"
+        "relative mx-2 my-2 flex h-[calc(100%-1rem)] min-h-0 w-14 shrink-0 gap-2 overflow-visible",
+        isSecondaryHistoryRail && "w-28",
+        secondaryHistoryExpanded && "md:w-80",
+        historyRailPinned && "lg:w-80"
       )}
       aria-label="Workspace navigation"
       data-history-open={historyVisible}
     >
-      <div className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-border/70 py-3">
+      <div className="flex w-14 shrink-0 flex-col items-center gap-2 rounded-[1.75rem] bg-sidebar py-3">
         <BrandMark aria-label="JustAI" className="size-8 shrink-0" />
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -456,7 +456,7 @@ export function FocusWorkspaceSidebar({
               <Button
                 aria-keyshortcuts="Meta+K Control+K"
                 aria-label="Search workspace"
-                className="size-9 rounded-xl border border-border/70 bg-muted/20 text-muted-foreground hover:border-border hover:bg-muted/45"
+                className="size-9 rounded-xl bg-muted/50 text-muted-foreground hover:bg-muted/45"
                 onClick={() => setSearchOpen(true)}
                 size="icon"
                 variant="ghost"
@@ -593,7 +593,7 @@ export function FocusWorkspaceSidebar({
       <div
         className={cn(
           isSecondaryHistoryRail
-            ? "relative flex h-full w-12 shrink-0 overflow-visible transition-[width] duration-200 md:overflow-hidden"
+            ? "relative flex h-full w-12 shrink-0 overflow-visible rounded-[1.5rem] bg-[var(--sidebar-secondary)] transition-[width] duration-200 md:overflow-hidden"
             : "contents",
           secondaryHistoryExpanded && "md:w-64",
           historyRailPinned && "lg:contents"
@@ -622,7 +622,7 @@ export function FocusWorkspaceSidebar({
         {isSecondaryHistoryRail && !secondaryHistoryExpanded && (
           <div
             className={cn(
-              "flex h-full w-12 flex-col items-center gap-1 border-r border-border/70 py-3",
+              "flex h-full w-12 flex-col items-center gap-1 py-3",
               historyRailPinned && "lg:hidden"
             )}
           >
@@ -736,13 +736,13 @@ export function FocusWorkspaceSidebar({
         <div
           aria-label={contextTitle}
           className={cn(
-            "min-w-0 flex-col overflow-hidden border-r border-border bg-background shadow-xl motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in-0 motion-safe:slide-in-from-left-2",
+            "min-w-0 flex-col overflow-hidden rounded-[1.5rem] bg-[var(--sidebar-secondary)] shadow-xl motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in-0 motion-safe:slide-in-from-left-2",
             isSecondaryHistoryRail
               ? "w-full gap-1 p-3"
-              : "absolute inset-y-0 left-14 z-30 w-64 gap-3 p-4 xl:static xl:z-auto xl:shadow-none",
+              : "absolute inset-y-0 left-16 z-30 w-64 gap-3 p-4 xl:static xl:z-auto xl:shadow-none",
             historyRailPinned && "lg:static lg:z-auto lg:shadow-none",
             contextPanelOpen ? "flex" : "hidden",
-            "max-md:fixed max-md:left-0 max-md:z-50 max-md:w-full"
+            "max-md:fixed max-md:inset-y-2 max-md:left-2 max-md:z-50 max-md:w-[calc(100%-1rem)]"
           )}
         >
           <div

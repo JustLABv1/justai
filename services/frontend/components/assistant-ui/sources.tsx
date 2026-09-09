@@ -28,7 +28,7 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
   const trustLabel = isExternal ? "Linked source" : "Attached context"
 
   return (
-    <details className="my-2 max-w-xl rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs">
+    <details className="my-2 max-w-xl rounded-xl bg-card px-2.5 py-1.5 text-xs">
       <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
         <FileText
           className="size-3.5 text-muted-foreground"

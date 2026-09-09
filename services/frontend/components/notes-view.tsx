@@ -404,7 +404,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                     value={title}
                   />
                   {selected.canManage && (
-                    <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 px-3 py-2">
                       {visibility === "workspace" ? (
                         <Share2 className="size-4 text-primary" />
                       ) : (

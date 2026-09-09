@@ -244,7 +244,7 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
           </CardAction>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+          <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
             <p className="font-medium text-foreground">Callback URL</p>
             <p className="mt-1 break-all">
               {callbackUrl ||

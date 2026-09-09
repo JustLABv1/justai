@@ -215,7 +215,7 @@ export function AdminView({
         </CardHeader>
         <CardContent className="space-y-5 pt-4">
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border bg-card p-4">
+            <div className="rounded-xl bg-card p-4">
               <label className="block space-y-2 text-sm font-medium">
                 <span className="block">Default chat endpoint</span>
                 <Select
@@ -250,9 +250,9 @@ export function AdminView({
                 </Select>
               </label>
             </div>
-            <div className="rounded-xl border bg-card p-4">
+            <div className="rounded-xl bg-card p-4">
               <span className="text-sm font-medium">Default MCP servers</span>
-              <div className="mt-2 grid gap-1 rounded-lg border bg-muted/20 p-1">
+              <div className="mt-2 grid gap-1 rounded-xl bg-muted/50 p-1">
                 {enabledServers.length === 0 && (
                   <p className="text-xs text-muted-foreground">
                     No enabled MCP servers.
@@ -404,7 +404,7 @@ export function AdminView({
               ["Tool calls", analytics?.summary.toolCalls ?? 0],
               ["Total tokens", analytics?.summary.totalTokens ?? "—"],
             ].map(([label, value]) => (
-              <div className="rounded-lg border bg-muted/20 p-3" key={label}>
+              <div className="rounded-xl bg-muted/50 p-3" key={label}>
                 <p className="text-xs text-muted-foreground">{label}</p>
                 <p className="mt-1 text-xl font-semibold">{value}</p>
               </div>

@@ -161,7 +161,7 @@ export function SettingsShell({
           {pageAction}
         </div>
 
-        <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl border bg-background p-1">
+        <div className="flex max-w-full gap-1 overflow-x-auto rounded-xl bg-muted p-1">
           {visibleTabs.map(({ id, label, icon: Icon }) => (
             <Button
               aria-current={activeTab === id ? "page" : undefined}

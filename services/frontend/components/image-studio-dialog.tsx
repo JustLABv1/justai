@@ -184,7 +184,7 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
         </div>
 
         {image && imageSrc && (
-          <div className="overflow-hidden rounded-xl border bg-muted/20">
+          <div className="overflow-hidden rounded-xl bg-muted/50">
             <Image
               alt={image.prompt}
               className="max-h-[32rem] w-full object-contain"

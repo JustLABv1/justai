@@ -2321,7 +2321,7 @@ export function LiveTranscriptionView({
                     workspace after capture.
                   </FieldDescription>
                 </Field>
-                <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-3">
+                <div className="flex items-center justify-between rounded-xl bg-muted/50 p-3">
                   <div>
                     <p className="text-sm font-medium">Record source audio</p>
                     <p className="text-xs text-muted-foreground">
@@ -2355,7 +2355,7 @@ export function LiveTranscriptionView({
                 </div>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                <div className="flex min-w-0 items-start gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
                   <AudioLines className="mt-0.5 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">
@@ -2375,7 +2375,7 @@ export function LiveTranscriptionView({
                     </p>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-start gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
                   <Settings2 className="mt-0.5 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">
@@ -2390,7 +2390,7 @@ export function LiveTranscriptionView({
                     </p>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-start gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
                   <Users className="mt-0.5 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Room</p>
@@ -2404,7 +2404,7 @@ export function LiveTranscriptionView({
                     </div>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-start gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
                   <ShieldCheck className="mt-0.5 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">
@@ -2566,7 +2566,7 @@ export function LiveTranscriptionView({
           </DialogHeader>
           {botSetup ? (
             <div className="flex flex-col gap-4">
-              <div className="rounded-xl border bg-muted/30 p-4">
+              <div className="rounded-xl bg-muted/50 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium">Ingest token</p>
@@ -2700,7 +2700,7 @@ export function LiveTranscriptionView({
             </DialogDescription>
           </DialogHeader>
           {snapshot?.session.joinCode ? (
-            <div className="flex min-w-0 items-center gap-2 rounded-xl border bg-muted/30 p-3">
+            <div className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/50 p-3">
               <code className="min-w-0 flex-1 text-xs break-all text-muted-foreground">
                 {new URL(
                   transcriptionJoinPath(snapshot.session.joinCode),
@@ -2719,7 +2719,7 @@ export function LiveTranscriptionView({
               </Button>
             </div>
           ) : null}
-          <div className="flex items-center justify-between rounded-xl border bg-muted/30 p-4">
+          <div className="flex items-center justify-between rounded-xl bg-muted/50 p-4">
             <span className="font-mono text-2xl font-semibold tracking-[0.32em]">
               {snapshot?.session.joinCode ?? "--------"}
             </span>

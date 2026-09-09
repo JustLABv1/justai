@@ -301,7 +301,7 @@ export function ChatAttachmentPreview({
       state={status}
     >
       <AttachmentMedia
-        className={cn("overflow-hidden rounded-lg border", "size-14!")}
+        className="size-14! overflow-hidden rounded-lg"
         variant={hasImagePreview ? "image" : "icon"}
       >
         {hasImagePreview ? (

@@ -142,7 +142,7 @@ export function PlatformAdminDashboard({
           </CardHeader>
           <CardContent>
             {dashboard.attention.length === 0 ? (
-              <div className="flex items-start gap-3 rounded-lg border bg-muted/20 p-4">
+              <div className="flex items-start gap-3 rounded-xl bg-muted/50 p-4">
                 <HugeiconsIcon
                   icon={CheckmarkCircle02Icon}
                   className="mt-0.5 text-primary"
@@ -235,7 +235,7 @@ export function PlatformAdminDashboard({
               ],
             ].map(([label, ok, detail]) => (
               <div
-                className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5"
+                className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5"
                 key={String(label)}
               >
                 <div>

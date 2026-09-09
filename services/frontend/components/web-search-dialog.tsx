@@ -208,7 +208,7 @@ export function WebSearchDialog({
             </div>
           </div>
 
-          <div className="min-h-0 overflow-y-auto rounded-lg border bg-muted/20">
+          <div className="min-h-0 overflow-y-auto rounded-xl bg-muted/50">
             {preview ? (
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3">

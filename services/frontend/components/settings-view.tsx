@@ -422,7 +422,7 @@ export function SettingsView({
                     No members found.
                   </div>
                 ) : (
-                  <div className="divide-y rounded-xl border bg-card">
+                  <div className="divide-y rounded-xl bg-card">
                     {members.map((member) => (
                       <div
                         className="flex flex-wrap items-center gap-4 p-4"

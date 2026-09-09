@@ -632,7 +632,7 @@ const AgentFlowNode = memo(function AgentFlowNode({
   return (
     <div
       className={cn(
-        "w-60 rounded-xl border bg-card px-3 py-2 shadow-sm",
+        "w-60 rounded-xl bg-card px-3 py-2 shadow-sm",
         data.selected && "border-primary ring-2 ring-primary/20"
       )}
     >
@@ -2905,7 +2905,7 @@ function WorkflowsPanel({
               <TabsContent value="build" className="pt-4">
                 {" "}
                 <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_23rem]">
-                  <div className="flex h-[620px] flex-col gap-2 overflow-hidden rounded-xl border bg-muted/20">
+                  <div className="flex h-[620px] flex-col gap-2 overflow-hidden rounded-xl bg-muted/50">
                     <div className="flex items-center justify-between border-b px-3 py-2">
                       <div>
                         <p className="text-xs font-medium">Execution graph</p>
@@ -3437,7 +3437,7 @@ function NodeInspector({
                   return (
                     <div
                       key={`${node.id}-binding-${index}`}
-                      className="rounded-lg border bg-muted/20 p-3"
+                      className="rounded-xl bg-muted/50 p-3"
                     >
                       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
                         <Field>
@@ -3837,7 +3837,7 @@ function ScheduleEditor({
 }) {
   const kind = schedule.kind || "manual"
   return (
-    <section className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4">
+    <section className="flex flex-col gap-3 rounded-xl bg-muted/50 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium">Schedule</h3>
@@ -4727,7 +4727,7 @@ function RunDetail({
           description="Inspect the workflow graph, prompts, intermediate responses, and raw values."
         >
           {flowNodes.length > 0 && (
-            <div className="mb-5 h-80 overflow-hidden rounded-xl border bg-muted/20">
+            <div className="mb-5 h-80 overflow-hidden rounded-xl bg-muted/50">
               <WorkflowCanvas
                 nodes={flowNodes}
                 edges={flowEdges}
