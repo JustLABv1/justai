@@ -153,6 +153,14 @@ pyannote:
     port: 8000
   modelId: pyannote/speaker-diarization-3.1
   device: auto
+  # Enable the separately published CUDA image and request an NVIDIA GPU.
+  # The cluster must have NVIDIA drivers and the NVIDIA device plugin installed.
+  gpu:
+    enabled: false
+    resourceName: nvidia.com/gpu
+    count: 1
+    # Defaults to pyannote-gpu-<chart appVersion> when empty.
+    imageTag: ""
   minAudioSeconds: 1
   torchThreads: 2
   downloadTimeoutSeconds: 1800

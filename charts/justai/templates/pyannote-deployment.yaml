@@ -81,7 +81,21 @@
 {{- fail "trustedCA accepts either existingConfigMap or existingSecret, not both" }}
 {{- end }}
 {{- $trustedCAEnabled := or $trustedCAConfigMap $trustedCASecret -}}
-{{- $imageTag := .Values.pyannote.image.tag | default (printf "pyannote-%s" .Chart.AppVersion) -}}
+{{- $cpuImageTag := .Values.pyannote.image.tag | default (printf "pyannote-%s" .Chart.AppVersion) -}}
+{{- $gpuImageTag := .Values.pyannote.gpu.imageTag | default (printf "pyannote-gpu-%s" .Chart.AppVersion) -}}
+{{- $imageTag := ternary $gpuImageTag $cpuImageTag .Values.pyannote.gpu.enabled -}}
+{{- if and .Values.pyannote.gpu.enabled (lt (int .Values.pyannote.gpu.count) 1) }}
+{{- fail "pyannote.gpu.count must be at least 1 when GPU support is enabled" }}
+{{- end }}
+{{- if and .Values.pyannote.gpu.enabled (not .Values.pyannote.gpu.resourceName) }}
+{{- fail "pyannote.gpu.resourceName is required when GPU support is enabled" }}
+{{- end }}
+{{- $resources := deepCopy .Values.pyannote.resources -}}
+{{- if .Values.pyannote.gpu.enabled }}
+{{- $limits := get $resources "limits" | default dict -}}
+{{- $_ := set $limits .Values.pyannote.gpu.resourceName .Values.pyannote.gpu.count -}}
+{{- $_ := set $resources "limits" $limits -}}
+{{- end }}
 {{- $modelStoreEndpoint := .Values.pyannote.modelStore.endpoint | default .Values.config.transcription.s3ProcessingEndpoint | default .Values.config.transcription.s3Endpoint -}}
 {{- $modelStoreRegion := .Values.pyannote.modelStore.region | default .Values.config.transcription.s3Region -}}
 {{- $modelStoreBucket := .Values.pyannote.modelStore.bucket | default .Values.config.transcription.s3Bucket -}}
@@ -221,7 +235,7 @@ spec:
             - name: PYANNOTE_MODEL_ID
               value: {{ .Values.pyannote.modelId | quote }}
             - name: PYANNOTE_DEVICE
-              value: {{ .Values.pyannote.device | quote }}
+              value: {{ ternary "cuda" .Values.pyannote.device .Values.pyannote.gpu.enabled | quote }}
             - name: PYANNOTE_MIN_AUDIO_SECONDS
               value: {{ .Values.pyannote.minAudioSeconds | quote }}
             - name: PYANNOTE_TORCH_THREADS
@@ -348,7 +362,7 @@ spec:
             periodSeconds: {{ .Values.pyannote.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.pyannote.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.pyannote.readinessProbe.failureThreshold }}
-          {{- with .Values.pyannote.resources }}
+          {{- with $resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}

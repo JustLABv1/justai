@@ -111,6 +111,24 @@ must list the exact S3/media scheme, host, and port. Add an origin to
 `pyannote.allowPrivateMediaOrigins` only when that exact origin is intentionally
 private (for example an in-cluster MinIO service).
 
+For NVIDIA GPU inference, install the NVIDIA drivers and device plugin on the
+cluster, then enable the chart's GPU mode:
+
+```bash
+helm upgrade --install justai ./charts/justai \
+  --set pyannote.enabled=true \
+  --set pyannote.gpu.enabled=true \
+  --set secrets.existingSecret=justai-secrets \
+  --set-string 'pyannote.allowedMediaOrigins={https://s3.example.com}'
+```
+
+GPU mode selects the release's `pyannote-gpu-<version>` CUDA image, sets
+`PYANNOTE_DEVICE=cuda`, and adds a `nvidia.com/gpu: 1` container limit. For
+clusters exposing a different extended resource, set `pyannote.gpu.resourceName`;
+set `pyannote.gpu.count` to request more than one device. The CPU image and
+behavior remain the default. `pyannote.gpu.imageTag` can select a custom GPU
+image tag without changing the CPU image setting.
+
 For a private test deployment only, `secrets.create=true` can create the
 Secret from `secrets.data.pyannoteHfToken`, `secrets.data.pyannoteServiceToken`,
 and the proxy data fields. Do not commit those values.
