@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import {
   Archive,
   Bot,
@@ -62,6 +62,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useIsMobile } from "@/hooks/use-mobile"
 import type {
   Conversation,
   Organization,
@@ -218,6 +219,8 @@ export function FocusWorkspaceSidebar({
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
   const [chatHistoryExpanded, setChatHistoryExpanded] = useState(false)
   const [historyRailPinned, setHistoryRailPinned] = useState(false)
+  const isMobile = useIsMobile()
+  const contextPanelRef = useRef<HTMLDivElement>(null)
   const historyView =
     activeView === "chat" ||
     activeView === "transcription" ||
@@ -230,6 +233,26 @@ export function FocusWorkspaceSidebar({
   const contextPanelOpen =
     historyVisible &&
     (!isSecondaryHistoryRail || chatHistoryExpanded || historyRailPinned)
+
+  useEffect(() => {
+    if (!isMobile || !contextPanelOpen) return
+    const previousFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    const frame = window.requestAnimationFrame(() => {
+      const firstFocusable =
+        contextPanelRef.current?.querySelector<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+        )
+      const focusTarget = firstFocusable ?? contextPanelRef.current
+      focusTarget?.focus()
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      if (previousFocus?.isConnected) previousFocus.focus()
+    }
+  }, [contextPanelOpen, isMobile])
 
   const createAction: CreateAction | null =
     activeView === "chat"
@@ -401,7 +424,7 @@ export function FocusWorkspaceSidebar({
     <aside
       className={cn(
         "relative mx-2 my-2 flex h-[calc(100%-1rem)] min-h-0 w-14 shrink-0 gap-2 overflow-visible",
-        isSecondaryHistoryRail && "w-28",
+        isSecondaryHistoryRail && "md:w-28",
         historyRailPinned && "lg:w-80"
       )}
       aria-label="Workspace navigation"
@@ -612,9 +635,32 @@ export function FocusWorkspaceSidebar({
           if (
             event.key === "Escape" &&
             isSecondaryHistoryRail &&
-            !historyRailPinned
+            (isMobile || !historyRailPinned)
           ) {
+            event.preventDefault()
             setChatHistoryExpanded(false)
+            if (isMobile) setHistoryRailPinned(false)
+            return
+          }
+          if (!isMobile || event.key !== "Tab") return
+          const focusable = Array.from(
+            event.currentTarget.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+            )
+          )
+          if (focusable.length === 0) {
+            event.preventDefault()
+            contextPanelRef.current?.focus()
+            return
+          }
+          const first = focusable[0]
+          const last = focusable[focusable.length - 1]
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault()
+            last.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first.focus()
           }
         }}
       >
@@ -732,8 +778,20 @@ export function FocusWorkspaceSidebar({
             </div>
           </div>
         )}
+        {isMobile && contextPanelOpen && (
+          <div
+            aria-hidden="true"
+            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px] md:hidden"
+            onPointerDown={() => {
+              setChatHistoryExpanded(false)
+              setHistoryRailPinned(false)
+            }}
+          />
+        )}
         <div
+          ref={contextPanelRef}
           aria-label={contextTitle}
+          aria-modal={isMobile ? true : undefined}
           className={cn(
             "min-w-0 flex-col overflow-hidden rounded-[1.5rem] bg-[var(--sidebar-secondary)] shadow-xl motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in-0 motion-safe:slide-in-from-left-2",
             isSecondaryHistoryRail
@@ -743,6 +801,8 @@ export function FocusWorkspaceSidebar({
             contextPanelOpen ? "flex" : "hidden",
             "max-md:fixed max-md:inset-y-2 max-md:left-2 max-md:z-50 max-md:w-[calc(100%-1rem)]"
           )}
+          role={isMobile ? "dialog" : "region"}
+          tabIndex={isMobile ? -1 : undefined}
         >
           <div
             className={cn(
@@ -776,34 +836,36 @@ export function FocusWorkspaceSidebar({
                   </TooltipContent>
                 </Tooltip>
               )}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      aria-label={
-                        historyRailPinned
-                          ? `Unpin ${secondaryHistoryLabel.toLocaleLowerCase()}`
-                          : `Keep ${secondaryHistoryLabel.toLocaleLowerCase()} open`
-                      }
-                      aria-pressed={historyRailPinned}
-                      className="size-7 rounded-lg text-muted-foreground"
-                      onClick={() => {
-                        setHistoryRailPinned((pinned) => !pinned)
-                        setChatHistoryExpanded(true)
-                      }}
-                      size="icon"
-                      variant="ghost"
-                    >
-                      {historyRailPinned ? <PinOff /> : <Pin />}
-                    </Button>
-                  }
-                />
-                <TooltipContent>
-                  {historyRailPinned
-                    ? `Unpin ${secondaryHistoryLabel.toLocaleLowerCase()}`
-                    : `Keep ${secondaryHistoryLabel.toLocaleLowerCase()} open`}
-                </TooltipContent>
-              </Tooltip>
+              {!isMobile && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        aria-label={
+                          historyRailPinned
+                            ? `Unpin ${secondaryHistoryLabel.toLocaleLowerCase()}`
+                            : `Keep ${secondaryHistoryLabel.toLocaleLowerCase()} open`
+                        }
+                        aria-pressed={historyRailPinned}
+                        className="size-7 rounded-lg text-muted-foreground"
+                        onClick={() => {
+                          setHistoryRailPinned((pinned) => !pinned)
+                          setChatHistoryExpanded(true)
+                        }}
+                        size="icon"
+                        variant="ghost"
+                      >
+                        {historyRailPinned ? <PinOff /> : <Pin />}
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>
+                    {historyRailPinned
+                      ? `Unpin ${secondaryHistoryLabel.toLocaleLowerCase()}`
+                      : `Keep ${secondaryHistoryLabel.toLocaleLowerCase()} open`}
+                  </TooltipContent>
+                </Tooltip>
+              )}
             </div>
           </div>
 
@@ -1130,7 +1192,7 @@ function SessionRow({
           render={
             <Button
               aria-label={`Actions for ${session.title}`}
-              className="absolute top-1/2 right-1 size-7 -translate-y-1/2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+              className="absolute top-1/2 right-1 size-8 -translate-y-1/2 bg-[var(--sidebar-secondary)] opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 max-md:opacity-100"
               size="icon-xs"
               title={`Actions for ${session.title}`}
               variant="ghost"

@@ -556,7 +556,7 @@ export function WorkspaceContext({
   }
 
   const panel = (
-    <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 py-5">
+    <div className="flex min-h-0 flex-col gap-4 overflow-y-auto bg-sidebar px-4 py-5 text-sidebar-foreground">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] text-muted-foreground">
@@ -587,7 +587,7 @@ export function WorkspaceContext({
         </p>
       )}
 
-      <div className="flex flex-col gap-2 rounded-xl bg-card p-3">
+      <div className="flex flex-col gap-2 rounded-xl bg-sidebar-accent p-3">
         <ContextHeading
           icon={FolderKanban}
           label="Project context"
@@ -659,7 +659,8 @@ export function WorkspaceContext({
             aria-selected={activeTab === id}
             className={cn(
               "min-h-8 rounded-md px-2 py-1.5 text-[11px] text-muted-foreground transition-[background-color,color,box-shadow,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.98]",
-              activeTab === id && "bg-card text-foreground shadow-xs"
+              activeTab === id &&
+                "bg-sidebar-accent text-sidebar-accent-foreground shadow-xs"
             )}
             key={id}
             onClick={() => setActiveTab(id)}
@@ -1155,7 +1156,7 @@ export function WorkspaceContext({
 
   return (
     <>
-      <aside className="workspace-context-enter hidden w-[304px] min-w-0 shrink-0 flex-col overflow-hidden bg-sidebar lg:flex">
+      <aside className="workspace-context-enter hidden w-[304px] min-w-0 shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground lg:flex">
         {panel}
       </aside>
       {isMobileViewport && (
@@ -1165,7 +1166,10 @@ export function WorkspaceContext({
             if (!open) onClose()
           }}
         >
-          <SheetContent className="w-[min(100vw,304px)] gap-0 p-0" side="right">
+          <SheetContent
+            className="w-[min(100vw,304px)] gap-0 bg-sidebar p-0 text-sidebar-foreground"
+            side="right"
+          >
             <SheetHeader className="sr-only">
               <SheetTitle>Conversation context</SheetTitle>
               <SheetDescription>
@@ -1229,7 +1233,7 @@ function ContextItem({
   action?: ReactNode
 }) {
   return (
-    <div className="flex min-w-0 items-start gap-2 rounded-xl bg-card p-2.5">
+    <div className="flex min-w-0 items-start gap-2 rounded-xl bg-sidebar-accent p-2.5">
       <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
         <Icon className="size-4" />
       </span>

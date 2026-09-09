@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { Note } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
@@ -43,6 +44,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 import {
   Select,
   SelectContent,
@@ -70,6 +72,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [loadError, setLoadError] = useState("")
   const [pendingNote, setPendingNote] = useState<Note | null>(null)
   const [discardCreateOpen, setDiscardCreateOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -140,16 +143,24 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
           null
         if (!isDirtyRef.current || !currentId || !currentBaseline)
           applySelectedNote(next)
+        setLoadError("")
         setError("")
       } catch (caught) {
         if (signal?.aborted) return
+        setLoadError(
+          caught instanceof Error
+            ? caught.message
+            : "Notes could not be loaded."
+        )
         setError(
           caught instanceof Error
             ? caught.message
             : "Notes could not be loaded."
         )
       } finally {
-        setLoading(false)
+        if (requestId === requestIdRef.current && !signal?.aborted) {
+          setLoading(false)
+        }
       }
     },
     [initialNoteId, query, updateNotes]
@@ -189,12 +200,15 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
       })
       updateNotes((current) => [response.note, ...current])
       applySelectedNote(response.note)
+      notifySuccess("Note created")
       setError("")
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The note could not be created."
+        notifyError(
+          "Note could not be created",
+          caught,
+          "The note could not be created."
+        )
       )
     } finally {
       setSaving(false)
@@ -217,12 +231,15 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
         current.map((note) => (note.id === selected.id ? response.note : note))
       )
       applySelectedNote(response.note)
+      notifySuccess("Note saved")
       setError("")
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The note could not be saved."
+        notifyError(
+          "Note could not be saved",
+          caught,
+          "The note could not be saved."
+        )
       )
     } finally {
       setSaving(false)
@@ -243,11 +260,15 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
         current.map((note) => (note.id === selected.id ? response.note : note))
       )
       applySelectedNote(response.note)
+      notifySuccess(selected.pinnedAt ? "Note unpinned" : "Note pinned")
+      setError("")
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The note could not be updated."
+        notifyError(
+          "Note could not be updated",
+          caught,
+          "The note could not be updated."
+        )
       )
     } finally {
       setSaving(false)
@@ -265,14 +286,33 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
       updateNotes(() => remaining)
       applySelectedNote(remaining[0] ?? null)
       setDeleteOpen(false)
+      notifySuccess("Note deleted")
+      setError("")
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The note could not be deleted."
+        notifyError(
+          "Note could not be deleted",
+          caught,
+          "The note could not be deleted."
+        )
       )
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function addSelectedToChat() {
+    if (!selected || !onUseInChat) return
+    try {
+      await onUseInChat({ ...selected, title, content })
+    } catch (caught) {
+      setError(
+        notifyError(
+          "Note could not be added to chat",
+          caught,
+          "The note could not be added to chat."
+        )
+      )
     }
   }
 
@@ -299,7 +339,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
         </div>
 
         {error && (
-          <Alert variant="destructive">
+          <Alert aria-live="polite" role="alert" variant="destructive">
             <AlertTitle>Notes action failed</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
@@ -321,9 +361,31 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
             </CardHeader>
             <CardContent className="min-h-0 overflow-y-auto p-2">
               {loading ? (
-                <p className="p-4 text-center text-xs text-muted-foreground">
+                <p
+                  aria-live="polite"
+                  className="p-4 text-center text-xs text-muted-foreground"
+                  role="status"
+                >
                   Loading notes…
                 </p>
+              ) : loadError ? (
+                <div className="flex flex-col items-center gap-3 p-6 text-center">
+                  <p
+                    aria-live="polite"
+                    className="text-sm text-destructive"
+                    role="alert"
+                  >
+                    Notes could not be loaded: {loadError}
+                  </p>
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={() => void load()}
+                  >
+                    Try again
+                  </Button>
+                </div>
               ) : notes.length === 0 ? (
                 <Empty className="min-h-48 border-0 p-4">
                   <EmptyHeader>
@@ -397,8 +459,11 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                   </div>
                 </CardHeader>
                 <CardContent className="flex min-h-0 flex-col gap-4 pt-5">
+                  <label className="sr-only" htmlFor="notes-editor-title">
+                    Note title
+                  </label>
                   <Input
-                    aria-label="Note title"
+                    id="notes-editor-title"
                     maxLength={200}
                     onChange={(event) => setTitle(event.target.value)}
                     placeholder="Note title"
@@ -417,13 +482,23 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                           Workspace notes can be read and edited by members.
                         </p>
                       </div>
+                      <label
+                        className="sr-only"
+                        htmlFor="notes-editor-visibility"
+                      >
+                        Note visibility
+                      </label>
                       <Select
                         onValueChange={(value) =>
                           setVisibility(value as "private" | "workspace")
                         }
                         value={visibility}
                       >
-                        <SelectTrigger className="w-36" size="sm">
+                        <SelectTrigger
+                          className="w-36"
+                          id="notes-editor-visibility"
+                          size="sm"
+                        >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -433,8 +508,11 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                       </Select>
                     </div>
                   )}
+                  <label className="sr-only" htmlFor="notes-editor-content">
+                    Note content
+                  </label>
                   <Textarea
-                    aria-label="Note content"
+                    id="notes-editor-content"
                     className="min-h-72 flex-1"
                     maxLength={100000}
                     onChange={(event) => setContent(event.target.value)}
@@ -449,9 +527,8 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                     <div className="flex items-center gap-2">
                       {onUseInChat && (
                         <Button
-                          onClick={() =>
-                            void onUseInChat({ ...selected, title, content })
-                          }
+                          onClick={() => void addSelectedToChat()}
+                          type="button"
                           variant="outline"
                         >
                           Use in chat
@@ -460,6 +537,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                       <Button
                         disabled={saving || !isDirty}
                         onClick={() => void saveNote()}
+                        type="button"
                       >
                         <Save data-icon="inline-start" />
                         {saving ? "Saving…" : "Save note"}
@@ -533,31 +611,17 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog
-        open={deleteOpen}
+      <ConfirmActionDialog
+        open={Boolean(selected && deleteOpen)}
+        title="Delete this note?"
+        description={`“${selected?.title || "Untitled note"}” will be permanently removed. This action cannot be undone.`}
+        confirmLabel="Delete note"
+        pending={saving}
         onOpenChange={(open) => {
-          if (!saving) setDeleteOpen(open)
+          if (!open && !saving) setDeleteOpen(false)
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this note?</AlertDialogTitle>
-            <AlertDialogDescription>
-              “{selected?.title || "Untitled note"}” will be permanently
-              removed. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={saving || !selected}
-              onClick={() => void deleteNote()}
-            >
-              {saving ? "Deleting…" : "Delete note"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onConfirm={deleteNote}
+      />
     </>
   )
 }

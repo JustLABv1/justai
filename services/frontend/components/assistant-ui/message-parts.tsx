@@ -568,7 +568,7 @@ function SourceGroup({ indices }: { indices: readonly number[] }) {
   }
 
   return (
-    <details className="my-2 w-full max-w-2xl overflow-hidden rounded-xl bg-card text-xs">
+    <details className="my-2 w-full max-w-2xl overflow-hidden rounded-xl bg-muted/40 text-xs">
       <summary className="group flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 font-medium text-foreground [&::-webkit-details-marker]:hidden">
         <Files className="size-3.5 text-muted-foreground" aria-hidden="true" />
         <span>Sources used</span>
@@ -580,7 +580,7 @@ function SourceGroup({ indices }: { indices: readonly number[] }) {
           aria-hidden="true"
         />
       </summary>
-      <div className="space-y-1 border-t p-2">
+      <div className="flex flex-col gap-1 border-t p-2">
         {sourceParts.map((part) => (
           <AssistantSource key={part.id} {...part} />
         ))}
@@ -695,7 +695,7 @@ export function AssistantMessageParts() {
         {({ part, children }) => {
           if (part.type === "group-reasoning") {
             return (
-              <details className="my-2 rounded-xl bg-card" open>
+              <details className="my-2 rounded-xl bg-muted/40" open>
                 <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
                   <Sparkles className="size-3.5" aria-hidden="true" />
                   Thinking

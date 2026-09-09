@@ -25,6 +25,7 @@ import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-
 import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
 import { TranscriptWorkspace } from "@/components/transcript-workspace"
+import { WorkspaceDetailHeader } from "@/components/workspace-detail-header"
 import {
   Dialog,
   DialogContent,
@@ -1751,7 +1752,7 @@ export function LiveTranscriptionView({
       : ("none" as const)
 
   return (
-    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
+    <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
       {error && (
         <Alert variant="destructive">
           <AlertTitle>Live transcription needs attention</AlertTitle>
@@ -1791,36 +1792,25 @@ export function LiveTranscriptionView({
         </>
       ) : snapshot.session.status === "completed" ? (
         <>
-          <section className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5">
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                <Check aria-hidden="true" />
-              </div>
-              <div className="min-w-0">
-                <Badge className="mb-2" variant="secondary">
-                  Capture complete
+          <WorkspaceDetailHeader
+            className="rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5"
+            eyebrow={<Badge variant="secondary">Capture complete</Badge>}
+            icon={<Check aria-hidden="true" />}
+            meta={
+              <>
+                <Badge variant="outline">
+                  {snapshot.segments.length} segments
                 </Badge>
-                <h1 className="text-lg font-semibold tracking-tight">
-                  Your transcript is ready to review
-                </h1>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                  Edit the wording, add notes, inspect speakers, generate
-                  insights, or export the finished transcript from one shared
-                  workspace.
-                </p>
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Badge variant="outline">
-                {snapshot.segments.length} segments
-              </Badge>
-              <Badge variant="outline">
-                {snapshot.recordings.length > 0
-                  ? "Audio recording available"
-                  : "Transcript only"}
-              </Badge>
-            </div>
-          </section>
+                <Badge variant="outline">
+                  {snapshot.recordings.length > 0
+                    ? "Audio recording available"
+                    : "Transcript only"}
+                </Badge>
+              </>
+            }
+            title="Your transcript is ready to review"
+            description="Edit the wording, add notes, inspect speakers, generate insights, or export the finished transcript from one shared workspace."
+          />
           <TranscriptWorkspace
             key={snapshot.session.id}
             currentTimeMs={workspaceTimeMs}

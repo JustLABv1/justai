@@ -366,6 +366,7 @@ export function KnowledgeWorkspace({
   const requestedItemId = searchParams.get("item") ?? searchParams.get("source")
   const requestedType = searchParams.get("type")
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState("")
   const [query, setQuery] = useState("")
   const [typeFilter, setTypeFilter] = useState<ItemFilter>(() =>
     requestedType && requestedType in typeLabels
@@ -380,6 +381,7 @@ export function KnowledgeWorkspace({
   const [selected, setSelected] = useState<KnowledgeItem | null>(null)
   const [selectedDetail, setSelectedDetail] =
     useState<KnowledgeItemDetail | null>(null)
+  const [selectedDetailLoading, setSelectedDetailLoading] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [notice, setNotice] = useState("")
   const [error, setError] = useState("")
@@ -441,6 +443,11 @@ export function KnowledgeWorkspace({
         transcriptionSessions,
         memoryResult.status === "fulfilled" ? memoryResult.value.memories : []
       )
+      const failures = [
+        itemResult.status === "rejected" ? "items" : null,
+        spaceResult.status === "rejected" ? "folders" : null,
+        memoryResult.status === "rejected" ? "memories" : null,
+      ].filter(Boolean) as string[]
       const nextItems =
         itemResult.status === "fulfilled" ? itemResult.value.items : fallback
       const nextSpaces =
@@ -468,7 +475,14 @@ export function KnowledgeWorkspace({
       if (memoryResult.status === "fulfilled") {
         setMemories(memoryResult.value.memories)
       }
-      setError("")
+      if (failures.length) {
+        const message = `Some Knowledge data could not be loaded (${failures.join(", ")}). Showing the latest available data.`
+        setLoadError(message)
+        setError(message)
+      } else {
+        setLoadError("")
+        setError("")
+      }
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -515,14 +529,17 @@ export function KnowledgeWorkspace({
     const timer = window.setTimeout(() => {
       if (!selected) {
         setSelectedDetail(null)
+        setSelectedDetailLoading(false)
         return
       }
+      setSelectedDetailLoading(true)
       void api
         .get<{ item: KnowledgeItemDetail }>(
           `/api/v1/knowledge/items/${selected.id}`
         )
         .then((result) => setSelectedDetail(result.item))
         .catch(() => setSelectedDetail(null))
+        .finally(() => setSelectedDetailLoading(false))
     }, 0)
     return () => window.clearTimeout(timer)
   }, [selected])
@@ -644,12 +661,33 @@ export function KnowledgeWorkspace({
 
   async function uploadFile(file: File) {
     if (!file || busy) return
+    const acceptedExtensions = new Set([
+      "pdf",
+      "csv",
+      "md",
+      "markdown",
+      "txt",
+      "html",
+      "htm",
+      "json",
+    ])
+    const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
+    const acceptedMime =
+      file.type === "application/pdf" ||
+      file.type === "application/json" ||
+      file.type === "text/csv" ||
+      file.type.startsWith("text/")
+    if (!acceptedExtensions.has(extension) && !acceptedMime) {
+      setError("Choose a PDF, CSV, Markdown, text, HTML, or JSON file.")
+      return
+    }
     if (file.size > 25 * 1024 * 1024) {
-      setNotice("Files are limited to 25 MB.")
+      setError("Files are limited to 25 MB.")
       return
     }
     setBusy(true)
     setNotice("")
+    setError("")
     const form = new FormData()
     form.append("file", file)
     form.append("title", file.name)
@@ -683,6 +721,7 @@ export function KnowledgeWorkspace({
     event.preventDefault()
     if (!url.trim() || busy) return
     setBusy(true)
+    setError("")
     try {
       const result = await api.post<KnowledgeSource>(
         "/api/v1/knowledge/sources",
@@ -714,6 +753,7 @@ export function KnowledgeWorkspace({
     event.preventDefault()
     if (!repositoryURL.trim() || busy) return
     setBusy(true)
+    setError("")
     try {
       await api.post<{ repositoryId: string }>(
         "/api/v1/knowledge/repositories",
@@ -746,6 +786,7 @@ export function KnowledgeWorkspace({
     event.preventDefault()
     if (!spaceName.trim() || busy) return
     setBusy(true)
+    setError("")
     try {
       const result = await api.post<{ space: KnowledgeSpace }>(
         "/api/v1/knowledge/spaces",
@@ -784,8 +825,9 @@ export function KnowledgeWorkspace({
 
   async function createNote(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!noteTitle.trim() && !noteContent.trim()) return
+    if ((!noteTitle.trim() && !noteContent.trim()) || busy) return
     setBusy(true)
+    setError("")
     try {
       const result = await api.post<{ note: Note }>("/api/v1/notes", {
         title: noteTitle.trim() || "Untitled note",
@@ -810,8 +852,9 @@ export function KnowledgeWorkspace({
 
   async function createMemory(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!memoryContent.trim()) return
+    if (!memoryContent.trim() || busy) return
     setBusy(true)
+    setError("")
     try {
       const result = await api.post<{ memory: Memory }>("/api/v1/memories", {
         content: memoryContent.trim(),
@@ -837,6 +880,7 @@ export function KnowledgeWorkspace({
     event.preventDefault()
     if (!transcriptSessionId || busy) return
     setBusy(true)
+    setError("")
     try {
       let item = items.find(
         (candidate) =>
@@ -907,27 +951,6 @@ export function KnowledgeWorkspace({
         caught instanceof Error
           ? caught.message
           : "The note could not be updated."
-      )
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function removeSelectedSource() {
-    if (!selectedSource || busy) return
-    setBusy(true)
-    try {
-      await api.delete(`/api/v1/knowledge/sources/${selectedSource.id}`)
-      onSourcesChange(
-        sources.filter((source) => source.id !== selectedSource.id)
-      )
-      closeInspector()
-      await load()
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The source could not be removed."
       )
     } finally {
       setBusy(false)
@@ -1295,6 +1318,7 @@ export function KnowledgeWorkspace({
   return (
     <Page className="min-h-0 max-w-[1500px] flex-1 gap-4">
       <input
+        aria-label="Upload knowledge file"
         ref={fileInputRef}
         type="file"
         accept=".pdf,.csv,.md,.markdown,.txt,.html,.htm,.json,text/*,application/pdf,application/json,application/vnd.ms-excel"
@@ -1337,7 +1361,11 @@ export function KnowledgeWorkspace({
       </PageHeader>
 
       {(error || notice) && (
-        <Alert variant={error ? "destructive" : "default"}>
+        <Alert
+          aria-live="polite"
+          role={error ? "alert" : "status"}
+          variant={error ? "destructive" : "default"}
+        >
           {error ? <X /> : <Check />}
           <AlertTitle>
             {error ? "Knowledge action failed" : "Knowledge updated"}
@@ -1610,8 +1638,28 @@ export function KnowledgeWorkspace({
                 </button>
 
                 {loading ? (
-                  <div className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground">
+                  <div
+                    aria-live="polite"
+                    className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground"
+                    role="status"
+                  >
                     <LoaderCircle className="animate-spin" /> Loading files…
+                  </div>
+                ) : loadError &&
+                  visibleItems.length === 0 &&
+                  childSpaces.length === 0 ? (
+                  <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">
+                    <p className="text-sm text-destructive" role="alert">
+                      Knowledge could not be loaded completely.
+                    </p>
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                      onClick={() => void load()}
+                    >
+                      Try again
+                    </Button>
                   </div>
                 ) : visibleItems.length === 0 && childSpaces.length === 0 ? (
                   <Empty className="min-h-64 border-0">
@@ -2008,11 +2056,20 @@ export function KnowledgeWorkspace({
                               : ""}
                           </p>
                           {selectedSource.error && (
-                            <p className="mt-2 text-destructive">
+                            <p className="mt-2 text-destructive" role="alert">
                               {selectedSource.error}
                             </p>
                           )}
                         </div>
+                        {selectedDetailLoading && (
+                          <p
+                            aria-live="polite"
+                            className="text-xs text-muted-foreground"
+                            role="status"
+                          >
+                            Loading item details…
+                          </p>
+                        )}
                         {selectedDetail?.content && (
                           <pre className="max-h-64 overflow-auto rounded-lg border bg-background p-3 text-xs leading-5 whitespace-pre-wrap">
                             {selectedDetail.content}
@@ -2057,7 +2114,7 @@ export function KnowledgeWorkspace({
                             size="sm"
                             variant="ghost"
                             disabled={busy}
-                            onClick={() => void removeSelectedSource()}
+                            onClick={() => setDeleteTarget(selected)}
                           >
                             <Trash2 data-icon="inline-start" /> Remove
                           </Button>
@@ -2110,6 +2167,8 @@ export function KnowledgeWorkspace({
                             </p>
                           </div>
                           <Switch
+                            aria-label="Use memory in chats"
+                            id="inspector-memory-enabled"
                             checked={selectedMemory.enabled}
                             onCheckedChange={(checked) =>
                               void toggleSelectedMemory(checked)
@@ -2387,6 +2446,12 @@ export function KnowledgeWorkspace({
                 Create it at the root or inside another folder.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not create folder</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="space-name">Name</Label>
               <Input
@@ -2402,12 +2467,12 @@ export function KnowledgeWorkspace({
                 onChange={(event) => setSpaceDescription(event.target.value)}
                 placeholder="What belongs in this space?"
               />
-              <Label>Parent folder</Label>
+              <Label htmlFor="space-parent">Parent folder</Label>
               <Select
                 value={spaceParentId}
                 onValueChange={(value) => setSpaceParentId(value ?? "root")}
               >
-                <SelectTrigger>
+                <SelectTrigger id="space-parent">
                   <SelectValue>
                     {spaceParentId === "root"
                       ? "Storage root"
@@ -2424,7 +2489,7 @@ export function KnowledgeWorkspace({
                   ))}
                 </SelectContent>
               </Select>
-              <Label>Visibility</Label>
+              <Label htmlFor="space-visibility">Visibility</Label>
               <Select
                 value={spaceVisibility}
                 onValueChange={(value) =>
@@ -2433,7 +2498,7 @@ export function KnowledgeWorkspace({
                   )
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger id="space-visibility">
                   <SelectValue>
                     {spaceVisibility === "workspace" ? "Workspace" : "Private"}
                   </SelectValue>
@@ -2469,6 +2534,12 @@ export function KnowledgeWorkspace({
                 Notes are durable context and can be updated from the inspector.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not save note</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="knowledge-note-title">Title</Label>
               <Input
@@ -2514,9 +2585,16 @@ export function KnowledgeWorkspace({
                 Keep it concise. You can disable or delete it any time.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not save memory</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="py-4">
+              <Label htmlFor="knowledge-memory-content">Memory</Label>
               <Textarea
-                autoFocus
+                id="knowledge-memory-content"
                 maxLength={2000}
                 value={memoryContent}
                 onChange={(event) => setMemoryContent(event.target.value)}
@@ -2549,6 +2627,12 @@ export function KnowledgeWorkspace({
                 space.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not import transcript</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="knowledge-transcript-session">Transcript</Label>
               <Select
@@ -2626,6 +2710,12 @@ export function KnowledgeWorkspace({
                 Public HTTP(S) pages are fetched and indexed asynchronously.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not index URL</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="knowledge-url">URL</Label>
               <Input
@@ -2672,6 +2762,12 @@ export function KnowledgeWorkspace({
                 private Knowledge library.
               </DialogDescription>
             </DialogHeader>
+            {error && (
+              <Alert aria-live="polite" role="alert" variant="destructive">
+                <AlertTitle>Could not connect repository</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <div className="flex flex-col gap-3 py-4">
               <Label htmlFor="knowledge-repository-url">Repository URL</Label>
               <Input

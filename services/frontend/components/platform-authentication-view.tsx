@@ -130,7 +130,8 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
     setDialogOpen(true)
   }
 
-  async function save() {
+  async function save(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     setError("")
     if (
       !form.displayName.trim() ||
@@ -215,7 +216,7 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
   return (
     <div className="flex flex-col gap-4">
       {error && (
-        <Alert variant="destructive">
+        <Alert aria-live="polite" role="alert" variant="destructive">
           <AlertTitle>Authentication request failed</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -259,7 +260,10 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
+            <div
+              aria-live="polite"
+              className="flex items-center justify-center py-10 text-sm text-muted-foreground"
+            >
               <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading
               providers…
             </div>
@@ -334,7 +338,12 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
         </CardContent>
       </Card>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          if (!saving) setDialogOpen(open)
+        }}
+      >
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>
@@ -345,10 +354,25 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
               configuration.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-xs font-medium">
+          {error && (
+            <Alert aria-live="polite" role="alert" variant="destructive">
+              <AlertTitle>Could not save provider</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <form
+            className="grid gap-3 sm:grid-cols-2"
+            onSubmit={(event) => void save(event)}
+          >
+            <label
+              className="grid gap-1.5 text-xs font-medium"
+              htmlFor="oidc-display-name"
+            >
               Display name
               <Input
+                disabled={saving}
+                id="oidc-display-name"
+                required
                 value={form.displayName}
                 onChange={(event) =>
                   setForm({ ...form, displayName: event.target.value })
@@ -356,9 +380,15 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
                 placeholder="Company SSO"
               />
             </label>
-            <label className="grid gap-1.5 text-xs font-medium">
+            <label
+              className="grid gap-1.5 text-xs font-medium"
+              htmlFor="oidc-slug"
+            >
               Slug
               <Input
+                disabled={saving}
+                id="oidc-slug"
+                required
                 value={form.slug}
                 onChange={(event) =>
                   setForm({ ...form, slug: event.target.value })
@@ -366,9 +396,16 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
                 placeholder="company-sso"
               />
             </label>
-            <label className="grid gap-1.5 text-xs font-medium sm:col-span-2">
+            <label
+              className="grid gap-1.5 text-xs font-medium sm:col-span-2"
+              htmlFor="oidc-issuer"
+            >
               Issuer URL
               <Input
+                disabled={saving}
+                id="oidc-issuer"
+                required
+                type="url"
                 value={form.issuer}
                 onChange={(event) =>
                   setForm({ ...form, issuer: event.target.value })
@@ -376,18 +413,29 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
                 placeholder="https://id.example.com"
               />
             </label>
-            <label className="grid gap-1.5 text-xs font-medium">
+            <label
+              className="grid gap-1.5 text-xs font-medium"
+              htmlFor="oidc-client-id"
+            >
               Client ID
               <Input
+                disabled={saving}
+                id="oidc-client-id"
+                required
                 value={form.clientId}
                 onChange={(event) =>
                   setForm({ ...form, clientId: event.target.value })
                 }
               />
             </label>
-            <label className="grid gap-1.5 text-xs font-medium">
+            <label
+              className="grid gap-1.5 text-xs font-medium"
+              htmlFor="oidc-client-secret"
+            >
               Client secret
               <Input
+                disabled={saving}
+                id="oidc-client-secret"
                 type="password"
                 value={form.clientSecret}
                 onChange={(event) =>
@@ -396,10 +444,15 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
                 placeholder={editingId ? "Leave blank to preserve" : "Required"}
               />
             </label>
-            <label className="grid gap-1.5 text-xs font-medium sm:col-span-2">
+            <label
+              className="grid gap-1.5 text-xs font-medium sm:col-span-2"
+              htmlFor="oidc-scopes"
+            >
               Scopes
               <Textarea
                 className="min-h-16"
+                disabled={saving}
+                id="oidc-scopes"
                 value={form.scopes}
                 onChange={(event) =>
                   setForm({ ...form, scopes: event.target.value })
@@ -415,20 +468,25 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
               </div>
               <Switch
                 checked={form.enabled}
+                disabled={saving}
                 onCheckedChange={(enabled) => setForm({ ...form, enabled })}
                 aria-label="Provider enabled"
               />
             </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setDialogOpen(false)} variant="outline">
-              Cancel
-            </Button>
-            <Button disabled={saving} onClick={() => void save()}>
-              {saving && <LoaderCircle className="animate-spin" />}{" "}
-              {saving ? "Saving…" : "Save provider"}
-            </Button>
-          </DialogFooter>
+            <DialogFooter className="sm:col-span-2">
+              <Button
+                onClick={() => setDialogOpen(false)}
+                type="button"
+                variant="outline"
+              >
+                Cancel
+              </Button>
+              <Button disabled={saving} type="submit">
+                {saving && <LoaderCircle className="animate-spin" />}{" "}
+                {saving ? "Saving…" : "Save provider"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
       <ConfirmActionDialog

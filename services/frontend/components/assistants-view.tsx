@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { Bot, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { Endpoint, SavedAssistant } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -159,7 +160,8 @@ export function AssistantsView({
     setDialogOpen(true)
   }
 
-  async function saveAssistant() {
+  async function saveAssistant(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     if (!form.name.trim()) {
       setError("Give this assistant a name.")
       return
@@ -193,12 +195,18 @@ export function AssistantsView({
             )
           : [response.assistant, ...assistants]
       )
+      notifySuccess(
+        editingId ? "Assistant updated" : "Assistant created",
+        response.assistant.name
+      )
       setDialogOpen(false)
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The assistant could not be saved."
+        notifyError(
+          "Assistant could not be saved",
+          caught,
+          "The assistant could not be saved."
+        )
       )
     } finally {
       setSaving(false)
@@ -213,15 +221,18 @@ export function AssistantsView({
     try {
       await api.delete(`/api/v1/assistants/${assistant.id}`)
       onChange(assistants.filter((item) => item.id !== assistant.id))
+      notifySuccess("Assistant deleted", assistant.name)
+      setDeleteTarget(null)
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The assistant could not be deleted."
+        notifyError(
+          "Assistant could not be deleted",
+          caught,
+          "The assistant could not be deleted."
+        )
       )
     } finally {
       setDeleting(false)
-      setDeleteTarget(null)
     }
   }
 
@@ -345,7 +356,12 @@ export function AssistantsView({
           ))}
         </div>
       )}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          if (!saving) setDialogOpen(open)
+        }}
+      >
         <DialogContent className="max-h-[min(860px,calc(100vh-2rem))] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
@@ -356,150 +372,176 @@ export function AssistantsView({
               with the assistant.
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="assistant-name">Name</FieldLabel>
-              <Input
-                id="assistant-name"
-                value={form.name}
-                onChange={(event) =>
-                  setForm({ ...form, name: event.target.value })
-                }
-                placeholder="Meeting Editor"
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="assistant-description">
-                Description
-              </FieldLabel>
-              <Input
-                id="assistant-description"
-                value={form.description}
-                onChange={(event) =>
-                  setForm({ ...form, description: event.target.value })
-                }
-                placeholder="What this assistant is best at"
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="assistant-instructions">
-                Instructions
-              </FieldLabel>
-              <Textarea
-                id="assistant-instructions"
-                rows={8}
-                value={form.instructions}
-                onChange={(event) =>
-                  setForm({ ...form, instructions: event.target.value })
-                }
-                placeholder="Describe the role, priorities, tone, and boundaries."
-              />
-              <FieldDescription>
-                These instructions are kept on the backend and added to the
-                system context for this assistant.
-              </FieldDescription>
-            </Field>
-            <div className="grid gap-4 sm:grid-cols-2">
+          <form onSubmit={(event) => void saveAssistant(event)}>
+            <FieldGroup>
               <Field>
-                <FieldLabel>Default endpoint</FieldLabel>
+                <FieldLabel htmlFor="assistant-name">Name</FieldLabel>
+                <Input
+                  id="assistant-name"
+                  value={form.name}
+                  onChange={(event) =>
+                    setForm({ ...form, name: event.target.value })
+                  }
+                  placeholder="Meeting Editor"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="assistant-description">
+                  Description
+                </FieldLabel>
+                <Input
+                  id="assistant-description"
+                  value={form.description}
+                  onChange={(event) =>
+                    setForm({ ...form, description: event.target.value })
+                  }
+                  placeholder="What this assistant is best at"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="assistant-instructions">
+                  Instructions
+                </FieldLabel>
+                <Textarea
+                  id="assistant-instructions"
+                  rows={8}
+                  value={form.instructions}
+                  onChange={(event) =>
+                    setForm({ ...form, instructions: event.target.value })
+                  }
+                  placeholder="Describe the role, priorities, tone, and boundaries."
+                />
+                <FieldDescription>
+                  These instructions are kept on the backend and added to the
+                  system context for this assistant.
+                </FieldDescription>
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="assistant-endpoint">
+                    Default endpoint
+                  </FieldLabel>
+                  <Select
+                    value={form.endpointId || "workspace-default"}
+                    onValueChange={(value) =>
+                      setForm({
+                        ...form,
+                        endpointId:
+                          value === "workspace-default" ? "" : (value ?? ""),
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-full" id="assistant-endpoint">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="workspace-default">
+                        Use workspace default
+                      </SelectItem>
+                      {chatEndpoints.map((endpoint) => (
+                        <SelectItem key={endpoint.id} value={endpoint.id}>
+                          {endpoint.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="assistant-model">
+                    Default model
+                  </FieldLabel>
+                  <Input
+                    id="assistant-model"
+                    value={form.model}
+                    onChange={(event) =>
+                      setForm({ ...form, model: event.target.value })
+                    }
+                    placeholder="Use endpoint default"
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  orientation="horizontal"
+                  className="rounded-lg border p-3"
+                >
+                  <FieldLabel htmlFor="assistant-memory">Use memory</FieldLabel>
+                  <Switch
+                    id="assistant-memory"
+                    checked={form.useMemory}
+                    onCheckedChange={(useMemory) =>
+                      setForm({ ...form, useMemory })
+                    }
+                  />
+                </Field>
+                <Field
+                  orientation="horizontal"
+                  className="rounded-lg border p-3"
+                >
+                  <FieldLabel htmlFor="assistant-deep-context">
+                    Deep context default
+                  </FieldLabel>
+                  <Switch
+                    id="assistant-deep-context"
+                    checked={form.deepContext}
+                    onCheckedChange={(deepContext) =>
+                      setForm({ ...form, deepContext })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field>
+                <FieldLabel htmlFor="assistant-visibility">
+                  Visibility
+                </FieldLabel>
                 <Select
-                  value={form.endpointId || "workspace-default"}
+                  value={form.visibility}
                   onValueChange={(value) =>
+                    value &&
                     setForm({
                       ...form,
-                      endpointId:
-                        value === "workspace-default" ? "" : (value ?? ""),
+                      visibility: value as AssistantForm["visibility"],
                     })
                   }
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full" id="assistant-visibility">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="workspace-default">
-                      Use workspace default
+                    <SelectItem value="private">Private · only me</SelectItem>
+                    <SelectItem value="workspace">
+                      Workspace · available to members
                     </SelectItem>
-                    {chatEndpoints.map((endpoint) => (
-                      <SelectItem key={endpoint.id} value={endpoint.id}>
-                        {endpoint.name}
-                      </SelectItem>
-                    ))}
                   </SelectContent>
                 </Select>
               </Field>
-              <Field>
-                <FieldLabel htmlFor="assistant-model">Default model</FieldLabel>
-                <Input
-                  id="assistant-model"
-                  value={form.model}
-                  onChange={(event) =>
-                    setForm({ ...form, model: event.target.value })
-                  }
-                  placeholder="Use endpoint default"
-                />
-              </Field>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field orientation="horizontal" className="rounded-lg border p-3">
-                <FieldLabel htmlFor="assistant-memory">Use memory</FieldLabel>
-                <Switch
-                  id="assistant-memory"
-                  checked={form.useMemory}
-                  onCheckedChange={(useMemory) =>
-                    setForm({ ...form, useMemory })
-                  }
-                />
-              </Field>
-              <Field orientation="horizontal" className="rounded-lg border p-3">
-                <FieldLabel htmlFor="assistant-deep-context">
-                  Deep context default
-                </FieldLabel>
-                <Switch
-                  id="assistant-deep-context"
-                  checked={form.deepContext}
-                  onCheckedChange={(deepContext) =>
-                    setForm({ ...form, deepContext })
-                  }
-                />
-              </Field>
-            </div>
-            <Field>
-              <FieldLabel>Visibility</FieldLabel>
-              <Select
-                value={form.visibility}
-                onValueChange={(value) =>
-                  value &&
-                  setForm({
-                    ...form,
-                    visibility: value as AssistantForm["visibility"],
-                  })
-                }
+            </FieldGroup>
+            {error && (
+              <p
+                aria-live="polite"
+                className="text-xs text-destructive"
+                role="alert"
               >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="private">Private · only me</SelectItem>
-                  <SelectItem value="workspace">
-                    Workspace · available to members
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-          </FieldGroup>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button disabled={saving} onClick={() => void saveAssistant()}>
-              {saving
-                ? "Saving…"
-                : editingId
-                  ? "Save changes"
-                  : "Create assistant"}
-            </Button>
-          </DialogFooter>
+                {error}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button disabled={saving} type="submit">
+                {saving
+                  ? "Saving…"
+                  : editingId
+                    ? "Save changes"
+                    : "Create assistant"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
       <ConfirmActionDialog

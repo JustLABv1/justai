@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Cpu,
   Plug,
@@ -128,6 +128,14 @@ export function SettingsShell({
   const [mcpCreateRequest, setMcpCreateRequest] = useState(0)
   const [workspaceCreateRequest, setWorkspaceCreateRequest] = useState(0)
   const [memberCreateRequest, setMemberCreateRequest] = useState(0)
+  const activeTabRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    })
+  }, [activeTab])
 
   const pageAction =
     activeTab === "workspace" ? (
@@ -164,13 +172,20 @@ export function SettingsShell({
         {pageAction && <PageActions>{pageAction}</PageActions>}
       </PageHeader>
 
-      <PageToolbar className="max-w-full overflow-x-auto">
+      <PageToolbar
+        aria-label="Workspace settings sections"
+        className="w-full max-w-full flex-nowrap overflow-x-auto"
+        role="tablist"
+      >
         {visibleTabs.map(({ id, label, icon: Icon }) => (
           <Button
             aria-current={activeTab === id ? "page" : undefined}
-            className="gap-2"
+            aria-selected={activeTab === id}
+            className="shrink-0 gap-2"
             key={id}
             onClick={() => onTabChange(id)}
+            ref={activeTab === id ? activeTabRef : undefined}
+            role="tab"
             variant={activeTab === id ? "secondary" : "ghost"}
           >
             <Icon className="size-4" />

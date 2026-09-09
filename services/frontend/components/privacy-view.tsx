@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Download, LockKeyhole, Play, Save } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { PrivacySettings } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -32,6 +33,7 @@ export function PrivacyView() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [cleaning, setCleaning] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
   const [cleanupOpen, setCleanupOpen] = useState(false)
@@ -64,11 +66,12 @@ export function PrivacyView() {
     const parsed = Number.parseInt(value, 10)
     setSettings((current) => ({
       ...current,
-      [key]: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
+      [key]: Number.isFinite(parsed) ? Math.min(3650, Math.max(0, parsed)) : 0,
     }))
   }
 
-  async function save() {
+  async function save(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     setSaving(true)
     setError("")
     setNotice("")
@@ -81,12 +84,15 @@ export function PrivacyView() {
       setNotice(
         "Privacy settings saved. The retention worker will apply them automatically."
       )
+      notifySuccess("Privacy settings saved")
       setCleanupOpen(false)
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "Privacy settings could not be saved."
+        notifyError(
+          "Privacy settings could not be saved",
+          caught,
+          "Privacy settings could not be saved."
+        )
       )
     } finally {
       setSaving(false)
@@ -94,6 +100,8 @@ export function PrivacyView() {
   }
 
   async function exportData() {
+    if (exporting) return
+    setExporting(true)
     setError("")
     setNotice("")
     try {
@@ -103,12 +111,15 @@ export function PrivacyView() {
       link.href = url
       link.download = "justai-data-export.json"
       link.click()
-      URL.revokeObjectURL(url)
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
       setNotice("Your data export is ready.")
+      notifySuccess("Data export ready")
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "The data export failed."
+        notifyError("Data export failed", caught, "The data export failed.")
       )
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -128,11 +139,14 @@ export function PrivacyView() {
       setNotice(
         `Cleanup complete: ${conversations} archived chats, ${knowledge} knowledge sources, and ${transcripts} transcripts removed.`
       )
+      notifySuccess("Retention cleanup complete")
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "Cleanup could not be completed."
+        notifyError(
+          "Cleanup could not be completed",
+          caught,
+          "Cleanup could not be completed."
+        )
       )
     } finally {
       setCleaning(false)
@@ -141,7 +155,7 @@ export function PrivacyView() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
-      <Card>
+      <Card aria-busy={loading || saving}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <LockKeyhole className="size-5 text-primary" />
@@ -154,92 +168,100 @@ export function PrivacyView() {
         </CardHeader>
         <CardContent>
           {error && (
-            <Alert className="mb-4" variant="destructive">
+            <Alert
+              aria-live="polite"
+              className="mb-4"
+              role="alert"
+              variant="destructive"
+            >
               <AlertTitle>Privacy action failed</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
           {notice && (
-            <Alert className="mb-4">
+            <Alert aria-live="polite" className="mb-4" role="status">
               <AlertDescription>{notice}</AlertDescription>
             </Alert>
           )}
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="archived-retention">
-                Archived conversations
-              </FieldLabel>
-              <Input
-                disabled={loading || saving}
-                id="archived-retention"
-                min={0}
-                max={3650}
-                onChange={(event) =>
-                  update(
-                    "archivedConversationRetentionDays",
-                    event.target.value
-                  )
-                }
-                type="number"
-                value={settings.archivedConversationRetentionDays}
-              />
-              <FieldDescription>
-                Delete archived chats after this many days.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="knowledge-retention">
-                Personal knowledge
-              </FieldLabel>
-              <Input
-                disabled={loading || saving}
-                id="knowledge-retention"
-                min={0}
-                max={3650}
-                onChange={(event) =>
-                  update("knowledgeRetentionDays", event.target.value)
-                }
-                type="number"
-                value={settings.knowledgeRetentionDays}
-              />
-              <FieldDescription>
-                Remove your uploaded and imported knowledge sources.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="transcription-retention">
-                Completed transcripts
-              </FieldLabel>
-              <Input
-                disabled={loading || saving}
-                id="transcription-retention"
-                min={0}
-                max={3650}
-                onChange={(event) =>
-                  update("transcriptionRetentionDays", event.target.value)
-                }
-                type="number"
-                value={settings.transcriptionRetentionDays}
-              />
-              <FieldDescription>
-                Remove completed or failed transcript sessions and recordings.
-              </FieldDescription>
-            </Field>
-          </FieldGroup>
-          <div className="mt-5 flex flex-wrap gap-2">
-            <Button disabled={loading || saving} onClick={() => void save()}>
-              <Save data-icon="inline-start" />
-              {saving ? "Saving…" : "Save retention settings"}
-            </Button>
-            <Button
-              disabled={cleaning}
-              onClick={() => setCleanupOpen(true)}
-              variant="outline"
-            >
-              <Play data-icon="inline-start" />
-              {cleaning ? "Running…" : "Run cleanup now"}
-            </Button>
-          </div>
+          <form onSubmit={(event) => void save(event)}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="archived-retention">
+                  Archived conversations
+                </FieldLabel>
+                <Input
+                  disabled={loading || saving}
+                  id="archived-retention"
+                  min={0}
+                  max={3650}
+                  onChange={(event) =>
+                    update(
+                      "archivedConversationRetentionDays",
+                      event.target.value
+                    )
+                  }
+                  type="number"
+                  value={settings.archivedConversationRetentionDays}
+                />
+                <FieldDescription>
+                  Delete archived chats after this many days.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="knowledge-retention">
+                  Personal knowledge
+                </FieldLabel>
+                <Input
+                  disabled={loading || saving}
+                  id="knowledge-retention"
+                  min={0}
+                  max={3650}
+                  onChange={(event) =>
+                    update("knowledgeRetentionDays", event.target.value)
+                  }
+                  type="number"
+                  value={settings.knowledgeRetentionDays}
+                />
+                <FieldDescription>
+                  Remove your uploaded and imported knowledge sources.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="transcription-retention">
+                  Completed transcripts
+                </FieldLabel>
+                <Input
+                  disabled={loading || saving}
+                  id="transcription-retention"
+                  min={0}
+                  max={3650}
+                  onChange={(event) =>
+                    update("transcriptionRetentionDays", event.target.value)
+                  }
+                  type="number"
+                  value={settings.transcriptionRetentionDays}
+                />
+                <FieldDescription>
+                  Remove completed or failed transcript sessions and recordings.
+                </FieldDescription>
+              </Field>
+            </FieldGroup>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Button disabled={loading || saving} type="submit">
+                <Save data-icon="inline-start" />
+                {saving ? "Saving…" : "Save retention settings"}
+              </Button>
+              <Button
+                disabled={cleaning}
+                onClick={() => setCleanupOpen(true)}
+                type="button"
+                variant="outline"
+              >
+                <Play data-icon="inline-start" />
+                {cleaning ? "Running…" : "Run cleanup now"}
+              </Button>
+            </div>
+          </form>
         </CardContent>
       </Card>
 
@@ -252,9 +274,13 @@ export function PrivacyView() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Button onClick={() => void exportData()} variant="outline">
+          <Button
+            disabled={exporting}
+            onClick={() => void exportData()}
+            variant="outline"
+          >
             <Download data-icon="inline-start" />
-            Download data export
+            {exporting ? "Preparing export…" : "Download data export"}
           </Button>
           <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
             Exports are generated on demand and are not stored by JustAI after

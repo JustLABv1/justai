@@ -17,7 +17,9 @@ import {
   BarChart3,
   Ban,
   CheckCircle2,
+  ChevronDown,
   Database,
+  SlidersHorizontal,
   Globe2,
   ImagePlus,
   KeyRound,
@@ -50,6 +52,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { notifyError, notifySuccess } from "@/lib/feedback"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
 import {
   AdminUsageCharts,
@@ -81,6 +84,11 @@ import {
   PageTitle,
 } from "@/components/ui/page"
 import { FilterBar } from "@/components/ui/filter-bar"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -220,6 +228,14 @@ export function PlatformAdminShell({
   const [authenticationCreateRequest, setAuthenticationCreateRequest] =
     useState(0)
   const [announcementCreateRequest, setAnnouncementCreateRequest] = useState(0)
+  const activeNavItemRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    activeNavItemRef.current?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    })
+  }, [activeTab])
 
   const load = useCallback(async () => {
     setError("")
@@ -453,7 +469,7 @@ export function PlatformAdminShell({
       <div className="grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start">
         <nav
           aria-label="Platform administration"
-          className="flex gap-4 overflow-x-auto rounded-xl bg-card p-2 lg:sticky lg:top-4 lg:flex-col lg:gap-5"
+          className="flex min-w-0 gap-4 overflow-x-auto rounded-xl bg-card p-2 lg:sticky lg:top-4 lg:flex-col lg:gap-5"
         >
           {tabGroups.map((group) => (
             <div
@@ -471,6 +487,7 @@ export function PlatformAdminShell({
                   return (
                     <button
                       aria-current={tab.id === activeTab ? "page" : undefined}
+                      aria-label={tab.label}
                       className={cn(
                         "inline-flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
                         tab.id === activeTab &&
@@ -482,6 +499,7 @@ export function PlatformAdminShell({
                         setListStatus("")
                         onTabChange(tab.id)
                       }}
+                      ref={tab.id === activeTab ? activeNavItemRef : undefined}
                       type="button"
                     >
                       <Icon className="size-3.5 shrink-0" /> {tab.label}
@@ -783,11 +801,11 @@ function Pagination({
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   if (pageCount <= 1) return null
   return (
-    <div className="flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">
-      <span>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1">
         Page {page} of {pageCount} · {total} total
       </span>
-      <div className="flex gap-1">
+      <div className="flex shrink-0 gap-1">
         <Button
           disabled={page <= 1}
           onClick={() => onPageChange(Math.max(1, page - 1))}
@@ -910,7 +928,7 @@ function UsersView({
               <AlertDescription>{actionError}</AlertDescription>
             </Alert>
           )}
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[36rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">User</th>
@@ -1278,7 +1296,7 @@ function WorkspacesView({
               <AlertDescription>{actionError}</AlertDescription>
             </Alert>
           )}
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[36rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">Workspace</th>
@@ -1923,7 +1941,7 @@ function InventoryView({
               {actionNotice}
             </div>
           )}
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[48rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">Name</th>
@@ -3011,7 +3029,7 @@ function AnalyticsView({
           <CardTitle>Endpoint and model breakdown</CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[44rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">Endpoint</th>
@@ -3053,7 +3071,7 @@ function AnalyticsView({
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[44rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
                 <th className="p-2">Date</th>
@@ -3109,8 +3127,16 @@ function AuditView({
   total: number
   onPageChange: (page: number) => void
 }) {
+  const isMobile = useIsMobile()
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false)
   const setFilter = (key: string, value: string) =>
     onFiltersChange({ ...filters, [key]: value })
+  const advancedFilterCount = Object.entries(filters).filter(
+    ([key, value]) => key !== "search" && Boolean(value.trim())
+  ).length
+  const hasActiveFilters = Object.values(filters).some((value) =>
+    Boolean(value.trim())
+  )
   return (
     <Card>
       <CardHeader>
@@ -3120,52 +3146,104 @@ function AuditView({
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <Input
-            aria-label="Audit search"
-            onChange={(event) => setFilter("search", event.target.value)}
-            placeholder="Search actions or details"
-            value={filters.search}
-          />
-          <Input
-            aria-label="Audit action"
-            onChange={(event) => setFilter("action", event.target.value)}
-            placeholder="Action"
-            value={filters.action}
-          />
-          <Input
-            aria-label="Audit resource type"
-            onChange={(event) => setFilter("resourceType", event.target.value)}
-            placeholder="Resource type"
-            value={filters.resourceType}
-          />
-          <Input
-            aria-label="Audit actor"
-            onChange={(event) => setFilter("actorId", event.target.value)}
-            placeholder="Actor user ID"
-            value={filters.actorId}
-          />
-          <Input
-            aria-label="Audit organization"
-            onChange={(event) =>
-              setFilter("organizationId", event.target.value)
-            }
-            placeholder="Organization ID"
-            value={filters.organizationId}
-          />
-          <Input
-            aria-label="Audit from"
-            onChange={(event) => setFilter("from", event.target.value)}
-            placeholder="From (YYYY-MM-DD)"
-            value={filters.from}
-          />
-          <Input
-            aria-label="Audit to"
-            onChange={(event) => setFilter("to", event.target.value)}
-            placeholder="To (YYYY-MM-DD)"
-            value={filters.to}
-          />
-        </div>
+        <Collapsible
+          className="flex flex-col gap-2"
+          onOpenChange={setMoreFiltersOpen}
+          open={!isMobile || moreFiltersOpen}
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              aria-label="Audit search"
+              className="min-w-0 flex-1"
+              onChange={(event) => setFilter("search", event.target.value)}
+              placeholder="Search actions or details"
+              value={filters.search}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <CollapsibleTrigger
+                className="gap-1.5 sm:w-auto lg:hidden"
+                render={<Button size="sm" variant="outline" />}
+              >
+                <SlidersHorizontal data-icon="inline-start" />
+                {moreFiltersOpen ? "Hide filters" : "More filters"}
+                {advancedFilterCount > 0 ? (
+                  <span className="ml-0.5 rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">
+                    {advancedFilterCount}
+                  </span>
+                ) : null}
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn(
+                    "size-3.5 transition-transform",
+                    moreFiltersOpen && "rotate-180"
+                  )}
+                />
+              </CollapsibleTrigger>
+              {hasActiveFilters ? (
+                <Button
+                  className="shrink-0"
+                  onClick={() =>
+                    onFiltersChange({
+                      search: "",
+                      action: "",
+                      resourceType: "",
+                      actorId: "",
+                      organizationId: "",
+                      from: "",
+                      to: "",
+                    })
+                  }
+                  size="sm"
+                  variant="ghost"
+                >
+                  <X data-icon="inline-start" /> Clear filters
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          <CollapsibleContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <Input
+              aria-label="Audit action"
+              onChange={(event) => setFilter("action", event.target.value)}
+              placeholder="Action"
+              value={filters.action}
+            />
+            <Input
+              aria-label="Audit resource type"
+              onChange={(event) =>
+                setFilter("resourceType", event.target.value)
+              }
+              placeholder="Resource type"
+              value={filters.resourceType}
+            />
+            <Input
+              aria-label="Audit actor"
+              onChange={(event) => setFilter("actorId", event.target.value)}
+              placeholder="Actor user ID"
+              value={filters.actorId}
+            />
+            <Input
+              aria-label="Audit organization"
+              onChange={(event) =>
+                setFilter("organizationId", event.target.value)
+              }
+              placeholder="Organization ID"
+              value={filters.organizationId}
+            />
+            <Input
+              aria-label="Audit from"
+              onChange={(event) => setFilter("from", event.target.value)}
+              placeholder="From (YYYY-MM-DD)"
+              value={filters.from}
+            />
+            <Input
+              aria-label="Audit to"
+              onChange={(event) => setFilter("to", event.target.value)}
+              placeholder="To (YYYY-MM-DD)"
+              value={filters.to}
+            />
+          </CollapsibleContent>
+        </Collapsible>
         {events.map((event) => (
           <div
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-xs"

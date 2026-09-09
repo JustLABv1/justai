@@ -941,7 +941,7 @@ export function MCPView({
           </Card>
         ))}
         {mode === "advanced" && visibleServers.length === 0 && (
-          <Card className="border-dashed lg:col-span-2">
+          <Card className="bg-muted/30 lg:col-span-2">
             <CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 text-center">
               <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
                 <Plug aria-hidden="true" />

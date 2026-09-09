@@ -229,7 +229,7 @@ export function AdminView({
         </CardHeader>
         <CardContent className="space-y-5 pt-4">
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl bg-card p-4">
+            <div className="rounded-xl bg-muted/40 p-4">
               <label className="block space-y-2 text-sm font-medium">
                 <span className="block">Default chat endpoint</span>
                 <Select
@@ -264,7 +264,7 @@ export function AdminView({
                 </Select>
               </label>
             </div>
-            <div className="rounded-xl bg-card p-4">
+            <div className="rounded-xl bg-muted/40 p-4">
               <span className="text-sm font-medium">Default MCP servers</span>
               <div className="mt-2 grid gap-1 rounded-xl bg-muted/50 p-1">
                 {enabledServers.length === 0 && (
@@ -425,7 +425,7 @@ export function AdminView({
               </div>
             ))}
           </div>
-          <div className="mt-6">
+          <div className="mt-6 rounded-2xl bg-muted/40 p-3 sm:p-4">
             <AdminUsageCharts analytics={analytics} />
           </div>
           {analytics?.byEndpoint && analytics.byEndpoint.length > 0 && (

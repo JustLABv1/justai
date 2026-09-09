@@ -221,7 +221,7 @@ function CapabilitySwitch({
   return (
     <label
       className={cn(
-        "flex items-start justify-between gap-3 rounded-xl bg-card px-3 py-2.5",
+        "flex items-start justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5",
         disabled && "opacity-55"
       )}
     >
@@ -584,12 +584,12 @@ export function EndpointCreationWizard({
 
         <form
           id="endpoint-creation-form"
-          className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-cols-[13rem_minmax(0,1fr)] md:grid-rows-1"
+          className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background md:grid-cols-[13rem_minmax(0,1fr)] md:grid-rows-1"
           onSubmit={handleSubmit}
         >
           <nav
             aria-label="Endpoint setup steps"
-            className="border-b px-4 py-3 md:border-r md:border-b-0 md:px-3 md:py-5"
+            className="border-b bg-muted/20 px-4 py-3 md:border-r md:border-b-0 md:px-3 md:py-5"
           >
             <div className="flex gap-1 overflow-x-auto md:flex-col md:gap-1.5">
               {steps.map((item, index) => {
@@ -640,7 +640,7 @@ export function EndpointCreationWizard({
             </div>
           </nav>
 
-          <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+          <div className="min-h-0 overflow-y-auto bg-background px-4 py-4 sm:px-6 sm:py-5">
             <div className="mx-auto w-full max-w-3xl">
               {validationMessage && step !== "review" && (
                 <Alert variant="destructive" className="mb-5">

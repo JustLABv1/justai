@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { notifyError, notifySuccess } from "@/lib/feedback"
 import type {
   Automation,
   AutomationRun,
@@ -62,6 +63,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 type Props = {
   automations: Automation[]
@@ -110,6 +112,9 @@ export function AutomationsView({
   const [form, setForm] = useState<Form>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [actionBusy, setActionBusy] = useState("")
+  const [removeTarget, setRemoveTarget] = useState<Automation | null>(null)
+  const [removing, setRemoving] = useState(false)
   const [runs, setRuns] = useState<Record<string, AutomationRun[]>>({})
   const timezoneSelectValue = timezoneSuggestions.includes(form.timezone)
     ? form.timezone
@@ -120,7 +125,9 @@ export function AutomationsView({
     [servers]
   )
 
-  async function save() {
+  async function save(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
+    if (!form.name.trim() || !form.prompt.trim() || saving) return
     setSaving(true)
     setError("")
     try {
@@ -129,48 +136,114 @@ export function AutomationsView({
         form
       )
       onChange([result.automation, ...automations])
+      notifySuccess("Automation created", result.automation.name)
       setOpen(false)
       setForm(emptyForm)
     } catch (caught) {
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "Automation could not be saved."
+        notifyError(
+          "Automation could not be saved",
+          caught,
+          "Automation could not be saved."
+        )
       )
     } finally {
       setSaving(false)
     }
   }
   async function toggle(item: Automation, enabled: boolean) {
-    const result = await api.patch<{ automation: Automation }>(
-      `/api/v1/automations/${item.id}`,
-      { enabled }
-    )
-    onChange(
-      automations.map((automation) =>
-        automation.id === item.id ? result.automation : automation
+    if (actionBusy) return
+    setActionBusy(`toggle:${item.id}`)
+    setError("")
+    try {
+      const result = await api.patch<{ automation: Automation }>(
+        `/api/v1/automations/${item.id}`,
+        { enabled }
       )
-    )
+      onChange(
+        automations.map((automation) =>
+          automation.id === item.id ? result.automation : automation
+        )
+      )
+    } catch (caught) {
+      setError(
+        notifyError(
+          "Automation could not be updated",
+          caught,
+          "Automation could not be updated."
+        )
+      )
+    } finally {
+      setActionBusy("")
+    }
   }
   async function remove(item: Automation) {
-    await api.delete(`/api/v1/automations/${item.id}`)
-    onChange(automations.filter((automation) => automation.id !== item.id))
+    if (removing) return
+    setRemoving(true)
+    setError("")
+    try {
+      await api.delete(`/api/v1/automations/${item.id}`)
+      onChange(automations.filter((automation) => automation.id !== item.id))
+      setRemoveTarget(null)
+      notifySuccess("Automation deleted", item.name)
+    } catch (caught) {
+      setError(
+        notifyError(
+          "Automation could not be deleted",
+          caught,
+          "Automation could not be deleted."
+        )
+      )
+    } finally {
+      setRemoving(false)
+    }
   }
   async function run(item: Automation) {
-    const result = await api.post<{ run: AutomationRun }>(
-      `/api/v1/automations/${item.id}/runs`
-    )
-    setRuns((current) => ({
-      ...current,
-      [item.id]: [result.run, ...(current[item.id] ?? [])],
-    }))
+    if (actionBusy) return
+    setActionBusy(`run:${item.id}`)
+    setError("")
+    try {
+      const result = await api.post<{ run: AutomationRun }>(
+        `/api/v1/automations/${item.id}/runs`
+      )
+      setRuns((current) => ({
+        ...current,
+        [item.id]: [result.run, ...(current[item.id] ?? [])],
+      }))
+      notifySuccess("Automation started", item.name)
+    } catch (caught) {
+      setError(
+        notifyError(
+          "Automation could not start",
+          caught,
+          "Automation could not start."
+        )
+      )
+    } finally {
+      setActionBusy("")
+    }
   }
   async function loadRuns(item: Automation) {
     if (runs[item.id]) return
-    const result = await api.get<{ runs: AutomationRun[] }>(
-      `/api/v1/automations/${item.id}/runs`
-    )
-    setRuns((current) => ({ ...current, [item.id]: result.runs }))
+    if (actionBusy) return
+    setActionBusy(`history:${item.id}`)
+    setError("")
+    try {
+      const result = await api.get<{ runs: AutomationRun[] }>(
+        `/api/v1/automations/${item.id}/runs`
+      )
+      setRuns((current) => ({ ...current, [item.id]: result.runs }))
+    } catch (caught) {
+      setError(
+        notifyError(
+          "Run history could not be loaded",
+          caught,
+          "Run history could not be loaded."
+        )
+      )
+    } finally {
+      setActionBusy("")
+    }
   }
   function toggleServer(id: string) {
     setForm((current) => ({
@@ -211,8 +284,13 @@ export function AutomationsView({
           read-only connections can run without a confirmation.
         </AlertDescription>
       </Alert>
+      {error && !open && (
+        <Alert aria-live="polite" role="alert" variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       {automations.length === 0 ? (
-        <Card className="border-dashed">
+        <Card className="bg-muted/30">
           <CardContent className="flex min-h-64 flex-col items-center justify-center text-center">
             <div className="rounded-full bg-muted p-3">
               <CalendarClock className="size-5 text-muted-foreground" />
@@ -253,6 +331,7 @@ export function AutomationsView({
                     </div>
                     <Switch
                       checked={item.enabled}
+                      disabled={Boolean(actionBusy)}
                       onCheckedChange={(checked) => void toggle(item, checked)}
                       aria-label={`Enable ${item.name}`}
                     />
@@ -304,6 +383,7 @@ export function AutomationsView({
                   <Button
                     className="h-auto min-h-8 px-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground"
                     onClick={() => void loadRuns(item)}
+                    disabled={actionBusy === `history:${item.id}`}
                     size="sm"
                     type="button"
                     variant="ghost"
@@ -314,12 +394,16 @@ export function AutomationsView({
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => void remove(item)}
+                      onClick={() => setRemoveTarget(item)}
                       aria-label={`Delete ${item.name}`}
                     >
                       <Trash2 className="size-4" />
                     </Button>
-                    <Button size="sm" onClick={() => void run(item)}>
+                    <Button
+                      disabled={Boolean(actionBusy)}
+                      size="sm"
+                      onClick={() => void run(item)}
+                    >
                       <Play className="mr-1.5 size-3.5" />
                       Run now
                     </Button>
@@ -330,196 +414,228 @@ export function AutomationsView({
           })}
         </div>
       )}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!saving) setOpen(nextOpen)
+        }}
+      >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>New automation</DialogTitle>
-            <DialogDescription>
-              Keep the task narrow. Scheduled work only sees the integrations
-              you select here.
-            </DialogDescription>
-          </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="automation-name">Name</FieldLabel>
-              <Input
-                id="automation-name"
-                value={form.name}
-                onChange={(event) =>
-                  setForm({ ...form, name: event.target.value })
-                }
-                placeholder="Weekly issue triage"
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="automation-task">Task</FieldLabel>
-              <Textarea
-                id="automation-task"
-                value={form.prompt}
-                onChange={(event) =>
-                  setForm({ ...form, prompt: event.target.value })
-                }
-                placeholder="Review new issues, identify duplicates and prepare a concise summary."
-                rows={4}
-              />
-            </Field>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <ScheduleBuilder
-                value={form.schedule}
-                onChange={(schedule) => setForm({ ...form, schedule })}
-              />
+          <form onSubmit={(event) => void save(event)}>
+            <DialogHeader>
+              <DialogTitle>New automation</DialogTitle>
+              <DialogDescription>
+                Keep the task narrow. Scheduled work only sees the integrations
+                you select here.
+              </DialogDescription>
+            </DialogHeader>
+            <FieldGroup>
               <Field>
-                <FieldLabel>Assistant</FieldLabel>
-                <Select
-                  value={form.assistantId || "default"}
-                  onValueChange={(value) =>
-                    setForm({
-                      ...form,
-                      assistantId: value === "default" ? "" : (value ?? ""),
-                    })
+                <FieldLabel htmlFor="automation-name">Name</FieldLabel>
+                <Input
+                  id="automation-name"
+                  value={form.name}
+                  onChange={(event) =>
+                    setForm({ ...form, name: event.target.value })
                   }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Default assistant" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="default">Default assistant</SelectItem>
-                    {assistants.map((assistant) => (
-                      <SelectItem key={assistant.id} value={assistant.id}>
-                        {assistant.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="Weekly issue triage"
+                />
               </Field>
               <Field>
-                <FieldLabel>Timezone</FieldLabel>
+                <FieldLabel htmlFor="automation-task">Task</FieldLabel>
+                <Textarea
+                  id="automation-task"
+                  value={form.prompt}
+                  onChange={(event) =>
+                    setForm({ ...form, prompt: event.target.value })
+                  }
+                  placeholder="Review new issues, identify duplicates and prepare a concise summary."
+                  rows={4}
+                />
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ScheduleBuilder
+                  value={form.schedule}
+                  onChange={(schedule) => setForm({ ...form, schedule })}
+                />
+                <Field>
+                  <FieldLabel htmlFor="automation-assistant">
+                    Assistant
+                  </FieldLabel>
+                  <Select
+                    value={form.assistantId || "default"}
+                    onValueChange={(value) =>
+                      setForm({
+                        ...form,
+                        assistantId: value === "default" ? "" : (value ?? ""),
+                      })
+                    }
+                  >
+                    <SelectTrigger id="automation-assistant">
+                      <SelectValue placeholder="Default assistant" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Default assistant</SelectItem>
+                      {assistants.map((assistant) => (
+                        <SelectItem key={assistant.id} value={assistant.id}>
+                          {assistant.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="automation-timezone">
+                    Timezone
+                  </FieldLabel>
+                  <Select
+                    value={timezoneSelectValue}
+                    onValueChange={(value) =>
+                      setForm({
+                        ...form,
+                        timezone:
+                          value === "__custom__"
+                            ? ""
+                            : (value ?? detectedTimezone),
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-full" id="automation-timezone">
+                      <SelectValue>
+                        {timezoneSelectValue === "__custom__"
+                          ? "Custom timezone"
+                          : form.timezone}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[...new Set(timezoneSuggestions)].map((timezone) => (
+                        <SelectItem key={timezone} value={timezone}>
+                          {timezone}
+                          {timezone === detectedTimezone ? " (local)" : ""}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="__custom__">
+                        Custom timezone…
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {timezoneSelectValue === "__custom__" && (
+                    <Input
+                      className="mt-2"
+                      value={form.timezone}
+                      onChange={(event) =>
+                        setForm({ ...form, timezone: event.target.value })
+                      }
+                      placeholder="e.g. Australia/Sydney"
+                      aria-label="Custom timezone"
+                    />
+                  )}
+                  <FieldDescription>
+                    All scheduled runs use this timezone.
+                  </FieldDescription>
+                </Field>
+              </div>
+              <Field>
+                <FieldLabel>Connected integrations</FieldLabel>
+                <FieldDescription>
+                  Only connected servers are available. Select the minimum
+                  access this task needs.
+                </FieldDescription>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {availableServers.length ? (
+                    availableServers.map((server) => (
+                      <label
+                        className="flex cursor-pointer items-center gap-2 rounded-xl bg-muted/50 px-3 py-2.5 text-sm transition-colors hover:bg-muted/45 has-[:checked]:border-primary/50 has-[:checked]:bg-primary/[0.06]"
+                        key={server.id}
+                      >
+                        <input
+                          className="size-4 accent-primary"
+                          type="checkbox"
+                          checked={form.mcpServerIds.includes(server.id)}
+                          onChange={() => toggleServer(server.id)}
+                        />
+                        <span>{server.name}</span>
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {server.trustedReadOnly
+                            ? "Read-only"
+                            : "Review required"}
+                        </span>
+                      </label>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Connect GitHub, GitLab or another MCP server first.
+                    </p>
+                  )}
+                </div>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="automation-approval">
+                  Execution safeguard
+                </FieldLabel>
                 <Select
-                  value={timezoneSelectValue}
+                  value={form.approvalMode}
                   onValueChange={(value) =>
                     setForm({
                       ...form,
-                      timezone:
-                        value === "__custom__"
-                          ? ""
-                          : (value ?? detectedTimezone),
+                      approvalMode: value as Form["approvalMode"],
                     })
                   }
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="automation-approval">
                     <SelectValue>
-                      {timezoneSelectValue === "__custom__"
-                        ? "Custom timezone"
-                        : form.timezone}
+                      {form.approvalMode === "review"
+                        ? "Review before integration actions"
+                        : "Auto-run read-only integrations"}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {[...new Set(timezoneSuggestions)].map((timezone) => (
-                      <SelectItem key={timezone} value={timezone}>
-                        {timezone}
-                        {timezone === detectedTimezone ? " (local)" : ""}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="__custom__">Custom timezone…</SelectItem>
+                    <SelectItem value="review">
+                      Review before integration actions
+                    </SelectItem>
+                    <SelectItem value="read_only_auto">
+                      Auto-run read-only integrations
+                    </SelectItem>
                   </SelectContent>
                 </Select>
-                {timezoneSelectValue === "__custom__" && (
-                  <Input
-                    className="mt-2"
-                    value={form.timezone}
-                    onChange={(event) =>
-                      setForm({ ...form, timezone: event.target.value })
-                    }
-                    placeholder="e.g. Australia/Sydney"
-                    aria-label="Custom timezone"
-                  />
-                )}
-                <FieldDescription>
-                  All scheduled runs use this timezone.
-                </FieldDescription>
               </Field>
-            </div>
-            <Field>
-              <FieldLabel>Connected integrations</FieldLabel>
-              <FieldDescription>
-                Only connected servers are available. Select the minimum access
-                this task needs.
-              </FieldDescription>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                {availableServers.length ? (
-                  availableServers.map((server) => (
-                    <label
-                      className="flex cursor-pointer items-center gap-2 rounded-xl bg-muted/50 px-3 py-2.5 text-sm transition-colors hover:bg-muted/45 has-[:checked]:border-primary/50 has-[:checked]:bg-primary/[0.06]"
-                      key={server.id}
-                    >
-                      <input
-                        className="size-4 accent-primary"
-                        type="checkbox"
-                        checked={form.mcpServerIds.includes(server.id)}
-                        onChange={() => toggleServer(server.id)}
-                      />
-                      <span>{server.name}</span>
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        {server.trustedReadOnly
-                          ? "Read-only"
-                          : "Review required"}
-                      </span>
-                    </label>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Connect GitHub, GitLab or another MCP server first.
-                  </p>
-                )}
-              </div>
-            </Field>
-            <Field>
-              <FieldLabel>Execution safeguard</FieldLabel>
-              <Select
-                value={form.approvalMode}
-                onValueChange={(value) =>
-                  setForm({
-                    ...form,
-                    approvalMode: value as Form["approvalMode"],
-                  })
-                }
+              {error && (
+                <Alert aria-live="polite" role="alert" variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+            </FieldGroup>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setOpen(false)}
               >
-                <SelectTrigger>
-                  <SelectValue>
-                    {form.approvalMode === "review"
-                      ? "Review before integration actions"
-                      : "Auto-run read-only integrations"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="review">
-                    Review before integration actions
-                  </SelectItem>
-                  <SelectItem value="read_only_auto">
-                    Auto-run read-only integrations
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-          </FieldGroup>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={saving || !form.name.trim() || !form.prompt.trim()}
-              onClick={() => void save()}
-            >
-              {saving ? "Saving…" : "Create automation"}
-            </Button>
-          </DialogFooter>
+                Cancel
+              </Button>
+              <Button
+                disabled={saving || !form.name.trim() || !form.prompt.trim()}
+                type="submit"
+              >
+                {saving ? "Saving…" : "Create automation"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
+      <ConfirmActionDialog
+        open={removeTarget !== null}
+        title={`Delete ${removeTarget?.name ?? "this automation"}?`}
+        description="Scheduled runs and their history will remain visible, but this automation will no longer run. This action cannot be undone."
+        confirmLabel="Delete automation"
+        pending={removing}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !removing) setRemoveTarget(null)
+        }}
+        onConfirm={() => {
+          if (removeTarget) return remove(removeTarget)
+        }}
+      />
     </Page>
   )
 }
@@ -547,7 +663,7 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
   return (
     <Field className="rounded-xl bg-muted/50 p-3 sm:col-span-2">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <FieldLabel>Schedule</FieldLabel>
+        <FieldLabel htmlFor="automation-schedule-interval">Schedule</FieldLabel>
         <span className="text-xs text-muted-foreground">{schedule}</span>
       </div>
       <div className="grid grid-cols-[auto_80px_minmax(0,1fr)] gap-2">
@@ -556,6 +672,7 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
         </span>
         <Input
           aria-label="Repeat interval"
+          id="automation-schedule-interval"
           min="1"
           max="365"
           onChange={(event) =>
@@ -570,7 +687,11 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
             setUnit((next ?? "weeks") as "days" | "weeks" | "months")
           }
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger
+            aria-label="Repeat unit"
+            className="w-full"
+            id="automation-schedule-unit"
+          >
             <SelectValue>{unit}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -586,7 +707,11 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
             value={weekday}
             onValueChange={(next) => setWeekday(next ?? "Monday")}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger
+              aria-label="Weekday"
+              className="w-full"
+              id="automation-schedule-weekday"
+            >
               <SelectValue>{weekday}</SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -612,6 +737,7 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
         )}
         <Input
           aria-label="Run time"
+          id="automation-schedule-time"
           onChange={(event) => setTime(event.target.value)}
           type="time"
           value={time}
