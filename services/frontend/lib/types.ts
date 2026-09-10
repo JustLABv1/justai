@@ -323,6 +323,13 @@ export type KnowledgeItemDetail = KnowledgeItem & {
   provider?: string
   repositoryUrl?: string
   ref?: string
+  includePatterns?: string[]
+  excludePatterns?: string[]
+  maxFileBytes?: number
+  maxFileSizeBytes?: number
+  honorGitignore?: boolean
+  syncIntervalMinutes?: number
+  nextSyncAt?: string | null
   locator?: string
   files?: KnowledgeRepositoryFile[]
 }
@@ -330,6 +337,7 @@ export type KnowledgeItemDetail = KnowledgeItem & {
 export type KnowledgeRepositoryFile = {
   path: string
   sourceId: string
+  url?: string
   status: string
   sizeBytes: number
 }
@@ -363,6 +371,13 @@ export type RepositoryContext = {
   skippedFileCount: number
   totalBytes: number
   progress: number
+  includePatterns?: string[]
+  excludePatterns?: string[]
+  maxFileBytes?: number
+  maxFileSizeBytes?: number
+  honorGitignore?: boolean
+  syncIntervalMinutes?: number
+  nextSyncAt?: string | null
   createdAt: string
   updatedAt: string
 }

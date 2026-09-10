@@ -64,11 +64,14 @@ func TestListUserRepositoryContextsReadsThePersistentLibrary(t *testing.T) {
 			"repository_url", "owner", "repository", "ref", "resolved_ref",
 			"title", "context_scope", "status", "error", "file_count",
 			"ready_file_count", "skipped_file_count", "total_bytes", "progress",
+			"include_patterns", "exclude_patterns", "max_file_bytes", "honor_gitignore",
+			"sync_interval_minutes", "next_sync_at",
 			"created_at", "updated_at",
 		}).AddRow(
 			repositoryID, nil, "user", userID, "github",
 			"https://github.com/example/project", "example", "project", "HEAD", "main",
 			"example/project", "persistent", "ready", "", 200, 200, 872, int64(4096), 100,
+			"{docs/**}", "{tmp/**}", int64(4*1024*1024), true, 1440, now,
 			now, now,
 		))
 
@@ -133,5 +136,39 @@ func TestRepositoryFailureMessageKeepsStorageErrorsActionable(t *testing.T) {
 				t.Fatalf("expected %q to contain %q", message, test.contains)
 			}
 		})
+	}
+}
+
+func TestRepositoryConfigInputNormalizesAliasesAndDefaults(t *testing.T) {
+	maxBytes := int64(4 * 1024 * 1024)
+	honorGitignore := false
+	config, err := repositoryConfigInput(
+		[]string{" docs/**", "docs/**"}, []string{"src/**"},
+		[]string{"tmp/**"}, []string{"tmp/**"}, &maxBytes, &honorGitignore,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(config.IncludePatterns) != 2 || config.IncludePatterns[0] != "docs/**" || config.IncludePatterns[1] != "src/**" {
+		t.Fatalf("unexpected include patterns: %#v", config.IncludePatterns)
+	}
+	if len(config.ExcludePatterns) != 1 || config.ExcludePatterns[0] != "tmp/**" {
+		t.Fatalf("unexpected exclude patterns: %#v", config.ExcludePatterns)
+	}
+	if config.MaxFileBytes != maxBytes || config.HonorGitignore {
+		t.Fatalf("unexpected normalized config: %+v", config)
+	}
+}
+
+func TestRepositoryFileCursorRoundTripsPaths(t *testing.T) {
+	for _, path := range []string{"docs/guide.md", "src/über.go", "README.md"} {
+		cursor := encodeRepositoryFileCursor(path)
+		decoded, err := decodeRepositoryFileCursor(cursor)
+		if err != nil || decoded != path {
+			t.Fatalf("cursor %q decoded as %q (%v)", path, decoded, err)
+		}
+	}
+	if _, err := decodeRepositoryFileCursor("not a cursor"); err == nil {
+		t.Fatal("expected malformed cursor to be rejected")
 	}
 }

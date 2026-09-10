@@ -7,7 +7,6 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
-  BrainCircuit,
   ExternalLink,
   FileText,
   Files,
@@ -56,90 +55,35 @@ type RetrievalStatus = {
   error?: string
 }
 
-type ContextSelection = {
-  status?: string
-  spaceNames?: string[]
-  itemCount?: number
-  passageCount?: number
-  routingVersion?: string
-}
-
-function ContextSelectionPart({ data }: { data: unknown }) {
-  const value = (data ?? {}) as ContextSelection
-  const names = Array.isArray(value.spaceNames)
-    ? value.spaceNames.filter(
-        (name): name is string => typeof name === "string"
-      )
-    : []
-  const label = names.length > 0 ? names.join(" · ") : "Automatic Knowledge"
-  return (
-    <div className="my-1 inline-flex max-w-full items-center gap-2 rounded-full bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
-      <BrainCircuit className="size-3.5 text-primary" aria-hidden="true" />
-      <span className="truncate">Knowledge · {label}</span>
-      {value.status === "started" && (
-        <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
-      )}
-    </div>
-  )
-}
-
 function RetrievalStatusPart({ data }: { data: unknown }) {
   const value = (data ?? {}) as RetrievalStatus
   const status = value.status ?? "started"
-  const sourceCountFromMessage = useAuiState((state) => {
-    const sourceIDs = new Set<string>()
-    for (const part of state.message.parts) {
-      if (part.type === "source") sourceIDs.add(part.id)
-    }
-    return sourceIDs.size
-  })
-  const sourceCount =
-    typeof value.sourceCount === "number"
-      ? value.sourceCount
-      : sourceCountFromMessage || value.citationCount || 0
-  const passageCount =
-    typeof value.passageCount === "number"
-      ? value.passageCount
-      : value.citationCount
-  const sourceLabel = `${sourceCount} ${sourceCount === 1 ? "source" : "sources"}`
-  const passageLabel =
-    typeof passageCount === "number" && passageCount > sourceCount
-      ? ` · ${passageCount} matches`
-      : ""
   // Keep recognizing the previous mode name so messages persisted before the
   // rename continue to render with the enhanced-context treatment.
   const deepContext =
     value.mode === "deep-context" || value.mode === "repository-analysis"
-  const noMatches = status === "completed" && sourceCount === 0
-  const label = noMatches
-    ? "No matching Knowledge"
-    : status === "completed"
-      ? `${deepContext ? "Deep context ready" : "Grounding ready"} · ${sourceLabel}${passageLabel}`
-      : status === "failed"
-        ? "Grounding unavailable"
-        : status === "disabled"
-          ? "Knowledge grounding is disabled"
-          : deepContext
-            ? "Analyzing deeper context…"
-            : "Searching attached context…"
+  // Retrieval is background plumbing. Once it succeeds, the source cards are
+  // the useful, auditable result; a second "Grounding ready" badge only adds
+  // noise next to MCP/tool activity. Keep transient progress and failures.
+  if (status === "completed" || status === "disabled") return null
+
+  const label =
+    status === "failed"
+      ? "Knowledge search unavailable"
+      : deepContext
+        ? "Analyzing deeper context…"
+        : "Searching context…"
 
   return (
     <div
       className={cn(
         "my-2 inline-flex max-w-full items-center gap-2 rounded-full border border-transparent bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground",
         status === "failed" && "border-destructive/30 text-destructive",
-        status === "completed" && "text-foreground"
       )}
       title={value.query ? `Query: ${value.query}` : undefined}
     >
       {status === "started" ? (
         <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-      ) : status === "completed" ? (
-        deepContext ? (
-          <BrainCircuit className="size-3.5 text-primary" aria-hidden="true" />
-        ) : (
-          <Sparkles className="size-3.5 text-primary" aria-hidden="true" />
-        )
       ) : (
         <FileText className="size-3.5" aria-hidden="true" />
       )}
@@ -666,7 +610,7 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
         ) : part.name === "retrieval-status" ? (
           <RetrievalStatusPart data={part.data} />
         ) : part.name === "context-selection" ? (
-          <ContextSelectionPart data={part.data} />
+          null
         ) : part.name === "justai-error" ? (
           <AssistantErrorPart data={part.data} />
         ) : null)

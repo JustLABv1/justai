@@ -642,19 +642,27 @@ type KnowledgeItem struct {
 
 type KnowledgeItemDetail struct {
 	KnowledgeItem
-	Content       string                    `json:"content,omitempty"`
-	SourceURL     string                    `json:"sourceUrl,omitempty"`
-	MIMEType      string                    `json:"mimeType,omitempty"`
-	Provider      string                    `json:"provider,omitempty"`
-	RepositoryURL string                    `json:"repositoryUrl,omitempty"`
-	Ref           string                    `json:"ref,omitempty"`
-	Locator       string                    `json:"locator,omitempty"`
-	Files         []KnowledgeRepositoryFile `json:"files,omitempty"`
+	Content             string                    `json:"content,omitempty"`
+	SourceURL           string                    `json:"sourceUrl,omitempty"`
+	MIMEType            string                    `json:"mimeType,omitempty"`
+	Provider            string                    `json:"provider,omitempty"`
+	RepositoryURL       string                    `json:"repositoryUrl,omitempty"`
+	Ref                 string                    `json:"ref,omitempty"`
+	IncludePatterns     []string                  `json:"includePatterns,omitempty"`
+	ExcludePatterns     []string                  `json:"excludePatterns,omitempty"`
+	MaxFileBytes        int64                     `json:"maxFileBytes,omitempty"`
+	MaxFileSizeBytes    int64                     `json:"maxFileSizeBytes,omitempty"`
+	HonorGitignore      bool                      `json:"honorGitignore,omitempty"`
+	SyncIntervalMinutes int                       `json:"syncIntervalMinutes,omitempty"`
+	NextSyncAt          *time.Time                `json:"nextSyncAt,omitempty"`
+	Locator             string                    `json:"locator,omitempty"`
+	Files               []KnowledgeRepositoryFile `json:"files,omitempty"`
 }
 
 type KnowledgeRepositoryFile struct {
 	Path      string    `json:"path"`
 	SourceID  uuid.UUID `json:"sourceId"`
+	URL       string    `json:"url,omitempty"`
 	Status    string    `json:"status"`
 	SizeBytes int64     `json:"sizeBytes"`
 }
@@ -681,27 +689,34 @@ type ResolvedContextSummary struct {
 }
 
 type RepositoryContext struct {
-	ID               uuid.UUID  `json:"id"`
-	ConversationID   *uuid.UUID `json:"conversationId,omitempty"`
-	ScopeType        string     `json:"scopeType"`
-	ScopeID          uuid.UUID  `json:"scopeId"`
-	Provider         string     `json:"provider"`
-	RepositoryURL    string     `json:"repositoryUrl"`
-	Owner            string     `json:"owner"`
-	Repository       string     `json:"repository"`
-	Ref              string     `json:"ref"`
-	ResolvedRef      string     `json:"resolvedRef,omitempty"`
-	Title            string     `json:"title"`
-	ContextScope     string     `json:"contextScope,omitempty"`
-	Status           string     `json:"status"`
-	Error            string     `json:"error,omitempty"`
-	FileCount        int        `json:"fileCount"`
-	ReadyFileCount   int        `json:"readyFileCount"`
-	SkippedFileCount int        `json:"skippedFileCount"`
-	TotalBytes       int64      `json:"totalBytes"`
-	Progress         int        `json:"progress"`
-	CreatedAt        time.Time  `json:"createdAt"`
-	UpdatedAt        time.Time  `json:"updatedAt"`
+	ID                  uuid.UUID  `json:"id"`
+	ConversationID      *uuid.UUID `json:"conversationId,omitempty"`
+	ScopeType           string     `json:"scopeType"`
+	ScopeID             uuid.UUID  `json:"scopeId"`
+	Provider            string     `json:"provider"`
+	RepositoryURL       string     `json:"repositoryUrl"`
+	Owner               string     `json:"owner"`
+	Repository          string     `json:"repository"`
+	Ref                 string     `json:"ref"`
+	ResolvedRef         string     `json:"resolvedRef,omitempty"`
+	Title               string     `json:"title"`
+	ContextScope        string     `json:"contextScope,omitempty"`
+	Status              string     `json:"status"`
+	Error               string     `json:"error,omitempty"`
+	FileCount           int        `json:"fileCount"`
+	ReadyFileCount      int        `json:"readyFileCount"`
+	SkippedFileCount    int        `json:"skippedFileCount"`
+	TotalBytes          int64      `json:"totalBytes"`
+	Progress            int        `json:"progress"`
+	IncludePatterns     []string   `json:"includePatterns,omitempty"`
+	ExcludePatterns     []string   `json:"excludePatterns,omitempty"`
+	MaxFileBytes        int64      `json:"maxFileBytes"`
+	MaxFileSizeBytes    int64      `json:"maxFileSizeBytes,omitempty"`
+	HonorGitignore      bool       `json:"honorGitignore"`
+	SyncIntervalMinutes int        `json:"syncIntervalMinutes"`
+	NextSyncAt          *time.Time `json:"nextSyncAt,omitempty"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
 type MCPServer struct {

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,13 +21,30 @@ import (
 )
 
 const (
-	ProviderGitHub     Provider = "github"
-	ProviderGitLab     Provider = "gitlab"
-	MaxFiles                    = 200
-	MaxFileBytes                = 2 * 1024 * 1024
-	MaxRepositoryBytes          = 20 * 1024 * 1024
-	MaxTreeEntries              = 5000
+	ProviderGitHub           Provider = "github"
+	ProviderGitLab           Provider = "gitlab"
+	MaxFiles                          = 200
+	MaxFileBytes                      = 2 * 1024 * 1024
+	MaxRepositoryBytes                = 20 * 1024 * 1024
+	MaxTreeEntries                    = 5000
+	MaxConfigurableFileBytes          = 25 * 1024 * 1024
 )
+
+// DefaultExcludePatterns are deliberately conservative repository defaults.
+// They complement isTextCandidate's extension and sensitive-file checks, and
+// are always applied even when a connection supplies its own patterns. A
+// connection can narrow the index further, but cannot accidentally opt into
+// common dependency/build output directories.
+var DefaultExcludePatterns = []string{
+	".git/**",
+	"node_modules/**",
+	"vendor/**",
+	"dist/**",
+	"build/**",
+	".next/**",
+	"coverage/**",
+	"**/*.map",
+}
 
 type Provider string
 
@@ -64,14 +82,22 @@ type Limits struct {
 	MaxFileBytes       int64
 	MaxRepositoryBytes int64
 	MaxTreeEntries     int
+	IncludePatterns    []string
+	ExcludePatterns    []string
+	// HonorGitignore is a pointer so callers can distinguish the zero value
+	// (use the safe default) from an explicit opt-out.
+	HonorGitignore *bool
 }
 
 func DefaultLimits() Limits {
+	honorGitignore := true
 	return Limits{
 		MaxFiles:           MaxFiles,
 		MaxFileBytes:       MaxFileBytes,
 		MaxRepositoryBytes: MaxRepositoryBytes,
 		MaxTreeEntries:     MaxTreeEntries,
+		ExcludePatterns:    append([]string(nil), DefaultExcludePatterns...),
+		HonorGitignore:     &honorGitignore,
 	}
 }
 
@@ -180,9 +206,7 @@ func (c *Client) Fetch(ctx context.Context, spec Spec, token string) (Snapshot, 
 	if c.HTTPClient == nil {
 		c.HTTPClient = &http.Client{Timeout: 45 * time.Second}
 	}
-	if c.Limits.MaxFiles <= 0 || c.Limits.MaxFileBytes <= 0 || c.Limits.MaxRepositoryBytes <= 0 || c.Limits.MaxTreeEntries <= 0 {
-		c.Limits = normalizedLimits(c.Limits)
-	}
+	c.Limits = normalizedLimits(c.Limits)
 	switch spec.Provider {
 	case ProviderGitHub:
 		return c.fetchGitHub(ctx, spec, token)
@@ -206,6 +230,31 @@ func normalizedLimits(limits Limits) Limits {
 	}
 	if limits.MaxTreeEntries <= 0 {
 		limits.MaxTreeEntries = defaults.MaxTreeEntries
+	}
+	// Keep the safety defaults even when callers provide a custom exclusion
+	// list. This makes the per-repository policy additive and avoids exposing
+	// dependency/build output by simply sending an empty list.
+	exclusions := make([]string, 0, len(defaults.ExcludePatterns)+len(limits.ExcludePatterns))
+	exclusions = append(exclusions, defaults.ExcludePatterns...)
+	for _, pattern := range limits.ExcludePatterns {
+		if pattern == "" {
+			continue
+		}
+		alreadyPresent := false
+		for _, existing := range exclusions {
+			if existing == pattern {
+				alreadyPresent = true
+				break
+			}
+		}
+		if !alreadyPresent {
+			exclusions = append(exclusions, pattern)
+		}
+	}
+	limits.ExcludePatterns = exclusions
+	if limits.HonorGitignore == nil {
+		honorGitignore := true
+		limits.HonorGitignore = &honorGitignore
 	}
 	return limits
 }
@@ -294,13 +343,50 @@ func (c *Client) fetchFiles(ctx context.Context, spec Spec, token, resolvedRef s
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	snapshot := Snapshot{Spec: spec, ResolvedRef: resolvedRef, Files: make([]File, 0, min(limits.MaxFiles, len(entries)))}
 	seenPaths := make(map[string]struct{}, len(entries))
+	gitignoreRules := make([]gitignoreRule, 0)
+	prefetchedGitignore := make(map[string]File)
+	if limits.HonorGitignore == nil || *limits.HonorGitignore {
+		// Fetch ignore files before filtering the tree. They are deliberately
+		// not required to be part of the final snapshot, so an include policy
+		// can still use a root .gitignore to filter a docs-only index.
+		for _, entry := range entries {
+			if entry.Type != "blob" || !isGitignorePath(entry.Path) {
+				continue
+			}
+			if entry.Size > limits.MaxFileBytes {
+				continue
+			}
+			file, err := c.fetchFile(ctx, spec, token, entry)
+			if err != nil {
+				// A malformed or inaccessible ignore file should not make an
+				// otherwise readable repository unavailable. The provider tree
+				// and the safe defaults remain authoritative in that case.
+				continue
+			}
+			prefetchedGitignore[entry.Path] = file
+			gitignoreRules = append(gitignoreRules, parseGitignoreRules(file.Content, gitignoreBaseDir(entry.Path))...)
+		}
+	}
 	for _, entry := range entries {
 		if _, seen := seenPaths[entry.Path]; seen {
 			snapshot.SkippedFileCount++
 			continue
 		}
 		seenPaths[entry.Path] = struct{}{}
-		if entry.Type != "blob" || !isTextCandidate(entry.Path) || entry.Size > limits.MaxFileBytes {
+		if entry.Type != "blob" || !isTextCandidate(entry.Path) {
+			snapshot.SkippedFileCount++
+			continue
+		}
+		if len(limits.IncludePatterns) > 0 && !matchesAnyRepositoryPattern(limits.IncludePatterns, entry.Path) {
+			snapshot.SkippedFileCount++
+			continue
+		}
+		if matchesAnyRepositoryPattern(limits.ExcludePatterns, entry.Path) ||
+			((limits.HonorGitignore == nil || *limits.HonorGitignore) && isIgnoredByGitignore(gitignoreRules, entry.Path)) {
+			snapshot.SkippedFileCount++
+			continue
+		}
+		if entry.Size > limits.MaxFileBytes {
 			snapshot.SkippedFileCount++
 			continue
 		}
@@ -308,9 +394,13 @@ func (c *Client) fetchFiles(ctx context.Context, spec Spec, token, resolvedRef s
 			snapshot.SkippedFileCount++
 			continue
 		}
-		file, err := c.fetchFile(ctx, spec, token, entry)
-		if err != nil {
-			return Snapshot{}, fmt.Errorf("read %s: %w", entry.Path, err)
+		file, prefetched := prefetchedGitignore[entry.Path]
+		if !prefetched {
+			var err error
+			file, err = c.fetchFile(ctx, spec, token, entry)
+			if err != nil {
+				return Snapshot{}, fmt.Errorf("read %s: %w", entry.Path, err)
+			}
 		}
 		if snapshot.TotalBytes+int64(len(file.Content)) > limits.MaxRepositoryBytes {
 			snapshot.SkippedFileCount++
@@ -323,6 +413,164 @@ func (c *Client) fetchFiles(ctx context.Context, spec Spec, token, resolvedRef s
 		return Snapshot{}, fmt.Errorf("repository contains no supported text files")
 	}
 	return snapshot, nil
+}
+
+type gitignoreRule struct {
+	pattern   string
+	baseDir   string
+	negated   bool
+	directory bool
+}
+
+func isGitignorePath(path string) bool {
+	parts := strings.Split(path, "/")
+	return len(parts) > 0 && parts[len(parts)-1] == ".gitignore"
+}
+
+func gitignoreBaseDir(path string) string {
+	if index := strings.LastIndexByte(path, '/'); index >= 0 {
+		return path[:index]
+	}
+	return ""
+}
+
+// parseGitignoreRules handles the path-oriented subset needed by a remote
+// tree importer: comments, negation, root-relative patterns, directory
+// patterns, and the standard * / ** wildcards. It intentionally does not
+// consult the local filesystem or global git configuration.
+func parseGitignoreRules(content, baseDir string) []gitignoreRule {
+	rules := make([]gitignoreRule, 0)
+	for _, rawLine := range strings.Split(content, "\n") {
+		line := strings.TrimSuffix(rawLine, "\r")
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		negated := false
+		if strings.HasPrefix(line, "!") {
+			negated = true
+			line = strings.TrimPrefix(line, "!")
+		}
+		line = strings.TrimSpace(line)
+		if line == "" || strings.ContainsAny(line, "\\\x00") {
+			continue
+		}
+		directory := strings.HasSuffix(line, "/")
+		line = strings.TrimSuffix(line, "/")
+		line = strings.TrimPrefix(line, "./")
+		line = strings.TrimPrefix(line, "/")
+		if line == "" {
+			continue
+		}
+		rules = append(rules, gitignoreRule{pattern: line, baseDir: baseDir, negated: negated, directory: directory})
+	}
+	return rules
+}
+
+func isIgnoredByGitignore(rules []gitignoreRule, path string) bool {
+	ignored := false
+	for _, rule := range rules {
+		if rule.matches(path) {
+			ignored = !rule.negated
+		}
+	}
+	return ignored
+}
+
+func (rule gitignoreRule) matches(path string) bool {
+	relativePath := path
+	if rule.baseDir != "" {
+		if path != rule.baseDir && !strings.HasPrefix(path, rule.baseDir+"/") {
+			return false
+		}
+		relativePath = strings.TrimPrefix(path, rule.baseDir+"/")
+	}
+	if rule.directory {
+		if relativePath == rule.pattern || strings.HasPrefix(relativePath, rule.pattern+"/") {
+			return true
+		}
+	}
+	if strings.Contains(rule.pattern, "/") {
+		return globMatchPath(rule.pattern, relativePath)
+	}
+	for _, segment := range strings.Split(relativePath, "/") {
+		if globMatchPath(rule.pattern, segment) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesAnyRepositoryPattern(patterns []string, path string) bool {
+	for _, pattern := range patterns {
+		if repositoryPatternMatches(pattern, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func repositoryPatternMatches(pattern, path string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+	directory := strings.HasSuffix(pattern, "/")
+	pattern = strings.TrimSuffix(pattern, "/")
+	pattern = strings.TrimPrefix(pattern, "./")
+	pattern = strings.TrimPrefix(pattern, "/")
+	if pattern == "" {
+		return false
+	}
+	if directory && (path == pattern || strings.HasPrefix(path, pattern+"/")) {
+		return true
+	}
+	if strings.Contains(pattern, "/") {
+		return globMatchPath(pattern, path)
+	}
+	for _, segment := range strings.Split(path, "/") {
+		if globMatchPath(pattern, segment) {
+			return true
+		}
+	}
+	return false
+}
+
+func globMatchPath(pattern, path string) bool {
+	parts := make([]string, 0, len(pattern)+2)
+	parts = append(parts, "^")
+	for index := 0; index < len(pattern); {
+		runeValue, runeSize := utf8.DecodeRuneInString(pattern[index:])
+		if runeSize == 0 {
+			break
+		}
+		switch runeValue {
+		case '*':
+			nextIndex := index + runeSize
+			nextRune, nextSize := utf8.DecodeRuneInString(pattern[nextIndex:])
+			if nextRune == '*' {
+				index = nextIndex + nextSize
+				if index < len(pattern) && pattern[index] == '/' {
+					parts = append(parts, "(?:.*/)?")
+					index++
+				} else {
+					parts = append(parts, ".*")
+				}
+			} else {
+				parts = append(parts, "[^/]*")
+				index = nextIndex
+			}
+		case '?':
+			parts = append(parts, "[^/]")
+			index += runeSize
+		default:
+			parts = append(parts, regexp.QuoteMeta(string(runeValue)))
+			index += runeSize
+		}
+	}
+	parts = append(parts, "$")
+	compiled, err := regexp.Compile(strings.Join(parts, ""))
+	return err == nil && compiled.MatchString(path)
 }
 
 func (c *Client) fetchFile(ctx context.Context, spec Spec, token string, entry treeEntry) (File, error) {
