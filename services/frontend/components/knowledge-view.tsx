@@ -257,37 +257,49 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
       }
     }, [hasPendingRemoteSources, onChange])
 
-    async function uploadFile(file: File) {
-      if (file.size > 25 * 1024 * 1024) {
-        setNotice("Files are limited to 25 MB.")
+    async function uploadFiles(files: File[]) {
+      if (files.some((file) => file.size > 25 * 1024 * 1024)) {
+        setNotice("Each file is limited to 25 MB.")
         if (fileInputRef.current) fileInputRef.current.value = ""
         return
       }
-      if (!isSupportedKnowledgeFile(file)) {
+      if (files.some((file) => !isSupportedKnowledgeFile(file))) {
         setNotice(
-          "Unsupported attachment. Use PDF, Markdown, text, HTML, or JSON; images and media are not supported."
+          "Unsupported attachment. Use PDF, Office, OpenDocument, email, or a text-based format."
         )
         if (fileInputRef.current) fileInputRef.current.value = ""
         return
       }
       setUploading(true)
       setNotice("")
-      const form = new FormData()
-      form.append("file", file)
-      form.append("title", title || file.name)
-      form.append(
-        "scopeType",
-        canManageOrganization || scopeType !== "organization"
-          ? scopeType
-          : "user"
-      )
       try {
-        const result = await api.upload<KnowledgeSource>(
-          "/api/v1/knowledge/sources",
-          form
+        const results = await Promise.allSettled(
+          files.map((file) => {
+            const form = new FormData()
+            form.append("file", file)
+            form.append(
+              "title",
+              files.length === 1 && title ? title : file.name
+            )
+            form.append(
+              "scopeType",
+              canManageOrganization || scopeType !== "organization"
+                ? scopeType
+                : "user"
+            )
+            return api.upload<KnowledgeSource>(
+              "/api/v1/knowledge/sources",
+              form
+            )
+          })
         )
-        onChange([result, ...sources])
-        setNotice(`${file.name} queued for indexing.`)
+        const uploaded = results.flatMap((result) =>
+          result.status === "fulfilled" ? [result.value] : []
+        )
+        onChange([...uploaded.reverse(), ...sources])
+        setNotice(
+          `${uploaded.length} of ${files.length} files queued for indexing.`
+        )
       } catch (caught) {
         if (caught instanceof APIError) {
           setNotice(`Upload failed: ${caught.message}`)
@@ -395,11 +407,12 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.md,.markdown,.txt,.html,.htm,.json,text/*,application/pdf,application/json"
+          multiple
+          accept=".pdf,.csv,.md,.markdown,.txt,.html,.htm,.json,.xml,.yaml,.yml,.rtf,.eml,.msg,.docx,.docm,.xlsx,.xlsm,.pptx,.pptm,.odt,.ods,.odp,.epub,text/*,application/pdf,application/json,message/rfc822,application/vnd.ms-outlook"
           className="hidden"
           onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) void uploadFile(file)
+            const files = Array.from(event.target.files ?? [])
+            if (files.length) void uploadFiles(files)
           }}
         />
 
@@ -861,19 +874,19 @@ function isSupportedKnowledgeFile(file: File) {
   const name = file.name.toLowerCase()
   const type = file.type.toLowerCase().split(";", 1)[0]
   if (
-    type.startsWith("image/") ||
     type.startsWith("audio/") ||
     type.startsWith("video/") ||
-    /\.(png|jpe?g|gif|webp|svg|bmp|ico|heic|mp3|wav|ogg|m4a|mp4|mov|webm|avi)$/.test(
-      name
-    )
+    /\.(mp3|wav|ogg|m4a|mp4|mov|webm|avi)$/.test(name)
   ) {
     return false
   }
   return (
     type.startsWith("text/") ||
+    type.startsWith("image/") ||
     type === "application/pdf" ||
     type === "application/json" ||
-    /\.(pdf|md|markdown|txt|html?|json)$/.test(name)
+    /\.(pdf|csv|md|markdown|txt|html?|json|xml|ya?ml|rtf|eml|msg|docx|docm|xlsx|xlsm|pptx|pptm|odt|ods|odp|epub|png|jpe?g|gif|webp|svg|bmp|ico|heic)$/.test(
+      name
+    )
   )
 }

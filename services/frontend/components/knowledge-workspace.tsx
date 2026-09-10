@@ -54,6 +54,7 @@ import type {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Card,
   CardContent,
@@ -290,6 +291,18 @@ function canDeleteKnowledgeItem(item: KnowledgeItem) {
   return ["source", "note", "memory", "repository", "transcript"].includes(
     item.resourceType
   )
+}
+
+function knowledgeItemDeleteEndpoint(item: KnowledgeItem) {
+  return item.resourceType === "source"
+    ? `/api/v1/knowledge/sources/${item.resourceId}`
+    : item.resourceType === "note"
+      ? `/api/v1/notes/${item.resourceId}`
+      : item.resourceType === "memory"
+        ? `/api/v1/memories/${item.resourceId}`
+        : item.resourceType === "repository"
+          ? `/api/v1/knowledge/repositories/${item.resourceId}`
+          : `/api/v1/transcription/sessions/${item.resourceId}`
 }
 
 function itemStatusLabel(status: string) {
@@ -762,7 +775,10 @@ export function KnowledgeWorkspace({
   const [folderDeleteTarget, setFolderDeleteTarget] =
     useState<KnowledgeSpace | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [recentUploadIds, setRecentUploadIds] = useState<Set<string>>(new Set())
   const [nextCursor, setNextCursor] = useState("")
   const [totalCount, setTotalCount] = useState<number>()
   const [loadingMore, setLoadingMore] = useState(false)
@@ -1131,6 +1147,83 @@ export function KnowledgeWorkspace({
   }, [load])
 
   useEffect(() => {
+    const hasPendingSources = sources.some(
+      (source) => source.status === "queued" || source.status === "processing"
+    )
+    if (!hasPendingSources) return
+
+    let cancelled = false
+    const refreshSourceProgress = async () => {
+      try {
+        const result = await api.get<{ sources: KnowledgeSource[] }>(
+          "/api/v1/knowledge/sources?limit=100"
+        )
+        if (cancelled) return
+        const refreshedById = new Map(
+          result.sources.map((source) => [source.id, source])
+        )
+        const refreshedSources = sources.map(
+          (source) => refreshedById.get(source.id) ?? source
+        )
+        const sourceStateChanged = refreshedSources.some((source, index) => {
+          const previous = sources[index]
+          return (
+            source.status !== previous?.status ||
+            source.progress !== previous?.progress ||
+            source.stage !== previous?.stage ||
+            source.error !== previous?.error ||
+            source.updatedAt !== previous?.updatedAt
+          )
+        })
+        if (sourceStateChanged) onSourcesChange(refreshedSources)
+        setItems((current) =>
+          current.map((item) => {
+            if (item.resourceType !== "source") return item
+            const source = refreshedById.get(item.resourceId)
+            return source
+              ? { ...item, status: source.status, updatedAt: source.updatedAt }
+              : item
+          })
+        )
+
+        if (recentUploadIds.size > 0) {
+          const uploaded = refreshedSources.filter((source) =>
+            recentUploadIds.has(source.id)
+          )
+          if (
+            uploaded.length === recentUploadIds.size &&
+            uploaded.every(
+              (source) =>
+                source.status === "ready" || source.status === "failed"
+            )
+          ) {
+            const ready = uploaded.filter(
+              (source) => source.status === "ready"
+            ).length
+            const failed = uploaded.length - ready
+            setNotice(
+              `${ready} uploaded file${ready === 1 ? " is" : "s are"} indexed and ready${failed ? `; ${failed} failed during indexing` : ""}.`
+            )
+            setRecentUploadIds(new Set())
+          }
+        }
+      } catch {
+        // Keep the last known state; the next poll can recover automatically.
+      }
+    }
+
+    void refreshSourceProgress()
+    const interval = window.setInterval(
+      () => void refreshSourceProgress(),
+      1500
+    )
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [onSourcesChange, recentUploadIds, sources])
+
+  useEffect(() => {
     if (activeView !== "connections") return
     const timer = window.setTimeout(() => void loadConnections(), 0)
     return () => window.clearTimeout(timer)
@@ -1346,8 +1439,8 @@ export function KnowledgeWorkspace({
     return () => window.clearTimeout(timer)
   }, [selectedMemory?.content])
 
-  async function uploadFile(file: File) {
-    if (!file || busy) return
+  async function uploadFiles(files: File[]) {
+    if (!files.length || busy) return
     const acceptedExtensions = new Set([
       "pdf",
       "csv",
@@ -1357,46 +1450,96 @@ export function KnowledgeWorkspace({
       "html",
       "htm",
       "json",
+      "xml",
+      "yaml",
+      "yml",
+      "rtf",
+      "eml",
+      "msg",
+      "docx",
+      "docm",
+      "xlsx",
+      "xlsm",
+      "pptx",
+      "pptm",
+      "odt",
+      "ods",
+      "odp",
+      "epub",
+      "png",
+      "jpg",
+      "jpeg",
+      "gif",
+      "webp",
+      "svg",
+      "heic",
     ])
-    const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
-    const acceptedMime =
-      file.type === "application/pdf" ||
-      file.type === "application/json" ||
-      file.type === "text/csv" ||
-      file.type.startsWith("text/")
-    if (!acceptedExtensions.has(extension) && !acceptedMime) {
-      setError("Choose a PDF, CSV, Markdown, text, HTML, or JSON file.")
+    const rejected = files.filter((file) => {
+      const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
+      return (
+        !acceptedExtensions.has(extension) && !file.type.startsWith("text/")
+      )
+    })
+    if (rejected.length) {
+      setError(`Unsupported: ${rejected.map((file) => file.name).join(", ")}.`)
       return
     }
-    if (file.size > 25 * 1024 * 1024) {
-      setError("Files are limited to 25 MB.")
+    const oversized = files.filter((file) => file.size > 25 * 1024 * 1024)
+    if (oversized.length) {
+      setError(
+        `Files are limited to 25 MB: ${oversized.map((file) => file.name).join(", ")}.`
+      )
       return
     }
     setBusy(true)
     setNotice("")
     setError("")
-    const form = new FormData()
-    form.append("file", file)
-    form.append("title", file.name)
-    form.append(
-      "scopeType",
-      selectedSpace?.visibility === "workspace" ? "organization" : "user"
-    )
-    if (selectedSpace) form.append("spaceId", selectedSpace.id)
     try {
-      const result = await api.upload<KnowledgeSource>(
-        "/api/v1/knowledge/sources",
-        form
+      const results = await Promise.allSettled(
+        files.map((file) => {
+          const form = new FormData()
+          form.append("file", file)
+          form.append("title", file.name)
+          form.append(
+            "scopeType",
+            selectedSpace?.visibility === "workspace" ? "organization" : "user"
+          )
+          if (selectedSpace) form.append("spaceId", selectedSpace.id)
+          return api.upload<KnowledgeSource>("/api/v1/knowledge/sources", form)
+        })
       )
-      onSourcesChange([result, ...sources])
-      setNotice(`${file.name} queued for indexing.`)
+      const uploaded = results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : []
+      )
+      const failed = results.length - uploaded.length
+      if (uploaded.length) {
+        onSourcesChange([...uploaded.reverse(), ...sources])
+        setRecentUploadIds(new Set(uploaded.map((source) => source.id)))
+      }
+      setNotice(
+        `Upload complete: ${uploaded.length} of ${files.length} files received and queued for indexing${failed ? `; ${failed} failed to upload` : ""}.`
+      )
+      if (failed)
+        setError(
+          results
+            .flatMap((result) =>
+              result.status === "rejected"
+                ? [
+                    result.reason instanceof Error
+                      ? result.reason.message
+                      : "Upload failed",
+                  ]
+                : []
+            )
+            .join(" · ")
+        )
       await load()
-      setAddOpen(false)
+      if (!failed) setAddOpen(false)
     } catch (caught) {
       setError(
         caught instanceof APIError
           ? caught.message
-          : "The file could not be uploaded."
+          : "The files could not be uploaded."
       )
     } finally {
       setBusy(false)
@@ -2042,17 +2185,7 @@ export function KnowledgeWorkspace({
     if (!canDeleteKnowledgeItem(item) || deleteBusy) return
     setDeleteBusy(true)
     try {
-      const endpoint =
-        item.resourceType === "source"
-          ? `/api/v1/knowledge/sources/${item.resourceId}`
-          : item.resourceType === "note"
-            ? `/api/v1/notes/${item.resourceId}`
-            : item.resourceType === "memory"
-              ? `/api/v1/memories/${item.resourceId}`
-              : item.resourceType === "repository"
-                ? `/api/v1/knowledge/repositories/${item.resourceId}`
-                : `/api/v1/transcription/sessions/${item.resourceId}`
-      await api.delete(endpoint)
+      await api.delete(knowledgeItemDeleteEndpoint(item))
       setItems((current) =>
         current.filter((candidate) => candidate.id !== item.id)
       )
@@ -2094,6 +2227,48 @@ export function KnowledgeWorkspace({
           ? caught.message
           : "The item could not be deleted."
       )
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
+
+  async function deleteSelectedItems() {
+    const targets = items.filter(
+      (item) => selectedItemIds.has(item.id) && canDeleteKnowledgeItem(item)
+    )
+    if (!targets.length || deleteBusy) return
+    setDeleteBusy(true)
+    setError("")
+    try {
+      const results = await Promise.allSettled(
+        targets.map((item) => api.delete(knowledgeItemDeleteEndpoint(item)))
+      )
+      const deletedIds = new Set(
+        targets.flatMap((item, index) =>
+          results[index]?.status === "fulfilled" ? [item.id] : []
+        )
+      )
+      const deletedResourceIds = new Set(
+        targets
+          .filter((item) => deletedIds.has(item.id))
+          .map((item) => item.resourceId)
+      )
+      setItems((current) => current.filter((item) => !deletedIds.has(item.id)))
+      onSourcesChange(
+        sources.filter((source) => !deletedResourceIds.has(source.id))
+      )
+      onNotesChange(notes.filter((note) => !deletedResourceIds.has(note.id)))
+      setSelectedItemIds(new Set())
+      setBulkDeleteOpen(false)
+      const failed = targets.length - deletedIds.size
+      setNotice(
+        `${deletedIds.size} item${deletedIds.size === 1 ? "" : "s"} deleted${failed ? `; ${failed} failed` : ""}.`
+      )
+      if (failed)
+        setError(
+          "Some selected items could not be deleted. Reload and try again."
+        )
+      await load()
     } finally {
       setDeleteBusy(false)
     }
@@ -2151,11 +2326,12 @@ export function KnowledgeWorkspace({
         aria-label="Upload knowledge file"
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.csv,.md,.markdown,.txt,.html,.htm,.json,text/*,application/pdf,application/json,application/vnd.ms-excel"
+        multiple
+        accept=".pdf,.csv,.md,.markdown,.txt,.html,.htm,.json,.xml,.yaml,.yml,.rtf,.eml,.msg,.docx,.docm,.xlsx,.xlsm,.pptx,.pptm,.odt,.ods,.odp,.epub,image/*,text/*,application/pdf,application/json,message/rfc822,application/vnd.ms-outlook"
         className="hidden"
         onChange={(event) => {
-          const file = event.target.files?.[0]
-          if (file) void uploadFile(file)
+          const files = Array.from(event.target.files ?? [])
+          if (files.length) void uploadFiles(files)
         }}
       />
       <PageHeader>
@@ -2454,6 +2630,50 @@ export function KnowledgeWorkspace({
                     </SelectContent>
                   </Select>
                 </FilterBar>
+                <div className="flex min-h-8 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      aria-label="Select all visible items"
+                      className="border-muted-foreground/50 bg-background shadow-xs"
+                      checked={
+                        visibleItems.length > 0 &&
+                        visibleItems.every((item) =>
+                          selectedItemIds.has(item.id)
+                        )
+                      }
+                      onCheckedChange={(checked) => {
+                        setSelectedItemIds((current) => {
+                          const next = new Set(current)
+                          for (const item of visibleItems) {
+                            if (checked) next.add(item.id)
+                            else next.delete(item.id)
+                          }
+                          return next
+                        })
+                      }}
+                    />
+                    <span>Select visible</span>
+                  </div>
+                  {selectedItemIds.size > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span>{selectedItemIds.size} selected</span>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => setBulkDeleteOpen(true)}
+                      >
+                        <Trash2 /> Delete selected
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setSelectedItemIds(new Set())}
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </CardHeader>
               <ContextMenu>
                 <ContextMenuTrigger className="block min-h-96">
@@ -2478,8 +2698,8 @@ export function KnowledgeWorkspace({
                     onDrop={(event) => {
                       event.preventDefault()
                       setDraggingFiles(false)
-                      const file = event.dataTransfer.files?.[0]
-                      if (file) void uploadFile(file)
+                      const files = Array.from(event.dataTransfer.files ?? [])
+                      if (files.length) void uploadFiles(files)
                     }}
                   >
                     <button
@@ -2499,11 +2719,11 @@ export function KnowledgeWorkspace({
                       <span>
                         <span className="block text-sm font-medium">
                           {busy
-                            ? "Uploading file…"
-                            : "Drop a file here or click to upload"}
+                            ? "Uploading files…"
+                            : "Drop files here or click to upload"}
                         </span>
                         <span className="block text-xs text-muted-foreground">
-                          PDF, CSV, Markdown, text, HTML or JSON · up to 25 MB
+                          PDF, Office, email, OpenDocument and text · 25 MB each
                         </span>
                       </span>
                     </button>
@@ -2683,39 +2903,57 @@ export function KnowledgeWorkspace({
                                       aria-hidden="true"
                                     />
                                   </span>
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger
-                                      render={
-                                        <Button
-                                          aria-label={`Actions for ${item.title}`}
-                                          size="icon-sm"
-                                          variant="ghost"
-                                        />
+                                  <div className="flex items-center gap-1">
+                                    <Checkbox
+                                      aria-label={`Select ${item.title}`}
+                                      className="border-muted-foreground/50 bg-background shadow-xs"
+                                      checked={selectedItemIds.has(item.id)}
+                                      onClick={(event) =>
+                                        event.stopPropagation()
                                       }
-                                    >
-                                      <MoreHorizontal />
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem
-                                        onClick={() => openInspector(item)}
+                                      onCheckedChange={(checked) =>
+                                        setSelectedItemIds((current) => {
+                                          const next = new Set(current)
+                                          if (checked) next.add(item.id)
+                                          else next.delete(item.id)
+                                          return next
+                                        })
+                                      }
+                                    />
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger
+                                        render={
+                                          <Button
+                                            aria-label={`Actions for ${item.title}`}
+                                            size="icon-sm"
+                                            variant="ghost"
+                                          />
+                                        }
                                       >
-                                        <Search /> Open details
-                                      </DropdownMenuItem>
-                                      {canDeleteKnowledgeItem(item) && (
-                                        <>
-                                          <DropdownMenuSeparator />
-                                          <DropdownMenuItem
-                                            variant="destructive"
-                                            onClick={() =>
-                                              setDeleteTarget(item)
-                                            }
-                                          >
-                                            <Trash2 /> Delete
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
+                                        <MoreHorizontal />
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem
+                                          onClick={() => openInspector(item)}
+                                        >
+                                          <Search /> Open details
+                                        </DropdownMenuItem>
+                                        {canDeleteKnowledgeItem(item) && (
+                                          <>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem
+                                              variant="destructive"
+                                              onClick={() =>
+                                                setDeleteTarget(item)
+                                              }
+                                            >
+                                              <Trash2 /> Delete
+                                            </DropdownMenuItem>
+                                          </>
+                                        )}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
                                 </div>
                                 <button
                                   className="w-full truncate text-left text-sm font-medium"
@@ -2736,10 +2974,21 @@ export function KnowledgeWorkspace({
                                   </span>
                                 </div>
                                 {pending && (
-                                  <Progress
-                                    className="mt-2 h-1"
-                                    value={source?.progress ?? 0}
-                                  />
+                                  <div className="mt-2 flex flex-col gap-1.5">
+                                    <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                      <span>
+                                        {source?.status === "queued"
+                                          ? "Upload complete · Waiting to index"
+                                          : `Indexing${source?.stage ? ` · ${source.stage.replace(/[-_]/g, " ")}` : ""}`}
+                                      </span>
+                                      {source?.status === "processing" && (
+                                        <span className="tabular-nums">
+                                          {Math.round(source.progress ?? 0)}%
+                                        </span>
+                                      )}
+                                    </div>
+                                    <Progress value={source?.progress ?? 0} />
+                                  </div>
                                 )}
                               </ContextMenuTrigger>
                               <ContextMenuContent className="w-44">
@@ -2848,9 +3097,7 @@ export function KnowledgeWorkspace({
                   const result = await api.post<{
                     status: string
                     alreadyRunning?: boolean
-                  }>(
-                    `/api/v1/knowledge/repositories/${connection.id}/sync`
-                  )
+                  }>(`/api/v1/knowledge/repositories/${connection.id}/sync`)
                   setNotice(
                     result.alreadyRunning
                       ? "Repository sync is already in progress."
@@ -3946,7 +4193,8 @@ export function KnowledgeWorkspace({
                     <>
                       {repositories.find(
                         (repository) => repository.id === repositoryEditId
-                      )?.fileCount ?? 0} indexed files currently.{" "}
+                      )?.fileCount ?? 0}{" "}
+                      indexed files currently.{" "}
                     </>
                   ) : (
                     "New connection will be checked before indexing. "
@@ -3997,6 +4245,17 @@ export function KnowledgeWorkspace({
         onConfirm={() => {
           if (deleteTarget) return deleteKnowledgeItem(deleteTarget)
         }}
+      />
+      <ConfirmActionDialog
+        open={bulkDeleteOpen}
+        title={`Delete ${selectedItemIds.size} selected item${selectedItemIds.size === 1 ? "" : "s"}?`}
+        description="The selected files and knowledge items will be permanently removed. Connected remote repositories are only disconnected; their remote contents are not changed."
+        confirmLabel="Delete selected"
+        pending={deleteBusy}
+        onOpenChange={(open) => {
+          if (!deleteBusy) setBulkDeleteOpen(open)
+        }}
+        onConfirm={deleteSelectedItems}
       />
       <ConfirmActionDialog
         open={Boolean(folderDeleteTarget)}
@@ -4153,11 +4412,7 @@ function KnowledgeConnections({
       </CardHeader>
       <CardContent className="min-h-96 overflow-y-auto p-4">
         {connectionError && (
-          <Alert
-            aria-live="polite"
-            role="alert"
-            variant="destructive"
-          >
+          <Alert aria-live="polite" role="alert" variant="destructive">
             <X />
             <AlertTitle>Connections could not be loaded</AlertTitle>
             <AlertDescription>{connectionError}</AlertDescription>

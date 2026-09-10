@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -1666,6 +1667,7 @@ const (
 func ExtractUploadContext(ctx context.Context, filename, mimeType string, body []byte) (string, error) {
 	lowerName := strings.ToLower(filename)
 	lowerMime := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+	extension := strings.ToLower(filepath.Ext(lowerName))
 	if strings.HasPrefix(lowerMime, "image/") || imageExtension(lowerName) {
 		if len(body) == 0 {
 			return "", fmt.Errorf("image attachment is empty")
@@ -1679,9 +1681,24 @@ func ExtractUploadContext(ctx context.Context, filename, mimeType string, body [
 	if strings.HasPrefix(lowerMime, "audio/") || strings.HasPrefix(lowerMime, "video/") || mediaExtension(lowerName) {
 		return "", fmt.Errorf("audio and video attachments must be transcribed before they can be added as Knowledge")
 	}
-	allowedText := lowerMime == "" || strings.HasPrefix(lowerMime, "text/") || lowerMime == "application/json" || lowerMime == "application/pdf" || lowerMime == "application/vnd.ms-excel" || strings.HasSuffix(lowerName, ".md") || strings.HasSuffix(lowerName, ".markdown") || strings.HasSuffix(lowerName, ".txt") || strings.HasSuffix(lowerName, ".html") || strings.HasSuffix(lowerName, ".htm") || strings.HasSuffix(lowerName, ".json") || strings.HasSuffix(lowerName, ".csv") || strings.HasSuffix(lowerName, ".pdf")
+	if extension == ".msg" {
+		return extractMSG(body)
+	}
+	if extension == ".eml" {
+		return extractEML(body)
+	}
+	if extension == ".rtf" {
+		return extractRTF(body), nil
+	}
+	if extension == ".docx" || extension == ".docm" || extension == ".dotx" || extension == ".xlsx" || extension == ".xlsm" || extension == ".xltx" || extension == ".pptx" || extension == ".pptm" || extension == ".potx" {
+		return extractOOXML(filename, body)
+	}
+	if extension == ".odt" || extension == ".ods" || extension == ".odp" || extension == ".epub" {
+		return extractOpenDocument(body)
+	}
+	allowedText := lowerMime == "" || strings.HasPrefix(lowerMime, "text/") || lowerMime == "application/json" || lowerMime == "application/pdf" || lowerMime == "application/xml" || lowerMime == "application/yaml" || lowerMime == "application/vnd.ms-excel" || strings.HasSuffix(lowerName, ".md") || strings.HasSuffix(lowerName, ".markdown") || strings.HasSuffix(lowerName, ".txt") || strings.HasSuffix(lowerName, ".html") || strings.HasSuffix(lowerName, ".htm") || strings.HasSuffix(lowerName, ".json") || strings.HasSuffix(lowerName, ".csv") || strings.HasSuffix(lowerName, ".pdf") || strings.HasSuffix(lowerName, ".xml") || strings.HasSuffix(lowerName, ".yaml") || strings.HasSuffix(lowerName, ".yml")
 	if !allowedText {
-		return "", fmt.Errorf("unsupported attachment type; use PDF, CSV, Markdown, text, HTML, or JSON")
+		return "", fmt.Errorf("unsupported attachment type; use PDF, Office/OpenDocument, email, CSV, Markdown, text, HTML, XML, YAML, or JSON")
 	}
 	if strings.HasSuffix(lowerName, ".pdf") || strings.Contains(lowerMime, "pdf") {
 		parseContext, cancel := context.WithTimeout(ctx, pdfExtractionTimeout)

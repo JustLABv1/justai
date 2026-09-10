@@ -529,7 +529,7 @@ function createAttachmentAdapter(
   const uploadControllers = new Map<string, AbortController>()
 
   return {
-    accept: `${supportsVision ? "image/*," : ""}text/plain,text/markdown,text/html,text/csv,application/json,application/pdf,.csv`,
+    accept: `${supportsVision ? "image/*," : ""}text/plain,text/markdown,text/html,text/csv,application/json,application/pdf,message/rfc822,application/vnd.ms-outlook,.csv,.xml,.yaml,.yml,.rtf,.eml,.msg,.docx,.docm,.xlsx,.xlsm,.pptx,.pptm,.odt,.ods,.odp,.epub`,
     async *add({ file }) {
       const attachment: PendingAttachment = {
         id: crypto.randomUUID(),
