@@ -14,6 +14,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/lmittmann/tint v1.2.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/richardlehane/mscfb v1.0.8
 	github.com/signintech/gopdf v0.38.0
 	golang.org/x/crypto v0.56.0
 	golang.org/x/image v0.45.0
@@ -45,6 +46,7 @@ require (
 	github.com/pkg/errors v0.8.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.1 // indirect
+	github.com/richardlehane/msoleps v1.0.3 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect

@@ -1,8 +1,11 @@
 package rag
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -10,6 +13,25 @@ import (
 
 	"justai-backend/models"
 )
+
+func zippedDocument(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var body bytes.Buffer
+	archive := zip.NewWriter(&body)
+	for name, content := range files {
+		file, err := archive.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body.Bytes()
+}
 
 func TestExplicitAttachmentSearchDoesNotRequireKnowledgeCatalogRow(t *testing.T) {
 	database, mock, err := sqlmock.New()
@@ -51,6 +73,30 @@ func TestExtractUploadContextAcceptsCSVWithGenericMIME(t *testing.T) {
 	}
 	if content != string(body[:len(body)-1]) {
 		t.Fatalf("unexpected CSV content: %q", content)
+	}
+}
+
+func TestExtractUploadContextAcceptsDOCX(t *testing.T) {
+	body := zippedDocument(t, map[string]string{
+		"word/document.xml": `<?xml version="1.0"?><w:document xmlns:w="urn:test"><w:body><w:p><w:r><w:t>Quarterly report</w:t></w:r></w:p><w:p><w:r><w:t>Revenue grew</w:t></w:r></w:p></w:body></w:document>`,
+	})
+	content, err := ExtractUploadContext(context.Background(), "report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "Quarterly report") || !strings.Contains(content, "Revenue grew") {
+		t.Fatalf("unexpected DOCX content: %q", content)
+	}
+}
+
+func TestExtractUploadContextAcceptsEML(t *testing.T) {
+	body := []byte("From: sender@example.com\r\nTo: team@example.com\r\nSubject: Launch plan\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nShip on Friday.\r\n")
+	content, err := ExtractUploadContext(context.Background(), "launch.eml", "message/rfc822", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "Subject: Launch plan") || !strings.Contains(content, "Ship on Friday") {
+		t.Fatalf("unexpected EML content: %q", content)
 	}
 }
 
