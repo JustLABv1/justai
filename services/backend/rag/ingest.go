@@ -48,6 +48,7 @@ const (
 	defaultConversationSearchLimit = 6
 	maxConversationSearchLimit     = 12
 	maxDeepContextCandidateLimit   = DeepContextLimit * 2
+	workerHeartbeatInterval        = 15 * time.Second
 )
 
 // AttachedDocumentContextLimit gives an explicitly uploaded document a broad
@@ -73,6 +74,21 @@ func (w *Worker) SetHeartbeat(heartbeat func()) {
 func (w *Worker) Start(ctx context.Context) {
 	if w.heartbeat != nil {
 		w.heartbeat()
+		// Heartbeats must not share the ingestion loop. Chunking and provider
+		// calls can legitimately take longer than the readiness stale window;
+		// tying liveness to that work would remove a healthy pod from service.
+		go func() {
+			ticker := time.NewTicker(workerHeartbeatInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					w.heartbeat()
+				}
+			}
+		}()
 	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
@@ -82,9 +98,6 @@ func (w *Worker) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if w.heartbeat != nil {
-					w.heartbeat()
-				}
 				_ = w.processOne(ctx)
 			}
 		}
