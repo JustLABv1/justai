@@ -176,14 +176,20 @@ func (a *App) conversationHasIndexingKnowledge(ctx context.Context, conversation
 			FROM conversation_knowledge_sources cks
 			JOIN knowledge_sources ks ON ks.id = cks.source_id
 			JOIN conversations c ON c.id = cks.conversation_id
-			JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = ks.id
+			LEFT JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = ks.id
 			WHERE cks.conversation_id = $1
 			  AND c.organization_id = $2
-			  AND ki.organization_id = $2
-			  AND (ki.visibility = 'workspace' OR ki.owner_id = $3)
 			  AND CASE WHEN $4 = '' THEN cks.context_scope = 'persistent'
 			           ELSE cks.source_id = ANY(string_to_array($4, ',')::uuid[])
 			      END
+			  -- A selected source is already authorized by its attachment to this
+			  -- conversation. The catalog remains the access boundary for durable
+			  -- background Knowledge, but must not make a message attachment vanish
+			  -- when a user belongs to more than one organization.
+			  AND ($4 <> '' OR (
+			      ki.organization_id = $2
+			      AND (ki.visibility = 'workspace' OR ki.owner_id = $3)
+			  ))
 			  AND ks.status IN ('queued', 'processing')
 		)`, conversationID, organizationID, userID, assistantUISourceIDsCSV(selectedSourceIDs)).Scan(&indexing)
 	return indexing, err
@@ -197,14 +203,16 @@ func (a *App) conversationHasKnowledge(ctx context.Context, conversationID, orga
 			FROM conversation_knowledge_sources cks
 			JOIN knowledge_sources ks ON ks.id = cks.source_id
 			JOIN conversations c ON c.id = cks.conversation_id
-			JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = ks.id
+			LEFT JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = ks.id
 			WHERE cks.conversation_id = $1
 			  AND c.organization_id = $2
-			  AND ki.organization_id = $2
-			  AND (ki.visibility = 'workspace' OR ki.owner_id = $3)
 			  AND CASE WHEN $4 = '' THEN cks.context_scope = 'persistent'
 			           ELSE cks.source_id = ANY(string_to_array($4, ',')::uuid[])
 			      END
+			  AND ($4 <> '' OR (
+			      ki.organization_id = $2
+			      AND (ki.visibility = 'workspace' OR ki.owner_id = $3)
+			  ))
 		) OR EXISTS (
 			SELECT 1
 			FROM conversation_notes cn
