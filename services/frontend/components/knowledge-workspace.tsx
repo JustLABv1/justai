@@ -778,6 +778,7 @@ export function KnowledgeWorkspace({
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [recentUploadIds, setRecentUploadIds] = useState<Set<string>>(new Set())
   const [nextCursor, setNextCursor] = useState("")
   const [totalCount, setTotalCount] = useState<number>()
   const [loadingMore, setLoadingMore] = useState(false)
@@ -1146,6 +1147,83 @@ export function KnowledgeWorkspace({
   }, [load])
 
   useEffect(() => {
+    const hasPendingSources = sources.some(
+      (source) => source.status === "queued" || source.status === "processing"
+    )
+    if (!hasPendingSources) return
+
+    let cancelled = false
+    const refreshSourceProgress = async () => {
+      try {
+        const result = await api.get<{ sources: KnowledgeSource[] }>(
+          "/api/v1/knowledge/sources?limit=100"
+        )
+        if (cancelled) return
+        const refreshedById = new Map(
+          result.sources.map((source) => [source.id, source])
+        )
+        const refreshedSources = sources.map(
+          (source) => refreshedById.get(source.id) ?? source
+        )
+        const sourceStateChanged = refreshedSources.some((source, index) => {
+          const previous = sources[index]
+          return (
+            source.status !== previous?.status ||
+            source.progress !== previous?.progress ||
+            source.stage !== previous?.stage ||
+            source.error !== previous?.error ||
+            source.updatedAt !== previous?.updatedAt
+          )
+        })
+        if (sourceStateChanged) onSourcesChange(refreshedSources)
+        setItems((current) =>
+          current.map((item) => {
+            if (item.resourceType !== "source") return item
+            const source = refreshedById.get(item.resourceId)
+            return source
+              ? { ...item, status: source.status, updatedAt: source.updatedAt }
+              : item
+          })
+        )
+
+        if (recentUploadIds.size > 0) {
+          const uploaded = refreshedSources.filter((source) =>
+            recentUploadIds.has(source.id)
+          )
+          if (
+            uploaded.length === recentUploadIds.size &&
+            uploaded.every(
+              (source) =>
+                source.status === "ready" || source.status === "failed"
+            )
+          ) {
+            const ready = uploaded.filter(
+              (source) => source.status === "ready"
+            ).length
+            const failed = uploaded.length - ready
+            setNotice(
+              `${ready} uploaded file${ready === 1 ? " is" : "s are"} indexed and ready${failed ? `; ${failed} failed during indexing` : ""}.`
+            )
+            setRecentUploadIds(new Set())
+          }
+        }
+      } catch {
+        // Keep the last known state; the next poll can recover automatically.
+      }
+    }
+
+    void refreshSourceProgress()
+    const interval = window.setInterval(
+      () => void refreshSourceProgress(),
+      1500
+    )
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [onSourcesChange, recentUploadIds, sources])
+
+  useEffect(() => {
     if (activeView !== "connections") return
     const timer = window.setTimeout(() => void loadConnections(), 0)
     return () => window.clearTimeout(timer)
@@ -1434,9 +1512,12 @@ export function KnowledgeWorkspace({
         result.status === "fulfilled" ? [result.value] : []
       )
       const failed = results.length - uploaded.length
-      if (uploaded.length) onSourcesChange([...uploaded.reverse(), ...sources])
+      if (uploaded.length) {
+        onSourcesChange([...uploaded.reverse(), ...sources])
+        setRecentUploadIds(new Set(uploaded.map((source) => source.id)))
+      }
       setNotice(
-        `${uploaded.length} of ${files.length} files queued for indexing${failed ? `; ${failed} failed` : ""}.`
+        `Upload complete: ${uploaded.length} of ${files.length} files received and queued for indexing${failed ? `; ${failed} failed to upload` : ""}.`
       )
       if (failed)
         setError(
@@ -2893,10 +2974,21 @@ export function KnowledgeWorkspace({
                                   </span>
                                 </div>
                                 {pending && (
-                                  <Progress
-                                    className="mt-2 h-1"
-                                    value={source?.progress ?? 0}
-                                  />
+                                  <div className="mt-2 flex flex-col gap-1.5">
+                                    <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                      <span>
+                                        {source?.status === "queued"
+                                          ? "Upload complete · Waiting to index"
+                                          : `Indexing${source?.stage ? ` · ${source.stage.replace(/[-_]/g, " ")}` : ""}`}
+                                      </span>
+                                      {source?.status === "processing" && (
+                                        <span className="tabular-nums">
+                                          {Math.round(source.progress ?? 0)}%
+                                        </span>
+                                      )}
+                                    </div>
+                                    <Progress value={source?.progress ?? 0} />
+                                  </div>
                                 )}
                               </ContextMenuTrigger>
                               <ContextMenuContent className="w-44">
