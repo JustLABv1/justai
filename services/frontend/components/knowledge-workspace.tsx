@@ -1,12 +1,18 @@
 "use client"
 
 import { downloadFile } from "@/lib/download-file"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useSearchParams } from "next/navigation"
 import {
   Brain,
   Check,
-  ChevronRight,
   File,
   FileArchive,
   FileAudio2,
@@ -53,8 +59,15 @@ import type {
 } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Card,
   CardContent,
@@ -779,10 +792,24 @@ export function KnowledgeWorkspace({
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [recentUploadIds, setRecentUploadIds] = useState<Set<string>>(new Set())
+  const [sourceProgressById, setSourceProgressById] = useState<
+    Record<string, KnowledgeSource>
+  >({})
   const [nextCursor, setNextCursor] = useState("")
   const [totalCount, setTotalCount] = useState<number>()
   const [loadingMore, setLoadingMore] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const liveSources = useMemo(
+    () => sources.map((source) => sourceProgressById[source.id] ?? source),
+    [sourceProgressById, sources]
+  )
+  const pendingSourceKey = liveSources
+    .filter(
+      (source) => source.status === "queued" || source.status === "processing"
+    )
+    .map((source) => source.id)
+    .sort()
+    .join(",")
 
   const openInspector = useCallback((item: KnowledgeItem) => {
     setSelected(item)
@@ -1147,10 +1174,7 @@ export function KnowledgeWorkspace({
   }, [load])
 
   useEffect(() => {
-    const hasPendingSources = sources.some(
-      (source) => source.status === "queued" || source.status === "processing"
-    )
-    if (!hasPendingSources) return
+    if (!pendingSourceKey) return
 
     let cancelled = false
     const refreshSourceProgress = async () => {
@@ -1162,20 +1186,11 @@ export function KnowledgeWorkspace({
         const refreshedById = new Map(
           result.sources.map((source) => [source.id, source])
         )
-        const refreshedSources = sources.map(
-          (source) => refreshedById.get(source.id) ?? source
-        )
-        const sourceStateChanged = refreshedSources.some((source, index) => {
-          const previous = sources[index]
-          return (
-            source.status !== previous?.status ||
-            source.progress !== previous?.progress ||
-            source.stage !== previous?.stage ||
-            source.error !== previous?.error ||
-            source.updatedAt !== previous?.updatedAt
-          )
+        setSourceProgressById((current) => {
+          const next = { ...current }
+          for (const [id, source] of refreshedById) next[id] = source
+          return next
         })
-        if (sourceStateChanged) onSourcesChange(refreshedSources)
         setItems((current) =>
           current.map((item) => {
             if (item.resourceType !== "source") return item
@@ -1187,7 +1202,7 @@ export function KnowledgeWorkspace({
         )
 
         if (recentUploadIds.size > 0) {
-          const uploaded = refreshedSources.filter((source) =>
+          const uploaded = result.sources.filter((source) =>
             recentUploadIds.has(source.id)
           )
           if (
@@ -1221,7 +1236,7 @@ export function KnowledgeWorkspace({
       cancelled = true
       window.clearInterval(interval)
     }
-  }, [onSourcesChange, recentUploadIds, sources])
+  }, [pendingSourceKey, recentUploadIds])
 
   useEffect(() => {
     if (activeView !== "connections") return
@@ -1364,7 +1379,8 @@ export function KnowledgeWorkspace({
       : null
   const selectedSource =
     selected?.resourceType === "source"
-      ? (sources.find((source) => source.id === selected.resourceId) ?? null)
+      ? (liveSources.find((source) => source.id === selected.resourceId) ??
+        null)
       : null
   const selectedRepository =
     selected?.resourceType === "repository"
@@ -1513,7 +1529,13 @@ export function KnowledgeWorkspace({
       )
       const failed = results.length - uploaded.length
       if (uploaded.length) {
-        onSourcesChange([...uploaded.reverse(), ...sources])
+        const nextSources = [...uploaded.reverse(), ...sources]
+        onSourcesChange(nextSources)
+        setSourceProgressById((current) => {
+          const next = { ...current }
+          for (const source of uploaded) next[source.id] = source
+          return next
+        })
         setRecentUploadIds(new Set(uploaded.map((source) => source.id)))
       }
       setNotice(
@@ -2404,48 +2426,56 @@ export function KnowledgeWorkspace({
           <TabsContent className="min-h-0 flex-1" value="library">
             <Card className="min-h-0 overflow-hidden">
               <CardHeader className="gap-3 border-b px-4 py-3">
-                {selectedSpace && (
-                  <nav
-                    aria-label="Folder path"
-                    className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
-                  >
-                    <button
-                      className="rounded-sm px-1.5 py-1 hover:bg-muted hover:text-foreground"
-                      onClick={() => setSpaceId("all")}
-                      type="button"
-                    >
-                      My files
-                    </button>
-                    {folderPath.slice(0, -1).map((folder) => (
-                      <span
-                        className="flex min-w-0 items-center gap-1"
-                        key={folder.id}
-                      >
-                        <ChevronRight
-                          className="size-3.5 shrink-0"
-                          aria-hidden="true"
-                        />
-                        <button
-                          className={cn(
-                            "truncate rounded-sm px-1.5 py-1 hover:bg-muted hover:text-foreground",
-                            folder.id === selectedSpace.id &&
-                              "font-medium text-foreground"
-                          )}
-                          onClick={() => setSpaceId(folder.id)}
-                          type="button"
-                        >
-                          {folder.name}
-                        </button>
-                      </span>
-                    ))}
-                  </nav>
-                )}
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
                     <CardTitle className="flex items-baseline gap-2 text-sm">
-                      <span className="truncate">
-                        {selectedSpace?.name ?? "My files"}
-                      </span>
+                      {selectedSpace ? (
+                        <Breadcrumb
+                          aria-label="Folder path"
+                          className="min-w-0"
+                        >
+                          <BreadcrumbList className="flex-nowrap">
+                            <BreadcrumbItem>
+                              <BreadcrumbLink
+                                render={
+                                  <button
+                                    onClick={() => setSpaceId("all")}
+                                    type="button"
+                                  />
+                                }
+                              >
+                                My files
+                              </BreadcrumbLink>
+                            </BreadcrumbItem>
+                            {folderPath.map((folder, index) => (
+                              <Fragment key={folder.id}>
+                                <BreadcrumbSeparator />
+                                <BreadcrumbItem className="min-w-0">
+                                  {index === folderPath.length - 1 ? (
+                                    <BreadcrumbPage className="truncate font-medium">
+                                      {folder.name}
+                                    </BreadcrumbPage>
+                                  ) : (
+                                    <BreadcrumbLink
+                                      className="truncate"
+                                      render={
+                                        <button
+                                          onClick={() => setSpaceId(folder.id)}
+                                          type="button"
+                                        />
+                                      }
+                                    >
+                                      {folder.name}
+                                    </BreadcrumbLink>
+                                  )}
+                                </BreadcrumbItem>
+                              </Fragment>
+                            ))}
+                          </BreadcrumbList>
+                        </Breadcrumb>
+                      ) : (
+                        <span className="truncate">My files</span>
+                      )}
                       <span
                         aria-live="polite"
                         className="shrink-0 font-normal text-muted-foreground"
@@ -2629,51 +2659,39 @@ export function KnowledgeWorkspace({
                       <SelectItem value="type">Type</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Button
+                    className="h-9"
+                    disabled={visibleItems.length === 0}
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setSelectedItemIds(
+                        new Set(visibleItems.map((item) => item.id))
+                      )
+                    }
+                  >
+                    <Check data-icon="inline-start" /> Select visible
+                  </Button>
                 </FilterBar>
-                <div className="flex min-h-8 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      aria-label="Select all visible items"
-                      className="border-muted-foreground/50 bg-background shadow-xs"
-                      checked={
-                        visibleItems.length > 0 &&
-                        visibleItems.every((item) =>
-                          selectedItemIds.has(item.id)
-                        )
-                      }
-                      onCheckedChange={(checked) => {
-                        setSelectedItemIds((current) => {
-                          const next = new Set(current)
-                          for (const item of visibleItems) {
-                            if (checked) next.add(item.id)
-                            else next.delete(item.id)
-                          }
-                          return next
-                        })
-                      }}
-                    />
-                    <span>Select visible</span>
+                {selectedItemIds.size > 0 && (
+                  <div className="flex translate-y-0 flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground opacity-100 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transform-none starting:translate-y-1 starting:opacity-0">
+                    <span>{selectedItemIds.size} selected</span>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => setBulkDeleteOpen(true)}
+                    >
+                      <Trash2 /> Delete selected
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setSelectedItemIds(new Set())}
+                    >
+                      Clear
+                    </Button>
                   </div>
-                  {selectedItemIds.size > 0 && (
-                    <div className="flex items-center gap-2">
-                      <span>{selectedItemIds.size} selected</span>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => setBulkDeleteOpen(true)}
-                      >
-                        <Trash2 /> Delete selected
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setSelectedItemIds(new Set())}
-                      >
-                        Clear
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                )}
               </CardHeader>
               <ContextMenu>
                 <ContextMenuTrigger className="block min-h-96">
@@ -2777,7 +2795,18 @@ export function KnowledgeWorkspace({
                             <ContextMenu key={folder.id}>
                               <ContextMenuTrigger
                                 className="group flex min-w-0 cursor-pointer flex-col rounded-xl bg-secondary/70 p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-secondary hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
-                                onDoubleClick={() => setSpaceId(folder.id)}
+                                onClick={() => setSpaceId(folder.id)}
+                                onKeyDown={(event) => {
+                                  if (
+                                    event.key === "Enter" ||
+                                    event.key === " "
+                                  ) {
+                                    event.preventDefault()
+                                    setSpaceId(folder.id)
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
                               >
                                 <div className="mb-3 flex items-start justify-between gap-2">
                                   <span className="flex size-12 items-center justify-center rounded-lg bg-muted text-primary">
@@ -2786,55 +2815,58 @@ export function KnowledgeWorkspace({
                                       aria-hidden="true"
                                     />
                                   </span>
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger
-                                      render={
-                                        <Button
-                                          aria-label={`Actions for ${folder.name}`}
-                                          size="icon-sm"
-                                          variant="ghost"
-                                        />
-                                      }
-                                    >
-                                      <MoreHorizontal />
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem
-                                        onClick={() => setSpaceId(folder.id)}
+                                  <div
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                  >
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger
+                                        render={
+                                          <Button
+                                            aria-label={`Actions for ${folder.name}`}
+                                            size="icon-sm"
+                                            variant="ghost"
+                                          />
+                                        }
                                       >
-                                        <Folder /> Open
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => {
-                                          setSpaceParentId(folder.id)
-                                          setSpaceOpen(true)
-                                        }}
-                                      >
-                                        <FolderPlus /> New subfolder
-                                      </DropdownMenuItem>
-                                      {folder.canManage && (
-                                        <>
-                                          <DropdownMenuSeparator />
-                                          <DropdownMenuItem
-                                            variant="destructive"
-                                            onClick={() =>
-                                              setFolderDeleteTarget(folder)
-                                            }
-                                          >
-                                            <Trash2 /> Delete folder
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
+                                        <MoreHorizontal />
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem
+                                          onClick={() => setSpaceId(folder.id)}
+                                        >
+                                          <Folder /> Open
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onClick={() => {
+                                            setSpaceParentId(folder.id)
+                                            setSpaceOpen(true)
+                                          }}
+                                        >
+                                          <FolderPlus /> New subfolder
+                                        </DropdownMenuItem>
+                                        {folder.canManage && (
+                                          <>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem
+                                              variant="destructive"
+                                              onClick={() =>
+                                                setFolderDeleteTarget(folder)
+                                              }
+                                            >
+                                              <Trash2 /> Delete folder
+                                            </DropdownMenuItem>
+                                          </>
+                                        )}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
                                 </div>
-                                <button
-                                  className="w-full truncate text-left text-sm font-medium"
-                                  onClick={() => setSpaceId(folder.id)}
-                                  type="button"
-                                >
+                                <p className="w-full truncate text-left text-sm font-medium">
                                   {folder.name}
-                                </button>
+                                </p>
                                 <span className="mt-1 text-xs text-muted-foreground">
                                   {folder.itemCount}{" "}
                                   {folder.itemCount === 1 ? "item" : "items"}
@@ -2877,7 +2909,7 @@ export function KnowledgeWorkspace({
                         {visibleItems.map((item) => {
                           const source =
                             item.resourceType === "source"
-                              ? sources.find(
+                              ? liveSources.find(
                                   (candidate) =>
                                     candidate.id === item.resourceId
                                 )
@@ -2889,11 +2921,24 @@ export function KnowledgeWorkspace({
                           return (
                             <ContextMenu key={item.id}>
                               <ContextMenuTrigger
+                                aria-selected={selectedItemIds.has(item.id)}
                                 className={cn(
-                                  "group flex min-w-0 cursor-pointer flex-col rounded-xl bg-secondary/70 p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-secondary hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                                  "group relative flex min-w-0 cursor-pointer flex-col overflow-hidden rounded-xl bg-secondary/70 p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] hover:-translate-y-0.5 hover:bg-secondary hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none active:scale-[0.99] motion-reduce:transform-none",
+                                  selectedItemIds.has(item.id) &&
+                                    "bg-primary/10 shadow-md ring-2 ring-primary/50",
+                                  pending &&
+                                    "before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:animate-pulse before:bg-primary motion-reduce:before:animate-none",
                                   selected?.id === item.id &&
                                     "ring-2 ring-primary/30"
                                 )}
+                                onClick={() =>
+                                  setSelectedItemIds((current) => {
+                                    const next = new Set(current)
+                                    if (next.has(item.id)) next.delete(item.id)
+                                    else next.add(item.id)
+                                    return next
+                                  })
+                                }
                                 onDoubleClick={() => openInspector(item)}
                               >
                                 <div className="mb-3 flex items-start justify-between gap-2">
@@ -2903,23 +2948,10 @@ export function KnowledgeWorkspace({
                                       aria-hidden="true"
                                     />
                                   </span>
-                                  <div className="flex items-center gap-1">
-                                    <Checkbox
-                                      aria-label={`Select ${item.title}`}
-                                      className="border-muted-foreground/50 bg-background shadow-xs"
-                                      checked={selectedItemIds.has(item.id)}
-                                      onClick={(event) =>
-                                        event.stopPropagation()
-                                      }
-                                      onCheckedChange={(checked) =>
-                                        setSelectedItemIds((current) => {
-                                          const next = new Set(current)
-                                          if (checked) next.add(item.id)
-                                          else next.delete(item.id)
-                                          return next
-                                        })
-                                      }
-                                    />
+                                  <div
+                                    className="flex items-center gap-1"
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
                                     <DropdownMenu>
                                       <DropdownMenuTrigger
                                         render={
@@ -2955,13 +2987,9 @@ export function KnowledgeWorkspace({
                                     </DropdownMenu>
                                   </div>
                                 </div>
-                                <button
-                                  className="w-full truncate text-left text-sm font-medium"
-                                  onClick={() => openInspector(item)}
-                                  type="button"
-                                >
+                                <p className="w-full truncate text-left text-sm font-medium">
                                   {item.title}
-                                </button>
+                                </p>
                                 <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                                   <span className="truncate">
                                     {typeLabels[item.resourceType] ??
@@ -2976,7 +3004,8 @@ export function KnowledgeWorkspace({
                                 {pending && (
                                   <div className="mt-2 flex flex-col gap-1.5">
                                     <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                                      <span>
+                                      <span className="flex items-center gap-1.5">
+                                        <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" />
                                         {source?.status === "queued"
                                           ? "Upload complete · Waiting to index"
                                           : `Indexing${source?.stage ? ` · ${source.stage.replace(/[-_]/g, " ")}` : ""}`}
@@ -2993,6 +3022,26 @@ export function KnowledgeWorkspace({
                               </ContextMenuTrigger>
                               <ContextMenuContent className="w-44">
                                 <ContextMenuGroup>
+                                  <ContextMenuItem
+                                    onClick={() =>
+                                      setSelectedItemIds((current) => {
+                                        const next = new Set(current)
+                                        if (next.has(item.id))
+                                          next.delete(item.id)
+                                        else next.add(item.id)
+                                        return next
+                                      })
+                                    }
+                                  >
+                                    {selectedItemIds.has(item.id) ? (
+                                      <X />
+                                    ) : (
+                                      <Check />
+                                    )}
+                                    {selectedItemIds.has(item.id)
+                                      ? "Deselect"
+                                      : "Select"}
+                                  </ContextMenuItem>
                                   <ContextMenuItem
                                     onClick={() => openInspector(item)}
                                   >
