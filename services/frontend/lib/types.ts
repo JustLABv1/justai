@@ -222,6 +222,20 @@ export type User = {
   suspendedAt?: string | null
   suspendedReason?: string
   lastLoginAt?: string | null
+  avatarUrl?: string
+}
+
+export type ProfileData = {
+  createdAt: string
+  avatarUrl: string
+  activity: Array<{ date: string; count: number }>
+  stats: {
+    conversations: number
+    prompts: number
+    notes: number
+    agentRuns: number
+    transcriptionMinutes: number
+  }
 }
 
 export type Organization = {

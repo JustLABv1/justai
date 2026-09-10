@@ -32,7 +32,7 @@ import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
 import { ThemeMenu } from "@/components/theme-switcher"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -73,6 +73,7 @@ import type {
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { resolveAPIURL } from "@/lib/api"
 
 const railNavigation: Array<{
   id: ViewId
@@ -566,6 +567,12 @@ export function FocusWorkspaceSidebar({
             }
           >
             <Avatar size="sm">
+              {user.avatarUrl && (
+                <AvatarImage
+                  alt={`${user.displayName}'s profile picture`}
+                  src={resolveAPIURL(user.avatarUrl)}
+                />
+              )}
               <AvatarFallback>{userInitials}</AvatarFallback>
             </Avatar>
           </DropdownMenuTrigger>

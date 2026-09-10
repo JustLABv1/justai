@@ -17,6 +17,7 @@ type User struct {
 	SuspendedReason string     `json:"suspendedReason,omitempty"`
 	SessionVersion  int        `json:"-"`
 	LastLoginAt     *time.Time `json:"lastLoginAt,omitempty"`
+	AvatarURL       string     `json:"avatarUrl,omitempty"`
 }
 
 type Organization struct {

@@ -157,6 +157,10 @@ func (a *App) Router() *gin.Engine {
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.RequireAuth(a.Tokens, a.DB))
 	protected.GET("/auth/me", a.me)
+	protected.GET("/profile", a.getProfile)
+	protected.GET("/profile/avatar", a.serveProfileAvatar)
+	protected.POST("/profile/avatar", a.uploadProfileAvatar)
+	protected.DELETE("/profile/avatar", a.deleteProfileAvatar)
 	protected.GET("/organizations", a.listOrganizations)
 	protected.POST("/organizations", a.createOrganization)
 	protected.POST("/auth/logout", a.logout)
@@ -509,7 +513,7 @@ func (a *App) cookieSameSite() http.SameSite {
 
 func (a *App) userByID(ctx context.Context, userID uuid.UUID) (models.User, error) {
 	var user models.User
-	err := a.DB.QueryRowContext(ctx, `SELECT id, email, display_name, is_platform_admin, COALESCE(status, 'active'), suspended_at, COALESCE(suspended_reason, ''), COALESCE(session_version, 0), last_login_at FROM users WHERE id = $1`, userID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &user.Status, &user.SuspendedAt, &user.SuspendedReason, &user.SessionVersion, &user.LastLoginAt)
+	err := a.DB.QueryRowContext(ctx, `SELECT id, email, display_name, is_platform_admin, COALESCE(status, 'active'), suspended_at, COALESCE(suspended_reason, ''), COALESCE(session_version, 0), last_login_at, CASE WHEN EXISTS (SELECT 1 FROM user_avatars WHERE user_id=$1) THEN '/api/v1/profile/avatar' ELSE '' END FROM users WHERE id = $1`, userID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &user.Status, &user.SuspendedAt, &user.SuspendedReason, &user.SessionVersion, &user.LastLoginAt, &user.AvatarURL)
 	return user, err
 }
 
