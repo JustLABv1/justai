@@ -25,6 +25,39 @@ func TestChatToolInstructionsRequiresSameTurnExecutionAndAnswer(t *testing.T) {
 	}
 }
 
+func TestExplicitAttachmentAvailabilityDoesNotRequireCatalogOwnership(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	conversationID := uuid.New()
+	organizationID := uuid.New()
+	userID := uuid.New()
+	sourceID := uuid.New()
+
+	// A message-scoped source is authorized by the conversation relation. The
+	// LEFT JOIN and selected-id bypass are what keep an incorrectly attributed
+	// or not-yet-synchronized catalog row from hiding the uploaded file.
+	mock.ExpectQuery(`(?s)LEFT JOIN knowledge_items ki.+AND \(\$4 <> '' OR \(`).
+		WithArgs(conversationID, organizationID, userID, sourceID.String()).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	attached, err := (&App{DB: database}).conversationHasKnowledge(
+		context.Background(), conversationID, organizationID, userID, []uuid.UUID{sourceID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !attached {
+		t.Fatal("expected the explicitly attached source to remain available without catalog ownership")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEnsureConversationPersistsAssistantForEmptyExistingConversation(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

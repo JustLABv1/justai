@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-04T09:48:01.783080+00:00",
+  "generated_at": "2026-09-10T08:20:39.734576+00:00",
   "nodes": {
     "provider_realtimestream": {
       "code_fingerprint": "b704e124042c6ab0f1efff5c5d2806d5c74f46c1edca01e343348fba0d4cb043",
@@ -12,13 +12,13 @@
           "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
         }
       ],
-      "score": 0.99995993,
+      "score": 0.871736841,
       "source_file": "services/backend/provider/transcription.go",
       "status": "tentative",
       "uses": 1
     },
     "rag_worker": {
-      "code_fingerprint": "5e4a78e584110ab2e67aa31211bcbffae6c578db34a056820ab5b06e03993a3c",
+      "code_fingerprint": "6facc5d880b1adf05dba5e374b373caf36be70176153ed5012fc3816554543f8",
       "label": "Worker",
       "last": "2026-09-04T09:45:31.941175+00:00",
       "provenance": [
@@ -28,13 +28,13 @@
           "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
         }
       ],
-      "score": 0.99995993,
+      "score": 0.871736841,
       "source_file": "services/backend/rag/ingest.go",
       "status": "tentative",
       "uses": 1
     },
     "rag_worker_ingest": {
-      "code_fingerprint": "5e4a78e584110ab2e67aa31211bcbffae6c578db34a056820ab5b06e03993a3c",
+      "code_fingerprint": "6facc5d880b1adf05dba5e374b373caf36be70176153ed5012fc3816554543f8",
       "label": ".ingest()",
       "last": "2026-08-20T08:35:02.297138+00:00",
       "provenance": [
@@ -44,13 +44,13 @@
           "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
         }
       ],
-      "score": 0.706279136,
+      "score": 0.615714214,
       "source_file": "services/backend/rag/ingest.go",
       "status": "tentative",
       "uses": 1
     },
     "server_app_createuploadedsource": {
-      "code_fingerprint": "ccba1b291dd1676d80f791846f8b90f71088a9a11a32314d9f640511e4df4609",
+      "code_fingerprint": "37054c88961bd6c076fdff4b3d4dc85de84266980dfac254bf66d58db0d775cd",
       "label": ".createUploadedSource()",
       "last": "2026-08-20T08:35:02.297138+00:00",
       "provenance": [
@@ -60,7 +60,7 @@
           "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
         }
       ],
-      "score": 0.706279136,
+      "score": 0.615714214,
       "source_file": "services/backend/server/handlers_knowledge.go",
       "status": "tentative",
       "uses": 1
@@ -76,13 +76,13 @@
           "q": "please now use again Luna Max agents to fix all of those issues at once"
         }
       ],
-      "score": 0.767185326,
+      "score": 0.668810511,
       "source_file": "services/backend/server/s3_storage.go",
       "status": "tentative",
       "uses": 1
     },
     "services_backend_middleware_auth": {
-      "code_fingerprint": "79caae789cee83f78d168d4499e7d527aa8780184709f0047124d0ef22dc93f9",
+      "code_fingerprint": "1d7cefb955f02b86878f513ef6b4e4da6eb1afd7901ea6c833463bb98945fe2b",
       "label": "auth.go",
       "last": "2026-08-23T22:30:22.886911+00:00",
       "provenance": [
@@ -92,7 +92,7 @@
           "q": "please now use again Luna Max agents to fix all of those issues at once"
         }
       ],
-      "score": 0.767185326,
+      "score": 0.668810511,
       "source_file": "services/backend/middleware/auth.go",
       "status": "tentative",
       "uses": 1
@@ -108,13 +108,13 @@
           "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
         }
       ],
-      "score": 0.99995993,
+      "score": 0.871736841,
       "source_file": "services/backend/provider/transcription.go",
       "status": "tentative",
       "uses": 1
     },
     "services_backend_rag_ingest_extractupload": {
-      "code_fingerprint": "5e4a78e584110ab2e67aa31211bcbffae6c578db34a056820ab5b06e03993a3c",
+      "code_fingerprint": "6facc5d880b1adf05dba5e374b373caf36be70176153ed5012fc3816554543f8",
       "label": "ExtractUpload()",
       "last": "2026-08-20T08:35:02.297138+00:00",
       "provenance": [
@@ -124,13 +124,13 @@
           "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
         }
       ],
-      "score": 0.706279136,
+      "score": 0.615714214,
       "source_file": "services/backend/rag/ingest.go",
       "status": "tentative",
       "uses": 1
     },
     "services_backend_rag_ingest_splitchunks": {
-      "code_fingerprint": "5e4a78e584110ab2e67aa31211bcbffae6c578db34a056820ab5b06e03993a3c",
+      "code_fingerprint": "6facc5d880b1adf05dba5e374b373caf36be70176153ed5012fc3816554543f8",
       "label": "splitChunks()",
       "last": "2026-08-20T08:35:02.297138+00:00",
       "provenance": [
@@ -140,7 +140,7 @@
           "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
         }
       ],
-      "score": 0.706279136,
+      "score": 0.615714214,
       "source_file": "services/backend/rag/ingest.go",
       "status": "tentative",
       "uses": 1
@@ -156,13 +156,13 @@
           "q": "please now use again Luna Max agents to fix all of those issues at once"
         }
       ],
-      "score": 0.767185326,
+      "score": 0.668810511,
       "source_file": "services/backend/security/password.go",
       "status": "tentative",
       "uses": 1
     },
     "services_backend_server_handlers_ws_citationprompt": {
-      "code_fingerprint": "af9442594e8351b97dc9f43c02eeba53bf120f6b3ff94b6b2e080bec726941fc",
+      "code_fingerprint": "486b4caff25d18c48efc17682838ff76c3b35fb8d8fc4ba15e2b6497412e8dfa",
       "label": "citationPrompt()",
       "last": "2026-08-20T08:35:02.297138+00:00",
       "provenance": [
@@ -172,13 +172,36 @@
           "q": "Take a look at both screenshots. On one I uploaded the transcript as pdf and on the other I pasted it raw. Both have different summaries where the differenze is very high. The one where I pasted the transcript in the chat is way better than the one where I uploaded the pdf"
         }
       ],
-      "score": 0.706279136,
+      "score": 0.615714214,
       "source_file": "services/backend/server/handlers_ws.go",
       "status": "tentative",
       "uses": 1
     },
+    "services_frontend_components_chat_view": {
+      "code_fingerprint": "90b696a68246d8778cea33a9de21cb4d3c48edd915f93434cc73ff96d3a7d250",
+      "label": "chat-view.tsx",
+      "last": "2026-09-10T08:19:17.102027+00:00",
+      "neg": 1,
+      "provenance": [
+        {
+          "date": "2026-09-10T08:19:17.102027+00:00",
+          "outcome": "corrected",
+          "q": "As you can see on the screenshot at my prod instance attaching files to the chat is again not working because the AI says that there is nothing. Why is this happening again?"
+        },
+        {
+          "date": "2026-09-10T08:17:25.995571+00:00",
+          "outcome": "useful",
+          "q": "As you can see on the screenshot at my prod instance attaching files to the chat is again not working because the AI says that there is nothing. Why is this happening again?"
+        }
+      ],
+      "score": -2.9711e-05,
+      "source_file": "services/frontend/components/chat-view.tsx",
+      "status": "contested",
+      "uses": 1,
+      "verdict": "dead end"
+    },
     "services_frontend_components_chat_view_chatview": {
-      "code_fingerprint": "48b818d5a32f08370962b35828afe05b9a870433b320d5b85e477d94d3ae9950",
+      "code_fingerprint": "90b696a68246d8778cea33a9de21cb4d3c48edd915f93434cc73ff96d3a7d250",
       "label": "ChatView()",
       "last": "2026-08-20T08:21:34.030795+00:00",
       "provenance": [
@@ -188,13 +211,13 @@
           "q": "Trace the post-send lifecycle after the first chat and explain why a persisted two-message conversation can show a fresh empty composer until a manual browser refresh."
         }
       ],
-      "score": 0.706126494,
+      "score": 0.615581145,
       "source_file": "services/frontend/components/chat-view.tsx",
       "status": "tentative",
       "uses": 1
     },
     "services_frontend_components_live_transcription_view_livetranscriptionview": {
-      "code_fingerprint": "b80f27d9c2cc6f497158429358ca57aed447c6e4ae4f1c4ef849aca08f9774e2",
+      "code_fingerprint": "db6d7f705b97035b6c8c16490709d1bcc54ba44e4d0397e2909496b81c79c559",
       "label": "LiveTranscriptionView()",
       "last": "2026-09-04T09:45:31.941175+00:00",
       "provenance": [
@@ -204,13 +227,36 @@
           "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
         }
       ],
-      "score": 0.99995993,
+      "score": 0.871736841,
       "source_file": "services/frontend/components/live-transcription-view.tsx",
       "status": "tentative",
       "uses": 1
     },
+    "services_frontend_components_ui_attachment_attachment": {
+      "code_fingerprint": "eae961259ff3740ddf83e668aa8d1347e03c16b70b0e62a11da45458edb87202",
+      "label": "Attachment()",
+      "last": "2026-09-10T08:19:17.102027+00:00",
+      "neg": 1,
+      "provenance": [
+        {
+          "date": "2026-09-10T08:19:17.102027+00:00",
+          "outcome": "corrected",
+          "q": "As you can see on the screenshot at my prod instance attaching files to the chat is again not working because the AI says that there is nothing. Why is this happening again?"
+        },
+        {
+          "date": "2026-09-10T08:17:25.995571+00:00",
+          "outcome": "useful",
+          "q": "As you can see on the screenshot at my prod instance attaching files to the chat is again not working because the AI says that there is nothing. Why is this happening again?"
+        }
+      ],
+      "score": -2.9711e-05,
+      "source_file": "services/frontend/components/ui/attachment.tsx",
+      "status": "contested",
+      "uses": 1,
+      "verdict": "dead end"
+    },
     "services_frontend_components_workspace_workspace": {
-      "code_fingerprint": "71091642dce33fb5051c146d16d4e124d019c9b526f676709af5d298d3e38978",
+      "code_fingerprint": "b140469f4b5be5af0befe8de49423273ae52fbf3208e304da3340a7fffe0a839",
       "label": "Workspace()",
       "last": "2026-08-20T08:21:34.030795+00:00",
       "provenance": [
@@ -220,13 +266,36 @@
           "q": "Trace the post-send lifecycle after the first chat and explain why a persisted two-message conversation can show a fresh empty composer until a manual browser refresh."
         }
       ],
-      "score": 0.706126494,
+      "score": 0.615581145,
       "source_file": "services/frontend/components/workspace.tsx",
       "status": "tentative",
       "uses": 1
     },
+    "services_frontend_lib_api_api": {
+      "code_fingerprint": "9d62879e2320cc4f744c8738af4181bbcf556e22f239db3dcff461f0ab163e23",
+      "label": "api",
+      "last": "2026-09-10T08:19:17.102027+00:00",
+      "neg": 1,
+      "provenance": [
+        {
+          "date": "2026-09-10T08:19:17.102027+00:00",
+          "outcome": "corrected",
+          "q": "As you can see on the screenshot at my prod instance attaching files to the chat is again not working because the AI says that there is nothing. Why is this happening again?"
+        },
+        {
+          "date": "2026-09-10T08:17:25.995571+00:00",
+          "outcome": "useful",
+          "q": "As you can see on the screenshot at my prod instance attaching files to the chat is again not working because the AI says that there is nothing. Why is this happening again?"
+        }
+      ],
+      "score": -2.9711e-05,
+      "source_file": "services/frontend/lib/api.ts",
+      "status": "contested",
+      "uses": 1,
+      "verdict": "dead end"
+    },
     "services_frontend_lib_types_transcriptionjoinrequest": {
-      "code_fingerprint": "b1c4cb7df50b8cdffcf5430fe712513517efc6e64145bb349e2bfb84650cd65a",
+      "code_fingerprint": "ba1961f16a099893dbdfad3fd0ca8d7607a30b25a3ca808dac698ad952a8dca3",
       "label": "TranscriptionJoinRequest",
       "last": "2026-09-04T09:45:31.941175+00:00",
       "provenance": [
@@ -236,7 +305,7 @@
           "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
         }
       ],
-      "score": 0.99995993,
+      "score": 0.871736841,
       "source_file": "services/frontend/lib/types.ts",
       "status": "tentative",
       "uses": 1
@@ -252,7 +321,7 @@
           "q": "Is it possible to support transcription of live streams and meetings? Like JustAI Joins a meeting and starts the transcription. Or Captures a Youtube or TV Livestream?"
         }
       ],
-      "score": 0.99995993,
+      "score": 0.871736841,
       "source_file": "services/frontend/public/audio-worklet.js",
       "status": "tentative",
       "uses": 1

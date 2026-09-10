@@ -708,14 +708,19 @@ func searchConversation(ctx context.Context, db *sql.DB, conversationID uuid.UUI
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
 		JOIN conversation_knowledge_sources cks ON cks.source_id = ks.id
 		JOIN conversations c ON c.id = cks.conversation_id
-		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = ks.id
+		LEFT JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = ks.id
 		WHERE cks.conversation_id = $1
-		  AND ki.organization_id = c.organization_id
-		  AND (ki.visibility = 'workspace' OR ki.owner_id = c.user_id)
 		  AND ks.status = 'ready'
 		  AND CASE WHEN $2 = '' THEN cks.context_scope = 'persistent'
 		           ELSE cks.source_id = ANY(string_to_array($2, ',')::uuid[])
 		      END
+		  -- Explicit source ids come from the authorized message attachment and
+		  -- are isolated by conversation_knowledge_sources. Persistent Knowledge
+		  -- still requires its catalog ownership envelope.
+		  AND ($2 <> '' OR (
+		      ki.organization_id = c.organization_id
+		      AND (ki.visibility = 'workspace' OR ki.owner_id = c.user_id)
+		  ))
 		  AND (kc.search_vector @@ plainto_tsquery('simple', $3)
 		       OR kc.search_vector @@ to_tsquery('simple', $4))
 		ORDER BY GREATEST(ts_rank(kc.search_vector, plainto_tsquery('simple', $3)),
@@ -823,10 +828,7 @@ func appendSelectedSourceCoverage(ctx context.Context, db *sql.DB, conversationI
 		JOIN knowledge_sources ks ON ks.id = kc.source_id
 		JOIN conversation_knowledge_sources cks ON cks.source_id = kc.source_id
 		JOIN conversations c ON c.id = cks.conversation_id
-		JOIN knowledge_items ki ON ki.resource_type = 'source' AND ki.resource_id = kc.source_id
 		WHERE cks.conversation_id = $1
-		  AND ki.organization_id = c.organization_id
-		  AND (ki.visibility = 'workspace' OR ki.owner_id = c.user_id)
 		  AND ks.status = 'ready'
 		  AND cks.source_id = ANY(string_to_array($2, ',')::uuid[])
 		ORDER BY cks.source_id, kc.chunk_index

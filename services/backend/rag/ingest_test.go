@@ -5,10 +5,43 @@ import (
 	"net"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 
 	"justai-backend/models"
 )
+
+func TestExplicitAttachmentSearchDoesNotRequireKnowledgeCatalogRow(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	conversationID := uuid.New()
+	sourceID := uuid.New()
+	sourceIDs := sourceID.String()
+	mock.ExpectQuery(`(?s)LEFT JOIN knowledge_items ki.+AND \(\$2 <> '' OR \(`).
+		WithArgs(conversationID, sourceIDs, "summarize this file", "summarize | this | file", 12).
+		WillReturnRows(sqlmock.NewRows([]string{"source_id", "title", "chunk_index", "content"}))
+	mock.ExpectQuery(`(?s)FROM knowledge_chunks kc.+conversation_knowledge_sources.+cks.source_id = ANY`).
+		WithArgs(conversationID, sourceIDs, AttachedDocumentContextLimit).
+		WillReturnRows(sqlmock.NewRows([]string{"source_id", "title", "chunk_index", "content"}).
+			AddRow(sourceID, "report.csv", 0, "headline,category\nExample,News"))
+
+	citations, err := SearchConversationSources(
+		context.Background(), database, conversationID, "summarize this file", 6, []uuid.UUID{sourceID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(citations) != 1 || citations[0].SourceID != sourceID {
+		t.Fatalf("expected explicit source coverage without a catalog row, got %+v", citations)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestExtractUploadContextAcceptsCSVWithGenericMIME(t *testing.T) {
 	body := []byte("portal,title,url\nExample,Daily news,https://example.com/news\n")
