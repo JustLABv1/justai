@@ -320,6 +320,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/agent-workflows/:id/runs", a.createWorkflowRun)
 	org.GET("/agent-runs", a.listAgentRuns)
 	org.GET("/agent-runs/:id", a.getAgentRun)
+	org.DELETE("/agent-runs/:id", a.deleteAgentRun)
 	org.GET("/agent-runs/:id/events", a.streamAgentRunEvents)
 	org.POST("/agent-runs/:id/cancel", a.cancelAgentRun)
 	org.POST("/agent-runs/:id/retry", a.retryAgentRun)

@@ -467,6 +467,42 @@ func (a *App) getAgentRun(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"run": run})
 }
 
+func (a *App) deleteAgentRun(c *gin.Context) {
+	principal, organizationID, err := workspaceScope(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	id, err := parseRouteUUID(c, "run")
+	if err != nil {
+		return
+	}
+	var status string
+	if err := a.DB.QueryRowContext(c, `SELECT status FROM agent_runs WHERE id=$1 AND organization_id=$2 AND user_id=$3`, id, organizationID, principal.UserID).Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			writeError(c, http.StatusNotFound, fmt.Errorf("agent run not found or cannot be deleted"))
+			return
+		}
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if status == "queued" || status == "running" || status == "waiting_approval" {
+		writeError(c, http.StatusConflict, fmt.Errorf("cancel the run before deleting it"))
+		return
+	}
+	result, err := a.DB.ExecContext(c, `DELETE FROM agent_runs WHERE id=$1 AND organization_id=$2 AND user_id=$3`, id, organizationID, principal.UserID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		writeError(c, http.StatusNotFound, fmt.Errorf("agent run not found or cannot be deleted"))
+		return
+	}
+	a.AgentWorker.auditAgentEvent(c, principal.UserID, organizationID, "agent.run.deleted", "agent_run", id, map[string]any{"previousStatus": status})
+	c.Status(http.StatusNoContent)
+}
+
 func (a *App) streamAgentRunEvents(c *gin.Context) {
 	principal, organizationID, err := workspaceScope(c)
 	if err != nil {

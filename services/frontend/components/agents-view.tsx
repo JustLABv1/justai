@@ -229,6 +229,8 @@ type DeleteTarget =
   | { kind: "workflow"; item: AgentWorkflow }
 
 type WorkflowRunInput = Record<string, string>
+type WorkflowValidationTarget = "build" | "name" | null
+type WorkflowValidationTone = "success" | "error" | "info"
 
 const emptyNativeForm: NativeAgentForm = {
   name: "",
@@ -801,6 +803,10 @@ export function AgentsView({
   const [testingConnectionId, setTestingConnectionId] = useState("")
   const [updatingConnectionId, setUpdatingConnectionId] = useState("")
   const [validationMessage, setValidationMessage] = useState("")
+  const [validationTarget, setValidationTarget] =
+    useState<WorkflowValidationTarget>(null)
+  const [validationTone, setValidationTone] =
+    useState<WorkflowValidationTone>("info")
   const [discoveryMessage, setDiscoveryMessage] = useState("")
 
   const refresh = useCallback(async () => {
@@ -1156,6 +1162,8 @@ export function AgentsView({
       setSelectedNodeId(next.definition.nodes[0]?.id ?? "")
       setPositions({})
       setValidationMessage("")
+      setValidationTarget(null)
+      setValidationTone("info")
     },
     [agents]
   )
@@ -1175,6 +1183,8 @@ export function AgentsView({
       setValidationMessage(
         "Template loaded. Choose agents and review the mappings before saving."
       )
+      setValidationTarget("build")
+      setValidationTone("info")
     },
     [agents]
   )
@@ -1277,11 +1287,16 @@ export function AgentsView({
     )
     if (unassignedNode) {
       setValidationMessage(`Node ${unassignedNode.id} needs an agent.`)
+      setValidationTarget("build")
+      setValidationTone("error")
+      setSelectedNodeId(unassignedNode.id)
       return
     }
     const localError = validateWorkflowDefinition(workflowDraft.definition)
     if (localError) {
       setValidationMessage(localError)
+      setValidationTarget("build")
+      setValidationTone("error")
       return
     }
     const resourceError = validateWorkflowResources(
@@ -1292,10 +1307,14 @@ export function AgentsView({
     )
     if (resourceError) {
       setValidationMessage(resourceError)
+      setValidationTarget("build")
+      setValidationTone("error")
       return
     }
     if (!workflowDraft.id) {
       setValidationMessage("Valid bounded DAG · ready to save")
+      setValidationTarget(null)
+      setValidationTone("success")
       return
     }
     setValidating(true)
@@ -1310,10 +1329,14 @@ export function AgentsView({
           ? `Valid bounded DAG · depth ${result.maxDepth ?? "within limit"}`
           : result.error || "Workflow is invalid"
       )
+      setValidationTarget(result.valid ? null : "build")
+      setValidationTone(result.valid ? "success" : "error")
     } catch (caught) {
       setValidationMessage(
         caught instanceof Error ? caught.message : "Workflow validation failed."
       )
+      setValidationTarget(null)
+      setValidationTone("error")
     } finally {
       setValidating(false)
     }
@@ -1321,16 +1344,29 @@ export function AgentsView({
 
   async function saveWorkflow() {
     if (!workflowDraft) return
+    if (!workflowDraft.name.trim()) {
+      setValidationMessage(
+        "A workflow name is required. Enter a name in Settings, then save again."
+      )
+      setValidationTarget("name")
+      setValidationTone("error")
+      return
+    }
     const unassignedNode = workflowDraft.definition.nodes.find(
       (node) => !node.agentId
     )
     if (unassignedNode) {
       setValidationMessage(`Node ${unassignedNode.id} needs an agent.`)
+      setValidationTarget("build")
+      setValidationTone("error")
+      setSelectedNodeId(unassignedNode.id)
       return
     }
     const localError = validateWorkflowDefinition(workflowDraft.definition)
     if (localError) {
       setValidationMessage(localError)
+      setValidationTarget("build")
+      setValidationTone("error")
       return
     }
     const resourceError = validateWorkflowResources(
@@ -1341,10 +1377,8 @@ export function AgentsView({
     )
     if (resourceError) {
       setValidationMessage(resourceError)
-      return
-    }
-    if (!workflowDraft.name.trim()) {
-      setValidationMessage("Give the workflow a name before saving.")
+      setValidationTarget("build")
+      setValidationTone("error")
       return
     }
     setSaving(true)
@@ -1378,12 +1412,16 @@ export function AgentsView({
       setValidationMessage(
         "Saved. Runs use an immutable workflow and agent-version snapshot."
       )
+      setValidationTarget(null)
+      setValidationTone("success")
     } catch (caught) {
       setValidationMessage(
         caught instanceof Error
           ? caught.message
           : "The workflow could not be saved."
       )
+      setValidationTarget(null)
+      setValidationTone("error")
     } finally {
       setSaving(false)
     }
@@ -1392,6 +1430,8 @@ export function AgentsView({
   function openRunDialog() {
     if (!workflowDraft?.id) {
       setValidationMessage("Save the workflow before running it.")
+      setValidationTarget(workflowDraft?.name.trim() ? null : "name")
+      setValidationTone("error")
       return
     }
     const names = workflowInputNames(workflowDraft.definition)
@@ -1633,6 +1673,8 @@ export function AgentsView({
             graphNodes={graphNodes}
             graphEdges={graphEdges}
             validationMessage={validationMessage}
+            validationTarget={validationTarget}
+            validationTone={validationTone}
             saving={saving}
             validating={validating}
             onOpen={openWorkflow}
@@ -1651,6 +1693,7 @@ export function AgentsView({
             onValidate={() => void validateWorkflow()}
             onSave={() => void saveWorkflow()}
             onRun={openRunDialog}
+            onValidationDismiss={() => setValidationTarget(null)}
             disabled={disabled}
           />
         </TabsContent>
@@ -2595,7 +2638,7 @@ function AgentsPanel({
                     </p>
                   )}
                 </CardContent>
-                <CardFooter className="justify-end gap-1 border-t pt-3 pb-0">
+                <CardFooter className="justify-between gap-2 border-t pt-4 pb-0">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -2604,6 +2647,7 @@ function AgentsPanel({
                     aria-label={`Delete ${agent.name}`}
                   >
                     <Trash2 data-icon="inline-start" />
+                    Delete
                   </Button>
                   <Button
                     size="sm"
@@ -2739,6 +2783,8 @@ function WorkflowsPanel({
   graphNodes,
   graphEdges,
   validationMessage,
+  validationTarget,
+  validationTone,
   saving,
   validating,
   onOpen,
@@ -2755,6 +2801,7 @@ function WorkflowsPanel({
   onValidate,
   onSave,
   onRun,
+  onValidationDismiss,
   disabled = false,
 }: {
   workflows: AgentWorkflow[]
@@ -2769,6 +2816,8 @@ function WorkflowsPanel({
   graphNodes: Node<FlowNodeData>[]
   graphEdges: Edge[]
   validationMessage: string
+  validationTarget: WorkflowValidationTarget
+  validationTone: WorkflowValidationTone
   saving: boolean
   validating: boolean
   onOpen: (workflow?: AgentWorkflow) => void
@@ -2785,11 +2834,18 @@ function WorkflowsPanel({
   onValidate: () => void
   onSave: () => void
   onRun: () => void
+  onValidationDismiss: () => void
   disabled?: boolean
 }) {
   const [workflowQuery, setWorkflowQuery] = useState("")
   const editorRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [editorTab, setEditorTab] = useState("build")
+  const activeEditorTab = validationTarget
+    ? validationTarget === "name"
+      ? "settings"
+      : "build"
+    : editorTab
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -3012,21 +3068,29 @@ function WorkflowsPanel({
             {validationMessage && (
               <Alert
                 className="mt-3"
-                role="status"
-                variant={
-                  validationMessage.toLowerCase().includes("valid") ||
-                  validationMessage.toLowerCase().includes("saved")
-                    ? undefined
-                    : "destructive"
-                }
+                role={validationTone === "error" ? "alert" : "status"}
+                variant={validationTone === "error" ? "destructive" : undefined}
               >
                 <ListChecks data-icon="inline-start" />
+                <AlertTitle>
+                  {validationTone === "error"
+                    ? "Workflow needs attention"
+                    : validationTone === "success"
+                      ? "Workflow ready"
+                      : "Workflow setup"}
+                </AlertTitle>
                 <AlertDescription>{validationMessage}</AlertDescription>
               </Alert>
             )}
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
-            <Tabs defaultValue="build">
+            <Tabs
+              value={activeEditorTab}
+              onValueChange={(value) => {
+                setEditorTab(value)
+                if (validationTarget) onValidationDismiss()
+              }}
+            >
               <TabsList aria-label="Workflow editor sections" variant="line">
                 <TabsTrigger value="build">Build</TabsTrigger>
                 <TabsTrigger value="settings">Settings</TabsTrigger>
@@ -3144,10 +3208,12 @@ function WorkflowsPanel({
               >
                 {" "}
                 <div className="grid gap-4 md:grid-cols-3">
-                  <Field>
+                  <Field data-invalid={validationTarget === "name"}>
                     <FieldLabel htmlFor="workflow-name">Name</FieldLabel>
                     <Input
                       id="workflow-name"
+                      aria-invalid={validationTarget === "name"}
+                      autoFocus={validationTarget === "name"}
                       value={draft.name}
                       disabled={disabled}
                       onChange={(event) =>
@@ -3155,6 +3221,12 @@ function WorkflowsPanel({
                       }
                       placeholder="Research then synthesize"
                     />
+                    {validationTarget === "name" && (
+                      <FieldDescription>
+                        Enter a name so this workflow can be saved and found
+                        later.
+                      </FieldDescription>
+                    )}
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="workflow-visibility">
@@ -3268,11 +3340,14 @@ function InspectorSection({
   title: string
   children: ReactNode
 }) {
+  const [open, setOpen] = useState(false)
   return (
-    <Collapsible className="border-t pt-3">
+    <Collapsible open={open} onOpenChange={setOpen} className="border-t pt-3">
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm font-medium">
         {title}
-        <ChevronDown className="size-4" />
+        <ChevronDown
+          className={cn("size-4 transition-transform", open && "rotate-180")}
+        />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="flex flex-col gap-4 py-3">{children}</div>
@@ -4189,6 +4264,8 @@ function RunsPanel({
   const [detail, setDetail] = useState<AgentRun | null>(null)
   const [events, setEvents] = useState<AgentRunEvent[]>([])
   const [error, setError] = useState("")
+  const [deleteRunTarget, setDeleteRunTarget] = useState<AgentRun | null>(null)
+  const [deletingRun, setDeletingRun] = useState(false)
   const selectedIDRef = useRef(selectedID)
   const runsRef = useRef(runs)
   const onRunsChangeRef = useRef(onRunsChange)
@@ -4363,6 +4440,39 @@ function RunsPanel({
           ? caught.message
           : "The run could not be retried."
       )
+    }
+  }
+
+  async function deleteRun() {
+    if (!deleteRunTarget || deletingRun) return
+    setDeletingRun(true)
+    setError("")
+    try {
+      await api.delete(`/api/v1/agent-runs/${deleteRunTarget.id}`)
+      const remaining = runsRef.current.filter(
+        (run) => run.id !== deleteRunTarget.id
+      )
+      onRunsChange(remaining)
+      if (selectedID === deleteRunTarget.id) {
+        selectedIDRef.current = null
+        setSelectedID(null)
+        setDetail(null)
+        setEvents([])
+        setShowDetail(false)
+        updateAgentRunURL()
+      }
+      setDeleteRunTarget(null)
+      notifySuccess("Run deleted")
+    } catch (caught) {
+      setError(
+        notifyError(
+          "Run could not be deleted",
+          caught,
+          "The run could not be deleted."
+        )
+      )
+    } finally {
+      setDeletingRun(false)
     }
   }
 
@@ -4543,6 +4653,7 @@ function RunsPanel({
                 <TableHead>Started</TableHead>
                 <TableHead>Duration</TableHead>
                 <TableHead>Result</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -4575,6 +4686,29 @@ function RunsPanel({
                   </TableCell>
                   <TableCell className="max-w-64 truncate text-muted-foreground">
                     {run.error || run.summary || "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      aria-label={`Delete ${runName(run)} run`}
+                      disabled={
+                        disabled ||
+                        ["queued", "running", "waiting_approval"].includes(
+                          run.status
+                        )
+                      }
+                      onClick={() => setDeleteRunTarget(run)}
+                      size="icon-sm"
+                      title={
+                        ["queued", "running", "waiting_approval"].includes(
+                          run.status
+                        )
+                          ? "Cancel this run before deleting it"
+                          : "Delete run"
+                      }
+                      variant="ghost"
+                    >
+                      <Trash2 />
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -4662,6 +4796,7 @@ function RunsPanel({
                 events={events}
                 onCancel={() => void cancelRun()}
                 onRetry={() => void retryRun()}
+                onDelete={() => setDeleteRunTarget(detail ?? selectedSummary!)}
                 onDecision={(approval, decision) =>
                   void decide(approval, decision)
                 }
@@ -4677,6 +4812,17 @@ function RunsPanel({
           </div>
         </SheetContent>
       </Sheet>
+      <ConfirmActionDialog
+        open={deleteRunTarget !== null}
+        title="Delete this run?"
+        description="This permanently removes the run, its execution events, approvals, and generated artifacts. This cannot be undone."
+        confirmLabel="Delete run"
+        pending={deletingRun}
+        onOpenChange={(open) => {
+          if (!open && !deletingRun) setDeleteRunTarget(null)
+        }}
+        onConfirm={deleteRun}
+      />
     </div>
   )
 }
@@ -4702,6 +4848,7 @@ function RunDetail({
   events,
   onCancel,
   onRetry,
+  onDelete,
   onDecision,
   disabled = false,
 }: {
@@ -4711,6 +4858,7 @@ function RunDetail({
   events: AgentRunEvent[]
   onCancel: () => void
   onRetry: () => void
+  onDelete: () => void
   onDecision: (
     approval: AgentApproval,
     decision: "approved" | "rejected"
@@ -4800,6 +4948,20 @@ function RunDetail({
                 render={<a href={`/${run.conversationId}`} />}
               >
                 <MessageLink />
+              </Button>
+            )}
+            {!["queued", "running", "waiting_approval"].includes(
+              run.status
+            ) && (
+              <Button
+                aria-label="Delete run"
+                disabled={disabled}
+                onClick={onDelete}
+                size="icon-sm"
+                title="Delete run"
+                variant="ghost"
+              >
+                <Trash2 />
               </Button>
             )}
           </div>
