@@ -21,6 +21,7 @@ import {
   FolderPlus,
   GitBranch,
   Globe2,
+  ExternalLink,
   Link2,
   LoaderCircle,
   MoreHorizontal,
@@ -40,15 +41,18 @@ import { APIError, api } from "@/lib/api"
 import type {
   KnowledgeItem,
   KnowledgeItemDetail,
+  KnowledgeRepositoryFile,
   KnowledgeItemType,
   KnowledgeSource,
   KnowledgeSpace,
   Memory,
   Note,
+  RepositoryContext,
   TranscriptionSession,
   WorkspaceProject,
 } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -93,7 +97,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -105,6 +118,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -131,6 +145,39 @@ type KnowledgeWorkspaceProps = {
 }
 
 type ItemFilter = "all" | KnowledgeItemType
+
+type KnowledgeItemsResponse = {
+  items: KnowledgeItem[]
+  nextCursor?: string
+  totalCount?: number
+}
+
+type RepositoryFilesResponse = {
+  files?: KnowledgeRepositoryFile[]
+  items?: KnowledgeRepositoryFile[]
+  nextCursor?: string
+  totalCount?: number
+}
+
+type RepositoryConnectionsResponse = {
+  repositories?: RepositoryContext[]
+  connections?: RepositoryContext[]
+  nextCursor?: string
+  totalCount?: number
+}
+
+type KnowledgeRepositoryConnection = RepositoryContext & {
+  lastSyncAt?: string | null
+  nextSyncAt?: string | null
+  syncIntervalMinutes?: number
+  includePatterns?: string[]
+  excludePatterns?: string[]
+  maxFileSizeBytes?: number
+}
+
+type KnowledgeView = "library" | "connections"
+
+const KNOWLEDGE_PAGE_SIZE = 50
 
 type KnowledgeSpaceTreeItem = KnowledgeSpace & { depth: number }
 
@@ -262,6 +309,281 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return "—"
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
+}
+
+function scheduleLabel(intervalMinutes?: number | null) {
+  const interval = Number(intervalMinutes ?? 0)
+  if (interval === 60) return "Hourly"
+  if (interval === 1440) return "Daily"
+  if (interval === 10080) return "Weekly"
+  if (interval > 0) return `Every ${interval} min`
+  return "Manual"
+}
+
+function repositoryIndexedCount(item: KnowledgeItem | null | undefined) {
+  if (!item || item.resourceType !== "repository") return 0
+  const value = item.metadata?.fileCount
+  return typeof value === "number" ? value : Number(value ?? 0) || 0
+}
+
+function repositoryConnectionFromItem(
+  item: KnowledgeItem
+): KnowledgeRepositoryConnection {
+  const metadata = item.metadata ?? {}
+  return {
+    id: item.resourceId,
+    conversationId: null,
+    scopeType: item.visibility === "workspace" ? "organization" : "user",
+    scopeId: null,
+    provider: String(metadata.provider ?? "repository"),
+    repositoryUrl: String(metadata.repositoryUrl ?? ""),
+    owner: "",
+    repository: item.title,
+    ref: String(metadata.ref ?? "HEAD"),
+    resolvedRef: String(metadata.resolvedRef ?? ""),
+    title: item.title,
+    contextScope: "persistent",
+    status: item.status,
+    error: typeof metadata.error === "string" ? metadata.error : undefined,
+    fileCount: Number(metadata.fileCount ?? 0) || 0,
+    readyFileCount:
+      Number(metadata.readyFileCount ?? metadata.fileCount ?? 0) || 0,
+    skippedFileCount: Number(metadata.skippedFileCount ?? 0) || 0,
+    totalBytes: Number(metadata.totalBytes ?? 0) || 0,
+    progress: Number(metadata.progress ?? 0) || 0,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    lastSyncAt:
+      typeof metadata.lastSyncAt === "string" ? metadata.lastSyncAt : null,
+    nextSyncAt:
+      typeof metadata.nextSyncAt === "string" ? metadata.nextSyncAt : null,
+    syncIntervalMinutes: Number(metadata.syncIntervalMinutes ?? 0) || 0,
+    includePatterns: Array.isArray(metadata.includePatterns)
+      ? metadata.includePatterns.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [],
+    excludePatterns: Array.isArray(metadata.excludePatterns)
+      ? metadata.excludePatterns.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [],
+    maxFileSizeBytes:
+      Number(metadata.maxFileSizeBytes ?? metadata.maxFileBytes ?? 0) ||
+      undefined,
+  }
+}
+
+function knowledgeItemFromRepositoryConnection(
+  connection: KnowledgeRepositoryConnection
+): KnowledgeItem {
+  return {
+    id: `repository:${connection.id}`,
+    resourceType: "repository",
+    resourceId: connection.id,
+    title: connection.title,
+    visibility:
+      connection.scopeType === "organization" ? "workspace" : "private",
+    status: connection.status,
+    metadata: {
+      provider: connection.provider,
+      repositoryUrl: connection.repositoryUrl,
+      ref: connection.ref,
+      resolvedRef: connection.resolvedRef,
+      fileCount: connection.fileCount,
+      readyFileCount: connection.readyFileCount,
+      skippedFileCount: connection.skippedFileCount,
+      totalBytes: connection.totalBytes,
+      progress: connection.progress,
+      lastSyncAt: connection.lastSyncAt,
+      nextSyncAt: connection.nextSyncAt,
+      syncIntervalMinutes: connection.syncIntervalMinutes,
+      includePatterns: connection.includePatterns,
+      excludePatterns: connection.excludePatterns,
+      maxFileSizeBytes: connection.maxFileSizeBytes,
+    },
+    spaceIds: [],
+    createdAt: connection.createdAt,
+    updatedAt: connection.updatedAt,
+  }
+}
+
+function enrichRepositoryConnection(
+  repository: RepositoryContext,
+  item?: KnowledgeItem
+): KnowledgeRepositoryConnection {
+  const metadata = item?.metadata ?? {}
+  const candidate = repository as RepositoryContext &
+    Partial<KnowledgeRepositoryConnection>
+  return {
+    ...repository,
+    title: repository.title || item?.title || repository.repository,
+    fileCount: repository.fileCount ?? Number(metadata.fileCount ?? 0) ?? 0,
+    readyFileCount:
+      repository.readyFileCount ??
+      Number(metadata.readyFileCount ?? metadata.fileCount ?? 0) ??
+      0,
+    skippedFileCount:
+      repository.skippedFileCount ??
+      Number(metadata.skippedFileCount ?? 0) ??
+      0,
+    totalBytes: repository.totalBytes ?? Number(metadata.totalBytes ?? 0) ?? 0,
+    progress: repository.progress ?? Number(metadata.progress ?? 0) ?? 0,
+    lastSyncAt:
+      candidate.lastSyncAt ??
+      (typeof metadata.lastSyncAt === "string" ? metadata.lastSyncAt : null),
+    nextSyncAt:
+      candidate.nextSyncAt ??
+      (typeof metadata.nextSyncAt === "string" ? metadata.nextSyncAt : null),
+    syncIntervalMinutes:
+      candidate.syncIntervalMinutes ??
+      Number(metadata.syncIntervalMinutes ?? 0) ??
+      0,
+    includePatterns:
+      candidate.includePatterns ??
+      (Array.isArray(metadata.includePatterns)
+        ? metadata.includePatterns.filter(
+            (value): value is string => typeof value === "string"
+          )
+        : []),
+    excludePatterns:
+      candidate.excludePatterns ??
+      (Array.isArray(metadata.excludePatterns)
+        ? metadata.excludePatterns.filter(
+            (value): value is string => typeof value === "string"
+          )
+        : []),
+    maxFileSizeBytes:
+      candidate.maxFileSizeBytes ??
+      (Number(metadata.maxFileSizeBytes ?? metadata.maxFileBytes ?? 0) ||
+        undefined),
+  }
+}
+
+function mergeRepositoryDetail(
+  connection: KnowledgeRepositoryConnection,
+  detail?: KnowledgeItemDetail | null
+): KnowledgeRepositoryConnection {
+  if (!detail) return connection
+  return {
+    ...connection,
+    provider: detail.provider || connection.provider,
+    repositoryUrl: detail.repositoryUrl || connection.repositoryUrl,
+    ref: detail.ref || connection.ref,
+    includePatterns: detail.includePatterns ?? connection.includePatterns,
+    excludePatterns: detail.excludePatterns ?? connection.excludePatterns,
+    maxFileBytes: detail.maxFileBytes ?? connection.maxFileBytes,
+    maxFileSizeBytes:
+      detail.maxFileSizeBytes ??
+      detail.maxFileBytes ??
+      connection.maxFileSizeBytes,
+    syncIntervalMinutes:
+      detail.syncIntervalMinutes ?? connection.syncIntervalMinutes,
+    nextSyncAt: detail.nextSyncAt ?? connection.nextSyncAt,
+    status: detail.status || connection.status,
+    fileCount: connection.fileCount || repositoryIndexedCount(detail),
+  }
+}
+
+function parsePatternLines(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[,\n]/)
+        .map((pattern) => pattern.trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+function connectionStatusVariant(
+  status: string
+): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "ready") return "default"
+  if (status === "failed") return "destructive"
+  if (status === "processing" || status === "queued") return "secondary"
+  return "outline"
+}
+
+function repositoryPreviewLabel(
+  includePatterns: string,
+  excludePatterns: string,
+  maxFileSize: string
+) {
+  const includeCount = parsePatternLines(includePatterns).length
+  const excludeCount = parsePatternLines(excludePatterns).length
+  const includeLabel =
+    includeCount > 0
+      ? `${includeCount} include pattern${includeCount === 1 ? "" : "s"}`
+      : "All supported paths"
+  const excludeLabel =
+    excludeCount > 0
+      ? `${excludeCount} excluded pattern${excludeCount === 1 ? "" : "s"}`
+      : ""
+  return [includeLabel, excludeLabel, `max ${maxFileSize || "2"} MB per file`]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+function filterAndSortRepositoryConnections(
+  connections: KnowledgeRepositoryConnection[],
+  query: string,
+  status: string,
+  sort: "updated" | "title" | "status"
+) {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filtered = connections.filter((connection) => {
+    const matchesQuery =
+      !normalizedQuery ||
+      `${connection.title} ${connection.repositoryUrl} ${connection.provider}`
+        .toLocaleLowerCase()
+        .includes(normalizedQuery)
+    const matchesStatus = status === "all" || connection.status === status
+    return matchesQuery && matchesStatus
+  })
+  return [...filtered].sort((left, right) => {
+    if (sort === "title") return left.title.localeCompare(right.title)
+    if (sort === "status")
+      return (
+        left.status.localeCompare(right.status) ||
+        left.title.localeCompare(right.title)
+      )
+    return right.updatedAt.localeCompare(left.updatedAt)
+  })
+}
+
+function deleteDialogTitle(item: KnowledgeItem | null) {
+  if (item?.resourceType === "repository") return "Disconnect repository?"
+  const type = item ? (typeLabels[item.resourceType] ?? "item") : "item"
+  return "Delete " + type.toLocaleLowerCase() + "?"
+}
+
+function deleteDialogDescription(item: KnowledgeItem | null) {
+  if (item?.resourceType === "repository") {
+    const count = repositoryIndexedCount(item)
+    return (
+      "Disconnecting “" +
+      item.title +
+      "” removes " +
+      count +
+      " indexed file" +
+      (count === 1 ? "" : "s") +
+      " from JustAI and stops automatic syncing. It does not modify the remote repository. This action cannot be undone."
+    )
+  }
+  return item
+    ? "“" +
+        item.title +
+        "” will be permanently removed from Knowledge. This action cannot be undone."
+    : "This action cannot be undone."
+}
+
 function AddKnowledgeOption({
   icon: Icon,
   title,
@@ -383,6 +705,7 @@ export function KnowledgeWorkspace({
     useState<KnowledgeItemDetail | null>(null)
   const [selectedDetailLoading, setSelectedDetailLoading] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [activeView, setActiveView] = useState<KnowledgeView>("library")
   const [notice, setNotice] = useState("")
   const [error, setError] = useState("")
   const [addOpen, setAddOpen] = useState(false)
@@ -409,11 +732,40 @@ export function KnowledgeWorkspace({
   const [repositoryURL, setRepositoryURL] = useState("")
   const [repositoryRef, setRepositoryRef] = useState("")
   const [repositoryToken, setRepositoryToken] = useState("")
+  const [repositoryIncludePatterns, setRepositoryIncludePatterns] = useState("")
+  const [repositoryExcludePatterns, setRepositoryExcludePatterns] = useState("")
+  const [repositoryMaxFileSize, setRepositoryMaxFileSize] = useState("2")
+  const [repositorySchedule, setRepositorySchedule] = useState("0")
+  const [repositoryEditId, setRepositoryEditId] = useState<string | null>(null)
+  const [repositories, setRepositories] = useState<
+    KnowledgeRepositoryConnection[]
+  >([])
+  const [connectionLoading, setConnectionLoading] = useState(false)
+  const [connectionError, setConnectionError] = useState("")
+  const [connectionNextCursor, setConnectionNextCursor] = useState("")
+  const [connectionTotalCount, setConnectionTotalCount] = useState<number>()
+  const [connectionQuery, setConnectionQuery] = useState("")
+  const [connectionStatusFilter, setConnectionStatusFilter] = useState("all")
+  const [connectionSort, setConnectionSort] = useState<
+    "updated" | "title" | "status"
+  >("updated")
+  const [repositoryFiles, setRepositoryFiles] = useState<
+    KnowledgeRepositoryFile[]
+  >([])
+  const [repositoryFilesNextCursor, setRepositoryFilesNextCursor] = useState("")
+  const [repositoryFilesTotalCount, setRepositoryFilesTotalCount] =
+    useState<number>()
+  const [repositoryFilesQuery, setRepositoryFilesQuery] = useState("")
+  const [repositoryFilesLoading, setRepositoryFilesLoading] = useState(false)
+  const [repositoryFilesError, setRepositoryFilesError] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<KnowledgeItem | null>(null)
   const [folderDeleteTarget, setFolderDeleteTarget] =
     useState<KnowledgeSpace | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [nextCursor, setNextCursor] = useState("")
+  const [totalCount, setTotalCount] = useState<number>()
+  const [loadingMore, setLoadingMore] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const openInspector = useCallback((item: KnowledgeItem) => {
@@ -427,13 +779,29 @@ export function KnowledgeWorkspace({
     setSelectedDetail(null)
   }, [])
 
+  const buildKnowledgeItemsPath = useCallback(
+    (cursor?: string) => {
+      const params = new URLSearchParams({
+        limit: String(KNOWLEDGE_PAGE_SIZE),
+        sort: sortBy,
+      })
+      if (cursor) params.set("cursor", cursor)
+      if (query.trim()) params.set("q", query.trim())
+      if (typeFilter !== "all") params.set("type", typeFilter)
+      if (statusFilter !== "all") params.set("status", statusFilter)
+      if (ownershipFilter !== "all") params.set("ownership", ownershipFilter)
+      if (spaceId !== "all") params.set("spaceId", spaceId)
+      return `/api/v1/knowledge/items?${params.toString()}`
+    },
+    [ownershipFilter, query, sortBy, spaceId, statusFilter, typeFilter]
+  )
+
   const load = useCallback(async () => {
     setLoading(true)
+    setNextCursor("")
     try {
       const [itemResult, spaceResult, memoryResult] = await Promise.allSettled([
-        api.get<{ items: KnowledgeItem[] }>(
-          "/api/v1/knowledge/items?limit=100"
-        ),
+        api.get<KnowledgeItemsResponse>(buildKnowledgeItemsPath()),
         api.get<{ spaces: KnowledgeSpace[] }>("/api/v1/knowledge/spaces"),
         api.get<{ memories: Memory[] }>("/api/v1/memories"),
       ])
@@ -465,6 +833,16 @@ export function KnowledgeWorkspace({
             }))
       setItems(nextItems)
       setSpaces(nextSpaces)
+      setTotalCount(
+        itemResult.status === "fulfilled"
+          ? (itemResult.value.totalCount ?? nextItems.length)
+          : nextItems.length
+      )
+      setNextCursor(
+        itemResult.status === "fulfilled"
+          ? (itemResult.value.nextCursor ?? "")
+          : ""
+      )
       if (requestedItemId) {
         const target = nextItems.find(
           (item) =>
@@ -489,11 +867,15 @@ export function KnowledgeWorkspace({
           ? caught.message
           : "Knowledge could not be loaded."
       )
-      setItems(localItems(sources, notes, transcriptionSessions))
+      const fallback = localItems(sources, notes, transcriptionSessions)
+      setItems(fallback)
+      setTotalCount(fallback.length)
+      setNextCursor("")
     } finally {
       setLoading(false)
     }
   }, [
+    buildKnowledgeItemsPath,
     notes,
     openInspector,
     projects,
@@ -502,10 +884,257 @@ export function KnowledgeWorkspace({
     transcriptionSessions,
   ])
 
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const result = await api.get<KnowledgeItemsResponse>(
+        buildKnowledgeItemsPath(nextCursor)
+      )
+      setItems((current) => {
+        const existing = new Set(current.map((item) => item.id))
+        return [
+          ...current,
+          ...result.items.filter((item) => !existing.has(item.id)),
+        ]
+      })
+      setNextCursor(result.nextCursor ?? "")
+      if (result.totalCount !== undefined) setTotalCount(result.totalCount)
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "More Knowledge items could not be loaded."
+      )
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [buildKnowledgeItemsPath, loadingMore, nextCursor])
+
+  const buildRepositoryConnectionsPath = useCallback(
+    (cursor?: string) => {
+      const params = new URLSearchParams({
+        limit: String(KNOWLEDGE_PAGE_SIZE),
+        sort: connectionSort,
+      })
+      if (cursor) params.set("cursor", cursor)
+      if (connectionQuery.trim()) params.set("q", connectionQuery.trim())
+      if (connectionStatusFilter !== "all")
+        params.set("status", connectionStatusFilter)
+      return `/api/v1/repositories?${params.toString()}`
+    },
+    [connectionQuery, connectionSort, connectionStatusFilter]
+  )
+
+  const fallbackConnections = useMemo(
+    () =>
+      items
+        .filter((item) => item.resourceType === "repository")
+        .map((item) => repositoryConnectionFromItem(item)),
+    [items]
+  )
+
+  const loadConnections = useCallback(async () => {
+    setConnectionLoading(true)
+    setConnectionError("")
+    setConnectionNextCursor("")
+    try {
+      const result = await api.get<RepositoryConnectionsResponse>(
+        buildRepositoryConnectionsPath()
+      )
+      const rows = result.repositories ?? result.connections ?? []
+      const itemByRepositoryID = new Map(
+        items
+          .filter((item) => item.resourceType === "repository")
+          .map((item) => [item.resourceId, item])
+      )
+      const connections = filterAndSortRepositoryConnections(
+        rows.map((repository) =>
+          enrichRepositoryConnection(
+            repository,
+            itemByRepositoryID.get(repository.id)
+          )
+        ),
+        connectionQuery,
+        connectionStatusFilter,
+        connectionSort
+      )
+      setRepositories(connections)
+      setConnectionTotalCount(result.totalCount ?? connections.length)
+      setConnectionNextCursor(result.nextCursor ?? "")
+    } catch (caught) {
+      const message =
+        caught instanceof Error
+          ? caught.message
+          : "Repository connections could not be loaded."
+      setConnectionError(message)
+      const fallback = filterAndSortRepositoryConnections(
+        fallbackConnections,
+        connectionQuery,
+        connectionStatusFilter,
+        connectionSort
+      )
+      setRepositories(fallback)
+      setConnectionTotalCount(fallback.length)
+    } finally {
+      setConnectionLoading(false)
+    }
+  }, [
+    buildRepositoryConnectionsPath,
+    connectionQuery,
+    connectionSort,
+    connectionStatusFilter,
+    fallbackConnections,
+    items,
+  ])
+
+  const loadMoreConnections = useCallback(async () => {
+    if (!connectionNextCursor || connectionLoading) return
+    setConnectionLoading(true)
+    try {
+      const result = await api.get<RepositoryConnectionsResponse>(
+        buildRepositoryConnectionsPath(connectionNextCursor)
+      )
+      const rows = result.repositories ?? result.connections ?? []
+      const itemByRepositoryID = new Map(
+        items
+          .filter((item) => item.resourceType === "repository")
+          .map((item) => [item.resourceId, item])
+      )
+      setRepositories((current) => {
+        const existing = new Set(current.map((repository) => repository.id))
+        return [
+          ...current,
+          ...rows
+            .map((repository) =>
+              enrichRepositoryConnection(
+                repository,
+                itemByRepositoryID.get(repository.id)
+              )
+            )
+            .filter((repository) => !existing.has(repository.id)),
+        ]
+      })
+      setConnectionNextCursor(result.nextCursor ?? "")
+      if (result.totalCount !== undefined)
+        setConnectionTotalCount(result.totalCount)
+    } catch (caught) {
+      setConnectionError(
+        caught instanceof Error
+          ? caught.message
+          : "More repository connections could not be loaded."
+      )
+    } finally {
+      setConnectionLoading(false)
+    }
+  }, [
+    buildRepositoryConnectionsPath,
+    connectionLoading,
+    connectionNextCursor,
+    items,
+  ])
+
+  const buildRepositoryFilesPath = useCallback(
+    (repositoryID: string, cursor?: string) => {
+      const params = new URLSearchParams({
+        limit: String(KNOWLEDGE_PAGE_SIZE),
+      })
+      if (cursor) params.set("cursor", cursor)
+      if (repositoryFilesQuery.trim())
+        params.set("q", repositoryFilesQuery.trim())
+      return `/api/v1/knowledge/repositories/${repositoryID}/files?${params.toString()}`
+    },
+    [repositoryFilesQuery]
+  )
+
+  const loadRepositoryFiles = useCallback(async () => {
+    if (!selected || selected.resourceType !== "repository") {
+      setRepositoryFiles([])
+      setRepositoryFilesNextCursor("")
+      setRepositoryFilesTotalCount(undefined)
+      setRepositoryFilesError("")
+      return
+    }
+    const repositoryID = selected.resourceId
+    setRepositoryFilesLoading(true)
+    setRepositoryFilesError("")
+    setRepositoryFilesNextCursor("")
+    try {
+      const result = await api.get<RepositoryFilesResponse>(
+        buildRepositoryFilesPath(repositoryID)
+      )
+      const files = result.files ?? result.items ?? []
+      setRepositoryFiles(files)
+      setRepositoryFilesTotalCount(result.totalCount ?? files.length)
+      setRepositoryFilesNextCursor(result.nextCursor ?? "")
+    } catch (caught) {
+      const isUnsupportedEndpoint =
+        caught instanceof APIError && [404, 405].includes(caught.status)
+      if (!isUnsupportedEndpoint) {
+        setRepositoryFilesError(
+          caught instanceof Error
+            ? caught.message
+            : "Repository files could not be loaded."
+        )
+      }
+      const fallback = selectedDetail?.files ?? []
+      setRepositoryFiles(fallback)
+      setRepositoryFilesTotalCount(fallback.length)
+    } finally {
+      setRepositoryFilesLoading(false)
+    }
+  }, [buildRepositoryFilesPath, selected, selectedDetail?.files])
+
+  const loadMoreRepositoryFiles = useCallback(async () => {
+    if (
+      !selected ||
+      selected.resourceType !== "repository" ||
+      !repositoryFilesNextCursor ||
+      repositoryFilesLoading
+    )
+      return
+    setRepositoryFilesLoading(true)
+    try {
+      const result = await api.get<RepositoryFilesResponse>(
+        buildRepositoryFilesPath(selected.resourceId, repositoryFilesNextCursor)
+      )
+      const files = result.files ?? result.items ?? []
+      setRepositoryFiles((current) => {
+        const existing = new Set(current.map((file) => file.sourceId))
+        return [
+          ...current,
+          ...files.filter((file) => !existing.has(file.sourceId)),
+        ]
+      })
+      setRepositoryFilesNextCursor(result.nextCursor ?? "")
+      if (result.totalCount !== undefined)
+        setRepositoryFilesTotalCount(result.totalCount)
+    } catch (caught) {
+      setRepositoryFilesError(
+        caught instanceof Error
+          ? caught.message
+          : "More repository files could not be loaded."
+      )
+    } finally {
+      setRepositoryFilesLoading(false)
+    }
+  }, [
+    buildRepositoryFilesPath,
+    repositoryFilesLoading,
+    repositoryFilesNextCursor,
+    selected,
+  ])
+
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0)
     return () => window.clearTimeout(timer)
   }, [load])
+
+  useEffect(() => {
+    if (activeView !== "connections") return
+    const timer = window.setTimeout(() => void loadConnections(), 0)
+    return () => window.clearTimeout(timer)
+  }, [activeView, loadConnections])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -543,6 +1172,11 @@ export function KnowledgeWorkspace({
     }, 0)
     return () => window.clearTimeout(timer)
   }, [selected])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadRepositoryFiles(), 0)
+    return () => window.clearTimeout(timer)
+  }, [loadRepositoryFiles])
 
   const spaceTree = useMemo(() => flattenKnowledgeSpaces(spaces), [spaces])
   const selectedFolderIds = useMemo(
@@ -639,6 +1273,15 @@ export function KnowledgeWorkspace({
     selected?.resourceType === "source"
       ? (sources.find((source) => source.id === selected.resourceId) ?? null)
       : null
+  const selectedRepository =
+    selected?.resourceType === "repository"
+      ? mergeRepositoryDetail(
+          repositories.find(
+            (repository) => repository.id === selected.resourceId
+          ) ?? repositoryConnectionFromItem(selected),
+          selectedDetail
+        )
+      : null
   const selectedSpaceItems = selectedSpace
     ? items.filter((item) =>
         item.spaceIds?.some((id) => selectedFolderIds.has(id))
@@ -650,6 +1293,50 @@ export function KnowledgeWorkspace({
   const selectedSpaceRepositories = selectedSpaceItems.filter(
     (item) => item.resourceType === "repository"
   ).length
+
+  const displayedItemCount = visibleItems.length + childSpaces.length
+  const libraryItemCount = totalCount ?? displayedItemCount
+
+  const openNewRepositoryDialog = useCallback(() => {
+    setRepositoryEditId(null)
+    setRepositoryURL("")
+    setRepositoryRef("")
+    setRepositoryToken("")
+    setRepositoryIncludePatterns("")
+    setRepositoryExcludePatterns("")
+    setRepositoryMaxFileSize("2")
+    setRepositorySchedule("0")
+    setRepositoryOpen(true)
+  }, [])
+
+  const openConfigureRepository = useCallback(
+    (connection: KnowledgeRepositoryConnection) => {
+      setRepositoryEditId(connection.id)
+      setRepositoryURL(connection.repositoryUrl)
+      setRepositoryRef(connection.ref)
+      setRepositoryToken("")
+      setRepositoryIncludePatterns(
+        (connection.includePatterns ?? []).join("\n")
+      )
+      setRepositoryExcludePatterns(
+        (connection.excludePatterns ?? []).join("\n")
+      )
+      setRepositoryMaxFileSize(
+        connection.maxFileSizeBytes
+          ? String(
+              Math.max(
+                0.1,
+                Math.round((connection.maxFileSizeBytes / (1024 * 1024)) * 10) /
+                  10
+              )
+            )
+          : "2"
+      )
+      setRepositorySchedule(String(connection.syncIntervalMinutes ?? 0))
+      setRepositoryOpen(true)
+    },
+    []
+  )
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -749,28 +1436,130 @@ export function KnowledgeWorkspace({
     }
   }
 
+  async function patchRepositorySettings(
+    repositoryID: string,
+    payload: Record<string, unknown>
+  ) {
+    const endpoints = [
+      `/api/v1/knowledge/repositories/${repositoryID}/config`,
+      `/api/v1/knowledge/repositories/${repositoryID}`,
+    ]
+    let lastError: unknown
+    for (const endpoint of endpoints) {
+      try {
+        return await api.patch<KnowledgeRepositoryConnection>(endpoint, payload)
+      } catch (caught) {
+        lastError = caught
+        if (
+          !(caught instanceof APIError) ||
+          ![404, 405].includes(caught.status)
+        )
+          throw caught
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Repository settings could not be updated.")
+  }
+
   async function addRepository(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!repositoryURL.trim() || busy) return
+    const maxSizeMB = Number(repositoryMaxFileSize)
+    if (!Number.isFinite(maxSizeMB) || maxSizeMB <= 0 || maxSizeMB > 50) {
+      setError("Maximum file size must be between 0.1 and 50 MB.")
+      return
+    }
+    const includePatterns = parsePatternLines(repositoryIncludePatterns)
+    const excludePatterns = parsePatternLines(repositoryExcludePatterns)
+    const maxFileSizeBytes = Math.round(maxSizeMB * 1024 * 1024)
     setBusy(true)
     setError("")
     try {
-      await api.post<{ repositoryId: string }>(
-        "/api/v1/knowledge/repositories",
-        {
-          url: repositoryURL.trim(),
-          ref: repositoryRef.trim() || undefined,
-          accessToken: repositoryToken.trim() || undefined,
-        }
-      )
+      const payload = {
+        url: repositoryURL.trim(),
+        ref: repositoryRef.trim() || undefined,
+        accessToken: repositoryToken.trim() || undefined,
+        includePatterns,
+        excludePatterns,
+        maxFileSizeBytes,
+        maxFileBytes: maxFileSizeBytes,
+        spaceId: selectedSpace?.id || undefined,
+      }
+      let repositoryID = repositoryEditId
+      if (repositoryEditId) {
+        const result = await patchRepositorySettings(repositoryEditId, payload)
+        repositoryID = result?.id ?? repositoryEditId
+        setItems((current) =>
+          current.map((item) =>
+            item.resourceType === "repository" &&
+            item.resourceId === repositoryEditId
+              ? {
+                  ...item,
+                  title: result?.title || item.title,
+                  status: result?.status || item.status,
+                  metadata: {
+                    ...(item.metadata ?? {}),
+                    provider: result?.provider ?? item.metadata?.provider,
+                    repositoryUrl:
+                      result?.repositoryUrl ?? item.metadata?.repositoryUrl,
+                    ref: result?.ref ?? (repositoryRef.trim() || "HEAD"),
+                    includePatterns,
+                    excludePatterns,
+                    maxFileSizeBytes,
+                    syncIntervalMinutes: Number(repositorySchedule) || 0,
+                  },
+                }
+              : item
+          )
+        )
+        setRepositories((current) =>
+          current.map((repository) =>
+            repository.id === repositoryEditId
+              ? {
+                  ...repository,
+                  ...result,
+                  ref: result?.ref ?? (repositoryRef.trim() || repository.ref),
+                  includePatterns,
+                  excludePatterns,
+                  maxFileSizeBytes,
+                  syncIntervalMinutes: Number(repositorySchedule) || 0,
+                }
+              : repository
+          )
+        )
+        setNotice("Repository settings updated.")
+      } else {
+        const result = await api.post<{
+          repositoryId: string
+          status?: string
+          fileCount?: number
+        }>("/api/v1/knowledge/repositories", payload)
+        repositoryID = result.repositoryId
+        setNotice(
+          "Repository queued for indexing. You can keep chatting while it syncs."
+        )
+      }
+      if (
+        repositoryID &&
+        (repositoryEditId || Number(repositorySchedule) > 0)
+      ) {
+        await api.patch(
+          `/api/v1/knowledge/repositories/${repositoryID}/schedule`,
+          { intervalMinutes: Number(repositorySchedule) }
+        )
+      }
       setRepositoryURL("")
       setRepositoryRef("")
       setRepositoryToken("")
+      setRepositoryIncludePatterns("")
+      setRepositoryExcludePatterns("")
+      setRepositoryMaxFileSize("2")
+      setRepositorySchedule("0")
+      setRepositoryEditId(null)
       setRepositoryOpen(false)
-      setNotice(
-        "Repository queued for indexing. You can keep chatting while it syncs."
-      )
       await load()
+      if (activeView === "connections") await loadConnections()
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -889,7 +1678,7 @@ export function KnowledgeWorkspace({
       )
       if (!item) {
         const result = await api.get<{ items: KnowledgeItem[] }>(
-          "/api/v1/knowledge/items?type=transcript&limit=100"
+          `/api/v1/knowledge/items?type=transcript&limit=${KNOWLEDGE_PAGE_SIZE}`
         )
         item = result.items.find(
           (candidate) => candidate.resourceId === transcriptSessionId
@@ -1160,8 +1949,20 @@ export function KnowledgeWorkspace({
       await api.post(
         `/api/v1/knowledge/repositories/${selected.resourceId}/sync`
       )
+      setRepositories((current) =>
+        current.map((repository) =>
+          repository.id === selected.resourceId
+            ? {
+                ...repository,
+                status: "queued",
+                updatedAt: new Date().toISOString(),
+              }
+            : repository
+        )
+      )
       setNotice("Repository sync queued.")
       await load()
+      if (activeView === "connections") await loadConnections()
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -1177,10 +1978,13 @@ export function KnowledgeWorkspace({
     if (!selected || selected.resourceType !== "repository" || busy) return
     setBusy(true)
     try {
-      await api.patch(
-        `/api/v1/knowledge/repositories/${selected.resourceId}/schedule`,
-        { intervalMinutes }
-      )
+      const result = await api.patch<{
+        intervalMinutes?: number
+        nextSyncAt?: string | null
+      }>(`/api/v1/knowledge/repositories/${selected.resourceId}/schedule`, {
+        intervalMinutes,
+      })
+      const nextSyncAt = result?.nextSyncAt ?? null
       setItems((current) =>
         current.map((item) =>
           item.id === selected.id
@@ -1189,9 +1993,21 @@ export function KnowledgeWorkspace({
                 metadata: {
                   ...(item.metadata ?? {}),
                   syncIntervalMinutes: intervalMinutes,
+                  nextSyncAt,
                 },
               }
             : item
+        )
+      )
+      setRepositories((current) =>
+        current.map((repository) =>
+          repository.id === selected.resourceId
+            ? {
+                ...repository,
+                syncIntervalMinutes: intervalMinutes,
+                nextSyncAt,
+              }
+            : repository
         )
       )
       setSelected((current) =>
@@ -1201,6 +2017,7 @@ export function KnowledgeWorkspace({
               metadata: {
                 ...(current.metadata ?? {}),
                 syncIntervalMinutes: intervalMinutes,
+                nextSyncAt,
               },
             }
           : current
@@ -1252,12 +2069,25 @@ export function KnowledgeWorkspace({
           current.filter((memory) => memory.id !== item.resourceId)
         )
       }
+      if (item.resourceType === "repository") {
+        setRepositories((current) =>
+          current.filter((repository) => repository.id !== item.resourceId)
+        )
+        setConnectionTotalCount((current) =>
+          current === undefined ? current : Math.max(0, current - 1)
+        )
+      }
       if (selected?.id === item.id) {
         closeInspector()
       }
       setDeleteTarget(null)
-      setNotice(`${typeLabels[item.resourceType] ?? "Item"} deleted.`)
+      setNotice(
+        item.resourceType === "repository"
+          ? "Repository disconnected. Its indexed files were removed; the remote repository was not changed."
+          : `${typeLabels[item.resourceType] ?? "Item"} deleted.`
+      )
       await load()
+      if (activeView === "connections") await loadConnections()
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -1374,543 +2204,674 @@ export function KnowledgeWorkspace({
         </Alert>
       )}
 
-      <div className="min-h-0 flex-1">
-        <Card className="min-h-0 overflow-hidden">
-          <CardHeader className="gap-3 border-b px-4 py-3">
-            {selectedSpace && (
-              <nav
-                aria-label="Folder path"
-                className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
-              >
-                <button
-                  className="rounded-sm px-1.5 py-1 hover:bg-muted hover:text-foreground"
-                  onClick={() => setSpaceId("all")}
-                  type="button"
-                >
-                  My files
-                </button>
-                {folderPath.slice(0, -1).map((folder) => (
-                  <span
-                    className="flex min-w-0 items-center gap-1"
-                    key={folder.id}
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        <Tabs
+          className="min-h-0 flex-1"
+          onValueChange={(value) => setActiveView(value as KnowledgeView)}
+          value={activeView}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <TabsList aria-label="Knowledge views">
+              <TabsTrigger value="library">
+                <FileText data-icon="inline-start" /> Library
+              </TabsTrigger>
+              <TabsTrigger value="connections">
+                <GitBranch data-icon="inline-start" /> Connections
+              </TabsTrigger>
+            </TabsList>
+            <p className="text-xs text-muted-foreground">
+              {activeView === "library"
+                ? `${libraryItemCount} library items`
+                : `${connectionTotalCount ?? repositories.length} connections`}
+            </p>
+          </div>
+          <TabsContent className="min-h-0 flex-1" value="library">
+            <Card className="min-h-0 overflow-hidden">
+              <CardHeader className="gap-3 border-b px-4 py-3">
+                {selectedSpace && (
+                  <nav
+                    aria-label="Folder path"
+                    className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
                   >
-                    <ChevronRight
-                      className="size-3.5 shrink-0"
-                      aria-hidden="true"
-                    />
                     <button
-                      className={cn(
-                        "truncate rounded-sm px-1.5 py-1 hover:bg-muted hover:text-foreground",
-                        folder.id === selectedSpace.id &&
-                          "font-medium text-foreground"
-                      )}
-                      onClick={() => setSpaceId(folder.id)}
+                      className="rounded-sm px-1.5 py-1 hover:bg-muted hover:text-foreground"
+                      onClick={() => setSpaceId("all")}
                       type="button"
                     >
-                      {folder.name}
+                      My files
                     </button>
-                  </span>
-                ))}
-              </nav>
-            )}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <CardTitle className="text-sm">
-                  {selectedSpace?.name ?? "My files"}
-                </CardTitle>
-                <CardDescription className="truncate text-xs">
-                  {selectedSpace?.description ||
-                    "Browse folders and files available to chats and agent workflows."}
-                </CardDescription>
-                {selectedSpace && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <span className="rounded-full border px-2 py-0.5">
-                      {selectedSpace.visibility === "workspace"
-                        ? "Workspace"
-                        : "Private"}
-                    </span>
-                    <span>{selectedSpace.itemCount} items</span>
-                    <span>·</span>
-                    <span>
-                      Updated{" "}
-                      {new Date(selectedSpace.updatedAt).toLocaleDateString()}
-                    </span>
-                    {selectedSpaceRepositories > 0 && (
-                      <>
+                    {folderPath.slice(0, -1).map((folder) => (
+                      <span
+                        className="flex min-w-0 items-center gap-1"
+                        key={folder.id}
+                      >
+                        <ChevronRight
+                          className="size-3.5 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <button
+                          className={cn(
+                            "truncate rounded-sm px-1.5 py-1 hover:bg-muted hover:text-foreground",
+                            folder.id === selectedSpace.id &&
+                              "font-medium text-foreground"
+                          )}
+                          onClick={() => setSpaceId(folder.id)}
+                          type="button"
+                        >
+                          {folder.name}
+                        </button>
+                      </span>
+                    ))}
+                  </nav>
+                )}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle className="flex items-baseline gap-2 text-sm">
+                      <span className="truncate">
+                        {selectedSpace?.name ?? "My files"}
+                      </span>
+                      <span
+                        aria-live="polite"
+                        className="shrink-0 font-normal text-muted-foreground"
+                      >
+                        {libraryItemCount} items
+                      </span>
+                    </CardTitle>
+                    <CardDescription className="truncate text-xs">
+                      {selectedSpace?.description ||
+                        "Browse folders and files available to chats and agent workflows."}
+                    </CardDescription>
+                    {selectedSpace && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span className="rounded-full border px-2 py-0.5">
+                          {selectedSpace.visibility === "workspace"
+                            ? "Workspace"
+                            : "Private"}
+                        </span>
+                        <span>{selectedSpace.itemCount} items</span>
                         <span>·</span>
                         <span>
-                          {selectedSpaceRepositories}{" "}
-                          {selectedSpaceRepositories === 1
-                            ? "repository"
-                            : "repositories"}
+                          Updated{" "}
+                          {new Date(
+                            selectedSpace.updatedAt
+                          ).toLocaleDateString()}
                         </span>
-                      </>
-                    )}
-                    {selectedSpaceProblems > 0 && (
-                      <>
-                        <span>·</span>
-                        <span className="text-destructive">
-                          {selectedSpaceProblems} indexing{" "}
-                          {selectedSpaceProblems === 1 ? "problem" : "problems"}
-                        </span>
-                      </>
+                        {selectedSpaceRepositories > 0 && (
+                          <>
+                            <span>·</span>
+                            <span>
+                              {selectedSpaceRepositories}{" "}
+                              {selectedSpaceRepositories === 1
+                                ? "repository"
+                                : "repositories"}
+                            </span>
+                          </>
+                        )}
+                        {selectedSpaceProblems > 0 && (
+                          <>
+                            <span>·</span>
+                            <span className="text-destructive">
+                              {selectedSpaceProblems} indexing{" "}
+                              {selectedSpaceProblems === 1
+                                ? "problem"
+                                : "problems"}
+                            </span>
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
-              {selectedSpace && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onNavigate("chat")}
-                >
-                  Start chat
-                </Button>
-              )}
-            </div>
-            <FilterBar
-              className="-mx-4 -mb-3 px-4 sm:-mx-0 sm:px-0"
-              search={{
-                value: query,
-                onChange: setQuery,
-                placeholder: "Search this folder",
-                label: "Search this folder",
-              }}
-              resultCount={visibleItems.length + childSpaces.length}
-              resultLabel="items"
-              hasActiveFilters={
-                Boolean(query.trim()) ||
-                typeFilter !== "all" ||
-                statusFilter !== "all" ||
-                ownershipFilter !== "all" ||
-                sortBy !== "updated"
-              }
-              onClear={() => {
-                setQuery("")
-                setTypeFilter("all")
-                setStatusFilter("all")
-                setOwnershipFilter("all")
-                setSortBy("updated")
-              }}
-            >
-              <Select
-                value={typeFilter}
-                onValueChange={(value) =>
-                  setTypeFilter((value as ItemFilter) || "all")
-                }
-              >
-                <SelectTrigger aria-label="Filter by type" className="min-w-32">
-                  <SelectValue>
-                    {typeFilter === "all"
-                      ? "All types"
-                      : (typeLabels[typeFilter] ?? "All types")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All types</SelectItem>
-                  {Object.entries(typeLabels).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                value={statusFilter}
-                onValueChange={(value) => setStatusFilter(value ?? "all")}
-              >
-                <SelectTrigger
-                  className="min-w-36"
-                  aria-label="Filter by status"
-                >
-                  <Settings2 data-icon="inline-start" />
-                  <SelectValue>
-                    {statusFilter === "all"
-                      ? "All statuses"
-                      : itemStatusLabel(statusFilter)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="ready">Ready</SelectItem>
-                  <SelectItem value="processing">Processing</SelectItem>
-                  <SelectItem value="queued">Queued</SelectItem>
-                  <SelectItem value="failed">Failed</SelectItem>
-                  <SelectItem value="disabled">Disabled</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={ownershipFilter}
-                onValueChange={(value) => setOwnershipFilter(value ?? "all")}
-              >
-                <SelectTrigger
-                  className="min-w-36"
-                  aria-label="Filter by ownership"
-                >
-                  <SelectValue>
-                    {ownershipFilter === "all"
-                      ? "All owners"
-                      : ownershipFilter === "private"
-                        ? "Personal"
-                        : "Workspace"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All owners</SelectItem>
-                  <SelectItem value="private">Personal</SelectItem>
-                  <SelectItem value="workspace">Workspace</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={sortBy}
-                onValueChange={(value) =>
-                  setSortBy(
-                    (value as "updated" | "title" | "type") || "updated"
-                  )
-                }
-              >
-                <SelectTrigger className="min-w-40" aria-label="Sort knowledge">
-                  <SelectValue>
-                    {sortBy === "updated"
-                      ? "Recently updated"
-                      : sortBy === "title"
-                        ? "Title"
-                        : "Type"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="updated">Recently updated</SelectItem>
-                  <SelectItem value="title">Title</SelectItem>
-                  <SelectItem value="type">Type</SelectItem>
-                </SelectContent>
-              </Select>
-            </FilterBar>
-          </CardHeader>
-          <ContextMenu>
-            <ContextMenuTrigger className="block min-h-96">
-              <CardContent
-                className={cn(
-                  "min-h-96 overflow-y-auto bg-muted/20 p-4 transition-colors sm:p-5",
-                  draggingFiles && "bg-muted/45"
-                )}
-                onDragEnter={(event) => {
-                  event.preventDefault()
-                  setDraggingFiles(true)
-                }}
-                onDragOver={(event) => event.preventDefault()}
-                onDragLeave={(event) => {
-                  if (
-                    !event.currentTarget.contains(event.relatedTarget as Node)
-                  )
-                    setDraggingFiles(false)
-                }}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  setDraggingFiles(false)
-                  const file = event.dataTransfer.files?.[0]
-                  if (file) void uploadFile(file)
-                }}
-              >
-                <button
-                  className={cn(
-                    "mb-5 flex w-full items-center justify-center gap-3 rounded-xl bg-card px-4 py-5 text-left shadow-xs transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
-                    draggingFiles && "border-primary bg-primary/5"
-                  )}
-                  disabled={busy}
-                  onClick={() => fileInputRef.current?.click()}
-                  type="button"
-                >
-                  {busy ? (
-                    <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
-                  ) : (
-                    <UploadCloud className="size-6 text-primary" />
-                  )}
-                  <span>
-                    <span className="block text-sm font-medium">
-                      {busy
-                        ? "Uploading file…"
-                        : "Drop a file here or click to upload"}
-                    </span>
-                    <span className="block text-xs text-muted-foreground">
-                      PDF, CSV, Markdown, text, HTML or JSON · up to 25 MB
-                    </span>
-                  </span>
-                </button>
-
-                {loading ? (
-                  <div
-                    aria-live="polite"
-                    className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground"
-                    role="status"
-                  >
-                    <LoaderCircle className="animate-spin" /> Loading files…
-                  </div>
-                ) : loadError &&
-                  visibleItems.length === 0 &&
-                  childSpaces.length === 0 ? (
-                  <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">
-                    <p className="text-sm text-destructive" role="alert">
-                      Knowledge could not be loaded completely.
-                    </p>
+                  {selectedSpace && (
                     <Button
                       size="sm"
-                      type="button"
                       variant="outline"
-                      onClick={() => void load()}
+                      onClick={() => onNavigate("chat")}
                     >
-                      Try again
+                      Start chat
                     </Button>
-                  </div>
-                ) : visibleItems.length === 0 && childSpaces.length === 0 ? (
-                  <Empty className="min-h-64 border-0">
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">
-                        <FolderKanban />
-                      </EmptyMedia>
-                      <EmptyTitle>
-                        {query ? "No matching files" : "This folder is empty"}
-                      </EmptyTitle>
-                      <EmptyDescription>
-                        Upload a file, or right-click here to create a folder.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                    {!query.trim() &&
-                      childSpaces.map((folder) => (
-                        <ContextMenu key={folder.id}>
-                          <ContextMenuTrigger
-                            className="group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
-                            onDoubleClick={() => setSpaceId(folder.id)}
-                          >
-                            <div className="mb-3 flex items-start justify-between gap-2">
-                              <span className="flex size-12 items-center justify-center rounded-lg bg-muted text-primary">
-                                <Folder className="size-7" aria-hidden="true" />
-                              </span>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger
-                                  render={
-                                    <Button
-                                      aria-label={`Actions for ${folder.name}`}
-                                      size="icon-sm"
-                                      variant="ghost"
+                  )}
+                </div>
+                <FilterBar
+                  className="-mx-4 -mb-3 border-0 px-4 sm:-mx-0 sm:px-0"
+                  search={{
+                    value: query,
+                    onChange: setQuery,
+                    placeholder: "Search this folder",
+                    label: "Search this folder",
+                  }}
+                  hasActiveFilters={
+                    Boolean(query.trim()) ||
+                    typeFilter !== "all" ||
+                    statusFilter !== "all" ||
+                    ownershipFilter !== "all" ||
+                    sortBy !== "updated"
+                  }
+                  onClear={() => {
+                    setQuery("")
+                    setTypeFilter("all")
+                    setStatusFilter("all")
+                    setOwnershipFilter("all")
+                    setSortBy("updated")
+                  }}
+                >
+                  <Select
+                    value={typeFilter}
+                    onValueChange={(value) =>
+                      setTypeFilter((value as ItemFilter) || "all")
+                    }
+                  >
+                    <SelectTrigger
+                      aria-label="Filter by type"
+                      className="min-w-32"
+                    >
+                      <SelectValue>
+                        {typeFilter === "all"
+                          ? "All types"
+                          : (typeLabels[typeFilter] ?? "All types")}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All types</SelectItem>
+                      {Object.entries(typeLabels).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value) => setStatusFilter(value ?? "all")}
+                  >
+                    <SelectTrigger
+                      className="min-w-36"
+                      aria-label="Filter by status"
+                    >
+                      <Settings2 data-icon="inline-start" />
+                      <SelectValue>
+                        {statusFilter === "all"
+                          ? "All statuses"
+                          : itemStatusLabel(statusFilter)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="ready">Ready</SelectItem>
+                      <SelectItem value="processing">Processing</SelectItem>
+                      <SelectItem value="queued">Queued</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                      <SelectItem value="disabled">Disabled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={ownershipFilter}
+                    onValueChange={(value) =>
+                      setOwnershipFilter(value ?? "all")
+                    }
+                  >
+                    <SelectTrigger
+                      className="min-w-36"
+                      aria-label="Filter by ownership"
+                    >
+                      <SelectValue>
+                        {ownershipFilter === "all"
+                          ? "All owners"
+                          : ownershipFilter === "private"
+                            ? "Personal"
+                            : "Workspace"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All owners</SelectItem>
+                      <SelectItem value="private">Personal</SelectItem>
+                      <SelectItem value="workspace">Workspace</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={sortBy}
+                    onValueChange={(value) =>
+                      setSortBy(
+                        (value as "updated" | "title" | "type") || "updated"
+                      )
+                    }
+                  >
+                    <SelectTrigger
+                      className="min-w-40"
+                      aria-label="Sort knowledge"
+                    >
+                      <SelectValue>
+                        {sortBy === "updated"
+                          ? "Recently updated"
+                          : sortBy === "title"
+                            ? "Title"
+                            : "Type"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="updated">Recently updated</SelectItem>
+                      <SelectItem value="title">Title</SelectItem>
+                      <SelectItem value="type">Type</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FilterBar>
+              </CardHeader>
+              <ContextMenu>
+                <ContextMenuTrigger className="block min-h-96">
+                  <CardContent
+                    className={cn(
+                      "min-h-96 overflow-y-auto bg-muted/20 p-4 transition-colors sm:p-5",
+                      draggingFiles && "bg-muted/45"
+                    )}
+                    onDragEnter={(event) => {
+                      event.preventDefault()
+                      setDraggingFiles(true)
+                    }}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDragLeave={(event) => {
+                      if (
+                        !event.currentTarget.contains(
+                          event.relatedTarget as Node
+                        )
+                      )
+                        setDraggingFiles(false)
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      setDraggingFiles(false)
+                      const file = event.dataTransfer.files?.[0]
+                      if (file) void uploadFile(file)
+                    }}
+                  >
+                    <button
+                      className={cn(
+                        "mb-5 flex w-full items-center justify-center gap-3 rounded-xl bg-secondary/70 px-4 py-5 text-left shadow-xs transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                        draggingFiles && "border-primary bg-primary/5"
+                      )}
+                      disabled={busy}
+                      onClick={() => fileInputRef.current?.click()}
+                      type="button"
+                    >
+                      {busy ? (
+                        <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
+                      ) : (
+                        <UploadCloud className="size-6 text-primary" />
+                      )}
+                      <span>
+                        <span className="block text-sm font-medium">
+                          {busy
+                            ? "Uploading file…"
+                            : "Drop a file here or click to upload"}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          PDF, CSV, Markdown, text, HTML or JSON · up to 25 MB
+                        </span>
+                      </span>
+                    </button>
+
+                    {loading ? (
+                      <div
+                        aria-live="polite"
+                        className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground"
+                        role="status"
+                      >
+                        <LoaderCircle className="animate-spin" /> Loading files…
+                      </div>
+                    ) : loadError &&
+                      visibleItems.length === 0 &&
+                      childSpaces.length === 0 ? (
+                      <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">
+                        <p className="text-sm text-destructive" role="alert">
+                          Knowledge could not be loaded completely.
+                        </p>
+                        <Button
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                          onClick={() => void load()}
+                        >
+                          Try again
+                        </Button>
+                      </div>
+                    ) : visibleItems.length === 0 &&
+                      childSpaces.length === 0 ? (
+                      <Empty className="min-h-64 border-0">
+                        <EmptyHeader>
+                          <EmptyMedia variant="icon">
+                            <FolderKanban />
+                          </EmptyMedia>
+                          <EmptyTitle>
+                            {query
+                              ? "No matching files"
+                              : "This folder is empty"}
+                          </EmptyTitle>
+                          <EmptyDescription>
+                            Upload a file, or right-click here to create a
+                            folder.
+                          </EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                        {!query.trim() &&
+                          childSpaces.map((folder) => (
+                            <ContextMenu key={folder.id}>
+                              <ContextMenuTrigger
+                                className="group flex min-w-0 cursor-pointer flex-col rounded-xl bg-secondary/70 p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-secondary hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+                                onDoubleClick={() => setSpaceId(folder.id)}
+                              >
+                                <div className="mb-3 flex items-start justify-between gap-2">
+                                  <span className="flex size-12 items-center justify-center rounded-lg bg-muted text-primary">
+                                    <Folder
+                                      className="size-7"
+                                      aria-hidden="true"
                                     />
-                                  }
+                                  </span>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger
+                                      render={
+                                        <Button
+                                          aria-label={`Actions for ${folder.name}`}
+                                          size="icon-sm"
+                                          variant="ghost"
+                                        />
+                                      }
+                                    >
+                                      <MoreHorizontal />
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem
+                                        onClick={() => setSpaceId(folder.id)}
+                                      >
+                                        <Folder /> Open
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          setSpaceParentId(folder.id)
+                                          setSpaceOpen(true)
+                                        }}
+                                      >
+                                        <FolderPlus /> New subfolder
+                                      </DropdownMenuItem>
+                                      {folder.canManage && (
+                                        <>
+                                          <DropdownMenuSeparator />
+                                          <DropdownMenuItem
+                                            variant="destructive"
+                                            onClick={() =>
+                                              setFolderDeleteTarget(folder)
+                                            }
+                                          >
+                                            <Trash2 /> Delete folder
+                                          </DropdownMenuItem>
+                                        </>
+                                      )}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
+                                <button
+                                  className="w-full truncate text-left text-sm font-medium"
+                                  onClick={() => setSpaceId(folder.id)}
+                                  type="button"
                                 >
-                                  <MoreHorizontal />
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
+                                  {folder.name}
+                                </button>
+                                <span className="mt-1 text-xs text-muted-foreground">
+                                  {folder.itemCount}{" "}
+                                  {folder.itemCount === 1 ? "item" : "items"}
+                                </span>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent className="w-48">
+                                <ContextMenuGroup>
+                                  <ContextMenuItem
                                     onClick={() => setSpaceId(folder.id)}
                                   >
                                     <Folder /> Open
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
+                                  </ContextMenuItem>
+                                  <ContextMenuItem
                                     onClick={() => {
                                       setSpaceParentId(folder.id)
                                       setSpaceOpen(true)
                                     }}
                                   >
                                     <FolderPlus /> New subfolder
-                                  </DropdownMenuItem>
-                                  {folder.canManage && (
-                                    <>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem
+                                  </ContextMenuItem>
+                                </ContextMenuGroup>
+                                {folder.canManage && (
+                                  <>
+                                    <ContextMenuSeparator />
+                                    <ContextMenuGroup>
+                                      <ContextMenuItem
                                         variant="destructive"
                                         onClick={() =>
                                           setFolderDeleteTarget(folder)
                                         }
                                       >
                                         <Trash2 /> Delete folder
+                                      </ContextMenuItem>
+                                    </ContextMenuGroup>
+                                  </>
+                                )}
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          ))}
+                        {visibleItems.map((item) => {
+                          const source =
+                            item.resourceType === "source"
+                              ? sources.find(
+                                  (candidate) =>
+                                    candidate.id === item.resourceId
+                                )
+                              : null
+                          const Icon = itemIcon(item, source)
+                          const pending =
+                            source?.status === "queued" ||
+                            source?.status === "processing"
+                          return (
+                            <ContextMenu key={item.id}>
+                              <ContextMenuTrigger
+                                className={cn(
+                                  "group flex min-w-0 cursor-pointer flex-col rounded-xl bg-secondary/70 p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-secondary hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+                                  selected?.id === item.id &&
+                                    "ring-2 ring-primary/30"
+                                )}
+                                onDoubleClick={() => openInspector(item)}
+                              >
+                                <div className="mb-3 flex items-start justify-between gap-2">
+                                  <span className="flex size-12 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                                    <Icon
+                                      className="size-6"
+                                      aria-hidden="true"
+                                    />
+                                  </span>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger
+                                      render={
+                                        <Button
+                                          aria-label={`Actions for ${item.title}`}
+                                          size="icon-sm"
+                                          variant="ghost"
+                                        />
+                                      }
+                                    >
+                                      <MoreHorizontal />
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem
+                                        onClick={() => openInspector(item)}
+                                      >
+                                        <Search /> Open details
                                       </DropdownMenuItem>
-                                    </>
-                                  )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                            <button
-                              className="w-full truncate text-left text-sm font-medium"
-                              onClick={() => setSpaceId(folder.id)}
-                              type="button"
-                            >
-                              {folder.name}
-                            </button>
-                            <span className="mt-1 text-xs text-muted-foreground">
-                              {folder.itemCount}{" "}
-                              {folder.itemCount === 1 ? "item" : "items"}
-                            </span>
-                          </ContextMenuTrigger>
-                          <ContextMenuContent className="w-48">
-                            <ContextMenuGroup>
-                              <ContextMenuItem
-                                onClick={() => setSpaceId(folder.id)}
-                              >
-                                <Folder /> Open
-                              </ContextMenuItem>
-                              <ContextMenuItem
-                                onClick={() => {
-                                  setSpaceParentId(folder.id)
-                                  setSpaceOpen(true)
-                                }}
-                              >
-                                <FolderPlus /> New subfolder
-                              </ContextMenuItem>
-                            </ContextMenuGroup>
-                            {folder.canManage && (
-                              <>
-                                <ContextMenuSeparator />
+                                      {canDeleteKnowledgeItem(item) && (
+                                        <>
+                                          <DropdownMenuSeparator />
+                                          <DropdownMenuItem
+                                            variant="destructive"
+                                            onClick={() =>
+                                              setDeleteTarget(item)
+                                            }
+                                          >
+                                            <Trash2 /> Delete
+                                          </DropdownMenuItem>
+                                        </>
+                                      )}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
+                                <button
+                                  className="w-full truncate text-left text-sm font-medium"
+                                  onClick={() => openInspector(item)}
+                                  type="button"
+                                >
+                                  {item.title}
+                                </button>
+                                <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                                  <span className="truncate">
+                                    {typeLabels[item.resourceType] ??
+                                      item.resourceType}
+                                  </span>
+                                  <span>
+                                    {new Date(
+                                      item.updatedAt
+                                    ).toLocaleDateString()}
+                                  </span>
+                                </div>
+                                {pending && (
+                                  <Progress
+                                    className="mt-2 h-1"
+                                    value={source?.progress ?? 0}
+                                  />
+                                )}
+                              </ContextMenuTrigger>
+                              <ContextMenuContent className="w-44">
                                 <ContextMenuGroup>
                                   <ContextMenuItem
-                                    variant="destructive"
-                                    onClick={() =>
-                                      setFolderDeleteTarget(folder)
-                                    }
-                                  >
-                                    <Trash2 /> Delete folder
-                                  </ContextMenuItem>
-                                </ContextMenuGroup>
-                              </>
-                            )}
-                          </ContextMenuContent>
-                        </ContextMenu>
-                      ))}
-                    {visibleItems.map((item) => {
-                      const source =
-                        item.resourceType === "source"
-                          ? sources.find(
-                              (candidate) => candidate.id === item.resourceId
-                            )
-                          : null
-                      const Icon = itemIcon(item, source)
-                      const pending =
-                        source?.status === "queued" ||
-                        source?.status === "processing"
-                      return (
-                        <ContextMenu key={item.id}>
-                          <ContextMenuTrigger
-                            className={cn(
-                              "group flex min-w-0 cursor-pointer flex-col rounded-xl bg-card p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-background hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
-                              selected?.id === item.id &&
-                                "ring-2 ring-primary/30"
-                            )}
-                            onDoubleClick={() => openInspector(item)}
-                          >
-                            <div className="mb-3 flex items-start justify-between gap-2">
-                              <span className="flex size-12 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                                <Icon className="size-6" aria-hidden="true" />
-                              </span>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger
-                                  render={
-                                    <Button
-                                      aria-label={`Actions for ${item.title}`}
-                                      size="icon-sm"
-                                      variant="ghost"
-                                    />
-                                  }
-                                >
-                                  <MoreHorizontal />
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
                                     onClick={() => openInspector(item)}
                                   >
                                     <Search /> Open details
-                                  </DropdownMenuItem>
-                                  {canDeleteKnowledgeItem(item) && (
-                                    <>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem
+                                  </ContextMenuItem>
+                                </ContextMenuGroup>
+                                {canDeleteKnowledgeItem(item) && (
+                                  <>
+                                    <ContextMenuSeparator />
+                                    <ContextMenuGroup>
+                                      <ContextMenuItem
                                         variant="destructive"
                                         onClick={() => setDeleteTarget(item)}
                                       >
                                         <Trash2 /> Delete
-                                      </DropdownMenuItem>
-                                    </>
-                                  )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                            <button
-                              className="w-full truncate text-left text-sm font-medium"
-                              onClick={() => openInspector(item)}
-                              type="button"
-                            >
-                              {item.title}
-                            </button>
-                            <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                              <span className="truncate">
-                                {typeLabels[item.resourceType] ??
-                                  item.resourceType}
-                              </span>
-                              <span>
-                                {new Date(item.updatedAt).toLocaleDateString()}
-                              </span>
-                            </div>
-                            {pending && (
-                              <Progress
-                                className="mt-2 h-1"
-                                value={source?.progress ?? 0}
-                              />
-                            )}
-                          </ContextMenuTrigger>
-                          <ContextMenuContent className="w-44">
-                            <ContextMenuGroup>
-                              <ContextMenuItem
-                                onClick={() => openInspector(item)}
-                              >
-                                <Search /> Open details
-                              </ContextMenuItem>
-                            </ContextMenuGroup>
-                            {canDeleteKnowledgeItem(item) && (
-                              <>
-                                <ContextMenuSeparator />
-                                <ContextMenuGroup>
-                                  <ContextMenuItem
-                                    variant="destructive"
-                                    onClick={() => setDeleteTarget(item)}
-                                  >
-                                    <Trash2 /> Delete
-                                  </ContextMenuItem>
-                                </ContextMenuGroup>
-                              </>
-                            )}
-                          </ContextMenuContent>
-                        </ContextMenu>
-                      )
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </ContextMenuTrigger>
-            <ContextMenuContent className="w-48">
-              <ContextMenuGroup>
-                <ContextMenuItem
-                  onClick={() => {
-                    setSpaceParentId(selectedSpace?.id ?? "root")
-                    setSpaceOpen(true)
-                  }}
-                >
-                  <FolderPlus /> New folder
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => fileInputRef.current?.click()}>
-                  <Upload /> Upload file
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => setAddOpen(true)}>
-                  <Plus /> Add knowledge
-                </ContextMenuItem>
-              </ContextMenuGroup>
-              <ContextMenuSeparator />
-              <ContextMenuGroup>
-                <ContextMenuItem onClick={() => void load()}>
-                  <RefreshCw /> Refresh
-                </ContextMenuItem>
-              </ContextMenuGroup>
-            </ContextMenuContent>
-          </ContextMenu>
-        </Card>
+                                      </ContextMenuItem>
+                                    </ContextMenuGroup>
+                                  </>
+                                )}
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {nextCursor && !loading && (
+                      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                        <span>
+                          Showing {displayedItemCount} of {libraryItemCount}{" "}
+                          items
+                        </span>
+                        <Button
+                          disabled={loadingMore}
+                          onClick={() => void loadMore()}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          {loadingMore ? "Loading…" : "Load more"}
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48">
+                  <ContextMenuGroup>
+                    <ContextMenuItem
+                      onClick={() => {
+                        setSpaceParentId(selectedSpace?.id ?? "root")
+                        setSpaceOpen(true)
+                      }}
+                    >
+                      <FolderPlus /> New folder
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Upload /> Upload file
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => setAddOpen(true)}>
+                      <Plus /> Add knowledge
+                    </ContextMenuItem>
+                  </ContextMenuGroup>
+                  <ContextMenuSeparator />
+                  <ContextMenuGroup>
+                    <ContextMenuItem onClick={() => void load()}>
+                      <RefreshCw /> Refresh
+                    </ContextMenuItem>
+                  </ContextMenuGroup>
+                </ContextMenuContent>
+              </ContextMenu>
+            </Card>
+          </TabsContent>
+          <TabsContent className="min-h-0 flex-1" value="connections">
+            <KnowledgeConnections
+              connectionError={connectionError}
+              connectionLoading={connectionLoading}
+              connectionNextCursor={connectionNextCursor}
+              connectionQuery={connectionQuery}
+              connectionSort={connectionSort}
+              connectionStatusFilter={connectionStatusFilter}
+              connectionTotalCount={connectionTotalCount}
+              connections={repositories}
+              onConfigure={openConfigureRepository}
+              onDisconnect={(connection) => {
+                const item = items.find(
+                  (candidate) =>
+                    candidate.resourceType === "repository" &&
+                    candidate.resourceId === connection.id
+                )
+                setDeleteTarget(
+                  item ?? knowledgeItemFromRepositoryConnection(connection)
+                )
+              }}
+              onRefresh={() => void loadConnections()}
+              onSearch={setConnectionQuery}
+              onSortChange={setConnectionSort}
+              onStatusChange={setConnectionStatusFilter}
+              onSync={async (connection) => {
+                setBusy(true)
+                try {
+                  const result = await api.post<{
+                    status: string
+                    alreadyRunning?: boolean
+                  }>(
+                    `/api/v1/knowledge/repositories/${connection.id}/sync`
+                  )
+                  setNotice(
+                    result.alreadyRunning
+                      ? "Repository sync is already in progress."
+                      : "Repository sync queued."
+                  )
+                  await loadConnections()
+                  await load()
+                } catch (caught) {
+                  setError(
+                    caught instanceof Error
+                      ? caught.message
+                      : "The repository could not be synced."
+                  )
+                } finally {
+                  setBusy(false)
+                }
+              }}
+              onLoadMore={() => void loadMoreConnections()}
+            />
+          </TabsContent>
+        </Tabs>
 
         <Sheet
           open={inspectorOpen && Boolean(selected)}
@@ -2184,95 +3145,195 @@ export function KnowledgeWorkspace({
                     {selected.resourceType === "repository" && (
                       <div className="flex flex-col gap-3">
                         <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
-                          <p className="flex items-center gap-2 font-medium text-foreground">
-                            <GitBranch />{" "}
-                            {String(
-                              selectedDetail?.provider ??
-                                selected.metadata?.provider ??
-                                "Repository"
-                            )}
-                          </p>
-                          <p className="mt-2 break-all">
-                            {String(
-                              selectedDetail?.repositoryUrl ??
-                                selected.metadata?.repositoryUrl ??
-                                ""
-                            )}
-                          </p>
-                          <p className="mt-1">
-                            Ref:{" "}
-                            {String(
-                              selectedDetail?.ref ??
-                                selected.metadata?.ref ??
-                                "HEAD"
-                            )}
-                          </p>
-                        </div>
-                        {selectedDetail?.files &&
-                          selectedDetail.files.length > 0 && (
-                            <div className="overflow-hidden rounded-xl bg-muted/50">
-                              <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
-                                <p className="text-sm font-medium">
-                                  Indexed files
-                                </p>
-                                <span className="text-xs text-muted-foreground">
-                                  {selectedDetail.files.length} files
-                                </span>
-                              </div>
-                              <div className="max-h-64 overflow-auto">
-                                <table className="w-full min-w-[30rem] text-xs">
-                                  <thead className="sticky top-0 bg-background/95 text-left text-muted-foreground backdrop-blur">
-                                    <tr className="border-b">
-                                      <th className="px-3 py-2 font-medium">
-                                        Path
-                                      </th>
-                                      <th className="px-3 py-2 font-medium">
-                                        State
-                                      </th>
-                                      <th className="px-3 py-2 text-right font-medium">
-                                        Size
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {selectedDetail.files.map((file) => (
-                                      <tr
-                                        className="border-b last:border-b-0"
-                                        key={file.sourceId}
-                                      >
-                                        <td
-                                          className="max-w-[20rem] truncate px-3 py-2 text-muted-foreground"
-                                          title={file.path}
-                                        >
-                                          {file.path}
-                                        </td>
-                                        <td
-                                          className={cn(
-                                            "px-3 py-2 whitespace-nowrap",
-                                            file.status === "failed" &&
-                                              "text-destructive"
-                                          )}
-                                        >
-                                          {itemStatusLabel(file.status)}
-                                        </td>
-                                        <td className="px-3 py-2 text-right whitespace-nowrap text-muted-foreground">
-                                          {formatBytes(file.sizeBytes)}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="flex items-center gap-2 font-medium text-foreground">
+                                <GitBranch />{" "}
+                                {selectedRepository?.provider ?? "Repository"}
+                              </p>
+                              <p className="mt-2 break-all">
+                                {selectedDetail?.repositoryUrl ??
+                                  selectedRepository?.repositoryUrl ??
+                                  ""}
+                              </p>
+                              <p className="mt-1">
+                                Ref:{" "}
+                                {selectedDetail?.ref ??
+                                  selectedRepository?.ref ??
+                                  "HEAD"}
+                              </p>
                             </div>
+                            {selectedRepository && (
+                              <Badge
+                                variant={connectionStatusVariant(
+                                  selectedRepository.status
+                                )}
+                              >
+                                {itemStatusLabel(selectedRepository.status)}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                            <span>
+                              <strong className="font-medium text-foreground">
+                                {selectedRepository?.fileCount ??
+                                  repositoryIndexedCount(selected)}
+                              </strong>{" "}
+                              indexed files
+                            </span>
+                            <span>
+                              <strong className="font-medium text-foreground">
+                                {selectedRepository?.skippedFileCount ?? 0}
+                              </strong>{" "}
+                              skipped
+                            </span>
+                            <span>
+                              Last sync:{" "}
+                              {formatDateTime(
+                                selectedRepository?.lastSyncAt ??
+                                  selectedRepository?.updatedAt
+                              )}
+                            </span>
+                            <span>
+                              Next sync:{" "}
+                              {formatDateTime(selectedRepository?.nextSyncAt)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => void syncSelectedRepository()}
+                          >
+                            <RefreshCw data-icon="inline-start" /> Sync now
+                          </Button>
+                          {selectedRepository && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() =>
+                                openConfigureRepository(selectedRepository)
+                              }
+                            >
+                              <Settings2 data-icon="inline-start" /> Configure
+                            </Button>
                           )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => void syncSelectedRepository()}
-                        >
-                          <RefreshCw data-icon="inline-start" /> Sync now
-                        </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={deleteBusy}
+                            onClick={() => setDeleteTarget(selected)}
+                          >
+                            <Trash2 data-icon="inline-start" /> Disconnect
+                            repository
+                          </Button>
+                        </div>
+                        <div className="flex flex-col gap-2 rounded-xl bg-muted/50 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium">
+                                Indexed files
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Search the repository snapshot without loading
+                                it into the main library.
+                              </p>
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              {repositoryFilesTotalCount ??
+                                repositoryFiles.length}{" "}
+                              files
+                            </span>
+                          </div>
+                          <Input
+                            aria-label="Search indexed repository files"
+                            onChange={(event) =>
+                              setRepositoryFilesQuery(event.target.value)
+                            }
+                            placeholder="Search file paths"
+                            value={repositoryFilesQuery}
+                          />
+                          {repositoryFilesLoading && (
+                            <p
+                              className="text-xs text-muted-foreground"
+                              role="status"
+                            >
+                              Loading indexed files…
+                            </p>
+                          )}
+                          {repositoryFilesError && (
+                            <p
+                              className="text-xs text-destructive"
+                              role="alert"
+                            >
+                              {repositoryFilesError}
+                            </p>
+                          )}
+                          {repositoryFiles.length > 0 ? (
+                            <div className="max-h-64 overflow-auto rounded-lg bg-background/60">
+                              <Table className="min-w-[30rem]">
+                                <TableHeader className="sticky top-0 bg-background/95 text-muted-foreground backdrop-blur">
+                                  <TableRow>
+                                    <TableHead>Path</TableHead>
+                                    <TableHead>State</TableHead>
+                                    <TableHead className="text-right">
+                                      Size
+                                    </TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {repositoryFiles.map((file) => (
+                                    <TableRow key={file.sourceId}>
+                                      <TableCell
+                                        className="max-w-[20rem] truncate text-muted-foreground"
+                                        title={file.path}
+                                      >
+                                        {file.path}
+                                      </TableCell>
+                                      <TableCell
+                                        className={cn(
+                                          "whitespace-nowrap",
+                                          file.status === "failed" &&
+                                            "text-destructive"
+                                        )}
+                                      >
+                                        {itemStatusLabel(file.status)}
+                                      </TableCell>
+                                      <TableCell className="text-right whitespace-nowrap text-muted-foreground">
+                                        {formatBytes(file.sizeBytes)}
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          ) : (
+                            !repositoryFilesLoading && (
+                              <p className="py-4 text-center text-xs text-muted-foreground">
+                                {repositoryFilesQuery
+                                  ? "No files match this search."
+                                  : "No indexed files yet."}
+                              </p>
+                            )
+                          )}
+                          {repositoryFilesNextCursor && (
+                            <Button
+                              className="self-start"
+                              disabled={repositoryFilesLoading}
+                              onClick={() => void loadMoreRepositoryFiles()}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              {repositoryFilesLoading
+                                ? "Loading…"
+                                : "Load more files"}
+                            </Button>
+                          )}
+                        </div>
                         <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
                           <div>
                             <p className="text-sm font-medium">Sync schedule</p>
@@ -2283,7 +3344,7 @@ export function KnowledgeWorkspace({
                           <Select
                             value={String(
                               Number(
-                                selected.metadata?.syncIntervalMinutes ?? 0
+                                selectedRepository?.syncIntervalMinutes ?? 0
                               )
                             )}
                             onValueChange={(value) =>
@@ -2295,21 +3356,9 @@ export function KnowledgeWorkspace({
                               aria-label="Repository sync schedule"
                             >
                               <SelectValue>
-                                {Number(
-                                  selected.metadata?.syncIntervalMinutes ?? 0
-                                ) === 60
-                                  ? "Hourly"
-                                  : Number(
-                                        selected.metadata
-                                          ?.syncIntervalMinutes ?? 0
-                                      ) === 1440
-                                    ? "Daily"
-                                    : Number(
-                                          selected.metadata
-                                            ?.syncIntervalMinutes ?? 0
-                                        ) === 10080
-                                      ? "Weekly"
-                                      : "Manual"}
+                                {scheduleLabel(
+                                  selectedRepository?.syncIntervalMinutes
+                                )}
                               </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
@@ -2430,7 +3479,7 @@ export function KnowledgeWorkspace({
               description="Keep GitHub or GitLab code searchable by the AI"
               onClick={() => {
                 setAddOpen(false)
-                setRepositoryOpen(true)
+                openNewRepositoryDialog()
               }}
             />
           </div>
@@ -2753,13 +3802,18 @@ export function KnowledgeWorkspace({
       </Dialog>
 
       <Dialog open={repositoryOpen} onOpenChange={setRepositoryOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[min(90dvh,48rem)] overflow-y-auto sm:max-w-xl">
           <form onSubmit={addRepository}>
             <DialogHeader>
-              <DialogTitle>Connect a repository</DialogTitle>
+              <DialogTitle>
+                {repositoryEditId
+                  ? "Configure repository"
+                  : "Connect a repository"}
+              </DialogTitle>
               <DialogDescription>
-                JustAI fetches supported text files and keeps the index in your
-                private Knowledge library.
+                {repositoryEditId
+                  ? "Update what JustAI indexes. Changes apply on the next sync."
+                  : "JustAI keeps one repository connection in your Knowledge library while its indexed files stay searchable in the background."}
               </DialogDescription>
             </DialogHeader>
             {error && (
@@ -2799,6 +3853,111 @@ export function KnowledgeWorkspace({
                 placeholder="Used only for this private repository"
                 autoComplete="off"
               />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="knowledge-repository-include">
+                    Include paths{" "}
+                    <span className="text-muted-foreground">(optional)</span>
+                  </Label>
+                  <Textarea
+                    id="knowledge-repository-include"
+                    className="min-h-20"
+                    value={repositoryIncludePatterns}
+                    onChange={(event) =>
+                      setRepositoryIncludePatterns(event.target.value)
+                    }
+                    placeholder={"docs/**\nsrc/**/*.ts"}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    One glob per line. Leave empty to use all supported files.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="knowledge-repository-exclude">
+                    Exclude paths{" "}
+                    <span className="text-muted-foreground">(optional)</span>
+                  </Label>
+                  <Textarea
+                    id="knowledge-repository-exclude"
+                    className="min-h-20"
+                    value={repositoryExcludePatterns}
+                    onChange={(event) =>
+                      setRepositoryExcludePatterns(event.target.value)
+                    }
+                    placeholder={"vendor/**\n**/*.lock"}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    .gitignore rules are respected by default when supported.
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="knowledge-repository-max-size">
+                    Max file size (MB)
+                  </Label>
+                  <Input
+                    id="knowledge-repository-max-size"
+                    type="number"
+                    min="0.1"
+                    max="50"
+                    step="0.1"
+                    value={repositoryMaxFileSize}
+                    onChange={(event) =>
+                      setRepositoryMaxFileSize(event.target.value)
+                    }
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Files larger than this are skipped before indexing.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="knowledge-repository-schedule">
+                    Sync schedule
+                  </Label>
+                  <Select
+                    value={repositorySchedule}
+                    onValueChange={(value) =>
+                      setRepositorySchedule(value ?? "0")
+                    }
+                  >
+                    <SelectTrigger id="knowledge-repository-schedule">
+                      <SelectValue>
+                        {scheduleLabel(Number(repositorySchedule))}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">Manual</SelectItem>
+                      <SelectItem value="60">Hourly</SelectItem>
+                      <SelectItem value="1440">Daily</SelectItem>
+                      <SelectItem value="10080">Weekly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Automatic sync can be changed later from Connections.
+                  </p>
+                </div>
+              </div>
+              <Alert className="bg-muted/40">
+                <GitBranch />
+                <AlertTitle>Sync preview</AlertTitle>
+                <AlertDescription>
+                  {repositoryEditId ? (
+                    <>
+                      {repositories.find(
+                        (repository) => repository.id === repositoryEditId
+                      )?.fileCount ?? 0} indexed files currently.{" "}
+                    </>
+                  ) : (
+                    "New connection will be checked before indexing. "
+                  )}
+                  {repositoryPreviewLabel(
+                    repositoryIncludePatterns,
+                    repositoryExcludePatterns,
+                    repositoryMaxFileSize
+                  )}
+                </AlertDescription>
+              </Alert>
             </div>
             <DialogFooter>
               <Button
@@ -2809,7 +3968,13 @@ export function KnowledgeWorkspace({
                 Cancel
               </Button>
               <Button type="submit" disabled={busy || !repositoryURL.trim()}>
-                {busy ? "Connecting…" : "Connect repository"}
+                {busy
+                  ? repositoryEditId
+                    ? "Saving…"
+                    : "Connecting…"
+                  : repositoryEditId
+                    ? "Save configuration"
+                    : "Connect repository"}
               </Button>
             </DialogFooter>
           </form>
@@ -2818,13 +3983,13 @@ export function KnowledgeWorkspace({
 
       <ConfirmActionDialog
         open={Boolean(deleteTarget)}
-        title={`Delete ${deleteTarget ? (typeLabels[deleteTarget.resourceType] ?? "item").toLocaleLowerCase() : "item"}?`}
-        description={
-          deleteTarget
-            ? `“${deleteTarget.title}” will be permanently removed from Knowledge. This action cannot be undone.`
-            : "This action cannot be undone."
+        title={deleteDialogTitle(deleteTarget)}
+        description={deleteDialogDescription(deleteTarget)}
+        confirmLabel={
+          deleteTarget?.resourceType === "repository"
+            ? "Disconnect repository"
+            : "Delete permanently"
         }
-        confirmLabel="Delete permanently"
         pending={deleteBusy}
         onOpenChange={(open) => {
           if (!open && !deleteBusy) setDeleteTarget(null)
@@ -2852,6 +4017,310 @@ export function KnowledgeWorkspace({
         }}
       />
     </Page>
+  )
+}
+
+type KnowledgeConnectionsProps = {
+  connections: KnowledgeRepositoryConnection[]
+  connectionLoading: boolean
+  connectionError: string
+  connectionNextCursor: string
+  connectionTotalCount?: number
+  connectionQuery: string
+  connectionStatusFilter: string
+  connectionSort: "updated" | "title" | "status"
+  onSearch: (value: string) => void
+  onStatusChange: (value: string) => void
+  onSortChange: (value: "updated" | "title" | "status") => void
+  onRefresh: () => void
+  onLoadMore: () => void
+  onSync: (connection: KnowledgeRepositoryConnection) => void | Promise<void>
+  onConfigure: (connection: KnowledgeRepositoryConnection) => void
+  onDisconnect: (connection: KnowledgeRepositoryConnection) => void
+}
+
+function KnowledgeConnections({
+  connections,
+  connectionLoading,
+  connectionError,
+  connectionNextCursor,
+  connectionTotalCount,
+  connectionQuery,
+  connectionStatusFilter,
+  connectionSort,
+  onSearch,
+  onStatusChange,
+  onSortChange,
+  onRefresh,
+  onLoadMore,
+  onSync,
+  onConfigure,
+  onDisconnect,
+}: KnowledgeConnectionsProps) {
+  const [syncingID, setSyncingID] = useState<string | null>(null)
+
+  async function handleSync(connection: KnowledgeRepositoryConnection) {
+    setSyncingID(connection.id)
+    try {
+      await onSync(connection)
+    } finally {
+      setSyncingID(null)
+    }
+  }
+
+  return (
+    <Card className="min-h-0 overflow-hidden">
+      <CardHeader className="gap-3 border-b px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-sm">Repository connections</CardTitle>
+            <CardDescription className="text-xs">
+              Manage what is synced into JustAI without exposing indexed files
+              as separate library items.
+            </CardDescription>
+          </div>
+          <Button
+            disabled={connectionLoading}
+            onClick={onRefresh}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <RefreshCw data-icon="inline-start" /> Refresh
+          </Button>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <Input
+            aria-label="Search repository connections"
+            className="h-8 min-w-0 sm:min-w-64 sm:flex-1"
+            onChange={(event) => onSearch(event.target.value)}
+            placeholder="Search repositories"
+            value={connectionQuery}
+          />
+          <Select
+            value={connectionStatusFilter}
+            onValueChange={(value) => onStatusChange(value ?? "all")}
+          >
+            <SelectTrigger
+              aria-label="Filter repository connections by status"
+              className="h-8 min-w-32"
+            >
+              <SelectValue>
+                {connectionStatusFilter === "all"
+                  ? "All statuses"
+                  : itemStatusLabel(connectionStatusFilter)}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="ready">Ready</SelectItem>
+              <SelectItem value="processing">Indexing</SelectItem>
+              <SelectItem value="queued">Queued</SelectItem>
+              <SelectItem value="failed">Needs attention</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={connectionSort}
+            onValueChange={(value) =>
+              onSortChange(
+                (value as "updated" | "title" | "status") || "updated"
+              )
+            }
+          >
+            <SelectTrigger
+              aria-label="Sort repository connections"
+              className="h-8 min-w-36"
+            >
+              <SelectValue>
+                {connectionSort === "updated"
+                  ? "Recently updated"
+                  : connectionSort === "title"
+                    ? "Repository name"
+                    : "Status"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="updated">Recently updated</SelectItem>
+              <SelectItem value="title">Repository name</SelectItem>
+              <SelectItem value="status">Status</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <p aria-live="polite" className="text-xs text-muted-foreground">
+          {connections.length} of {connectionTotalCount ?? connections.length}{" "}
+          {connectionTotalCount === 1 ? "connection" : "connections"}
+        </p>
+      </CardHeader>
+      <CardContent className="min-h-96 overflow-y-auto p-4">
+        {connectionError && (
+          <Alert
+            aria-live="polite"
+            role="alert"
+            variant="destructive"
+          >
+            <X />
+            <AlertTitle>Connections could not be loaded</AlertTitle>
+            <AlertDescription>{connectionError}</AlertDescription>
+          </Alert>
+        )}
+        {connectionLoading && connections.length === 0 ? (
+          <div
+            aria-live="polite"
+            className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground"
+            role="status"
+          >
+            <LoaderCircle className="animate-spin" /> Loading connections…
+          </div>
+        ) : connections.length === 0 ? (
+          <Empty className="min-h-64 border-0">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <GitBranch />
+              </EmptyMedia>
+              <EmptyTitle>No repository connections</EmptyTitle>
+              <EmptyDescription>
+                Connect a GitHub or GitLab repository from Add knowledge to make
+                its supported files searchable.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <>
+            <Table className="min-w-[70rem]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Provider</TableHead>
+                  <TableHead>Repository</TableHead>
+                  <TableHead>Ref</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Indexed</TableHead>
+                  <TableHead className="text-right">Skipped</TableHead>
+                  <TableHead>Last sync</TableHead>
+                  <TableHead>Next sync</TableHead>
+                  <TableHead>Schedule</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {connections.map((connection) => (
+                  <TableRow key={connection.id}>
+                    <TableCell className="font-medium capitalize">
+                      {connection.provider}
+                    </TableCell>
+                    <TableCell className="max-w-64">
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="truncate">{connection.title}</span>
+                        {connection.repositoryUrl && (
+                          <a
+                            className="flex items-center gap-1 truncate text-xs text-muted-foreground hover:text-foreground"
+                            href={connection.repositoryUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                            title={connection.repositoryUrl}
+                          >
+                            <span className="truncate">
+                              {connection.repositoryUrl}
+                            </span>
+                            <ExternalLink className="size-3.5 shrink-0" />
+                          </a>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>{connection.ref || "HEAD"}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={connectionStatusVariant(connection.status)}
+                      >
+                        {itemStatusLabel(connection.status)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {connection.fileCount.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {connection.skippedFileCount.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDateTime(
+                        connection.lastSyncAt ?? connection.updatedAt
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDateTime(connection.nextSyncAt)}
+                    </TableCell>
+                    <TableCell>
+                      {scheduleLabel(connection.syncIntervalMinutes)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              aria-label={`Actions for ${connection.title}`}
+                              size="icon-sm"
+                              type="button"
+                              variant="ghost"
+                            />
+                          }
+                        >
+                          <MoreHorizontal />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuGroup>
+                            <DropdownMenuItem
+                              disabled={syncingID === connection.id}
+                              onClick={() => void handleSync(connection)}
+                            >
+                              {syncingID === connection.id ? (
+                                <LoaderCircle className="animate-spin" />
+                              ) : (
+                                <RefreshCw />
+                              )}
+                              Sync now
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => onConfigure(connection)}
+                            >
+                              <Settings2 /> Configure
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuGroup>
+                            <DropdownMenuItem
+                              onClick={() => onDisconnect(connection)}
+                              variant="destructive"
+                            >
+                              <Trash2 /> Disconnect
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {connectionNextCursor && (
+              <div className="flex items-center justify-between gap-3 border-t bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+                <span>
+                  Showing {connections.length} of{" "}
+                  {connectionTotalCount ?? "more"} connections
+                </span>
+                <Button
+                  disabled={connectionLoading}
+                  onClick={onLoadMore}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {connectionLoading ? "Loading…" : "Load more"}
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

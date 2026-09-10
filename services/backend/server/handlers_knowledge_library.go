@@ -110,6 +110,170 @@ func parseKnowledgeSpaceIDs(values []string) []uuid.UUID {
 	return result
 }
 
+type knowledgeItemListOptions struct {
+	limit        int
+	offset       int
+	query        string
+	resourceType string
+	status       string
+	ownership    string
+	spaceID      uuid.UUID
+	personal     bool
+	sort         string
+}
+
+// parseKnowledgeItemListOptions keeps the catalog query contract in one place.
+// Cursors remain offset-compatible with the original endpoint, while all
+// values that become SQL identifiers or clauses are normalized to a small
+// allow-list before the query is built.
+func parseKnowledgeItemListOptions(c *gin.Context) (knowledgeItemListOptions, error) {
+	options := knowledgeItemListOptions{limit: 50, sort: "updated"}
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil {
+			return options, publicError("invalid_limit", "limit must be between 1 and 100")
+		}
+		// Keep the historical behavior of clamping callers that request a
+		// larger page, while still preventing zero/negative SQL limits.
+		if parsed < 1 {
+			parsed = 1
+		}
+		if parsed > 100 {
+			parsed = 100
+		}
+		options.limit = parsed
+	}
+	if raw := strings.TrimSpace(c.Query("cursor")); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed < 0 {
+			return options, publicError("invalid_cursor", "cursor is invalid")
+		}
+		options.offset = parsed
+	}
+
+	options.query = strings.TrimSpace(c.Query("q"))
+	if resourceType := strings.ToLower(strings.TrimSpace(c.Query("type"))); resourceType != "" && resourceType != "all" {
+		switch resourceType {
+		case "source", "note", "memory", "repository", "transcript":
+			options.resourceType = resourceType
+		default:
+			return options, publicError("invalid_type", "invalid knowledge item type")
+		}
+	}
+	options.status = strings.ToLower(strings.TrimSpace(c.Query("status")))
+	if options.status == "all" {
+		options.status = ""
+	}
+
+	// `owner` and `visibility` were used by early clients. Accept them as
+	// aliases while making `ownership` the documented query parameter.
+	ownership := strings.TrimSpace(c.Query("ownership"))
+	if ownership == "" {
+		ownership = strings.TrimSpace(c.Query("owner"))
+	}
+	if ownership == "" {
+		ownership = strings.TrimSpace(c.Query("visibility"))
+	}
+	switch strings.ToLower(ownership) {
+	case "", "all":
+		options.ownership = ""
+	case "private", "personal", "mine":
+		options.ownership = "private"
+	case "workspace", "shared":
+		options.ownership = "workspace"
+	default:
+		return options, publicError("invalid_ownership", "ownership must be all, private, or workspace")
+	}
+
+	if rawSpaceID := strings.ToLower(strings.TrimSpace(c.Query("spaceId"))); rawSpaceID != "" && rawSpaceID != "all" {
+		if rawSpaceID == "personal" {
+			options.personal = true
+		} else {
+			parsed, parseErr := uuid.Parse(rawSpaceID)
+			if parseErr != nil {
+				return options, publicError("invalid_space_id", "invalid space id")
+			}
+			options.spaceID = parsed
+		}
+	}
+
+	sortBy := strings.ToLower(strings.TrimSpace(c.Query("sort")))
+	if sortBy == "" {
+		sortBy = strings.ToLower(strings.TrimSpace(c.Query("sortBy")))
+	}
+	switch sortBy {
+	case "", "updated", "recent", "recently_updated", "recently-updated", "updated_at":
+		options.sort = "updated"
+	case "title", "name":
+		options.sort = "title"
+	case "type", "resource_type":
+		options.sort = "type"
+	default:
+		return options, publicError("invalid_sort", "sort must be updated, title, or type")
+	}
+	return options, nil
+}
+
+func knowledgeItemsWhere(options knowledgeItemListOptions, organizationID, userID uuid.UUID) (string, []any) {
+	args := []any{organizationID, userID}
+	where := `ki.organization_id = $1
+		AND (ki.visibility = 'workspace' OR ki.owner_id = $2)
+		-- Repository files retain catalog identities for RAG, but the library
+		-- presents the parent repository as their single top-level item.
+		AND (ki.resource_type <> 'source' OR NOT EXISTS (
+			SELECT 1 FROM repository_context_files hidden_repo_file
+			WHERE hidden_repo_file.source_id = ki.resource_id
+		))`
+
+	if options.resourceType != "" {
+		where += fmt.Sprintf(" AND ki.resource_type = $%d", len(args)+1)
+		args = append(args, options.resourceType)
+	}
+	if options.status != "" {
+		where += fmt.Sprintf(" AND ki.status = $%d", len(args)+1)
+		args = append(args, options.status)
+	}
+	if options.query != "" {
+		where += fmt.Sprintf(" AND (ki.title ILIKE $%d OR ki.resource_type ILIKE $%d OR ki.metadata::text ILIKE $%d)", len(args)+1, len(args)+1, len(args)+1)
+		args = append(args, "%"+options.query+"%")
+	}
+	if options.ownership != "" {
+		where += fmt.Sprintf(" AND ki.visibility = $%d", len(args)+1)
+		args = append(args, options.ownership)
+	}
+	if options.personal {
+		where += ` AND ki.visibility = 'private'
+			AND ki.owner_id = $2
+			AND NOT EXISTS (
+				SELECT 1 FROM knowledge_space_items personal_ksi
+				WHERE personal_ksi.item_id = ki.id
+			)`
+	} else if options.spaceID != uuid.Nil {
+		where += fmt.Sprintf(` AND EXISTS (
+			SELECT 1
+			FROM knowledge_space_items filter_ksi
+			JOIN workspace_projects filter_space ON filter_space.id = filter_ksi.space_id
+			WHERE filter_ksi.item_id = ki.id
+			  AND filter_space.id = $%d
+			  AND filter_space.organization_id = $1
+			  AND (filter_space.user_id = $2 OR filter_space.visibility = 'workspace')
+		)`, len(args)+1)
+		args = append(args, options.spaceID)
+	}
+	return where, args
+}
+
+func knowledgeItemsOrderBy(sortBy string) string {
+	switch sortBy {
+	case "title":
+		return "lower(ki.title) ASC, ki.id ASC"
+	case "type":
+		return "ki.resource_type ASC, lower(ki.title) ASC, ki.id ASC"
+	default:
+		return "ki.updated_at DESC, ki.id DESC"
+	}
+}
+
 func (a *App) listKnowledgeItems(c *gin.Context) {
 	principal, organizationID, err := workspaceScope(c)
 	if err != nil {
@@ -120,74 +284,43 @@ func (a *App) listKnowledgeItems(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	limit := 50
-	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
-		if parsed, parseErr := strconv.Atoi(raw); parseErr == nil {
-			limit = parsed
-		}
+	options, err := parseKnowledgeItemListOptions(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
 	}
-	if limit < 1 {
-		limit = 1
+	where, args := knowledgeItemsWhere(options, organizationID, principal.UserID)
+	var totalCount int
+	if err := a.DB.QueryRowContext(c, `SELECT COUNT(*) FROM knowledge_items ki WHERE `+where, args...).Scan(&totalCount); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
 	}
-	if limit > 100 {
-		limit = 100
-	}
-	offset := 0
-	if raw := strings.TrimSpace(c.Query("cursor")); raw != "" {
-		if parsed, parseErr := strconv.Atoi(raw); parseErr == nil && parsed >= 0 {
-			offset = parsed
-		}
-	}
-	args := []any{organizationID, principal.UserID}
-	where := `ki.organization_id = $1 AND (ki.visibility = 'workspace' OR ki.owner_id = $2)`
-	if resourceType := strings.TrimSpace(c.Query("type")); resourceType != "" {
-		switch resourceType {
-		case "source", "note", "memory", "repository", "transcript":
-		default:
-			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid knowledge item type"))
-			return
-		}
-		where += fmt.Sprintf(" AND ki.resource_type = $%d", len(args)+1)
-		args = append(args, resourceType)
-	}
-	if status := strings.TrimSpace(c.Query("status")); status != "" {
-		where += fmt.Sprintf(" AND ki.status = $%d", len(args)+1)
-		args = append(args, status)
-	}
-	if query := strings.TrimSpace(c.Query("q")); query != "" {
-		where += fmt.Sprintf(" AND (ki.title ILIKE $%d OR ki.resource_type ILIKE $%d)", len(args)+1, len(args)+1)
-		args = append(args, "%"+query+"%")
-	}
-	if spaceID := strings.TrimSpace(c.Query("spaceId")); spaceID != "" {
-		parsed, parseErr := uuid.Parse(spaceID)
-		if parseErr != nil {
-			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid space id"))
-			return
-		}
-		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM knowledge_space_items filter_ksi JOIN workspace_projects filter_space ON filter_space.id = filter_ksi.space_id WHERE filter_ksi.item_id = ki.id AND filter_space.id = $%d AND filter_space.organization_id = $1 AND (filter_space.user_id = $2 OR filter_space.visibility = 'workspace'))", len(args)+1)
-		args = append(args, parsed)
-	}
-	args = append(args, limit+1, offset)
+
+	listArgs := append([]any(nil), args...)
+	listArgs = append(listArgs, options.limit+1, options.offset)
+	limitPlaceholder := len(listArgs) - 1
+	offsetPlaceholder := len(listArgs)
 	rows, err := a.DB.QueryContext(c, `
 		SELECT ki.id, ki.owner_id, ki.resource_type, ki.resource_id, ki.title,
 		       ki.visibility, ki.status, ki.metadata, ki.created_at, ki.updated_at,
-	       COALESCE(array_agg(visible_space.id::text) FILTER (WHERE visible_space.id IS NOT NULL), '{}')
+	       COALESCE(ARRAY(
+				SELECT visible_space.id::text
+				FROM knowledge_space_items visible_ksi
+				JOIN workspace_projects visible_space ON visible_space.id = visible_ksi.space_id
+				WHERE visible_ksi.item_id = ki.id
+				  AND visible_space.organization_id = $1
+				  AND (visible_space.user_id = $2 OR visible_space.visibility = 'workspace')
+			), '{}'::text[])
 	FROM knowledge_items ki
-	LEFT JOIN knowledge_space_items ksi ON ksi.item_id = ki.id
-	LEFT JOIN workspace_projects visible_space
-	  ON visible_space.id = ksi.space_id
-	 AND visible_space.organization_id = $1
-	 AND (visible_space.user_id = $2 OR visible_space.visibility = 'workspace')
 		WHERE `+where+`
-		GROUP BY ki.id
-		ORDER BY ki.updated_at DESC, ki.id DESC
-		LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
+		ORDER BY `+knowledgeItemsOrderBy(options.sort)+`
+		LIMIT $`+strconv.Itoa(limitPlaceholder)+` OFFSET $`+strconv.Itoa(offsetPlaceholder), listArgs...)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	defer rows.Close()
-	items := make([]models.KnowledgeItem, 0, limit)
+	items := make([]models.KnowledgeItem, 0, options.limit)
 	for rows.Next() {
 		var item models.KnowledgeItem
 		var metadata []byte
@@ -206,11 +339,11 @@ func (a *App) listKnowledgeItems(c *gin.Context) {
 		return
 	}
 	nextCursor := ""
-	if len(items) > limit {
-		items = items[:limit]
-		nextCursor = strconv.Itoa(offset + limit)
+	if len(items) > options.limit {
+		items = items[:options.limit]
+		nextCursor = strconv.Itoa(options.offset + options.limit)
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "nextCursor": nextCursor})
+	c.JSON(http.StatusOK, gin.H{"items": items, "nextCursor": nextCursor, "totalCount": totalCount})
 }
 
 func (a *App) getKnowledgeItemDetail(c *gin.Context) {
