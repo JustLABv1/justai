@@ -37,6 +37,11 @@ func (a *App) putOrganizationAdminDefaults(c *gin.Context) {
 	if !ok {
 		return
 	}
+	previousDefaults, err := a.readAdminDefaults(c, organizationID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 	var request struct {
 		EndpointID   *string  `json:"endpointId"`
 		MCPServerIDs []string `json:"mcpServerIds"`
@@ -140,6 +145,7 @@ func (a *App) putOrganizationAdminDefaults(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	a.writePlatformAudit(c, "platform.organization_defaults.updated", "organization_defaults", &organizationID, gin.H{"previous": previousDefaults, "current": defaults})
 	c.JSON(http.StatusOK, defaults)
 }
 
@@ -510,6 +516,9 @@ func analyticsRange(c *gin.Context) (time.Time, time.Time, error) {
 	}
 	if !start.Before(end) {
 		return time.Time{}, time.Time{}, fmt.Errorf("from must be before to")
+	}
+	if end.Sub(start) > 365*24*time.Hour {
+		return time.Time{}, time.Time{}, fmt.Errorf("from and to must be within 365 days")
 	}
 	return start, end, nil
 }

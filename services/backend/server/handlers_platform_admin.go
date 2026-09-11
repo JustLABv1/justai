@@ -2,7 +2,9 @@ package server
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,17 +28,18 @@ func isPlatformCatalogRoute(c *gin.Context) bool {
 }
 
 type platformSettingsRequest struct {
-	LoginEnabled         *bool   `json:"loginEnabled"`
-	LocalAuthEnabled     *bool   `json:"localAuthEnabled"`
-	SignupEnabled        *bool   `json:"signupEnabled"`
-	AIEnabled            *bool   `json:"aiEnabled"`
-	VoiceEnabled         *bool   `json:"voiceEnabled"`
-	TranscriptionEnabled *bool   `json:"transcriptionEnabled"`
-	MCPEnabled           *bool   `json:"mcpEnabled"`
-	KnowledgeEnabled     *bool   `json:"knowledgeEnabled"`
-	AttachmentsEnabled   *bool   `json:"attachmentsEnabled"`
-	AgentsEnabled        *bool   `json:"agentsEnabled"`
-	MaintenanceMessage   *string `json:"maintenanceMessage"`
+	LoginEnabled         *bool      `json:"loginEnabled"`
+	LocalAuthEnabled     *bool      `json:"localAuthEnabled"`
+	SignupEnabled        *bool      `json:"signupEnabled"`
+	AIEnabled            *bool      `json:"aiEnabled"`
+	VoiceEnabled         *bool      `json:"voiceEnabled"`
+	TranscriptionEnabled *bool      `json:"transcriptionEnabled"`
+	MCPEnabled           *bool      `json:"mcpEnabled"`
+	KnowledgeEnabled     *bool      `json:"knowledgeEnabled"`
+	AttachmentsEnabled   *bool      `json:"attachmentsEnabled"`
+	AgentsEnabled        *bool      `json:"agentsEnabled"`
+	MaintenanceMessage   *string    `json:"maintenanceMessage"`
+	ExpectedUpdatedAt    *time.Time `json:"expectedUpdatedAt"`
 }
 
 type platformHealthSnapshot struct {
@@ -53,9 +56,10 @@ type platformDatabaseHealth struct {
 }
 
 type platformWorkerHealth struct {
-	RAG           bool `json:"rag"`
-	Transcription bool `json:"transcription"`
-	Agents        bool `json:"agents"`
+	RAG           bool                    `json:"rag"`
+	Transcription bool                    `json:"transcription"`
+	Agents        bool                    `json:"agents"`
+	Details       []workerHealthAdminView `json:"details,omitempty"`
 }
 
 type platformAgentHealth struct {
@@ -128,6 +132,7 @@ func (a *App) putPlatformSettings(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	previous := current
 	if request.LoginEnabled != nil {
 		current.LoginEnabled = *request.LoginEnabled
 	}
@@ -162,11 +167,49 @@ func (a *App) putPlatformSettings(c *gin.Context) {
 		current.MaintenanceMessage = strings.TrimSpace(*request.MaintenanceMessage)
 	}
 	principal, _ := middleware.GetPrincipal(c)
-	if _, err := a.DB.ExecContext(c, `UPDATE platform_settings SET login_enabled = $1, local_auth_enabled = $2, signup_enabled = $3, ai_enabled = $4, voice_enabled = $5, transcription_enabled = $6, mcp_enabled = $7, knowledge_enabled = $8, attachments_enabled = $9, agents_enabled = $10, maintenance_message = $11, updated_by = $12, updated_at = now() WHERE id = TRUE`, current.LoginEnabled, current.LocalAuthEnabled, current.SignupEnabled, current.AIEnabled, current.VoiceEnabled, current.TranscriptionEnabled, current.MCPEnabled, current.KnowledgeEnabled, current.AttachmentsEnabled, current.AgentsEnabled, current.MaintenanceMessage, principal.UserID); err != nil {
+	args := []any{current.LoginEnabled, current.LocalAuthEnabled, current.SignupEnabled, current.AIEnabled, current.VoiceEnabled, current.TranscriptionEnabled, current.MCPEnabled, current.KnowledgeEnabled, current.AttachmentsEnabled, current.AgentsEnabled, current.MaintenanceMessage, principal.UserID}
+	query := `UPDATE platform_settings SET login_enabled = $1, local_auth_enabled = $2, signup_enabled = $3, ai_enabled = $4, voice_enabled = $5, transcription_enabled = $6, mcp_enabled = $7, knowledge_enabled = $8, attachments_enabled = $9, agents_enabled = $10, maintenance_message = $11, updated_by = $12, updated_at = now() WHERE id = TRUE`
+	if request.ExpectedUpdatedAt != nil {
+		query = `UPDATE platform_settings SET login_enabled = $1, local_auth_enabled = $2, signup_enabled = $3, ai_enabled = $4, voice_enabled = $5, transcription_enabled = $6, mcp_enabled = $7, knowledge_enabled = $8, attachments_enabled = $9, agents_enabled = $10, maintenance_message = $11, updated_by = $12, updated_at = now() WHERE id = TRUE AND updated_at = $13`
+		args = append(args, *request.ExpectedUpdatedAt)
+	}
+	result, err := a.DB.ExecContext(c, query, args...)
+	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	a.writePlatformAudit(c, "platform.settings.updated", "platform_settings", nil, gin.H{"maintenanceMessageChanged": request.MaintenanceMessage != nil})
+	if request.ExpectedUpdatedAt != nil {
+		if affected, affectedErr := result.RowsAffected(); affectedErr != nil {
+			writeError(c, http.StatusInternalServerError, affectedErr)
+			return
+		} else if affected == 0 {
+			writeError(c, http.StatusConflict, fmt.Errorf("platform settings changed since they were loaded; refresh and try again"))
+			return
+		}
+	}
+	changes := map[string]any{}
+	addChange := func(name string, from, to any, changed bool) {
+		if changed {
+			changes[name] = gin.H{"from": from, "to": to}
+		}
+	}
+	addChange("loginEnabled", previous.LoginEnabled, current.LoginEnabled, request.LoginEnabled != nil)
+	addChange("localAuthEnabled", previous.LocalAuthEnabled, current.LocalAuthEnabled, request.LocalAuthEnabled != nil)
+	addChange("signupEnabled", previous.SignupEnabled, current.SignupEnabled, request.SignupEnabled != nil)
+	addChange("aiEnabled", previous.AIEnabled, current.AIEnabled, request.AIEnabled != nil)
+	addChange("voiceEnabled", previous.VoiceEnabled, current.VoiceEnabled, request.VoiceEnabled != nil)
+	addChange("transcriptionEnabled", previous.TranscriptionEnabled, current.TranscriptionEnabled, request.TranscriptionEnabled != nil)
+	addChange("mcpEnabled", previous.MCPEnabled, current.MCPEnabled, request.MCPEnabled != nil)
+	addChange("knowledgeEnabled", previous.KnowledgeEnabled, current.KnowledgeEnabled, request.KnowledgeEnabled != nil)
+	addChange("attachmentsEnabled", previous.AttachmentsEnabled, current.AttachmentsEnabled, request.AttachmentsEnabled != nil)
+	addChange("agentsEnabled", previous.AgentsEnabled, current.AgentsEnabled, request.AgentsEnabled != nil)
+	addChange("maintenanceMessage", previous.MaintenanceMessage, current.MaintenanceMessage, request.MaintenanceMessage != nil)
+	a.writePlatformAudit(c, "platform.settings.updated", "platform_settings", nil, gin.H{"changes": changes})
+	// Read the server-generated timestamp so clients can use it as the next
+	// optimistic-concurrency token.
+	if refreshed, refreshErr := a.readPlatformSettings(c); refreshErr == nil {
+		current = refreshed
+	}
 	c.JSON(http.StatusOK, current)
 }
 
@@ -328,6 +371,79 @@ func (a *App) getPlatformUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": gin.H{"id": id, "email": email, "displayName": displayName, "platformAdmin": admin, "status": status, "suspendedAt": nullTimeValue(suspendedAt), "suspendedReason": reason, "lastLoginAt": nullTimeValue(lastLogin), "createdAt": nullTimeValue(createdAt)}, "organizations": orgs})
 }
 
+func (a *App) listPlatformUserSessions(c *gin.Context) {
+	if !a.requirePlatformAdmin(c) {
+		return
+	}
+	userID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid user id"))
+		return
+	}
+	rows, err := a.DB.QueryContext(c, `SELECT id, issued_at, expires_at, last_seen_at, revoked_at, user_agent, ip_address::text FROM user_sessions WHERE user_id = $1 ORDER BY last_seen_at DESC`, userID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer rows.Close()
+	sessions := []gin.H{}
+	for rows.Next() {
+		var id uuid.UUID
+		var issuedAt, expiresAt, lastSeenAt time.Time
+		var revokedAt sql.NullTime
+		var userAgent, ipAddress sql.NullString
+		if err := rows.Scan(&id, &issuedAt, &expiresAt, &lastSeenAt, &revokedAt, &userAgent, &ipAddress); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		sessions = append(sessions, gin.H{
+			"id":         id,
+			"issuedAt":   issuedAt,
+			"expiresAt":  expiresAt,
+			"lastSeenAt": lastSeenAt,
+			"revokedAt":  nullTimeValue(revokedAt),
+			"userAgent":  nullableStringValue(userAgent),
+			"ipAddress":  nullableStringValue(ipAddress),
+			"active":     !revokedAt.Valid && expiresAt.After(time.Now()),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
+}
+
+func (a *App) revokePlatformUserSession(c *gin.Context) {
+	if !a.requirePlatformAdmin(c) {
+		return
+	}
+	userID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid user id"))
+		return
+	}
+	sessionID, err := uuid.Parse(c.Param("sessionId"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid session id"))
+		return
+	}
+	result, err := a.DB.ExecContext(c, `UPDATE user_sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND user_id = $2`, sessionID, userID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil {
+		writeError(c, http.StatusInternalServerError, affectedErr)
+		return
+	} else if affected == 0 {
+		writeError(c, http.StatusNotFound, fmt.Errorf("session not found"))
+		return
+	}
+	a.writePlatformAudit(c, "platform.user.session_revoked", "user_session", &sessionID, gin.H{"userId": userID})
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 type platformUserPatch struct {
 	Email           *string `json:"email"`
 	DisplayName     *string `json:"displayName"`
@@ -368,8 +484,8 @@ func (a *App) updatePlatformUser(c *gin.Context) {
 		return
 	}
 	var currentAdmin bool
-	var currentStatus string
-	if err := transaction.QueryRowContext(c, `SELECT is_platform_admin, COALESCE(status, 'active') FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&currentAdmin, &currentStatus); err != nil {
+	var currentStatus, currentEmail, currentDisplayName string
+	if err := transaction.QueryRowContext(c, `SELECT email, display_name, is_platform_admin, COALESCE(status, 'active') FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&currentEmail, &currentDisplayName, &currentAdmin, &currentStatus); err != nil {
 		writeError(c, http.StatusNotFound, fmt.Errorf("user not found"))
 		return
 	}
@@ -400,7 +516,24 @@ func (a *App) updatePlatformUser(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	a.writePlatformAudit(c, "platform.user.updated", "user", &id, gin.H{"statusChanged": request.Status != nil, "adminChanged": request.PlatformAdmin != nil, "profileChanged": request.Email != nil || request.DisplayName != nil})
+	newEmail := currentEmail
+	if strings.TrimSpace(valueOrEmpty(request.Email)) != "" {
+		newEmail = strings.TrimSpace(valueOrEmpty(request.Email))
+	}
+	newDisplayName := currentDisplayName
+	if strings.TrimSpace(valueOrEmpty(request.DisplayName)) != "" {
+		newDisplayName = strings.TrimSpace(valueOrEmpty(request.DisplayName))
+	}
+	newStatus := currentStatus
+	if status != "" {
+		newStatus = status
+	}
+	a.writePlatformAudit(c, "platform.user.updated", "user", &id, gin.H{"changes": gin.H{
+		"email":         gin.H{"from": currentEmail, "to": newEmail},
+		"displayName":   gin.H{"from": currentDisplayName, "to": newDisplayName},
+		"status":        gin.H{"from": currentStatus, "to": newStatus},
+		"platformAdmin": gin.H{"from": currentAdmin, "to": request.PlatformAdmin != nil && *request.PlatformAdmin || request.PlatformAdmin == nil && currentAdmin},
+	}})
 	a.getPlatformUser(c)
 }
 
@@ -631,12 +764,28 @@ func (a *App) updatePlatformOrganization(c *gin.Context) {
 			return
 		}
 	}
+	var currentName, currentStatus string
+	if err := a.DB.QueryRowContext(c, `SELECT name, COALESCE(status, 'active') FROM organizations WHERE id = $1`, id).Scan(&currentName, &currentStatus); err != nil {
+		writeError(c, http.StatusNotFound, fmt.Errorf("workspace not found"))
+		return
+	}
 	_, err = a.DB.ExecContext(c, `UPDATE organizations SET name = COALESCE(NULLIF($2, ''), name), status = COALESCE(NULLIF($3, ''), status) WHERE id = $1`, id, valueOrEmpty(request.Name), status)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	a.writePlatformAudit(c, "platform.organization.updated", "organization", &id, gin.H{"statusChanged": request.Status != nil, "nameChanged": request.Name != nil})
+	newName := currentName
+	if strings.TrimSpace(valueOrEmpty(request.Name)) != "" {
+		newName = strings.TrimSpace(valueOrEmpty(request.Name))
+	}
+	newStatus := currentStatus
+	if status != "" {
+		newStatus = status
+	}
+	a.writePlatformAudit(c, "platform.organization.updated", "organization", &id, gin.H{"changes": gin.H{
+		"name":   gin.H{"from": currentName, "to": newName},
+		"status": gin.H{"from": currentStatus, "to": newStatus},
+	}})
 	a.getPlatformOrganization(c)
 }
 
@@ -667,13 +816,25 @@ func (a *App) transferPlatformOrganizationOwnership(c *gin.Context) {
 		return
 	}
 	defer transaction.Rollback()
+	// Serialize ownership changes for this workspace. The partial unique index
+	// in migration 051 is the final invariant; row locks keep the transition
+	// itself from briefly creating two owners under concurrent requests.
+	var workspaceID uuid.UUID
+	if err := transaction.QueryRowContext(c, `SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, organizationID).Scan(&workspaceID); err != nil {
+		if err == sql.ErrNoRows {
+			writeError(c, http.StatusNotFound, fmt.Errorf("workspace not found"))
+			return
+		}
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 	var currentOwner uuid.UUID
-	if err := transaction.QueryRowContext(c, `SELECT user_id FROM organization_members WHERE organization_id = $1 AND role = 'owner' LIMIT 1`, organizationID).Scan(&currentOwner); err != nil {
+	if err := transaction.QueryRowContext(c, `SELECT user_id FROM organization_members WHERE organization_id = $1 AND role = 'owner' ORDER BY created_at, user_id LIMIT 1 FOR UPDATE`, organizationID).Scan(&currentOwner); err != nil {
 		writeError(c, http.StatusNotFound, fmt.Errorf("workspace owner not found"))
 		return
 	}
 	var newOwnerRole, newOwnerStatus string
-	if err := transaction.QueryRowContext(c, `SELECT om.role, COALESCE(u.status, 'active') FROM organization_members om JOIN users u ON u.id = om.user_id WHERE om.organization_id = $1 AND om.user_id = $2`, organizationID, request.NewOwnerID).Scan(&newOwnerRole, &newOwnerStatus); err != nil {
+	if err := transaction.QueryRowContext(c, `SELECT om.role, COALESCE(u.status, 'active') FROM organization_members om JOIN users u ON u.id = om.user_id WHERE om.organization_id = $1 AND om.user_id = $2 FOR UPDATE`, organizationID, request.NewOwnerID).Scan(&newOwnerRole, &newOwnerStatus); err != nil {
 		if err == sql.ErrNoRows {
 			writeError(c, http.StatusBadRequest, fmt.Errorf("new owner must already be an organization admin"))
 		} else {
@@ -793,6 +954,12 @@ func (a *App) createPlatformEndpoint(c *gin.Context) {
 	}
 	a.createEndpoint(c)
 	if c.Writer.Status() < http.StatusBadRequest {
+		if value, exists := c.Get("justai.created_endpoint_id"); exists {
+			if id, ok := value.(uuid.UUID); ok {
+				a.writePlatformAudit(c, "platform.endpoint.created", "endpoint", &id, nil)
+				return
+			}
+		}
 		a.writePlatformAudit(c, "platform.endpoint.created", "endpoint", nil, nil)
 	}
 }
@@ -878,6 +1045,12 @@ func (a *App) createPlatformMCPServer(c *gin.Context) {
 	markPlatformCatalogRoute(c)
 	a.createMCPServer(c)
 	if c.Writer.Status() < http.StatusBadRequest {
+		if value, exists := c.Get("justai.created_mcp_server_id"); exists {
+			if id, ok := value.(uuid.UUID); ok {
+				a.writePlatformAudit(c, "platform.mcp.created", "mcp_server", &id, nil)
+				return
+			}
+		}
 		a.writePlatformAudit(c, "platform.mcp.created", "mcp_server", nil, nil)
 	}
 }
@@ -991,7 +1164,7 @@ func (a *App) listPlatformAudit(c *gin.Context) {
 		add("created_at < $%d", to)
 	}
 	args = append(args, pageSize, offset)
-	query := `SELECT id, user_id, organization_id, action, resource_type, resource_id, details, created_at, COUNT(*) OVER() FROM audit_events WHERE ` + strings.Join(filters, " AND ") + fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
+	query := `SELECT id, user_id, organization_id, action, resource_type, resource_id, details, created_at, request_id, outcome, ip_address::text, user_agent, COUNT(*) OVER() FROM audit_events WHERE ` + strings.Join(filters, " AND ") + fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
 	rows, err := a.DB.QueryContext(c, query, args...)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
@@ -1006,17 +1179,38 @@ func (a *App) listPlatformAudit(c *gin.Context) {
 		var action, resourceType string
 		var details []byte
 		var createdAt time.Time
-		if err := rows.Scan(&id, &userID, &orgID, &action, &resourceType, &resourceID, &details, &createdAt, &total); err != nil {
+		var requestID, outcome, ipAddress, userAgent sql.NullString
+		if err := rows.Scan(&id, &userID, &orgID, &action, &resourceType, &resourceID, &details, &createdAt, &requestID, &outcome, &ipAddress, &userAgent, &total); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
-		events = append(events, gin.H{"id": id, "userId": nullableAdminUUID(userID), "organizationId": nullableAdminUUID(orgID), "action": action, "resourceType": resourceType, "resourceId": nullableAdminUUID(resourceID), "details": details, "createdAt": createdAt})
+		events = append(events, gin.H{"id": id, "userId": nullableAdminUUID(userID), "organizationId": nullableAdminUUID(orgID), "action": action, "resourceType": resourceType, "resourceId": nullableAdminUUID(resourceID), "details": json.RawMessage(details), "createdAt": createdAt, "requestId": nullableStringValue(requestID), "outcome": nullableStringValue(outcome), "ipAddress": nullableStringValue(ipAddress), "userAgent": nullableStringValue(userAgent)})
+	}
+	if err := rows.Err(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"events": events, "page": page, "pageSize": pageSize, "total": total})
 }
 
 func (a *App) readPlatformHealth(c *gin.Context) (platformHealthSnapshot, error) {
 	databaseOK := a.DB != nil && a.DB.PingContext(c) == nil
+	workerDetails := a.workerHealthAdminViews()
+	if databaseOK {
+		if persisted, heartbeatErr := a.workerHealthAdminViewsFromDB(c); heartbeatErr == nil && len(persisted) > 0 {
+			workerDetails = persisted
+		} else if heartbeatErr != nil {
+			slog.Debug("platform worker heartbeat read failed", "error", heartbeatErr)
+		}
+	}
+	workerHealthy := func(name string) bool {
+		for _, worker := range workerDetails {
+			if worker.WorkerName == name || worker.Name == name {
+				return worker.Healthy
+			}
+		}
+		return false
+	}
 	var recentFailures, endpointTotal, endpointEnabled, mcpTotal, mcpEnabled, mcpFailures int
 	var agentTotal, agentEnabled, activeRuns, pendingApprovals int
 	if databaseOK {
@@ -1026,7 +1220,7 @@ func (a *App) readPlatformHealth(c *gin.Context) (platformHealthSnapshot, error)
 		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE enabled = TRUE) FROM endpoint_settings`).Scan(&endpointTotal, &endpointEnabled); err != nil {
 			return platformHealthSnapshot{}, err
 		}
-		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE enabled = TRUE), COUNT(*) FILTER (WHERE last_error IS NOT NULL AND last_error <> '') FROM mcp_servers`).Scan(&mcpTotal, &mcpEnabled, &mcpFailures); err != nil {
+		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE enabled = TRUE), COUNT(*) FILTER (WHERE last_error IS NOT NULL AND last_error <> '' AND last_tested_at >= now() - interval '1 hour') FROM mcp_servers`).Scan(&mcpTotal, &mcpEnabled, &mcpFailures); err != nil {
 			return platformHealthSnapshot{}, err
 		}
 		if err := a.DB.QueryRowContext(c, `SELECT COUNT(*), COUNT(*) FILTER (WHERE agent_kind = 'native' OR connection_id IS NOT NULL) FROM saved_assistants WHERE deleted_at IS NULL`).Scan(&agentTotal, &agentEnabled); err != nil {
@@ -1041,10 +1235,10 @@ func (a *App) readPlatformHealth(c *gin.Context) (platformHealthSnapshot, error)
 	}
 	return platformHealthSnapshot{
 		Database:  platformDatabaseHealth{OK: databaseOK},
-		Workers:   platformWorkerHealth{RAG: a.RAG != nil, Transcription: a.Live != nil, Agents: a.AgentWorker != nil},
-		Providers: platformProviderHealth{OK: databaseOK && endpointEnabled > 0, Total: endpointTotal, Enabled: endpointEnabled, RecentFailures: recentFailures},
-		MCP:       platformMCPHealth{OK: databaseOK && mcpFailures == 0, Total: mcpTotal, Enabled: mcpEnabled, Failures: mcpFailures},
-		Agents:    platformAgentHealth{OK: databaseOK && a.AgentWorker != nil, Total: agentTotal, Enabled: agentEnabled, ActiveRuns: activeRuns, PendingApprovals: pendingApprovals},
+		Workers:   platformWorkerHealth{RAG: workerHealthy("rag"), Transcription: workerHealthy("transcription"), Agents: workerHealthy("agent"), Details: workerDetails},
+		Providers: platformProviderHealth{OK: databaseOK && endpointEnabled > 0 && recentFailures == 0, Total: endpointTotal, Enabled: endpointEnabled, RecentFailures: recentFailures},
+		MCP:       platformMCPHealth{OK: databaseOK && (mcpEnabled == 0 || mcpFailures == 0), Total: mcpTotal, Enabled: mcpEnabled, Failures: mcpFailures},
+		Agents:    platformAgentHealth{OK: databaseOK && workerHealthy("agent"), Total: agentTotal, Enabled: agentEnabled, ActiveRuns: activeRuns, PendingApprovals: pendingApprovals},
 		CheckedAt: time.Now().UTC(),
 	}, nil
 }
@@ -1092,6 +1286,9 @@ func platformAttentionItems(counts map[string]int, settings platformSettings, he
 	if !health.Workers.Transcription {
 		add("transcription-worker-offline", "warning", "Transcription worker is offline", "Live and video transcription processing may be unavailable.", "health", nil)
 	}
+	if !health.Workers.Agents {
+		add("agent-worker-offline", "warning", "Agent worker is offline", "Scheduled workflows and queued agent runs may be delayed.", "health", nil)
+	}
 	if workers.Queued > 0 && workers.Active >= workers.Capacity {
 		add("transcription-capacity-saturated", "warning", "Transcription capacity is saturated", "All video worker slots are occupied; new videos are waiting in the queue.", "analytics", workers.Queued)
 	}
@@ -1117,6 +1314,14 @@ func platformAttentionItems(counts map[string]int, settings platformSettings, he
 }
 
 func (a *App) writePlatformAudit(c *gin.Context, action, resourceType string, resourceID *uuid.UUID, details any) {
+	a.writePlatformAuditOutcome(c, action, resourceType, resourceID, details, "success")
+}
+
+// writePlatformAuditOutcome keeps privileged mutations correlated with the
+// request log while retaining a small, structured payload that is safe to
+// display in the admin console. Audit failures are surfaced in server logs;
+// callers should not turn a completed mutation into a misleading 500 response.
+func (a *App) writePlatformAuditOutcome(c *gin.Context, action, resourceType string, resourceID *uuid.UUID, details any, outcome string) {
 	principal, ok := middleware.GetPrincipal(c)
 	if !ok || a.DB == nil {
 		return
@@ -1125,7 +1330,42 @@ func (a *App) writePlatformAudit(c *gin.Context, action, resourceType string, re
 	if id, exists := middleware.GetOrganizationID(c); exists && id != uuid.Nil {
 		organizationID = id
 	}
-	_, _ = a.DB.ExecContext(c, `INSERT INTO audit_events (user_id, organization_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)`, principal.UserID, organizationID, action, resourceType, resourceID, jsonRaw(details))
+	requestID := middleware.GetRequestID(c)
+	ipAddress := strings.TrimSpace(c.ClientIP())
+	userAgent := c.GetHeader("User-Agent")
+	if len(userAgent) > 512 {
+		userAgent = userAgent[:512]
+	}
+	var insertErr error
+	if requestID != "" {
+		// The request-id middleware runs before every production route, so normal
+		// writes use the indexed diagnostic columns added by migration 051.
+		var ipValue any
+		if ipAddress != "" {
+			ipValue = ipAddress
+		}
+		_, insertErr = a.DB.ExecContext(c, `INSERT INTO audit_events (user_id, organization_id, action, resource_type, resource_id, request_id, outcome, ip_address, user_agent, details) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, principal.UserID, organizationID, action, resourceType, resourceID, requestID, outcome, ipValue, userAgent, jsonRaw(details))
+	} else {
+		// Keep the original insert shape compatible with direct unit-test
+		// handlers and rolling migrations that have not installed the additive
+		// columns yet. Preserve context in a reserved metadata object there.
+		insertDetails := details
+		if ipAddress != "" || userAgent != "" || outcome != "success" {
+			insertDetails = gin.H{
+				"details": details,
+				"_meta": gin.H{
+					"requestId": requestID,
+					"outcome":   outcome,
+					"ipAddress": ipAddress,
+					"userAgent": userAgent,
+				},
+			}
+		}
+		_, insertErr = a.DB.ExecContext(c, `INSERT INTO audit_events (user_id, organization_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)`, principal.UserID, organizationID, action, resourceType, resourceID, jsonRaw(insertDetails))
+	}
+	if insertErr != nil {
+		slog.Warn("platform_audit_write_failed", "requestId", requestID, "action", action, "resourceType", resourceType, "error", insertErr)
+	}
 }
 
 func nullTimeValue(value sql.NullTime) any {
@@ -1138,6 +1378,13 @@ func nullTimeValue(value sql.NullTime) any {
 func nullableAdminUUID(value uuid.NullUUID) any {
 	if value.Valid {
 		return value.UUID
+	}
+	return nil
+}
+
+func nullableStringValue(value sql.NullString) any {
+	if value.Valid {
+		return value.String
 	}
 	return nil
 }

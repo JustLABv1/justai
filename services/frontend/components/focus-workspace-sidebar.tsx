@@ -32,7 +32,7 @@ import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
 import { ThemeMenu } from "@/components/theme-switcher"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -73,6 +73,8 @@ import type {
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { resolveAPIURL } from "@/lib/api"
+import { avatarToneFor, versionedAvatarURL } from "@/lib/identity"
 
 const railNavigation: Array<{
   id: ViewId
@@ -566,7 +568,18 @@ export function FocusWorkspaceSidebar({
             }
           >
             <Avatar size="sm">
-              <AvatarFallback>{userInitials}</AvatarFallback>
+              {user.avatarUrl && (
+                  <AvatarImage
+                    alt={`${user.displayName}'s profile picture`}
+                    src={resolveAPIURL(
+                      versionedAvatarURL(user.avatarUrl, user.avatarVersion) ??
+                        user.avatarUrl
+                    )}
+                  />
+                )}
+              <AvatarFallback className={avatarToneFor(user.id)}>
+                {userInitials}
+              </AvatarFallback>
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56" side="right">
@@ -578,6 +591,11 @@ export function FocusWorkspaceSidebar({
                 <span className="block truncate text-[11px] font-normal text-muted-foreground">
                   {user.email}
                 </span>
+                {activeOrganization?.role && (
+                  <span className="mt-1 block truncate text-[11px] font-normal text-muted-foreground">
+                    {activeOrganization.name} · {activeOrganization.role}
+                  </span>
+                )}
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

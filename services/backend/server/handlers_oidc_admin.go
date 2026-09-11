@@ -115,20 +115,25 @@ func (a *App) updatePlatformOIDCProvider(c *gin.Context) {
 	if lastTested.Valid {
 		current.LastTestedAt = &lastTested.Time
 	}
+	connectionChanged := false
 	if strings.TrimSpace(request.Slug) != "" {
 		current.Slug = strings.TrimSpace(request.Slug)
+		connectionChanged = true
 	}
 	if strings.TrimSpace(request.DisplayName) != "" {
 		current.DisplayName = strings.TrimSpace(request.DisplayName)
 	}
 	if strings.TrimSpace(request.Issuer) != "" {
 		current.Issuer = strings.TrimRight(strings.TrimSpace(request.Issuer), "/")
+		connectionChanged = true
 	}
 	if strings.TrimSpace(request.ClientID) != "" {
 		current.ClientID = strings.TrimSpace(request.ClientID)
+		connectionChanged = true
 	}
 	if strings.TrimSpace(request.Scopes) != "" {
 		current.Scopes = strings.TrimSpace(request.Scopes)
+		connectionChanged = true
 	}
 	if request.Enabled != nil {
 		current.Enabled = *request.Enabled
@@ -148,9 +153,10 @@ func (a *App) updatePlatformOIDCProvider(c *gin.Context) {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
+		connectionChanged = true
 	}
 	principal, _ := middleware.GetPrincipal(c)
-	_, err = a.DB.ExecContext(c, `UPDATE oidc_providers SET slug = $2, display_name = $3, issuer = $4, client_id = $5, client_secret_ciphertext = $6, scopes = $7, enabled = $8, updated_by = $9, updated_at = now() WHERE id = $1`, id, current.Slug, current.DisplayName, current.Issuer, current.ClientID, secret, current.Scopes, current.Enabled, principal.UserID)
+	_, err = a.DB.ExecContext(c, `UPDATE oidc_providers SET slug = $2, display_name = $3, issuer = $4, client_id = $5, client_secret_ciphertext = $6, scopes = $7, enabled = $8, updated_by = $9, last_tested_at = CASE WHEN $10 THEN NULL ELSE last_tested_at END, last_error = CASE WHEN $10 THEN '' ELSE last_error END, updated_at = now() WHERE id = $1`, id, current.Slug, current.DisplayName, current.Issuer, current.ClientID, secret, current.Scopes, current.Enabled, principal.UserID, connectionChanged)
 	if err != nil {
 		writeError(c, http.StatusConflict, fmt.Errorf("OIDC provider could not be updated: %w", err))
 		return

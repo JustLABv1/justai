@@ -54,7 +54,7 @@ func (a *App) listMCPServers(c *gin.Context) {
 	if !hasOrganization {
 		organizationID, _, _ = middleware.ResolveOrganization(c, a.DB, principal)
 	}
-	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = mcp_servers.id) THEN '/api/v1/mcp/servers/' || mcp_servers.id::text || '/icon' ELSE COALESCE(icon_url, '') END, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, auto_discover, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE (scope_type = 'global') OR (scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) ORDER BY created_at DESC`, organizationID, principal.UserID)
+	rows, err := a.DB.QueryContext(c, `SELECT id, scope_type, scope_id, name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = mcp_servers.id) THEN '/api/v1/mcp/servers/' || mcp_servers.id::text || '/icon' ELSE COALESCE(icon_url, '') END, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, auto_discover, oauth_expires_at, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE (scope_type = 'global') OR (scope_type = 'organization' AND scope_id = $1) OR (scope_type = 'user' AND scope_id = $2) ORDER BY created_at DESC`, organizationID, principal.UserID)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -189,6 +189,7 @@ func (a *App) createMCPServer(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	c.Set("justai.created_mcp_server_id", serverID)
 	c.JSON(http.StatusCreated, item)
 }
 
@@ -527,7 +528,7 @@ func scanMCPServer(scanner interface{ Scan(dest ...any) error }) (models.MCPServ
 	var item models.MCPServer
 	var scopeID sql.NullString
 	var allowed []byte
-	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.IconURL, &item.EndpointURL, &item.AuthType, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.AutoDiscover, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.Name, &item.IconURL, &item.EndpointURL, &item.AuthType, &item.CredentialConfigured, &item.Enabled, &allowed, &item.TrustedReadOnly, &item.AutoDiscover, &item.OAuthExpiresAt, &item.LastTestedAt, &item.LastError, &item.ProtocolVersion, &item.ToolCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	item.ScopeID = parseMCPScopeID(scopeID)
@@ -550,7 +551,7 @@ func parseMCPScopeID(value sql.NullString) *uuid.UUID {
 }
 
 func (a *App) getMCPServer(ctx context.Context, id uuid.UUID) (models.MCPServer, error) {
-	return scanMCPServer(a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = mcp_servers.id) THEN '/api/v1/mcp/servers/' || mcp_servers.id::text || '/icon' ELSE COALESCE(icon_url, '') END, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, auto_discover, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE id = $1`, id))
+	return scanMCPServer(a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, name, CASE WHEN EXISTS (SELECT 1 FROM mcp_server_icons msi WHERE msi.server_id = mcp_servers.id) THEN '/api/v1/mcp/servers/' || mcp_servers.id::text || '/icon' ELSE COALESCE(icon_url, '') END, endpoint_url, auth_type, encrypted_credential IS NOT NULL, enabled, allowed_tools, trusted_read_only, auto_discover, oauth_expires_at, last_tested_at, COALESCE(last_error, ''), COALESCE(protocol_version, ''), (SELECT COUNT(*) FROM mcp_server_tools mst WHERE mst.server_id = mcp_servers.id), created_at, updated_at FROM mcp_servers WHERE id = $1`, id))
 }
 
 const (
@@ -796,13 +797,29 @@ func encodeMCPServerIcon(source image.Image) ([]byte, error) {
 }
 
 func (a *App) uploadPlatformMCPServerIcon(c *gin.Context) {
+	if !a.requirePlatformAdmin(c) {
+		return
+	}
 	markPlatformCatalogRoute(c)
 	a.uploadMCPServerIcon(c)
+	if c.Writer.Status() < http.StatusBadRequest {
+		if id, err := uuid.Parse(c.Param("id")); err == nil {
+			a.writePlatformAudit(c, "platform.mcp.icon_updated", "mcp_server", &id, nil)
+		}
+	}
 }
 
 func (a *App) deletePlatformMCPServerIcon(c *gin.Context) {
+	if !a.requirePlatformAdmin(c) {
+		return
+	}
 	markPlatformCatalogRoute(c)
 	a.deleteMCPServerIcon(c)
+	if c.Writer.Status() < http.StatusBadRequest {
+		if id, err := uuid.Parse(c.Param("id")); err == nil {
+			a.writePlatformAudit(c, "platform.mcp.icon_deleted", "mcp_server", &id, nil)
+		}
+	}
 }
 
 func (a *App) uploadMCPServerIcon(c *gin.Context) {

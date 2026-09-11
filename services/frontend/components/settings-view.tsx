@@ -1,20 +1,20 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  Check,
-  LoaderCircle,
-  Pencil,
-  Trash2,
-  UserPlus,
-  Users,
-} from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { LoaderCircle, Trash2, UserPlus } from "lucide-react"
 
-import { api } from "@/lib/api"
+import { api, resolveAPIURL } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
-import type { Organization, OrganizationMember, User } from "@/lib/types"
+import type {
+  AdminAnalyticsResponse,
+  Endpoint,
+  MCPServer,
+  Organization,
+  OrganizationMember,
+  User,
+} from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -46,16 +46,21 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
+import { avatarToneFor, initialsFor, versionedAvatarURL } from "@/lib/identity"
+import { WorkspaceSettingsDashboard } from "@/components/workspace-settings-dashboard"
 
 type MemberRole = OrganizationMember["role"]
 
 type SettingsViewProps = {
   user: User
   organizations: Organization[]
+  endpoints?: Endpoint[]
+  mcpServers?: MCPServer[]
   activeOrganizationId: string | null
   onOrganizationSelect: (organizationId: string) => void
   onOrganizationCreated: (organization: Organization) => void
   onOrganizationUpdated: (organization: Organization) => void
+  onOrganizationRemoved?: (organizationId: string) => void
   workspaceCreateRequest?: number
   memberCreateRequest?: number
   section?: "workspace" | "members"
@@ -64,10 +69,12 @@ type SettingsViewProps = {
 export function SettingsView({
   user,
   organizations,
+  endpoints = [],
+  mcpServers = [],
   activeOrganizationId,
-  onOrganizationSelect,
   onOrganizationCreated,
   onOrganizationUpdated,
+  onOrganizationRemoved,
   workspaceCreateRequest,
   memberCreateRequest,
   section = "workspace",
@@ -75,6 +82,10 @@ export function SettingsView({
   const [members, setMembers] = useState<OrganizationMember[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
   const [membersError, setMembersError] = useState("")
+  const [analyticsResult, setAnalyticsResult] = useState<{
+    organizationId: string
+    data: AdminAnalyticsResponse
+  } | null>(null)
   const [actionError, setActionError] = useState("")
   const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false)
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
@@ -85,6 +96,15 @@ export function SettingsView({
   const [saving, setSaving] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [updatingMemberId, setUpdatingMemberId] = useState("")
+  const [lifecycleAction, setLifecycleAction] = useState<
+    "archive" | "leave" | null
+  >(null)
+  const [lifecycleBusy, setLifecycleBusy] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteConfirmation, setDeleteConfirmation] = useState("")
+  const [ownerTransferTarget, setOwnerTransferTarget] =
+    useState<OrganizationMember | null>(null)
+  const [ownerTransferBusy, setOwnerTransferBusy] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<OrganizationMember | null>(
     null
   )
@@ -99,7 +119,6 @@ export function SettingsView({
     user.platformAdmin ||
     activeOrganization?.role === "owner" ||
     activeOrganization?.role === "admin"
-  const canRenameWorkspace = canManageMembers
   const isMembersSection = section === "members"
 
   const loadMembers = useCallback(async () => {
@@ -126,25 +145,40 @@ export function SettingsView({
   }, [activeOrganization])
 
   useEffect(() => {
-    if (!isMembersSection) {
-      return
-    }
     const timer = window.setTimeout(() => {
       void loadMembers()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [isMembersSection, loadMembers])
+  }, [loadMembers])
 
-  const initials = useMemo(
-    () => (name: string) =>
-      name
-        .split(" ")
-        .map((part) => part[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase(),
-    []
-  )
+  useEffect(() => {
+    if (isMembersSection || !activeOrganization || !canManageMembers) {
+      return
+    }
+    let cancelled = false
+    void api
+      .get<AdminAnalyticsResponse>(
+        `/api/v1/organizations/${activeOrganization.id}/admin/analytics?days=90`
+      )
+      .then((result) => {
+        if (!cancelled) {
+          setAnalyticsResult({
+            organizationId: activeOrganization.id,
+            data: result,
+          })
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [activeOrganization, canManageMembers, isMembersSection])
+
+  const analytics =
+    analyticsResult?.organizationId === activeOrganization?.id
+      ? analyticsResult.data
+      : null
+  const analyticsLoading = canManageMembers && analytics === null
 
   const openWorkspaceDialog = useCallback(() => {
     setWorkspaceName("")
@@ -259,6 +293,10 @@ export function SettingsView({
   ) {
     if (!activeOrganization || member.role === role) return
     if (updatingMemberId) return
+    if (role === "owner" && member.role !== "owner") {
+      setOwnerTransferTarget(member)
+      return
+    }
     setUpdatingMemberId(member.id)
     setActionError("")
     try {
@@ -277,6 +315,32 @@ export function SettingsView({
       )
     } finally {
       setUpdatingMemberId("")
+    }
+  }
+
+  async function transferOwnership() {
+    if (!activeOrganization || !ownerTransferTarget) return
+    const target = ownerTransferTarget
+    setOwnerTransferBusy(true)
+    setActionError("")
+    try {
+      await api.patch(
+        `/api/v1/organizations/${activeOrganization.id}/members/${target.id}`,
+        { role: "owner" }
+      )
+      setOwnerTransferTarget(null)
+      notifySuccess("Ownership transferred", target.displayName || target.email)
+      await loadMembers()
+    } catch (caught) {
+      setActionError(
+        notifyError(
+          "Ownership could not be transferred",
+          caught,
+          "The workspace ownership could not be transferred."
+        )
+      )
+    } finally {
+      setOwnerTransferBusy(false)
     }
   }
 
@@ -305,6 +369,77 @@ export function SettingsView({
     }
   }
 
+  async function archiveWorkspace() {
+    if (!activeOrganization) return
+    setLifecycleBusy(true)
+    setActionError("")
+    try {
+      await api.post(`/api/v1/organizations/${activeOrganization.id}/archive`)
+      notifySuccess("Workspace archived", activeOrganization.name)
+      setLifecycleAction(null)
+      onOrganizationRemoved?.(activeOrganization.id)
+    } catch (caught) {
+      setActionError(
+        notifyError(
+          "Workspace could not be archived",
+          caught,
+          "The workspace could not be archived."
+        )
+      )
+    } finally {
+      setLifecycleBusy(false)
+    }
+  }
+
+  async function leaveWorkspace() {
+    if (!activeOrganization) return
+    setLifecycleBusy(true)
+    setActionError("")
+    try {
+      await api.delete(`/api/v1/organizations/${activeOrganization.id}/leave`)
+      notifySuccess("You left the workspace", activeOrganization.name)
+      setLifecycleAction(null)
+      onOrganizationRemoved?.(activeOrganization.id)
+    } catch (caught) {
+      setActionError(
+        notifyError(
+          "Could not leave workspace",
+          caught,
+          "You could not leave this workspace."
+        )
+      )
+    } finally {
+      setLifecycleBusy(false)
+    }
+  }
+
+  async function deleteWorkspace(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
+    if (!activeOrganization || deleteConfirmation !== activeOrganization.name)
+      return
+    setLifecycleBusy(true)
+    setActionError("")
+    try {
+      await api.delete(`/api/v1/organizations/${activeOrganization.id}`, {
+        confirmation: deleteConfirmation,
+      })
+      notifySuccess("Workspace deleted", activeOrganization.name)
+      setDeleteDialogOpen(false)
+      setDeleteConfirmation("")
+      onOrganizationRemoved?.(activeOrganization.id)
+    } catch (caught) {
+      setActionError(
+        notifyError(
+          "Workspace could not be deleted",
+          caught,
+          "The workspace could not be deleted."
+        )
+      )
+    } finally {
+      setLifecycleBusy(false)
+    }
+  }
+
   useEffect(() => {
     if (
       !workspaceCreateRequest ||
@@ -326,7 +461,7 @@ export function SettingsView({
   }, [memberCreateRequest, openMemberDialog])
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
+    <div className="w-full space-y-5">
       {actionError && (
         <Alert aria-live="polite" role="alert" variant="destructive">
           <AlertTitle>Could not save changes</AlertTitle>
@@ -334,201 +469,153 @@ export function SettingsView({
         </Alert>
       )}
 
-      {!isMembersSection && (
-        <Card size="sm">
-          <CardHeader className="flex flex-row items-start gap-6">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Users aria-hidden="true" /> Workspaces
-              </CardTitle>
-              <CardDescription className="mt-1 text-sm">
-                Each workspace keeps conversations and integrations separate.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {organizations.map((organization) => {
-                const selected = organization.id === activeOrganization?.id
-                return (
-                  <button
-                    aria-pressed={selected}
-                    aria-label={`${selected ? "Current" : "Switch to"} workspace ${organization.name}`}
-                    className={`cursor-pointer rounded-xl border p-4 text-left transition-[background-color,border-color,box-shadow,color,transform] duration-150 hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none active:scale-[0.99] ${selected ? "border-primary bg-primary/5 shadow-sm" : "bg-card"}`}
-                    onClick={() => onOrganizationSelect(organization.id)}
-                    type="button"
-                    key={organization.id}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="flex size-9 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                        <Users aria-hidden="true" />
-                      </span>
-                      {selected && (
-                        <Check
-                          className="size-4 text-primary"
-                          aria-label="Selected workspace"
-                        />
-                      )}
-                    </div>
-                    <p className="mt-3 truncate text-sm font-medium">
-                      {organization.name}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {selected ? "Active workspace" : "Available workspace"}
-                    </p>
-                  </button>
-                )
-              })}
-            </div>
-          </CardContent>
-        </Card>
+      {activeOrganization && !isMembersSection && (
+        <WorkspaceSettingsDashboard
+          analytics={analytics}
+          analyticsLoading={analyticsLoading}
+          canManage={canManageMembers}
+          endpoints={endpoints}
+          mcpServers={mcpServers}
+          memberCount={members.length}
+          membersLoading={membersLoading}
+          onArchive={() => setLifecycleAction("archive")}
+          onDelete={() => {
+            setDeleteConfirmation("")
+            setDeleteDialogOpen(true)
+          }}
+          onLeave={() => setLifecycleAction("leave")}
+          onRename={openRenameDialog}
+          organization={activeOrganization}
+        />
       )}
 
-      {activeOrganization && (
+      {activeOrganization && isMembersSection && (
         <Card size="sm">
           <CardHeader className="flex flex-row items-start justify-between gap-6">
             <div className="min-w-0">
-              <CardTitle className="truncate text-xl">
-                {activeOrganization.name}
-              </CardTitle>
+              <CardTitle>Member directory</CardTitle>
               <CardDescription className="mt-1 truncate text-sm">
-                {isMembersSection
-                  ? "People with access to this workspace"
-                  : "Active workspace details"}
+                People with access to {activeOrganization.name}.
               </CardDescription>
             </div>
-            {canRenameWorkspace && !isMembersSection && (
-              <Button
-                className="shrink-0"
-                onClick={openRenameDialog}
-                variant="outline"
-              >
-                <Pencil data-icon="inline-start" /> Rename
-              </Button>
+            {!membersLoading && (
+              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                {members.length} {members.length === 1 ? "member" : "members"}
+              </span>
             )}
           </CardHeader>
           <CardContent className="pt-0">
-            {!isMembersSection ? (
-              <div className="grid gap-3 border-t pt-4 text-sm sm:grid-cols-2">
-                <div>
-                  <p className="text-xs text-muted-foreground">
-                    Workspace slug
-                  </p>
-                  <p className="mt-1 truncate font-mono text-xs">
-                    {activeOrganization.slug}
-                  </p>
+            <>
+              {membersError && (
+                <Alert className="mb-4" variant="destructive">
+                  <AlertDescription>{membersError}</AlertDescription>
+                </Alert>
+              )}
+              {membersLoading ? (
+                <div
+                  aria-live="polite"
+                  className="flex items-center gap-2 rounded-xl border p-4 text-sm text-muted-foreground"
+                  role="status"
+                >
+                  <LoaderCircle className="animate-spin" /> Loading members…
                 </div>
-              </div>
-            ) : (
-              <>
-                <div className="mb-5">
-                  <div>
-                    <h3 className="text-base font-medium">Members</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      People with access to this workspace.
-                    </p>
-                  </div>
-                </div>
-                {membersError && (
-                  <Alert className="mb-4" variant="destructive">
-                    <AlertDescription>{membersError}</AlertDescription>
-                  </Alert>
-                )}
-                {membersLoading ? (
-                  <div
-                    aria-live="polite"
-                    className="flex items-center gap-2 rounded-xl border p-4 text-sm text-muted-foreground"
-                    role="status"
+              ) : membersError ? (
+                <div className="flex flex-col items-start gap-3 rounded-xl border border-destructive/30 p-4 text-sm">
+                  <p className="text-destructive">
+                    Members could not be loaded.
+                  </p>
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadMembers()}
                   >
-                    <LoaderCircle className="animate-spin" /> Loading members…
-                  </div>
-                ) : membersError ? (
-                  <div className="flex flex-col items-start gap-3 rounded-xl border border-destructive/30 p-4 text-sm">
-                    <p className="text-destructive">
-                      Members could not be loaded.
-                    </p>
-                    <Button
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                      onClick={() => void loadMembers()}
+                    Try again
+                  </Button>
+                </div>
+              ) : members.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  No members found.
+                </div>
+              ) : (
+                <div className="divide-y rounded-xl bg-card">
+                  {members.map((member) => (
+                    <div
+                      className="flex flex-wrap items-center gap-4 p-4"
+                      key={member.id}
                     >
-                      Try again
-                    </Button>
-                  </div>
-                ) : members.length === 0 ? (
-                  <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                    No members found.
-                  </div>
-                ) : (
-                  <div className="divide-y rounded-xl bg-card">
-                    {members.map((member) => (
-                      <div
-                        className="flex flex-wrap items-center gap-4 p-4"
-                        key={member.id}
-                      >
-                        <Avatar className="size-9" size="sm">
-                          <AvatarFallback>
-                            {initials(member.displayName || member.email)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-base font-medium">
-                            {member.displayName}
-                          </p>
-                          <p className="truncate text-sm text-muted-foreground">
-                            {member.email}
-                          </p>
-                        </div>
-                        <span className="hidden text-xs text-muted-foreground lg:block">
-                          Joined {formatDate(member.createdAt)}
-                        </span>
-                        <Select
-                          disabled={
-                            !canManageMembers ||
-                            Boolean(updatingMemberId) ||
-                            (!user.platformAdmin &&
-                              activeOrganization.role === "admin" &&
-                              member.role !== "member")
-                          }
-                          onValueChange={(value) => {
-                            if (value)
-                              void updateMemberRole(member, value as MemberRole)
-                          }}
-                          value={member.role}
-                        >
-                          <SelectTrigger
-                            className="w-32"
-                            aria-label={`Role for ${member.displayName}`}
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="member">Member</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                            {(activeOrganization.role === "owner" ||
-                              user.platformAdmin) && (
-                              <SelectItem value="owner">Owner</SelectItem>
+                      <Avatar className="size-9" size="sm">
+                        {member.avatarUrl && (
+                          <AvatarImage
+                            alt={`${member.displayName || member.email}'s profile picture`}
+                            src={resolveAPIURL(
+                              versionedAvatarURL(
+                                member.avatarUrl,
+                                member.avatarVersion
+                              ) ?? member.avatarUrl
                             )}
-                          </SelectContent>
-                        </Select>
-                        {canManageMembers && member.role !== "owner" && (
-                          <Button
-                            aria-label={`Remove ${member.displayName}`}
-                            onClick={() => setRemoveTarget(member)}
-                            size="icon-sm"
-                            title={`Remove ${member.displayName}`}
-                            variant="ghost"
-                          >
-                            <Trash2 className="text-destructive" />
-                          </Button>
+                          />
                         )}
+                        <AvatarFallback className={avatarToneFor(member.id)}>
+                          {initialsFor(member.displayName || member.email)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-base font-medium">
+                          {member.displayName}
+                        </p>
+                        <p className="truncate text-sm text-muted-foreground">
+                          {member.email}
+                        </p>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+                      <span className="hidden text-xs text-muted-foreground lg:block">
+                        Joined {formatDate(member.createdAt)}
+                      </span>
+                      <Select
+                        disabled={
+                          !canManageMembers ||
+                          Boolean(updatingMemberId) ||
+                          (!user.platformAdmin &&
+                            activeOrganization.role === "admin" &&
+                            member.role !== "member")
+                        }
+                        onValueChange={(value) => {
+                          if (value)
+                            void updateMemberRole(member, value as MemberRole)
+                        }}
+                        value={member.role}
+                      >
+                        <SelectTrigger
+                          className="w-32"
+                          aria-label={`Role for ${member.displayName}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="member">Member</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          {(activeOrganization.role === "owner" ||
+                            user.platformAdmin) && (
+                            <SelectItem value="owner">Owner</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      {canManageMembers && member.role !== "owner" && (
+                        <Button
+                          aria-label={`Remove ${member.displayName}`}
+                          onClick={() => setRemoveTarget(member)}
+                          size="icon-sm"
+                          title={`Remove ${member.displayName}`}
+                          variant="ghost"
+                        >
+                          <Trash2 className="text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           </CardContent>
         </Card>
       )}
@@ -731,6 +818,98 @@ export function SettingsView({
         }}
         onConfirm={removeMember}
       />
+
+      <ConfirmActionDialog
+        open={ownerTransferTarget !== null}
+        title={`Transfer ownership to ${ownerTransferTarget?.displayName || ownerTransferTarget?.email || "this member"}?`}
+        description={`You will become an admin of ${activeOrganization?.name ?? "this workspace"}. ${ownerTransferTarget?.displayName || ownerTransferTarget?.email || "This member"} will become the new owner.`}
+        confirmLabel="Transfer ownership"
+        pending={ownerTransferBusy}
+        destructive={false}
+        onOpenChange={(open) => {
+          if (!open && !ownerTransferBusy) setOwnerTransferTarget(null)
+        }}
+        onConfirm={transferOwnership}
+      />
+
+      <ConfirmActionDialog
+        open={lifecycleAction !== null}
+        title={
+          lifecycleAction === "archive"
+            ? `Archive ${activeOrganization?.name ?? "this workspace"}?`
+            : `Leave ${activeOrganization?.name ?? "this workspace"}?`
+        }
+        description={
+          lifecycleAction === "archive"
+            ? "Members will lose access until a platform administrator restores the workspace. Existing data is retained."
+            : "You will lose access to this workspace. Existing workspace data remains available to its members."
+        }
+        confirmLabel={
+          lifecycleAction === "archive"
+            ? "Archive workspace"
+            : "Leave workspace"
+        }
+        pending={lifecycleBusy}
+        onOpenChange={(open) => {
+          if (!open && !lifecycleBusy) setLifecycleAction(null)
+        }}
+        onConfirm={
+          lifecycleAction === "archive" ? archiveWorkspace : leaveWorkspace
+        }
+      />
+
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!lifecycleBusy) setDeleteDialogOpen(open)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <form onSubmit={(event) => void deleteWorkspace(event)}>
+            <DialogHeader>
+              <DialogTitle>
+                Delete {activeOrganization?.name ?? "workspace"}?
+              </DialogTitle>
+              <DialogDescription>
+                This permanently removes the workspace and its data. Type the
+                exact workspace name to confirm.
+              </DialogDescription>
+            </DialogHeader>
+            <Field>
+              <FieldLabel htmlFor="delete-workspace-confirmation">
+                Workspace name
+              </FieldLabel>
+              <Input
+                autoComplete="off"
+                id="delete-workspace-confirmation"
+                value={deleteConfirmation}
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                placeholder={activeOrganization?.name}
+                required
+              />
+            </Field>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDeleteDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="destructive"
+                disabled={
+                  lifecycleBusy ||
+                  deleteConfirmation !== (activeOrganization?.name ?? "")
+                }
+              >
+                {lifecycleBusy ? "Deleting…" : "Delete workspace"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

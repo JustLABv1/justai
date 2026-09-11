@@ -2552,7 +2552,7 @@ function AgentsPanel({
               (item) => item.id === agent.connectionId
             )
             return (
-              <Card key={agent.id} className="h-fit pb-0">
+              <Card key={agent.id} className="h-fit">
                 <CardHeader>
                   <div className="flex items-start gap-3">
                     <div
@@ -2638,7 +2638,7 @@ function AgentsPanel({
                     </p>
                   )}
                 </CardContent>
-                <CardFooter className="justify-between gap-2 border-t pt-4 pb-0">
+                <CardFooter className="justify-between gap-2 border-t">
                   <Button
                     size="sm"
                     variant="ghost"

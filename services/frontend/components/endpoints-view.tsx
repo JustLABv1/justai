@@ -78,6 +78,29 @@ type Props = {
   apiBasePath?: string
   defaultScopeType?: "global" | "organization" | "user"
   createRequest?: number
+  resourceError?: string
+  onRetryResource?: () => void
+}
+
+function endpointHealthSummary(endpoint: Endpoint) {
+  const results = Object.entries(endpoint.lastTestResults ?? {})
+  const checks = results
+    .map(([capability, result]) => {
+      if (result.tested) {
+        return `${capability}: ${result.ok ? "ok" : result.error || "failed"}`
+      }
+      return `${capability}: ${result.note || "not probed"}`
+    })
+    .join("; ")
+  return [
+    endpoint.lastTestedAt
+      ? `Last tested ${new Date(endpoint.lastTestedAt).toLocaleString()}`
+      : "Not tested",
+    endpoint.lastTestError,
+    checks,
+  ]
+    .filter(Boolean)
+    .join(" · ")
 }
 
 export function EndpointsView({
@@ -89,6 +112,8 @@ export function EndpointsView({
   apiBasePath = "/api/v1/endpoints",
   defaultScopeType,
   createRequest,
+  resourceError,
+  onRetryResource,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [editingEndpoint, setEditingEndpoint] = useState<Endpoint | null>(null)
@@ -327,20 +352,42 @@ export function EndpointsView({
   }
 
   async function testEndpoint(endpoint: Endpoint) {
+    setBusyId(endpoint.id)
+    setNotice("")
     try {
       const result = await api.post<{
+        endpoint?: Endpoint
         results?: Record<
           string,
-          { ok: boolean; supported: boolean; tested: boolean; error?: string }
+          {
+            ok: boolean
+            supported: boolean
+            tested: boolean
+            error?: string
+            note?: string
+          }
         >
       }>(`${endpointPath}/${endpoint.id}/test`)
+      const testedEndpoint = result.endpoint
+      if (testedEndpoint) {
+        onChange(
+          endpoints.map((item) =>
+            item.id === testedEndpoint.id ? testedEndpoint : item
+          )
+        )
+      }
       const failed = Object.entries(result.results ?? {}).filter(
         ([, value]) => value.tested && !value.ok
       )
+      const failedDetails = failed
+        .map(
+          ([capability, value]) => `${capability}: ${value.error ?? "failed"}`
+        )
+        .join("; ")
       const message =
         failed.length === 0
           ? `${endpoint.name} capability checks completed.`
-          : `${endpoint.name} has ${failed.length} failing capability check${failed.length === 1 ? "" : "s"}.`
+          : `${endpoint.name} has ${failed.length} failing capability check${failed.length === 1 ? "" : "s"}. ${failedDetails}`
       if (failed.length === 0) {
         notifySuccess("Endpoint checks completed", message)
       } else {
@@ -355,6 +402,8 @@ export function EndpointsView({
           `${endpoint.name} could not be reached. Check its URL and credential.`
         )
       )
+    } finally {
+      setBusyId("")
     }
   }
 
@@ -444,6 +493,19 @@ export function EndpointsView({
 
   return (
     <div className="flex flex-col gap-6">
+      {resourceError && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+          role="alert"
+        >
+          <span>Endpoints could not be loaded. {resourceError}</span>
+          {onRetryResource && (
+            <Button size="sm" variant="outline" onClick={onRetryResource}>
+              Retry
+            </Button>
+          )}
+        </div>
+      )}
       {notice && (
         <div className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
           {notice}
@@ -493,6 +555,8 @@ export function EndpointsView({
         onEdit={openEdit}
         onRemove={setRemoveTarget}
         onCreate={openCreate}
+        resourceError={resourceError}
+        onRetryResource={onRetryResource}
       />
 
       <EndpointCreationWizard
@@ -572,6 +636,8 @@ function EndpointTable({
   onEdit,
   onRemove,
   onCreate,
+  resourceError,
+  onRetryResource,
 }: {
   endpoints: Endpoint[]
   visibleEndpoints: Endpoint[]
@@ -593,6 +659,8 @@ function EndpointTable({
   onEdit: (endpoint: Endpoint) => void
   onRemove: (endpoint: Endpoint) => void
   onCreate: (kind?: EndpointKind) => void
+  resourceError?: string
+  onRetryResource?: () => void
 }) {
   return (
     <Card>
@@ -777,6 +845,32 @@ function EndpointTable({
                               <KeyRound aria-hidden="true" /> Credential
                             </Badge>
                           )}
+                          {endpoint.lastTestedAt && (
+                            <div className="min-w-0">
+                              <Badge
+                                aria-label={endpointHealthSummary(endpoint)}
+                                variant={
+                                  endpoint.lastTestOk === false
+                                    ? "destructive"
+                                    : "outline"
+                                }
+                                title={endpointHealthSummary(endpoint)}
+                              >
+                                <span
+                                  className={`size-1.5 rounded-full ${endpoint.lastTestOk === false ? "bg-destructive" : "bg-primary"}`}
+                                />
+                                {endpoint.lastTestOk === false
+                                  ? "Check failed"
+                                  : "Checked"}
+                              </Badge>
+                              {endpoint.lastTestOk === false &&
+                                endpoint.lastTestError && (
+                                  <p className="mt-1 max-w-44 truncate text-[10px] text-destructive">
+                                    {endpoint.lastTestError}
+                                  </p>
+                                )}
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -878,17 +972,25 @@ function EndpointTable({
             </div>
             <div>
               <p className="font-medium">
-                {endpoints.length === 0
-                  ? "No endpoints yet"
-                  : "No endpoints match these filters"}
+                {resourceError && endpoints.length === 0
+                  ? "Endpoint inventory unavailable"
+                  : endpoints.length === 0
+                    ? "No endpoints yet"
+                    : "No endpoints match these filters"}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                {endpoints.length === 0
-                  ? "Connect a provider to make it available for model routing."
-                  : "Try a different search or clear the scope and status filters."}
+                {resourceError && endpoints.length === 0
+                  ? "JustAI could not load the endpoint catalog. Retry to check again."
+                  : endpoints.length === 0
+                    ? "Connect a provider to make it available for model routing."
+                    : "Try a different search or clear the scope and status filters."}
               </p>
             </div>
-            {endpoints.length === 0 && (
+            {resourceError && endpoints.length === 0 && onRetryResource ? (
+              <Button variant="outline" size="sm" onClick={onRetryResource}>
+                Retry
+              </Button>
+            ) : endpoints.length === 0 && !resourceError ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -901,7 +1003,7 @@ function EndpointTable({
                   ? "diarization service"
                   : "model endpoint"}
               </Button>
-            )}
+            ) : null}
           </div>
         )}
       </CardContent>

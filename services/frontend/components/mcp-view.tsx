@@ -84,6 +84,8 @@ type Props = {
   userId?: string
   platformAdmin?: boolean
   createRequest?: number
+  resourceError?: string
+  onRetryResource?: () => void
 }
 
 type MCPForm = {
@@ -169,6 +171,24 @@ function mcpAuthLabel(authType: string) {
   }
 }
 
+function oauthExpiryState(expiresAt?: string | null) {
+  if (!expiresAt) return null
+  const timestamp = new Date(expiresAt).getTime()
+  if (!Number.isFinite(timestamp)) return null
+  if (timestamp <= Date.now()) return "expired" as const
+  if (timestamp <= Date.now() + 7 * 24 * 60 * 60 * 1000)
+    return "expiring" as const
+  return "active" as const
+}
+
+function oauthExpiryLabel(expiresAt?: string | null) {
+  if (!expiresAt) return "OAuth authorization needs attention"
+  const date = new Date(expiresAt)
+  if (!Number.isFinite(date.getTime()))
+    return "OAuth authorization needs attention"
+  return `OAuth ${date <= new Date() ? "expired" : "expires"} ${date.toLocaleString()}`
+}
+
 function isRequestAborted(caught: unknown) {
   return caught instanceof APIError && caught.code === "request_aborted"
 }
@@ -181,6 +201,8 @@ export function MCPView({
   userId,
   platformAdmin = false,
   createRequest,
+  resourceError,
+  onRetryResource,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<MCPForm>(emptyForm)
@@ -574,6 +596,19 @@ export function MCPView({
 
   return (
     <div className="space-y-6">
+      {resourceError && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+          role="alert"
+        >
+          <span>MCP servers could not be loaded. {resourceError}</span>
+          {onRetryResource && (
+            <Button size="sm" variant="outline" onClick={onRetryResource}>
+              Retry
+            </Button>
+          )}
+        </div>
+      )}
       {notice && (
         <div
           aria-live="polite"
@@ -685,275 +720,314 @@ export function MCPView({
         </section>
       )}
       <div className="grid gap-3 lg:grid-cols-2">
-        {visibleServers.map((server) => (
-          <Card key={server.id} size="sm" className="gap-0">
-            <CardHeader className="flex-row items-start gap-3 border-b pb-3">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                {server.iconUrl ? (
-                  // MCP icons are served by JustAI, so Next Image does not need
-                  // a global host allowlist here.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    alt=""
-                    className="size-7 rounded-md object-contain"
-                    src={resolveAPIURL(server.iconUrl)}
-                  />
-                ) : (
-                  <Plug aria-hidden="true" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <CardTitle className="text-base">{server.name}</CardTitle>
-                  <Badge variant="outline">
-                    {mcpAuthLabel(server.authType)}
-                  </Badge>
-                </div>
-                <CardDescription className="mt-1 truncate font-mono text-xs">
-                  {server.endpointUrl}
-                </CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-3">
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                {server.scopeType === "global" ? (
-                  <Badge variant="outline" className="gap-1.5">
-                    <LockKeyhole aria-hidden="true" /> Platform-managed
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary">
-                    {server.scopeType === "organization"
-                      ? "Workspace"
-                      : "Personal"}
-                  </Badge>
-                )}
-                {!server.enabled && <Badge variant="outline">Disabled</Badge>}
-                {server.trustedReadOnly && (
-                  <Badge variant="outline" className="gap-1.5">
-                    <ShieldCheck aria-hidden="true" />
-                    Trusted read-only
-                  </Badge>
-                )}
-                {server.autoDiscover && (
-                  <Badge variant="outline" className="gap-1.5">
-                    <Sparkles aria-hidden="true" /> Available automatically
-                  </Badge>
-                )}
-                {server.credentialConfigured && (
-                  <Badge variant="outline" className="gap-1.5">
-                    <KeyRound aria-hidden="true" />
-                    Credential stored
-                  </Badge>
-                )}
-                <Badge variant="outline" className="gap-1.5">
-                  <ShieldCheck aria-hidden="true" />
-                  Approval gated
-                </Badge>
-              </div>
-              <Separator className="my-4" />
-              <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                <div>
-                  <span className="font-medium text-foreground">Protocol:</span>{" "}
-                  {server.protocolVersion || "Negotiating"}
-                </div>
-                <div>
-                  <span className="font-medium text-foreground">
-                    Last test:
-                  </span>{" "}
-                  {server.lastTestedAt
-                    ? new Date(server.lastTestedAt).toLocaleString()
-                    : "Not tested"}
-                </div>
-              </div>
-              <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-xs text-muted-foreground">
-                <Wrench aria-hidden="true" className="size-3.5" />
-                <span className="truncate">
-                  {server.toolCount
-                    ? `${server.toolCount} discovered tools`
-                    : server.allowedTools.length
-                      ? `${server.allowedTools.length} allowlisted tools`
-                      : "No tools discovered yet"}
-                </span>
-              </div>
-              {tools[server.id] && (
-                <div className="mt-2 grid max-h-36 gap-1 overflow-y-auto sm:grid-cols-2">
-                  {tools[server.id].map((tool) => (
-                    <div
-                      key={tool.name}
-                      className="rounded-md border bg-muted/20 px-2 py-1.5"
-                    >
-                      <p className="font-mono text-xs">{tool.name}</p>
-                      <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
-                        {tool.description || "No description provided"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {server.lastError && (
-                <div
-                  aria-live="assertive"
-                  className="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive"
-                  role="alert"
-                >
-                  <AlertTriangle
-                    aria-hidden="true"
-                    className="mt-0.5 size-3.5 shrink-0"
-                  />
-                  <span className="min-w-0 break-words">
-                    <span className="font-medium">MCP action failed: </span>
-                    {server.lastError}
-                  </span>
-                </div>
-              )}
-              {canManageServer(server) && (
-                <div className="flex items-center justify-end border-t pt-3">
-                  {activeAction?.serverId === server.id ? (
-                    <div className="flex w-full items-center justify-end gap-2">
-                      <div
-                        aria-live="polite"
-                        className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"
-                        role="status"
-                      >
-                        <LoaderCircle
-                          aria-hidden="true"
-                          className="size-3.5 shrink-0 animate-spin"
-                        />
-                        <span className="truncate">{activeAction.label}</span>
-                      </div>
-                      <Button
-                        aria-label={`Stop action for ${server.name}`}
-                        onClick={stopActiveAction}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        <Square data-icon="inline-start" aria-hidden="true" />
-                        Stop
-                      </Button>
-                    </div>
+        {visibleServers.map((server) => {
+          const oauthState =
+            server.authType === "oauth"
+              ? oauthExpiryState(server.oauthExpiresAt)
+              : null
+          return (
+            <Card key={server.id} size="sm" className="gap-0">
+              <CardHeader className="flex-row items-start gap-3 border-b pb-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+                  {server.iconUrl ? (
+                    // MCP icons are served by JustAI, so Next Image does not need
+                    // a global host allowlist here.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      alt=""
+                      className="size-7 rounded-md object-contain"
+                      src={resolveAPIURL(server.iconUrl)}
+                    />
                   ) : (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <Button
-                            disabled={busyId === server.id}
-                            variant="outline"
-                            size="sm"
-                            aria-label={`Actions for ${server.name}`}
-                          />
-                        }
-                      >
-                        <MoreHorizontal
-                          data-icon="inline-start"
-                          aria-hidden="true"
-                        />
-                        Actions
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          disabled={busyId === server.id}
-                          onClick={() => void discover(server)}
-                        >
-                          <TerminalSquare aria-hidden="true" /> Discover tools
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={busyId === server.id}
-                          onClick={() => void test(server)}
-                        >
-                          <Check aria-hidden="true" /> Test connection
-                        </DropdownMenuItem>
-                        {server.authType === "oauth" && (
-                          <DropdownMenuItem
-                            disabled={busyId === server.id}
-                            onClick={() => authorize(server)}
-                          >
-                            <KeyRound aria-hidden="true" />
-                            {server.credentialConfigured
-                              ? "Reconnect OAuth"
-                              : "Authorize"}
-                          </DropdownMenuItem>
-                        )}
-                        {canManageServer(server) && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              disabled={busyId === server.id}
-                              onClick={() => edit(server)}
-                            >
-                              <Pencil aria-hidden="true" /> Edit server
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={busyId === server.id}
-                              className={
-                                server.enabled
-                                  ? "text-destructive focus:text-destructive"
-                                  : "text-primary focus:text-primary"
-                              }
-                              onClick={() =>
-                                void patchServer(server, {
-                                  enabled: !server.enabled,
-                                })
-                              }
-                            >
-                              {server.enabled ? "Disable" : "Enable"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={busyId === server.id}
-                              onClick={() =>
-                                void patchServer(server, {
-                                  trustedReadOnly: !server.trustedReadOnly,
-                                })
-                              }
-                            >
-                              {server.trustedReadOnly
-                                ? "Remove read-only trust"
-                                : "Trust read-only tools"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={busyId === server.id}
-                              onClick={() =>
-                                void patchServer(server, {
-                                  autoDiscover: !server.autoDiscover,
-                                })
-                              }
-                            >
-                              <Sparkles aria-hidden="true" />
-                              {server.autoDiscover
-                                ? "Require manual attachment"
-                                : "Make available automatically"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={busyId === server.id}
-                              variant="destructive"
-                              onClick={() => setRemoveTarget(server)}
-                            >
-                              <Trash2 aria-hidden="true" /> Remove
-                            </DropdownMenuItem>
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <Plug aria-hidden="true" />
                   )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-base">{server.name}</CardTitle>
+                    <Badge variant="outline">
+                      {mcpAuthLabel(server.authType)}
+                    </Badge>
+                  </div>
+                  <CardDescription className="mt-1 truncate font-mono text-xs">
+                    {server.endpointUrl}
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-3">
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  {server.scopeType === "global" ? (
+                    <Badge variant="outline" className="gap-1.5">
+                      <LockKeyhole aria-hidden="true" /> Platform-managed
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">
+                      {server.scopeType === "organization"
+                        ? "Workspace"
+                        : "Personal"}
+                    </Badge>
+                  )}
+                  {!server.enabled && <Badge variant="outline">Disabled</Badge>}
+                  {server.trustedReadOnly && (
+                    <Badge variant="outline" className="gap-1.5">
+                      <ShieldCheck aria-hidden="true" />
+                      Trusted read-only
+                    </Badge>
+                  )}
+                  {server.autoDiscover && (
+                    <Badge variant="outline" className="gap-1.5">
+                      <Sparkles aria-hidden="true" /> Available automatically
+                    </Badge>
+                  )}
+                  {server.credentialConfigured && (
+                    <Badge variant="outline" className="gap-1.5">
+                      <KeyRound aria-hidden="true" />
+                      Credential stored
+                    </Badge>
+                  )}
+                  {server.authType === "oauth" && (
+                    <Badge
+                      variant={
+                        oauthState === "expired" ? "destructive" : "outline"
+                      }
+                      title={oauthExpiryLabel(server.oauthExpiresAt)}
+                    >
+                      {oauthState === "expired"
+                        ? "OAuth expired"
+                        : oauthState === "expiring"
+                          ? "OAuth expiring soon"
+                          : server.oauthExpiresAt
+                            ? "OAuth active"
+                            : server.credentialConfigured
+                              ? "OAuth connected"
+                              : "OAuth not authorized"}
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="gap-1.5">
+                    <ShieldCheck aria-hidden="true" />
+                    Approval gated
+                  </Badge>
+                </div>
+                <Separator className="my-4" />
+                <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                  <div>
+                    <span className="font-medium text-foreground">
+                      Protocol:
+                    </span>{" "}
+                    {server.protocolVersion || "Negotiating"}
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">
+                      Last test:
+                    </span>{" "}
+                    {server.lastTestedAt
+                      ? new Date(server.lastTestedAt).toLocaleString()
+                      : "Not tested"}
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-xs text-muted-foreground">
+                  <Wrench aria-hidden="true" className="size-3.5" />
+                  <span className="truncate">
+                    {server.toolCount
+                      ? `${server.toolCount} discovered tools`
+                      : server.allowedTools.length
+                        ? `${server.allowedTools.length} allowlisted tools`
+                        : "No tools discovered yet"}
+                  </span>
+                </div>
+                {tools[server.id] && (
+                  <div className="mt-2 grid max-h-36 gap-1 overflow-y-auto sm:grid-cols-2">
+                    {tools[server.id].map((tool) => (
+                      <div
+                        key={tool.name}
+                        className="rounded-md border bg-muted/20 px-2 py-1.5"
+                      >
+                        <p className="font-mono text-xs">{tool.name}</p>
+                        <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+                          {tool.description || "No description provided"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {server.lastError && (
+                  <div
+                    aria-live="assertive"
+                    className="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive"
+                    role="alert"
+                  >
+                    <AlertTriangle
+                      aria-hidden="true"
+                      className="mt-0.5 size-3.5 shrink-0"
+                    />
+                    <span className="min-w-0 break-words">
+                      <span className="font-medium">MCP action failed: </span>
+                      {server.lastError}
+                    </span>
+                  </div>
+                )}
+                {canManageServer(server) && (
+                  <div className="flex items-center justify-end border-t pt-3">
+                    {activeAction?.serverId === server.id ? (
+                      <div className="flex w-full items-center justify-end gap-2">
+                        <div
+                          aria-live="polite"
+                          className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"
+                          role="status"
+                        >
+                          <LoaderCircle
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0 animate-spin"
+                          />
+                          <span className="truncate">{activeAction.label}</span>
+                        </div>
+                        <Button
+                          aria-label={`Stop action for ${server.name}`}
+                          onClick={stopActiveAction}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          <Square data-icon="inline-start" aria-hidden="true" />
+                          Stop
+                        </Button>
+                      </div>
+                    ) : (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              disabled={busyId === server.id}
+                              variant="outline"
+                              size="sm"
+                              aria-label={`Actions for ${server.name}`}
+                            />
+                          }
+                        >
+                          <MoreHorizontal
+                            data-icon="inline-start"
+                            aria-hidden="true"
+                          />
+                          Actions
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            disabled={busyId === server.id}
+                            onClick={() => void discover(server)}
+                          >
+                            <TerminalSquare aria-hidden="true" /> Discover tools
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={busyId === server.id}
+                            onClick={() => void test(server)}
+                          >
+                            <Check aria-hidden="true" /> Test connection
+                          </DropdownMenuItem>
+                          {server.authType === "oauth" && (
+                            <DropdownMenuItem
+                              disabled={busyId === server.id}
+                              onClick={() => authorize(server)}
+                            >
+                              <KeyRound aria-hidden="true" />
+                              {server.credentialConfigured
+                                ? "Reconnect OAuth"
+                                : "Authorize"}
+                            </DropdownMenuItem>
+                          )}
+                          {canManageServer(server) && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                disabled={busyId === server.id}
+                                onClick={() => edit(server)}
+                              >
+                                <Pencil aria-hidden="true" /> Edit server
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={busyId === server.id}
+                                className={
+                                  server.enabled
+                                    ? "text-destructive focus:text-destructive"
+                                    : "text-primary focus:text-primary"
+                                }
+                                onClick={() =>
+                                  void patchServer(server, {
+                                    enabled: !server.enabled,
+                                  })
+                                }
+                              >
+                                {server.enabled ? "Disable" : "Enable"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={busyId === server.id}
+                                onClick={() =>
+                                  void patchServer(server, {
+                                    trustedReadOnly: !server.trustedReadOnly,
+                                  })
+                                }
+                              >
+                                {server.trustedReadOnly
+                                  ? "Remove read-only trust"
+                                  : "Trust read-only tools"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={busyId === server.id}
+                                onClick={() =>
+                                  void patchServer(server, {
+                                    autoDiscover: !server.autoDiscover,
+                                  })
+                                }
+                              >
+                                <Sparkles aria-hidden="true" />
+                                {server.autoDiscover
+                                  ? "Require manual attachment"
+                                  : "Make available automatically"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={busyId === server.id}
+                                variant="destructive"
+                                onClick={() => setRemoveTarget(server)}
+                              >
+                                <Trash2 aria-hidden="true" /> Remove
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )
+        })}
         {mode === "advanced" && visibleServers.length === 0 && (
           <Card className="bg-muted/30 lg:col-span-2">
             <CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 text-center">
               <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
                 <Plug aria-hidden="true" />
               </div>
-              <p className="font-medium">No MCP servers connected</p>
-              <p className="max-w-md text-sm text-muted-foreground">
-                Add a remote server over Streamable HTTP or legacy HTTP+SSE.
-                JustAI does not run arbitrary stdio processes from the web app.
+              <p className="font-medium">
+                {resourceError
+                  ? "MCP server inventory unavailable"
+                  : "No MCP servers connected"}
               </p>
-              <Button variant="outline" size="sm" onClick={openCreate}>
-                Add a server
-              </Button>
+              <p className="max-w-md text-sm text-muted-foreground">
+                {resourceError
+                  ? "JustAI could not load the MCP server catalog. Retry to check again."
+                  : "Add a remote server over Streamable HTTP or legacy HTTP+SSE. JustAI does not run arbitrary stdio processes from the web app."}
+              </p>
+              {resourceError ? (
+                onRetryResource && (
+                  <Button variant="outline" size="sm" onClick={onRetryResource}>
+                    Retry
+                  </Button>
+                )
+              ) : (
+                <Button variant="outline" size="sm" onClick={openCreate}>
+                  Add a server
+                </Button>
+              )}
             </CardContent>
           </Card>
         )}

@@ -17,6 +17,8 @@ type User struct {
 	SuspendedReason string     `json:"suspendedReason,omitempty"`
 	SessionVersion  int        `json:"-"`
 	LastLoginAt     *time.Time `json:"lastLoginAt,omitempty"`
+	AvatarURL       string     `json:"avatarUrl,omitempty"`
+	AvatarVersion   string     `json:"avatarVersion,omitempty"`
 }
 
 type Organization struct {
@@ -412,6 +414,10 @@ type Endpoint struct {
 	TimeoutSeconds       int             `json:"timeoutSeconds"`
 	MaxOutputTokens      int             `json:"maxOutputTokens"`
 	Temperature          float64         `json:"temperature"`
+	LastTestedAt         *time.Time      `json:"lastTestedAt,omitempty"`
+	LastTestOK           *bool           `json:"lastTestOk,omitempty"`
+	LastTestError        string          `json:"lastTestError,omitempty"`
+	LastTestResults      json.RawMessage `json:"lastTestResults,omitempty"`
 	CreatedAt            time.Time       `json:"createdAt"`
 	UpdatedAt            time.Time       `json:"updatedAt"`
 }
@@ -732,6 +738,7 @@ type MCPServer struct {
 	AllowedTools         json.RawMessage `json:"allowedTools"`
 	TrustedReadOnly      bool            `json:"trustedReadOnly"`
 	AutoDiscover         bool            `json:"autoDiscover"`
+	OAuthExpiresAt       *time.Time      `json:"oauthExpiresAt,omitempty"`
 	LastTestedAt         *time.Time      `json:"lastTestedAt,omitempty"`
 	LastError            string          `json:"lastError,omitempty"`
 	ProtocolVersion      string          `json:"protocolVersion,omitempty"`

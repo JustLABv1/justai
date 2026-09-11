@@ -221,6 +221,11 @@ func (a *App) exportPrivacyData(c *gin.Context) {
 		"projects":       []map[string]any{},
 		"knowledge":      []map[string]any{},
 		"transcriptions": []map[string]any{},
+		"excluded": []gin.H{
+			{"category": "binary files", "reason": "Downloadable file bytes are not included in this JSON export."},
+			{"category": "recordings and media", "reason": "Audio, video, and message attachments are not included in this JSON export."},
+			{"category": "credentials and security logs", "reason": "Provider credentials and security-sensitive records are never exported."},
+		},
 	}
 	conversations := make([]privacyExportConversation, 0)
 	conversationRows, err := a.DB.QueryContext(c, `SELECT id, title, visibility, created_at, updated_at FROM conversations WHERE user_id = $1 AND organization_id = $2 ORDER BY created_at`, principal.UserID, organizationID)

@@ -204,12 +204,24 @@ export function PlatformAdminDashboard({
             <CardAction>
               <Badge
                 variant={
-                  health.database.ok && health.providers.ok && health.mcp.ok
+                  health.database.ok &&
+                  health.providers.ok &&
+                  health.mcp.ok &&
+                  health.agents.ok &&
+                  health.workers.rag &&
+                  health.workers.transcription &&
+                  health.workers.agents
                     ? "default"
                     : "destructive"
                 }
               >
-                {health.database.ok && health.providers.ok && health.mcp.ok
+                {health.database.ok &&
+                health.providers.ok &&
+                health.mcp.ok &&
+                health.agents.ok &&
+                health.workers.rag &&
+                health.workers.transcription &&
+                health.workers.agents
                   ? "Operational"
                   : "Degraded"}
               </Badge>
@@ -230,8 +242,15 @@ export function PlatformAdminDashboard({
               ],
               [
                 "Workers",
-                health.workers.rag && health.workers.transcription,
-                "RAG and transcription",
+                health.workers.rag &&
+                  health.workers.transcription &&
+                  health.workers.agents,
+                "RAG, transcription, and agent heartbeats",
+              ],
+              [
+                "Agents",
+                health.agents.ok,
+                `${health.agents.activeRuns} active runs · ${health.agents.pendingApprovals} approvals`,
               ],
             ].map(([label, ok, detail]) => (
               <div

@@ -64,3 +64,13 @@ func TestValidateEndpointKind(t *testing.T) {
 		})
 	}
 }
+
+func TestFloatValuePreservesExplicitZero(t *testing.T) {
+	zero := float64(0)
+	if got := floatValue(&zero, 0.2); got != 0 {
+		t.Fatalf("floatValue() = %v, want explicit zero", got)
+	}
+	if got := floatValue(nil, 0.2); got != 0.2 {
+		t.Fatalf("floatValue(nil) = %v, want fallback", got)
+	}
+}
