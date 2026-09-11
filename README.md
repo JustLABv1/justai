@@ -113,3 +113,13 @@ apply it automatically. **Download original** in knowledge storage retrieves the
 bytes; uploads created before this migration may only have extracted text.
 Generated content is limited to 512 KiB per file, generated artifacts to 8 MiB,
 and native tool output to 16 files / 8 MiB total per node execution.
+
+## License
+
+Copyright © 2026 JustLAB.
+
+JustAI is free and open-source software licensed under the
+[GNU Affero General Public License v3.0 only](LICENSE) (`AGPL-3.0-only`). If you
+modify JustAI and distribute it, or make the modified software available to
+users over a network, you must make the corresponding source code available
+under the same license. See the `LICENSE` file for the complete terms.
