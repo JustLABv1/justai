@@ -16,6 +16,8 @@ type Props = {
   onChange: (servers: MCPServer[]) => void
   organization?: Organization
   user: User
+  resourceError?: string
+  onRetry?: () => void
 }
 
 export function IntegrationsView({
@@ -23,6 +25,8 @@ export function IntegrationsView({
   onChange,
   organization,
   user,
+  resourceError,
+  onRetry,
 }: Props) {
   return (
     <Page>
@@ -43,6 +47,8 @@ export function IntegrationsView({
         organizationRole={organization?.role}
         platformAdmin={user.platformAdmin}
         userId={user.id}
+        resourceError={resourceError}
+        onRetryResource={onRetry}
       />
     </Page>
   )

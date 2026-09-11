@@ -46,17 +46,20 @@ type SettingsShellProps = {
   onOrganizationSelect: (organizationId: string) => void
   onOrganizationCreated: (organization: Organization) => void
   onOrganizationUpdated: (organization: Organization) => void
+  onOrganizationRemoved?: (organizationId: string) => void
   onEndpointsChange: (endpoints: Endpoint[]) => void
   onMCPChange: (servers: MCPServer[]) => void
+  resourceErrors?: Partial<Record<"endpoints" | "mcp", string>>
+  onRetryResource?: () => void
 }
 
 const tabs: Array<{ id: SettingsTab; label: string; icon: typeof Settings2 }> =
   [
-    { id: "workspace", label: "Workspace", icon: Settings2 },
-    { id: "endpoints", label: "Endpoints", icon: Cpu },
-    { id: "mcp", label: "MCP", icon: Plug },
+    { id: "workspace", label: "Overview", icon: Settings2 },
+    { id: "endpoints", label: "AI models", icon: Cpu },
+    { id: "mcp", label: "Tools", icon: Plug },
     { id: "members", label: "Members", icon: Users },
-    { id: "privacy", label: "Privacy", icon: ShieldCheck },
+    { id: "privacy", label: "Data & privacy", icon: ShieldCheck },
   ]
 
 export function SettingsShell({
@@ -70,8 +73,11 @@ export function SettingsShell({
   onOrganizationSelect,
   onOrganizationCreated,
   onOrganizationUpdated,
+  onOrganizationRemoved,
   onEndpointsChange,
   onMCPChange,
+  resourceErrors = {},
+  onRetryResource,
 }: SettingsShellProps) {
   const activeOrganization =
     organizations.find((item) => item.id === activeOrganizationId) ??
@@ -79,16 +85,15 @@ export function SettingsShell({
   const visibleTabs = tabs
   const pageMeta = {
     workspace: {
-      eyebrow: "Workspace",
-      title: "Workspace",
-      description:
-        "Create and rename workspaces, then manage workspace access.",
+      eyebrow: "Workspace summary",
+      title: "Overview",
+      description: "Review activity, connected capacity, and workspace health.",
     },
     endpoints: {
-      eyebrow: "Models",
-      title: "Endpoints",
+      eyebrow: "AI infrastructure",
+      title: "AI models",
       description:
-        "Connect providers and configure the models available to your workspace.",
+        "Configure the model providers and transcription services available here.",
     },
     knowledge: {
       eyebrow: "Knowledge",
@@ -97,10 +102,10 @@ export function SettingsShell({
         "Index sources that can be attached to conversations and cited in answers.",
     },
     mcp: {
-      eyebrow: "Tools",
-      title: "MCP servers",
+      eyebrow: "Connected tools",
+      title: "Tools & MCP",
       description:
-        "Connect and manage the remote tools available to your workspace.",
+        "Manage the remote tools and integrations available to assistants.",
     },
     members: {
       eyebrow: "Access",
@@ -108,10 +113,10 @@ export function SettingsShell({
       description: "Invite people and manage access for the active workspace.",
     },
     privacy: {
-      eyebrow: "Privacy",
-      title: "Privacy & lifecycle",
+      eyebrow: "Data controls",
+      title: "Data & privacy",
       description:
-        "Control retention, export your data, and decide when completed workspace data is removed.",
+        "Control retention, cleanup, and exports for your workspace data.",
     },
     admin: {
       eyebrow: "Operations",
@@ -135,6 +140,7 @@ export function SettingsShell({
       block: "nearest",
       inline: "nearest",
     })
+    activeTabRef.current?.focus()
   }, [activeTab])
 
   const pageAction =
@@ -165,79 +171,149 @@ export function SettingsShell({
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageEyebrow>{currentPage.eyebrow}</PageEyebrow>
-          <PageTitle>{currentPage.title}</PageTitle>
-          <PageDescription>{currentPage.description}</PageDescription>
+          <PageEyebrow>Settings</PageEyebrow>
+          <PageTitle>Workspace settings</PageTitle>
+          <PageDescription>
+            Configure {activeOrganization?.name ?? "your active workspace"} and
+            everything available to its members.
+          </PageDescription>
         </PageHeading>
         {pageAction && <PageActions>{pageAction}</PageActions>}
       </PageHeader>
 
-      <PageToolbar
-        aria-label="Workspace settings sections"
-        className="w-full max-w-full flex-nowrap overflow-x-auto"
-        role="tablist"
-      >
-        {visibleTabs.map(({ id, label, icon: Icon }) => (
-          <Button
-            aria-current={activeTab === id ? "page" : undefined}
-            aria-selected={activeTab === id}
-            className="shrink-0 gap-2"
-            key={id}
-            onClick={() => onTabChange(id)}
-            ref={activeTab === id ? activeTabRef : undefined}
-            role="tab"
-            variant={activeTab === id ? "secondary" : "ghost"}
-          >
-            <Icon className="size-4" />
-            {label}
-          </Button>
-        ))}
-      </PageToolbar>
+      <div className="grid items-start gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
+        <PageToolbar
+          aria-label="Workspace settings sections"
+          aria-orientation="vertical"
+          className="w-full max-w-full flex-nowrap overflow-x-auto lg:sticky lg:top-6 lg:flex-col lg:items-stretch lg:overflow-visible"
+          role="tablist"
+        >
+          <p className="hidden px-2 pb-1 text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase lg:block">
+            Workspace
+          </p>
+          {visibleTabs.map(({ id, label, icon: Icon }) => (
+            <Button
+              aria-controls={`settings-panel-${id}`}
+              aria-current={activeTab === id ? "page" : undefined}
+              aria-selected={activeTab === id}
+              className="shrink-0 justify-start gap-2 lg:w-full"
+              id={`settings-tab-${id}`}
+              key={id}
+              onClick={() => onTabChange(id)}
+              onKeyDown={(event) => {
+                const index = visibleTabs.findIndex((tab) => tab.id === id)
+                let nextIndex = index
+                if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                  nextIndex = (index + 1) % visibleTabs.length
+                } else if (
+                  event.key === "ArrowLeft" ||
+                  event.key === "ArrowUp"
+                ) {
+                  nextIndex =
+                    (index - 1 + visibleTabs.length) % visibleTabs.length
+                } else if (event.key === "Home") {
+                  nextIndex = 0
+                } else if (event.key === "End") {
+                  nextIndex = visibleTabs.length - 1
+                } else {
+                  return
+                }
+                event.preventDefault()
+                onTabChange(visibleTabs[nextIndex].id)
+              }}
+              ref={activeTab === id ? activeTabRef : undefined}
+              role="tab"
+              tabIndex={activeTab === id ? 0 : -1}
+              type="button"
+              variant={activeTab === id ? "secondary" : "ghost"}
+            >
+              <Icon className="size-4" />
+              {label}
+            </Button>
+          ))}
+        </PageToolbar>
 
-      {activeTab === "workspace" || activeTab === "members" ? (
-        <SettingsView
-          activeOrganizationId={activeOrganizationId}
-          onOrganizationSelect={onOrganizationSelect}
-          onOrganizationCreated={onOrganizationCreated}
-          onOrganizationUpdated={onOrganizationUpdated}
-          workspaceCreateRequest={workspaceCreateRequest}
-          memberCreateRequest={memberCreateRequest}
-          organizations={organizations}
-          section={activeTab === "members" ? "members" : "workspace"}
-          user={user}
-        />
-      ) : null}
-      {activeTab === "endpoints" ? (
-        <EndpointsView
-          endpoints={endpoints}
-          onChange={onEndpointsChange}
-          organizationRole={activeOrganization?.role}
-          platformAdmin={user.platformAdmin}
-          userId={user.id}
-          createRequest={endpointCreateRequest}
-        />
-      ) : null}
-      {activeTab === "mcp" ? (
-        <MCPView
-          mode="advanced"
-          servers={mcpServers}
-          onChange={onMCPChange}
-          organizationRole={activeOrganization?.role}
-          platformAdmin={user.platformAdmin}
-          userId={user.id}
-          createRequest={mcpCreateRequest}
-        />
-      ) : null}
-      {activeTab === "privacy" ? <PrivacyView /> : null}
-      {activeTab === "admin" ? (
-        <AdminView
-          endpoints={endpoints}
-          mcpServers={mcpServers}
-          organizationId={activeOrganization?.id ?? null}
-          organizationRole={activeOrganization?.role}
-          platformAdmin={user.platformAdmin}
-        />
-      ) : null}
+        <div
+          aria-labelledby={`settings-tab-${activeTab}`}
+          className="min-w-0"
+          id={`settings-panel-${activeTab}`}
+          role="tabpanel"
+          tabIndex={0}
+        >
+          <div className="mb-5 flex items-start gap-3 px-1">
+            <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
+              {(() => {
+                const Icon =
+                  visibleTabs.find((tab) => tab.id === activeTab)?.icon ??
+                  Settings2
+                return <Icon className="size-4" aria-hidden="true" />
+              })()}
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+                {currentPage.eyebrow}
+              </p>
+              <h2 className="font-heading mt-1 text-xl font-semibold tracking-tight">
+                {currentPage.title}
+              </h2>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                {currentPage.description}
+              </p>
+            </div>
+          </div>
+          {activeTab === "workspace" || activeTab === "members" ? (
+            <SettingsView
+              activeOrganizationId={activeOrganizationId}
+              endpoints={endpoints}
+              mcpServers={mcpServers}
+              onOrganizationSelect={onOrganizationSelect}
+              onOrganizationCreated={onOrganizationCreated}
+              onOrganizationUpdated={onOrganizationUpdated}
+              onOrganizationRemoved={onOrganizationRemoved}
+              workspaceCreateRequest={workspaceCreateRequest}
+              memberCreateRequest={memberCreateRequest}
+              organizations={organizations}
+              section={activeTab === "members" ? "members" : "workspace"}
+              user={user}
+            />
+          ) : null}
+          {activeTab === "endpoints" ? (
+            <EndpointsView
+              endpoints={endpoints}
+              onChange={onEndpointsChange}
+              organizationRole={activeOrganization?.role}
+              platformAdmin={user.platformAdmin}
+              userId={user.id}
+              createRequest={endpointCreateRequest}
+              resourceError={resourceErrors.endpoints}
+              onRetryResource={onRetryResource}
+            />
+          ) : null}
+          {activeTab === "mcp" ? (
+            <MCPView
+              mode="advanced"
+              servers={mcpServers}
+              onChange={onMCPChange}
+              organizationRole={activeOrganization?.role}
+              platformAdmin={user.platformAdmin}
+              userId={user.id}
+              createRequest={mcpCreateRequest}
+              resourceError={resourceErrors.mcp}
+              onRetryResource={onRetryResource}
+            />
+          ) : null}
+          {activeTab === "privacy" ? <PrivacyView /> : null}
+          {activeTab === "admin" ? (
+            <AdminView
+              endpoints={endpoints}
+              mcpServers={mcpServers}
+              organizationId={activeOrganization?.id ?? null}
+              organizationRole={activeOrganization?.role}
+              platformAdmin={user.platformAdmin}
+            />
+          ) : null}
+        </div>
+      </div>
     </Page>
   )
 }

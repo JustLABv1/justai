@@ -48,6 +48,7 @@ import type {
   Endpoint,
   MCPServer,
   PlatformSettings,
+  PlatformSession,
   User,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -91,6 +92,7 @@ import {
 } from "@/components/ui/collapsible"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -156,6 +158,13 @@ type PlatformControlKey = Exclude<
   "maintenanceMessage" | "updatedAt"
 >
 
+function readAdminParam(key: string, fallback = "") {
+  if (typeof window === "undefined") return fallback
+  return (
+    new URLSearchParams(window.location.search).get(`admin_${key}`) ?? fallback
+  )
+}
+
 type PlatformAdminShellProps = {
   activeTab: AdminTab
   onTabChange: (tab: AdminTab) => void
@@ -195,30 +204,32 @@ export function PlatformAdminShell({
   const [analytics, setAnalytics] = useState<AdminAnalyticsResponse | null>(
     null
   )
-  const [query, setQuery] = useState("")
-  const [listStatus, setListStatus] = useState("")
+  const [query, setQuery] = useState(() => readAdminParam("query"))
+  const [listStatus, setListStatus] = useState(() => readAdminParam("status"))
   const [listPage, setListPage] = useState(1)
   const [listTotal, setListTotal] = useState(0)
-  const [auditFilters, setAuditFilters] = useState<Record<string, string>>({
-    search: "",
-    action: "",
-    resourceType: "",
-    actorId: "",
-    organizationId: "",
-    from: "",
-    to: "",
-  })
+  const [auditFilters, setAuditFilters] = useState<Record<string, string>>(
+    () => ({
+      search: readAdminParam("audit_search"),
+      action: readAdminParam("audit_action"),
+      resourceType: readAdminParam("audit_resourceType"),
+      actorId: readAdminParam("audit_actorId"),
+      organizationId: readAdminParam("audit_organizationId"),
+      from: readAdminParam("audit_from"),
+      to: readAdminParam("audit_to"),
+    })
+  )
   const [analyticsFilters, setAnalyticsFilters] = useState<
     Record<string, string>
-  >({
-    days: "30",
-    from: "",
-    to: "",
-    organizationId: "",
-    endpointId: "",
-    model: "",
-    status: "",
-  })
+  >(() => ({
+    days: readAdminParam("analytics_days", "30"),
+    from: readAdminParam("analytics_from"),
+    to: readAdminParam("analytics_to"),
+    organizationId: readAdminParam("analytics_organizationId"),
+    endpointId: readAdminParam("analytics_endpointId"),
+    model: readAdminParam("analytics_model"),
+    status: readAdminParam("analytics_status"),
+  }))
   const [savingMaintenance, setSavingMaintenance] = useState(false)
   const [savingControl, setSavingControl] = useState<PlatformControlKey | null>(
     null
@@ -236,6 +247,32 @@ export function PlatformAdminShell({
       inline: "nearest",
     })
   }, [activeTab])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const url = new URL(window.location.href)
+    const values: Record<string, string> = {
+      query,
+      status: listStatus,
+      ...Object.fromEntries(
+        Object.entries(analyticsFilters).map(([key, value]) => [
+          `analytics_${key}`,
+          value,
+        ])
+      ),
+      ...Object.fromEntries(
+        Object.entries(auditFilters).map(([key, value]) => [
+          `audit_${key}`,
+          value,
+        ])
+      ),
+    }
+    Object.entries(values).forEach(([key, value]) => {
+      if (value) url.searchParams.set(`admin_${key}`, value)
+      else url.searchParams.delete(`admin_${key}`)
+    })
+    window.history.replaceState(window.history.state, "", url)
+  }, [analyticsFilters, auditFilters, listStatus, query])
 
   const load = useCallback(async () => {
     setError("")
@@ -311,7 +348,12 @@ export function PlatformAdminShell({
   }, [load])
 
   useEffect(() => {
-    if (activeTab !== "overview" && activeTab !== "analytics") return
+    if (
+      activeTab !== "overview" &&
+      activeTab !== "analytics" &&
+      activeTab !== "health"
+    )
+      return
     const timer = window.setInterval(() => void load(), 10_000)
     return () => window.clearInterval(timer)
   }, [activeTab, load])
@@ -322,10 +364,14 @@ export function PlatformAdminShell({
     try {
       const result = await api.put<PlatformSettings>("/api/v1/admin/settings", {
         maintenanceMessage: settings.maintenanceMessage,
+        expectedUpdatedAt: settings.updatedAt ?? undefined,
       })
       setSettings(result)
       notifySuccess("Maintenance message saved")
     } catch (caught) {
+      if (caught instanceof APIError && caught.status === 409) {
+        await load()
+      }
       setError(
         notifyError(
           "Maintenance message could not be saved",
@@ -346,6 +392,7 @@ export function PlatformAdminShell({
     try {
       const result = await api.put<PlatformSettings>("/api/v1/admin/settings", {
         [key]: value,
+        expectedUpdatedAt: settings.updatedAt ?? undefined,
       })
       setSettings((current) => ({
         ...result,
@@ -354,6 +401,9 @@ export function PlatformAdminShell({
       notifySuccess(`${settingLabel(key)} ${value ? "enabled" : "disabled"}`)
     } catch (caught) {
       setSettings((current) => ({ ...current, [key]: previousValue }))
+      if (caught instanceof APIError && caught.status === 409) {
+        await load()
+      }
       setError(
         notifyError(
           "Platform control could not be updated",
@@ -853,15 +903,68 @@ function UsersView({
   } | null>(null)
   const [deletePhrase, setDeletePhrase] = useState("")
   const [revokeCandidate, setRevokeCandidate] = useState<any | null>(null)
+  const [sessionBusyId, setSessionBusyId] = useState("")
+  const [confirmAction, setConfirmAction] = useState<{
+    item: any
+    patch: Record<string, unknown>
+    title: string
+    description: string
+    confirmLabel: string
+    destructive?: boolean
+  } | null>(null)
+  const [confirmPending, setConfirmPending] = useState(false)
+
+  function requestUserAction(item: any, patch: Record<string, unknown>) {
+    const isAdminChange = Object.prototype.hasOwnProperty.call(
+      patch,
+      "platformAdmin"
+    )
+    const isSuspension = patch.status === "suspended"
+    const verb = isAdminChange
+      ? item.platformAdmin
+        ? "Demote"
+        : "Promote"
+      : isSuspension
+        ? "Suspend"
+        : "Unsuspend"
+    setConfirmAction({
+      item,
+      patch,
+      title: `${verb} ${item.displayName ?? "this user"}?`,
+      description: isAdminChange
+        ? `${verb}ing platform administrator access changes this user's ability to manage every workspace and platform control.`
+        : isSuspension
+          ? "Suspending this user revokes their current access and prevents new sign-ins until they are unsuspended."
+          : "This user will be able to sign in and use their workspaces again.",
+      confirmLabel: verb,
+      destructive: isSuspension || isAdminChange,
+    })
+  }
+
+  async function confirmUserAction() {
+    if (!confirmAction) return
+    setConfirmPending(true)
+    try {
+      await onUpdate(confirmAction.item.id, confirmAction.patch)
+      setConfirmAction(null)
+    } finally {
+      setConfirmPending(false)
+    }
+  }
 
   async function showDetail(id: string) {
     setLoadingDetail(true)
     setActionError("")
     try {
-      const result = await api.get<{ user: any; organizations: any[] }>(
-        `/api/v1/admin/users/${id}`
-      )
-      setDetail(result)
+      const [result, sessionResult] = await Promise.all([
+        api.get<{ user: any; organizations: any[] }>(
+          `/api/v1/admin/users/${id}`
+        ),
+        api.get<{ sessions: PlatformSession[] }>(
+          `/api/v1/admin/users/${id}/sessions`
+        ),
+      ])
+      setDetail({ ...result, sessions: sessionResult.sessions ?? [] })
     } catch (caught) {
       setActionError(
         caught instanceof Error
@@ -870,6 +973,43 @@ function UsersView({
       )
     } finally {
       setLoadingDetail(false)
+    }
+  }
+
+  async function revokeSession(session: PlatformSession) {
+    const userID = detail?.user?.id
+    if (!userID || !session.active) return
+    setSessionBusyId(session.id)
+    setActionError("")
+    try {
+      await api.post(
+        `/api/v1/admin/users/${userID}/sessions/${session.id}/revoke`
+      )
+      setDetail((current: any) =>
+        current
+          ? {
+              ...current,
+              sessions: (current.sessions ?? []).map((item: PlatformSession) =>
+                item.id === session.id
+                  ? {
+                      ...item,
+                      active: false,
+                      revokedAt: new Date().toISOString(),
+                    }
+                  : item
+              ),
+            }
+          : current
+      )
+      notifySuccess("Session revoked")
+    } catch (caught) {
+      setActionError(
+        caught instanceof Error
+          ? caught.message
+          : "Session could not be revoked."
+      )
+    } finally {
+      setSessionBusyId("")
     }
   }
 
@@ -991,7 +1131,7 @@ function UsersView({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                void onUpdate(item.id, {
+                                requestUserAction(item, {
                                   status:
                                     item.status === "suspended"
                                       ? "active"
@@ -1010,7 +1150,7 @@ function UsersView({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                void onUpdate(item.id, {
+                                requestUserAction(item, {
                                   platformAdmin: !item.platformAdmin,
                                 })
                               }
@@ -1100,6 +1240,64 @@ function UsersView({
                   {detail.organizations?.length === 0 && <span>None</span>}
                 </div>
               </div>
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium">Sessions</p>
+                  <span className="text-xs text-muted-foreground">
+                    {
+                      (detail.sessions ?? []).filter(
+                        (session: PlatformSession) => session.active
+                      ).length
+                    }{" "}
+                    active
+                  </span>
+                </div>
+                <div className="mt-2 flex max-h-48 flex-col gap-1 overflow-y-auto text-xs">
+                  {(detail.sessions ?? []).map((session: PlatformSession) => (
+                    <div
+                      className="flex items-start justify-between gap-2 rounded-md border px-2 py-1.5"
+                      key={session.id}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge
+                            variant={session.active ? "default" : "secondary"}
+                          >
+                            {session.active ? "Active" : "Revoked"}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            Last seen{" "}
+                            {new Date(session.lastSeenAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-muted-foreground">
+                          {[session.userAgent, session.ipAddress]
+                            .filter(Boolean)
+                            .join(" · ") || "No device metadata"}
+                        </p>
+                      </div>
+                      {session.active && (
+                        <Button
+                          aria-label="Revoke this session"
+                          disabled={sessionBusyId === session.id}
+                          onClick={() => void revokeSession(session)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          {sessionBusyId === session.id
+                            ? "Revoking…"
+                            : "Revoke"}
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  {detail.sessions?.length === 0 && (
+                    <span className="text-muted-foreground">
+                      No sessions found.
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           ) : null}
           <DialogFooter>
@@ -1112,7 +1310,7 @@ function UsersView({
                   <DropdownMenuGroup>
                     <DropdownMenuItem
                       onClick={() =>
-                        void onUpdate(detail.user.id, {
+                        requestUserAction(detail.user, {
                           status:
                             detail.user.status === "suspended"
                               ? "active"
@@ -1131,7 +1329,7 @@ function UsersView({
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() =>
-                        void onUpdate(detail.user.id, {
+                        requestUserAction(detail.user, {
                           platformAdmin: !detail.user.platformAdmin,
                         })
                       }
@@ -1238,6 +1436,16 @@ function UsersView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmActionDialog
+        open={confirmAction !== null}
+        title={confirmAction?.title ?? "Confirm user action"}
+        description={confirmAction?.description ?? ""}
+        confirmLabel={confirmAction?.confirmLabel ?? "Confirm"}
+        destructive={confirmAction?.destructive}
+        pending={confirmPending}
+        onOpenChange={(open) => !open && setConfirmAction(null)}
+        onConfirm={confirmUserAction}
+      />
     </>
   )
 }
@@ -1265,6 +1473,52 @@ function WorkspacesView({
   const [newOwnerID, setNewOwnerID] = useState("")
   const [deleteCandidate, setDeleteCandidate] = useState<any | null>(null)
   const [deletePhrase, setDeletePhrase] = useState("")
+  const [confirmAction, setConfirmAction] = useState<{
+    item: any
+    patch: Record<string, unknown>
+    title: string
+    description: string
+    confirmLabel: string
+  } | null>(null)
+  const [confirmPending, setConfirmPending] = useState(false)
+
+  function requestWorkspaceAction(item: any, patch: Record<string, unknown>) {
+    const nextStatus = patch.status
+    const isArchive = item.status === "archived" || nextStatus === "archived"
+    const isSuspend =
+      !isArchive && (item.status === "suspended" || nextStatus === "suspended")
+    const verb = isArchive
+      ? item.status === "archived"
+        ? "Restore"
+        : "Archive"
+      : isSuspend
+        ? "Suspend"
+        : "Unsuspend"
+    setConfirmAction({
+      item,
+      patch,
+      title: `${verb} ${item.name ?? "this workspace"}?`,
+      description: isArchive
+        ? item.status === "archived"
+          ? "Restoring this workspace makes its resources available to members again."
+          : "Archiving this workspace hides it from normal use until an administrator restores it."
+        : isSuspend
+          ? "Suspending this workspace blocks member access and active work until it is unsuspended."
+          : "Members will be able to access this workspace again.",
+      confirmLabel: verb,
+    })
+  }
+
+  async function confirmWorkspaceAction() {
+    if (!confirmAction) return
+    setConfirmPending(true)
+    try {
+      await onUpdate(confirmAction.item.id, confirmAction.patch)
+      setConfirmAction(null)
+    } finally {
+      setConfirmPending(false)
+    }
+  }
 
   async function showDetail(id: string) {
     setActionError("")
@@ -1355,7 +1609,7 @@ function WorkspacesView({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                void onUpdate(item.id, {
+                                requestWorkspaceAction(item, {
                                   status:
                                     item.status === "archived"
                                       ? "active"
@@ -1374,7 +1628,7 @@ function WorkspacesView({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                void onUpdate(item.id, {
+                                requestWorkspaceAction(item, {
                                   status:
                                     item.status === "suspended"
                                       ? "active"
@@ -1597,6 +1851,15 @@ function WorkspacesView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmActionDialog
+        open={confirmAction !== null}
+        title={confirmAction?.title ?? "Confirm workspace action"}
+        description={confirmAction?.description ?? ""}
+        confirmLabel={confirmAction?.confirmLabel ?? "Confirm"}
+        pending={confirmPending}
+        onOpenChange={(open) => !open && setConfirmAction(null)}
+        onConfirm={confirmWorkspaceAction}
+      />
     </>
   )
 }
@@ -1645,6 +1908,7 @@ function InventoryView({
   const [createIconFile, setCreateIconFile] = useState<File | null>(null)
   const [createIconPreview, setCreateIconPreview] = useState("")
   const [deleteCandidate, setDeleteCandidate] = useState<any | null>(null)
+  const [deletePhrase, setDeletePhrase] = useState("")
   const [createValues, setCreateValues] = useState({
     name: "",
     providerType: "openai-compatible",
@@ -2215,24 +2479,38 @@ function InventoryView({
       </Card>
       <Dialog
         open={deleteCandidate !== null}
-        onOpenChange={(open) => !open && setDeleteCandidate(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteCandidate(null)
+            setDeletePhrase("")
+          }
+        }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete {resourceLabel.toLowerCase()}</DialogTitle>
             <DialogDescription>
-              {`Permanently delete ${deleteCandidate?.name ?? `this ${resourceLabel.toLowerCase()}`}? This cannot be undone.`}
+              {`Permanently delete ${deleteCandidate?.name ?? `this ${resourceLabel.toLowerCase()}`}? Type DELETE to confirm. This cannot be undone.`}
             </DialogDescription>
           </DialogHeader>
+          <Input
+            aria-label="Type DELETE to confirm"
+            autoComplete="off"
+            onChange={(event) => setDeletePhrase(event.target.value)}
+            placeholder="DELETE"
+            value={deletePhrase}
+          />
           <DialogFooter>
             <Button onClick={() => setDeleteCandidate(null)} variant="outline">
               Cancel
             </Button>
             <Button
+              disabled={deletePhrase !== "DELETE"}
               onClick={() => {
                 const resource = deleteCandidate
-                if (!resource) return
+                if (!resource || deletePhrase !== "DELETE") return
                 setDeleteCandidate(null)
+                setDeletePhrase("")
                 void runAction(
                   resource.id,
                   {
@@ -2760,6 +3038,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
   const totalProviders = Number(providers.total ?? 0)
   const enabledMcp = Number(mcp.enabled ?? 0)
   const totalMcp = Number(mcp.total ?? 0)
+  const workerDetails = Array.isArray(workers.details) ? workers.details : []
   const workerEntries = [
     ["RAG worker", workers.rag],
     ["Transcription worker", workers.transcription],
@@ -2881,6 +3160,36 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
               </div>
             ))}
           </div>
+          {workerDetails.length > 0 && (
+            <div className="mt-3 flex flex-col gap-1.5 border-t pt-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                Heartbeat diagnostics
+              </p>
+              {workerDetails.map((worker: any) => (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-2 text-xs"
+                  key={worker.name}
+                >
+                  <span className="font-medium">
+                    {String(worker.name)
+                      .replace(/[-_]/g, " ")
+                      .replace(/^./, (value) => value.toUpperCase())}
+                    {worker.instanceId
+                      ? ` · ${String(worker.instanceId).slice(0, 8)}`
+                      : ""}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {worker.heartbeatAgeSeconds >= 0
+                      ? `${worker.heartbeatAgeSeconds}s since heartbeat`
+                      : worker.started
+                        ? "Awaiting heartbeat"
+                        : "Not started"}
+                    {worker.lastError ? ` · ${worker.lastError}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </HealthPanel>
       </div>
 
@@ -3129,6 +3438,7 @@ function AuditView({
 }) {
   const isMobile = useIsMobile()
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false)
+  const [selectedEvent, setSelectedEvent] = useState<any | null>(null)
   const setFilter = (key: string, value: string) =>
     onFiltersChange({ ...filters, [key]: value })
   const advancedFilterCount = Object.entries(filters).filter(
@@ -3245,9 +3555,11 @@ function AuditView({
           </CollapsibleContent>
         </Collapsible>
         {events.map((event) => (
-          <div
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-xs"
+          <button
+            className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-left text-xs transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
             key={event.id}
+            onClick={() => setSelectedEvent(event)}
+            type="button"
           >
             <div>
               <p className="font-medium">{event.action}</p>
@@ -3260,7 +3572,7 @@ function AuditView({
                 ? new Date(event.createdAt).toLocaleString()
                 : ""}
             </time>
-          </div>
+          </button>
         ))}
         {events.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">
@@ -3274,6 +3586,84 @@ function AuditView({
           onPageChange={onPageChange}
         />
       </CardContent>
+      <Dialog
+        open={selectedEvent !== null}
+        onOpenChange={(open) => !open && setSelectedEvent(null)}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{selectedEvent?.action ?? "Audit event"}</DialogTitle>
+            <DialogDescription>
+              {selectedEvent?.resourceType ?? "—"} ·{" "}
+              {selectedEvent?.resourceId ?? "No resource ID"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 text-sm sm:grid-cols-2">
+            <AuditDetail label="Actor" value={selectedEvent?.userId} />
+            <AuditDetail
+              label="Organization"
+              value={selectedEvent?.organizationId}
+            />
+            <AuditDetail
+              label="Outcome"
+              value={selectedEvent?.outcome ?? "success"}
+            />
+            <AuditDetail label="Request ID" value={selectedEvent?.requestId} />
+            <AuditDetail label="IP address" value={selectedEvent?.ipAddress} />
+            <AuditDetail
+              label="Time"
+              value={
+                selectedEvent?.createdAt
+                  ? new Date(selectedEvent.createdAt).toLocaleString()
+                  : undefined
+              }
+            />
+          </div>
+          {selectedEvent?.userAgent && (
+            <AuditDetail label="User agent" value={selectedEvent.userAgent} />
+          )}
+          <div>
+            <p className="mb-1 text-xs font-medium text-muted-foreground">
+              Details
+            </p>
+            <pre className="max-h-72 overflow-auto rounded-lg bg-muted/50 p-3 text-xs break-words whitespace-pre-wrap">
+              {formatAuditDetails(selectedEvent?.details)}
+            </pre>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setSelectedEvent(null)} variant="outline">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
+  )
+}
+
+function formatAuditDetails(value: unknown) {
+  if (value == null || value === "") return "No additional details."
+  if (typeof value === "string") {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2)
+    } catch {
+      return value
+    }
+  }
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function AuditDetail({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-xs break-words">
+        {value == null || value === "" ? "—" : String(value)}
+      </p>
+    </div>
   )
 }

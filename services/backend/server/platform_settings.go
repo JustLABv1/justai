@@ -13,10 +13,14 @@ import (
 
 // platformCapabilityEnabled is used by long-lived chat and voice workflows
 // that cannot be wrapped in a Gin middleware without turning off the entire
-// workflow. A missing settings row/table keeps the pre-control-plane behavior.
+// workflow. A missing settings row/table must fail closed for a running
+// application; isolated nil-DB fixtures retain their historical defaults.
 func (a *App) platformCapabilityEnabled(ctx context.Context, feature string) bool {
 	if a.DB == nil {
-		return true
+		// A nil DB is used by a few isolated unit-test handlers. A running
+		// application always has a database and must not silently re-enable a
+		// capability when its control-plane state cannot be read.
+		return false
 	}
 	column := map[string]string{
 		"mcp":       "mcp_enabled",
@@ -36,7 +40,7 @@ func (a *App) platformCapabilityEnabled(ctx context.Context, feature string) boo
 	}
 	var enabled bool
 	if err := a.DB.QueryRowContext(ctx, `SELECT `+column+` FROM platform_settings WHERE id = TRUE`).Scan(&enabled); err != nil {
-		return true
+		return false
 	}
 	return enabled
 }
@@ -125,8 +129,8 @@ func (a *App) readPlatformSettings(c *gin.Context) (platformSettings, error) {
 func (a *App) featureEnabled(c *gin.Context, feature string) bool {
 	settings, err := a.readPlatformSettings(c)
 	if err != nil {
-		// Before the migration is applied, preserve the existing product behavior.
-		return true
+		middleware.AbortError(c, http.StatusServiceUnavailable, "platform_controls_unavailable", "Platform controls are temporarily unavailable")
+		return false
 	}
 	var enabled bool
 	switch strings.ToLower(feature) {

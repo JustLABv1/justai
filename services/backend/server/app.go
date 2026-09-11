@@ -157,10 +157,15 @@ func (a *App) Router() *gin.Engine {
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.RequireAuth(a.Tokens, a.DB))
 	protected.GET("/auth/me", a.me)
+	protected.PATCH("/profile", a.updateProfile)
 	protected.GET("/profile", a.getProfile)
 	protected.GET("/profile/avatar", a.serveProfileAvatar)
 	protected.POST("/profile/avatar", a.uploadProfileAvatar)
 	protected.DELETE("/profile/avatar", a.deleteProfileAvatar)
+	protected.GET("/auth/sessions", a.listAccountSessions)
+	protected.DELETE("/auth/sessions/:id", a.revokeAccountSession)
+	protected.POST("/auth/sessions/revoke-others", a.revokeOtherAccountSessions)
+	protected.GET("/auth/identities", a.listAccountIdentities)
 	protected.GET("/organizations", a.listOrganizations)
 	protected.POST("/organizations", a.createOrganization)
 	protected.POST("/auth/logout", a.logout)
@@ -185,7 +190,9 @@ func (a *App) Router() *gin.Engine {
 	protected.GET("/admin/users", a.listPlatformUsers)
 	protected.GET("/admin/users/:id", a.getPlatformUser)
 	protected.PATCH("/admin/users/:id", a.updatePlatformUser)
+	protected.GET("/admin/users/:id/sessions", a.listPlatformUserSessions)
 	protected.POST("/admin/users/:id/revoke-sessions", a.revokePlatformUserSessions)
+	protected.POST("/admin/users/:id/sessions/:sessionId/revoke", a.revokePlatformUserSession)
 	protected.DELETE("/admin/users/:id", a.deletePlatformUser)
 	protected.GET("/admin/organizations", a.listPlatformOrganizations)
 	protected.GET("/admin/organizations/:id", a.getPlatformOrganization)
@@ -412,9 +419,13 @@ func (a *App) Router() *gin.Engine {
 	protected.POST("/mcp/servers/:id/icon", a.uploadMCPServerIcon)
 	protected.DELETE("/mcp/servers/:id/icon", a.deleteMCPServerIcon)
 	router.GET("/api/v1/ws/transcription", a.platformFeature("transcription"), a.transcriptionWebSocket)
+	protected.GET("/organizations/:id/members/:userId/avatar", a.serveOrganizationMemberAvatar)
 	organizationRoutes := protected.Group("/organizations/:id")
 	organizationRoutes.Use(middleware.RequireOrg(a.DB))
 	organizationRoutes.PATCH("", middleware.RequireOrgRole("owner", "admin"), a.updateOrganization)
+	organizationRoutes.POST("/archive", middleware.RequireOrgRole("owner"), a.archiveOrganization)
+	organizationRoutes.DELETE("", middleware.RequireOrgRole("owner"), a.deleteOrganization)
+	organizationRoutes.DELETE("/leave", a.leaveOrganization)
 	organizationRoutes.GET("/admin/defaults", middleware.RequireOrgRole("owner", "admin"), a.getOrganizationAdminDefaults)
 	organizationRoutes.PUT("/admin/defaults", middleware.RequireOrgRole("owner", "admin"), a.putOrganizationAdminDefaults)
 	organizationRoutes.GET("/admin/analytics", middleware.RequireOrgRole("owner", "admin"), a.getOrganizationAnalytics)
@@ -513,12 +524,12 @@ func (a *App) cookieSameSite() http.SameSite {
 
 func (a *App) userByID(ctx context.Context, userID uuid.UUID) (models.User, error) {
 	var user models.User
-	err := a.DB.QueryRowContext(ctx, `SELECT id, email, display_name, is_platform_admin, COALESCE(status, 'active'), suspended_at, COALESCE(suspended_reason, ''), COALESCE(session_version, 0), last_login_at, CASE WHEN EXISTS (SELECT 1 FROM user_avatars WHERE user_id=$1) THEN '/api/v1/profile/avatar' ELSE '' END FROM users WHERE id = $1`, userID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &user.Status, &user.SuspendedAt, &user.SuspendedReason, &user.SessionVersion, &user.LastLoginAt, &user.AvatarURL)
+	err := a.DB.QueryRowContext(ctx, `SELECT id, email, display_name, is_platform_admin, COALESCE(status, 'active'), suspended_at, COALESCE(suspended_reason, ''), COALESCE(session_version, 0), last_login_at, CASE WHEN EXISTS (SELECT 1 FROM user_avatars WHERE user_id=$1) THEN '/api/v1/profile/avatar' ELSE '' END, COALESCE((SELECT floor(extract(epoch FROM updated_at) * 1000000)::text FROM user_avatars WHERE user_id=$1), '') FROM users WHERE id = $1`, userID).Scan(&user.ID, &user.Email, &user.DisplayName, &user.PlatformAdmin, &user.Status, &user.SuspendedAt, &user.SuspendedReason, &user.SessionVersion, &user.LastLoginAt, &user.AvatarURL, &user.AvatarVersion)
 	return user, err
 }
 
 func (a *App) organizationsFor(ctx context.Context, userID uuid.UUID) ([]models.Organization, error) {
-	rows, err := a.DB.QueryContext(ctx, `SELECT o.id, o.name, o.slug, om.role, COALESCE(o.status, 'active') FROM organizations o JOIN organization_members om ON om.organization_id = o.id WHERE om.user_id = $1 ORDER BY o.created_at`, userID)
+	rows, err := a.DB.QueryContext(ctx, `SELECT o.id, o.name, o.slug, om.role, COALESCE(o.status, 'active') FROM organizations o JOIN organization_members om ON om.organization_id = o.id WHERE om.user_id = $1 AND COALESCE(o.status, 'active') = 'active' ORDER BY o.created_at`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -551,19 +562,24 @@ func (a *App) me(c *gin.Context) {
 
 func (a *App) authConfig(c *gin.Context) {
 	settings, err := a.readPlatformSettings(c)
+	controlsUnavailable := err != nil
 	if err != nil {
-		settings = platformSettings{LoginEnabled: true, LocalAuthEnabled: true, SignupEnabled: true, AIEnabled: true, VoiceEnabled: true, TranscriptionEnabled: true, MCPEnabled: true, KnowledgeEnabled: true, AttachmentsEnabled: true}
+		// The public config controls whether the login and signup UI is offered.
+		// Never advertise those capabilities while the authoritative control row
+		// cannot be read; auth handlers apply the same fail-closed policy.
+		settings = platformSettings{MaintenanceMessage: "Platform controls are temporarily unavailable"}
 	}
 	providers := a.publicOIDCProviders(c)
 	c.JSON(http.StatusOK, gin.H{
-		"oidcEnabled":        len(providers) > 0,
-		"oidcLabel":          "Continue with OIDC",
-		"oidcProviders":      providers,
-		"loginEnabled":       settings.LoginEnabled,
-		"localAuthEnabled":   settings.LocalAuthEnabled,
-		"signupEnabled":      settings.SignupEnabled,
-		"maintenanceMessage": settings.MaintenanceMessage,
-		"banners":            a.activePlatformBanners(c),
+		"oidcEnabled":         len(providers) > 0,
+		"oidcLabel":           "Continue with OIDC",
+		"oidcProviders":       providers,
+		"loginEnabled":        settings.LoginEnabled,
+		"localAuthEnabled":    settings.LocalAuthEnabled,
+		"signupEnabled":       settings.SignupEnabled,
+		"maintenanceMessage":  settings.MaintenanceMessage,
+		"banners":             a.activePlatformBanners(c),
+		"controlsUnavailable": controlsUnavailable,
 	})
 }
 

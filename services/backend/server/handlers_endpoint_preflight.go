@@ -205,8 +205,9 @@ func hydratePreflightFromEndpoint(request *endpointRequest, current models.Endpo
 	if request.MaxOutputTokens == 0 {
 		request.MaxOutputTokens = current.MaxOutputTokens
 	}
-	if request.Temperature == 0 {
-		request.Temperature = current.Temperature
+	if request.Temperature == nil {
+		temperature := current.Temperature
+		request.Temperature = &temperature
 	}
 }
 

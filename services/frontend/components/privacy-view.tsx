@@ -25,12 +25,17 @@ import { Input } from "@/components/ui/input"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 export function PrivacyView() {
-  const [settings, setSettings] = useState<PrivacySettings>({
+  const defaultSettings: PrivacySettings = {
     archivedConversationRetentionDays: 0,
     knowledgeRetentionDays: 0,
     transcriptionRetentionDays: 0,
-  })
+  }
+  const [settings, setSettings] = useState<PrivacySettings>(defaultSettings)
+  const [savedSettings, setSavedSettings] =
+    useState<PrivacySettings>(defaultSettings)
   const [loading, setLoading] = useState(true)
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [loadError, setLoadError] = useState("")
   const [saving, setSaving] = useState(false)
   const [cleaning, setCleaning] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -43,11 +48,14 @@ export function PrivacyView() {
     void api
       .get<{ settings: PrivacySettings }>("/api/v1/privacy/settings")
       .then((response) => {
-        if (!cancelled) setSettings(response.settings)
+        if (!cancelled) {
+          setSettings(response.settings)
+          setSavedSettings(response.settings)
+        }
       })
       .catch((caught) => {
         if (!cancelled) {
-          setError(
+          setLoadError(
             caught instanceof Error
               ? caught.message
               : "Privacy settings could not be loaded."
@@ -60,7 +68,7 @@ export function PrivacyView() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loadAttempt])
 
   function update(key: keyof PrivacySettings, value: string) {
     const parsed = Number.parseInt(value, 10)
@@ -81,6 +89,7 @@ export function PrivacyView() {
         settings
       )
       setSettings(response.settings)
+      setSavedSettings(response.settings)
       setNotice(
         "Privacy settings saved. The retention worker will apply them automatically."
       )
@@ -153,6 +162,13 @@ export function PrivacyView() {
     }
   }
 
+  const settingsDirty =
+    settings.archivedConversationRetentionDays !==
+      savedSettings.archivedConversationRetentionDays ||
+    settings.knowledgeRetentionDays !== savedSettings.knowledgeRetentionDays ||
+    settings.transcriptionRetentionDays !==
+      savedSettings.transcriptionRetentionDays
+
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
       <Card aria-busy={loading || saving}>
@@ -162,20 +178,40 @@ export function PrivacyView() {
             Retention controls
           </CardTitle>
           <CardDescription>
-            Choose how long your workspace data remains. A value of 0 means
-            JustAI never removes it automatically.
+            Choose how long your personal data in this workspace remains. A
+            value of 0 means JustAI never removes it automatically.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {error && (
+          {(loadError || error) && (
             <Alert
               aria-live="polite"
-              className="mb-4"
+              className="mb-4 flex flex-wrap items-start justify-between gap-3"
               role="alert"
               variant="destructive"
             >
-              <AlertTitle>Privacy action failed</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <div>
+                <AlertTitle>
+                  {loadError
+                    ? "Privacy settings unavailable"
+                    : "Privacy action failed"}
+                </AlertTitle>
+                <AlertDescription>{loadError || error}</AlertDescription>
+              </div>
+              {loadError && (
+                <Button
+                  onClick={() => {
+                    setLoadError("")
+                    setLoading(true)
+                    setLoadAttempt((attempt) => attempt + 1)
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Retry
+                </Button>
+              )}
             </Alert>
           )}
           {notice && (
@@ -252,7 +288,7 @@ export function PrivacyView() {
                 {saving ? "Saving…" : "Save retention settings"}
               </Button>
               <Button
-                disabled={cleaning}
+                disabled={loading || saving || cleaning || settingsDirty}
                 onClick={() => setCleanupOpen(true)}
                 type="button"
                 variant="outline"
@@ -261,6 +297,12 @@ export function PrivacyView() {
                 {cleaning ? "Running…" : "Run cleanup now"}
               </Button>
             </div>
+            {settingsDirty && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Save your retention settings before running cleanup. Cleanup
+                uses the last saved values.
+              </p>
+            )}
           </form>
         </CardContent>
       </Card>
@@ -270,7 +312,8 @@ export function PrivacyView() {
           <CardTitle>Export your data</CardTitle>
           <CardDescription>
             Download conversations, messages, notes, memories, projects, and
-            personal source metadata as JSON.
+            personal source metadata as JSON. Binary files, recordings, and
+            message attachments are not included.
           </CardDescription>
         </CardHeader>
         <CardContent>

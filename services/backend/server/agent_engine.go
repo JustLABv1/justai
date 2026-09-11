@@ -107,6 +107,7 @@ func (e *AgentEngine) Start(ctx context.Context) {
 		return
 	}
 	e.start.Do(func() {
+		e.app.markWorkerStarted("agent")
 		go e.workerLoop(ctx)
 	})
 }
@@ -119,6 +120,7 @@ func (e *AgentEngine) workerLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			e.app.markWorkerHeartbeat("agent")
 			if !e.app.platformCapabilityEnabled(ctx, "agents") {
 				continue
 			}
@@ -129,6 +131,7 @@ func (e *AgentEngine) workerLoop(ctx context.Context) {
 				runID, claimed, err := e.claimAgentRun(ctx)
 				if err != nil {
 					slog.Warn("agent run claim failed", "error", err)
+					e.app.markWorkerError("agent", err)
 					break
 				}
 				if !claimed {

@@ -127,7 +127,19 @@ export type AdminAnalyticsResponse = {
 
 export type PlatformHealth = {
   database: { ok: boolean }
-  workers: { rag: boolean; transcription: boolean; agents: boolean }
+  workers: {
+    rag: boolean
+    transcription: boolean
+    agents: boolean
+    details?: Array<{
+      name: string
+      healthy: boolean
+      started: boolean
+      lastHeartbeat?: string
+      heartbeatAgeSeconds: number
+      lastError?: string
+    }>
+  }
   providers: {
     ok: boolean
     total: number
@@ -210,7 +222,19 @@ export type AuthConfig = {
   localAuthEnabled: boolean
   signupEnabled: boolean
   maintenanceMessage?: string
+  controlsUnavailable?: boolean
   banners: PlatformBanner[]
+}
+
+export type PlatformSession = {
+  id: string
+  issuedAt: string
+  expiresAt: string
+  lastSeenAt: string
+  revokedAt?: string | null
+  userAgent?: string | null
+  ipAddress?: string | null
+  active: boolean
 }
 
 export type User = {
@@ -223,11 +247,14 @@ export type User = {
   suspendedReason?: string
   lastLoginAt?: string | null
   avatarUrl?: string
+  avatarVersion?: string
 }
 
 export type ProfileData = {
   createdAt: string
   avatarUrl: string
+  avatarVersion?: string
+  timezone?: string
   activity: Array<{ date: string; count: number }>
   stats: {
     conversations: number
@@ -235,6 +262,14 @@ export type ProfileData = {
     notes: number
     agentRuns: number
     transcriptionMinutes: number
+    currentStreak?: number
+    longestStreak?: number
+    productiveWeekday?: string
+    last30DaysActions?: number
+    previous30DaysActions?: number
+    favoriteAgent?: string
+    favoriteModel?: string
+    milestones?: string[]
   }
 }
 
@@ -251,6 +286,24 @@ export type OrganizationMember = {
   email: string
   displayName: string
   role: "owner" | "admin" | "member"
+  createdAt: string
+  avatarUrl?: string
+  avatarVersion?: string
+}
+
+export type AccountSession = {
+  id: string
+  issuedAt: string
+  expiresAt: string
+  lastSeenAt: string
+  userAgent: string
+  current: boolean
+}
+
+export type AccountIdentity = {
+  provider: string
+  providerSlug?: string
+  issuer?: string
   createdAt: string
 }
 
@@ -278,6 +331,19 @@ export type Endpoint = {
   timeoutSeconds: number
   maxOutputTokens: number
   temperature: number
+  lastTestedAt?: string | null
+  lastTestOk?: boolean | null
+  lastTestError?: string
+  lastTestResults?: Record<
+    string,
+    {
+      ok: boolean
+      supported: boolean
+      tested: boolean
+      error?: string
+      note?: string
+    }
+  >
   createdAt: string
   updatedAt: string
 }
@@ -409,6 +475,7 @@ export type MCPServer = {
   allowedTools: string[]
   trustedReadOnly?: boolean
   autoDiscover?: boolean
+  oauthExpiresAt?: string | null
   lastTestedAt?: string | null
   lastError?: string
   protocolVersion?: string

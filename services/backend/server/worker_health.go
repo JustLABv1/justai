@@ -36,6 +36,20 @@ type workerHealthView struct {
 	LastError string `json:"-"`
 }
 
+// workerHealthAdminView contains the diagnostic fields that are intentionally
+// omitted from the public liveness endpoint. Keep this separate from
+// workerHealthView so provider/database errors are never exposed publicly.
+type workerHealthAdminView struct {
+	Name               string    `json:"name"`
+	WorkerName         string    `json:"-"`
+	InstanceID         string    `json:"instanceId,omitempty"`
+	Healthy            bool      `json:"healthy"`
+	Started            bool      `json:"started"`
+	LastHeartbeat      time.Time `json:"lastHeartbeat,omitempty"`
+	HeartbeatAgeSecond int64     `json:"heartbeatAgeSeconds"`
+	LastError          string    `json:"lastError,omitempty"`
+}
+
 func (a *App) markWorkerStarted(name string) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -128,6 +142,62 @@ func (a *App) workerHealthViews() []workerHealthView {
 	a.workerHealthMu.RUnlock()
 	sort.Slice(views, func(i, j int) bool { return views[i].Name < views[j].Name })
 	return views
+}
+
+func (a *App) workerHealthAdminViews() []workerHealthAdminView {
+	now := time.Now().UTC()
+	a.workerHealthMu.RLock()
+	views := make([]workerHealthAdminView, 0, len(a.workerHealth))
+	for name, status := range a.workerHealth {
+		age := int64(-1)
+		healthy := false
+		if !status.LastHeartbeat.IsZero() {
+			age = maxInt64(0, int64(now.Sub(status.LastHeartbeat).Seconds()))
+			healthy = status.Started && now.Sub(status.LastHeartbeat) <= workerHeartbeatStaleAfter
+		}
+		views = append(views, workerHealthAdminView{Name: name, WorkerName: name, Healthy: healthy, Started: status.Started, LastHeartbeat: status.LastHeartbeat, HeartbeatAgeSecond: age, LastError: truncateWorkerError(status.LastError)})
+	}
+	a.workerHealthMu.RUnlock()
+	sort.Slice(views, func(i, j int) bool { return views[i].Name < views[j].Name })
+	return views
+}
+
+// workerHealthAdminViewsFromDB includes heartbeats from every backend replica.
+// The in-memory view is still used as a fallback while migrations are rolling
+// out or before the first asynchronous heartbeat write completes.
+func (a *App) workerHealthAdminViewsFromDB(ctx context.Context) ([]workerHealthAdminView, error) {
+	if a == nil || a.DB == nil {
+		return nil, nil
+	}
+	rows, err := a.DB.QueryContext(ctx, `SELECT worker_name, instance_id, heartbeat_at, last_error FROM worker_heartbeats ORDER BY worker_name, heartbeat_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	now := time.Now().UTC()
+	views := []workerHealthAdminView{}
+	for rows.Next() {
+		var workerName, instanceID, lastError string
+		var heartbeatAt time.Time
+		if err := rows.Scan(&workerName, &instanceID, &heartbeatAt, &lastError); err != nil {
+			return nil, err
+		}
+		age := maxInt64(0, int64(now.Sub(heartbeatAt).Seconds()))
+		views = append(views, workerHealthAdminView{
+			Name:               workerName,
+			WorkerName:         workerName,
+			InstanceID:         instanceID,
+			Healthy:            now.Sub(heartbeatAt) <= workerHeartbeatStaleAfter,
+			Started:            true,
+			LastHeartbeat:      heartbeatAt,
+			HeartbeatAgeSecond: age,
+			LastError:          truncateWorkerError(lastError),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return views, nil
 }
 
 func (a *App) workersReady() bool {

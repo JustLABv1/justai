@@ -48,6 +48,7 @@ import type {
 import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
 import { cn } from "@/lib/utils"
 import { FocusWorkspaceSidebar } from "@/components/focus-workspace-sidebar"
+import { initialsFor } from "@/lib/identity"
 
 type WorkspaceStatus = "loading" | "ready" | "error"
 
@@ -588,12 +589,7 @@ export function Workspace() {
 
   const initials = useMemo(() => {
     if (!user) return "?"
-    return user.displayName
-      .split(" ")
-      .map((part) => part[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase()
+    return initialsFor(user.displayName, "U")
   }, [user])
 
   const workspaceViewKey =
@@ -863,6 +859,20 @@ export function Workspace() {
     []
   )
 
+  const handleOrganizationRemoved = useCallback(
+    (organizationId: string) => {
+      const remaining = organizations.filter(
+        (item) => item.id !== organizationId
+      )
+      const nextOrganization = remaining[0]
+      setOrganizations(remaining)
+      api.setOrganizationId(nextOrganization?.id ?? null)
+      setActiveOrganizationId(nextOrganization?.id ?? null)
+      setReloadToken((value) => value + 1)
+    },
+    [organizations]
+  )
+
   const handleArchiveConversation = useCallback(
     async (conversationId: string, archived: boolean) => {
       setActionError("")
@@ -1007,6 +1017,7 @@ export function Workspace() {
     try {
       await api.post("/api/v1/auth/logout")
     } finally {
+      api.setOrganizationId(null)
       router.push("/login")
     }
   }
@@ -1262,8 +1273,14 @@ export function Workspace() {
                 onOrganizationSelect={selectOrganization}
                 onOrganizationCreated={handleOrganizationCreated}
                 onOrganizationUpdated={handleOrganizationUpdated}
+                onOrganizationRemoved={handleOrganizationRemoved}
                 onEndpointsChange={setEndpoints}
                 onMCPChange={setServers}
+                resourceErrors={{
+                  endpoints: featureErrors.endpoints,
+                  mcp: featureErrors.mcp,
+                }}
+                onRetryResource={() => setReloadToken((value) => value + 1)}
                 onTabChange={(tab) =>
                   navigate("settings", null, false, null, tab)
                 }
@@ -1271,7 +1288,13 @@ export function Workspace() {
                 user={user}
               />
             )}
-            {activeView === "profile" && <ProfileView user={user} />}
+            {activeView === "profile" && (
+              <ProfileView
+                organization={activeOrganization}
+                onUserChange={setUser}
+                user={user}
+              />
+            )}
             {activeView === "knowledge" &&
               (disabledFeatures.knowledge ? (
                 <FeatureDisabledPanel label="Knowledge" />
@@ -1324,6 +1347,8 @@ export function Workspace() {
                 onChange={setServers}
                 organization={activeOrganization}
                 user={user}
+                resourceError={featureErrors.mcp}
+                onRetry={() => setReloadToken((value) => value + 1)}
               />
             )}
             {activeView === "automations" && (

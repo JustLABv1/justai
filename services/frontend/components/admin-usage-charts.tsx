@@ -127,10 +127,21 @@ export function AdminUsageCharts({
                   stroke="var(--chart-1)"
                   strokeWidth={2}
                   fill="url(#admin-success)"
-                  stackId="outcomes"
                 />
-                <Area dataKey="failed" type="monotone" stroke="var(--destructive)" strokeWidth={2} fill="transparent" stackId="outcomes" />
-                <Area dataKey="cancelled" type="monotone" stroke="var(--chart-4)" strokeWidth={2} fill="transparent" stackId="outcomes" />
+                <Line
+                  dataKey="failed"
+                  type="monotone"
+                  stroke="var(--destructive)"
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  dataKey="cancelled"
+                  type="monotone"
+                  stroke="var(--chart-4)"
+                  strokeWidth={2}
+                  dot={false}
+                />
               </AreaChart>
             </ChartContainer>
           </div>

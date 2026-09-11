@@ -74,6 +74,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { resolveAPIURL } from "@/lib/api"
+import { avatarToneFor, versionedAvatarURL } from "@/lib/identity"
 
 const railNavigation: Array<{
   id: ViewId
@@ -568,12 +569,17 @@ export function FocusWorkspaceSidebar({
           >
             <Avatar size="sm">
               {user.avatarUrl && (
-                <AvatarImage
-                  alt={`${user.displayName}'s profile picture`}
-                  src={resolveAPIURL(user.avatarUrl)}
-                />
-              )}
-              <AvatarFallback>{userInitials}</AvatarFallback>
+                  <AvatarImage
+                    alt={`${user.displayName}'s profile picture`}
+                    src={resolveAPIURL(
+                      versionedAvatarURL(user.avatarUrl, user.avatarVersion) ??
+                        user.avatarUrl
+                    )}
+                  />
+                )}
+              <AvatarFallback className={avatarToneFor(user.id)}>
+                {userInitials}
+              </AvatarFallback>
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56" side="right">
@@ -585,6 +591,11 @@ export function FocusWorkspaceSidebar({
                 <span className="block truncate text-[11px] font-normal text-muted-foreground">
                   {user.email}
                 </span>
+                {activeOrganization?.role && (
+                  <span className="mt-1 block truncate text-[11px] font-normal text-muted-foreground">
+                    {activeOrganization.name} · {activeOrganization.role}
+                  </span>
+                )}
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

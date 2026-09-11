@@ -40,7 +40,7 @@ type endpointRequest struct {
 	IsDefault          *bool           `json:"isDefault"`
 	TimeoutSeconds     int             `json:"timeoutSeconds"`
 	MaxOutputTokens    int             `json:"maxOutputTokens"`
-	Temperature        float64         `json:"temperature"`
+	Temperature        *float64        `json:"temperature"`
 }
 
 func (a *App) supportedProviders(c *gin.Context) {
@@ -82,7 +82,9 @@ func (a *App) listEndpoints(c *gin.Context) {
 		             )
 		         )
 		       END,
-		       e.timeout_seconds, e.max_output_tokens, e.temperature, e.created_at, e.updated_at
+		       e.timeout_seconds, e.max_output_tokens, e.temperature,
+		       e.last_tested_at, e.last_test_ok, COALESCE(e.last_test_error, ''), COALESCE(e.last_test_results, '{}'::jsonb),
+		       e.created_at, e.updated_at
 		FROM endpoint_settings e
 		LEFT JOIN organization_default_endpoints defaults ON defaults.organization_id = $1
 		WHERE (e.scope_type = 'global')
@@ -213,6 +215,7 @@ func (a *App) createEndpoint(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	c.Set("justai.created_endpoint_id", id)
 	c.JSON(http.StatusCreated, item)
 }
 
@@ -536,11 +539,42 @@ func (a *App) testEndpoint(c *gin.Context) {
 			break
 		}
 	}
-	c.JSON(status, gin.H{"ok": status == http.StatusOK, "results": results})
+	encodedResults, encodeErr := json.Marshal(results)
+	if encodeErr != nil {
+		writeError(c, http.StatusInternalServerError, encodeErr)
+		return
+	}
+	lastError := ""
+	if status != http.StatusOK {
+		for _, capability := range request.Capabilities {
+			result := results[capability]
+			if result["tested"] == true && result["ok"] != true {
+				if message, ok := result["error"].(string); ok {
+					lastError = message
+				}
+				if lastError == "" {
+					lastError = "one or more capability checks failed"
+				}
+				break
+			}
+		}
+	}
+	// A capability probe completed successfully even when the provider itself
+	// reported a failure. Keep the route HTTP-200 so callers can render the
+	// per-capability diagnostics instead of losing them to generic 502 handling.
+	if _, err := a.DB.ExecContext(c, `UPDATE endpoint_settings SET last_tested_at = now(), last_test_ok = $2, last_test_error = $3, last_test_results = $4, updated_at = updated_at WHERE id = $1`, id, status == http.StatusOK, lastError, encodedResults); err != nil {
+		writeError(c, http.StatusInternalServerError, fmt.Errorf("endpoint health could not be persisted: %w", err))
+		return
+	}
+	response := gin.H{"ok": status == http.StatusOK, "results": results}
+	if updated, updateErr := a.getEndpoint(c, id); updateErr == nil {
+		response["endpoint"] = updated
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func (a *App) getEndpoint(ctx context.Context, id uuid.UUID) (models.Endpoint, error) {
-	row := a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, endpoint_kind, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(vision_model, ''), COALESCE(image_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, created_at, updated_at FROM endpoint_settings WHERE id = $1`, id)
+	row := a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, endpoint_kind, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(vision_model, ''), COALESCE(image_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, last_tested_at, last_test_ok, COALESCE(last_test_error, ''), COALESCE(last_test_results, '{}'::jsonb), created_at, updated_at FROM endpoint_settings WHERE id = $1`, id)
 	return scanEndpoint(row)
 }
 
@@ -548,7 +582,11 @@ func scanEndpoint(scanner interface{ Scan(dest ...any) error }) (models.Endpoint
 	var item models.Endpoint
 	var scopeID sql.NullString
 	var capabilities []byte
-	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.EndpointKind, &item.ProviderType, &item.Name, &item.BaseURL, &item.APIPath, &item.APIVersion, &item.ChatModel, &item.VisionModel, &item.ImageModel, &item.EmbeddingModel, &item.TranscriptionModel, &item.DiarizationModel, &item.SpeechModel, &capabilities, &item.CredentialConfigured, &item.Enabled, &item.IsDefault, &item.TimeoutSeconds, &item.MaxOutputTokens, &item.Temperature, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	var lastTestedAt sql.NullTime
+	var lastTestOK sql.NullBool
+	var lastTestError string
+	var lastTestResults []byte
+	if err := scanner.Scan(&item.ID, &item.ScopeType, &scopeID, &item.EndpointKind, &item.ProviderType, &item.Name, &item.BaseURL, &item.APIPath, &item.APIVersion, &item.ChatModel, &item.VisionModel, &item.ImageModel, &item.EmbeddingModel, &item.TranscriptionModel, &item.DiarizationModel, &item.SpeechModel, &capabilities, &item.CredentialConfigured, &item.Enabled, &item.IsDefault, &item.TimeoutSeconds, &item.MaxOutputTokens, &item.Temperature, &lastTestedAt, &lastTestOK, &lastTestError, &lastTestResults, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	if scopeID.Valid {
@@ -558,6 +596,17 @@ func scanEndpoint(scanner interface{ Scan(dest ...any) error }) (models.Endpoint
 		}
 	}
 	item.Capabilities = json.RawMessage(capabilities)
+	if lastTestedAt.Valid {
+		item.LastTestedAt = &lastTestedAt.Time
+	}
+	if lastTestOK.Valid {
+		item.LastTestOK = &lastTestOK.Bool
+	}
+	item.LastTestError = lastTestError
+	if len(lastTestResults) == 0 || string(lastTestResults) == "null" {
+		lastTestResults = []byte("{}")
+	}
+	item.LastTestResults = json.RawMessage(lastTestResults)
 	return item, nil
 }
 
@@ -783,9 +832,9 @@ func endpointTimeoutDefault(providerType string) int {
 	return 120
 }
 
-func floatValue(value, fallback float64) float64 {
-	if value == 0 {
+func floatValue(value *float64, fallback float64) float64 {
+	if value == nil {
 		return fallback
 	}
-	return value
+	return *value
 }

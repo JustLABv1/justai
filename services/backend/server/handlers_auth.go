@@ -54,7 +54,11 @@ func (a *App) register(c *gin.Context) {
 		return
 	}
 	settings, settingsErr := a.readPlatformSettings(c)
-	if settingsErr == nil && !settings.LocalAuthEnabled {
+	if settingsErr != nil {
+		middleware.AbortError(c, http.StatusServiceUnavailable, "platform_controls_unavailable", "Platform controls are temporarily unavailable")
+		return
+	}
+	if !settings.LocalAuthEnabled {
 		message := strings.TrimSpace(settings.MaintenanceMessage)
 		if message == "" {
 			message = "Local password authentication is disabled by the platform administrator"
@@ -115,6 +119,10 @@ func (a *App) login(c *gin.Context) {
 		return
 	}
 	settings, settingsErr := a.readPlatformSettings(c)
+	if settingsErr != nil && !user.PlatformAdmin {
+		middleware.AbortError(c, http.StatusServiceUnavailable, "platform_controls_unavailable", "Platform controls are temporarily unavailable")
+		return
+	}
 	if settingsErr == nil && !localPasswordAuthAllowed(settings, user) {
 		message := strings.TrimSpace(settings.MaintenanceMessage)
 		if message == "" {
@@ -339,6 +347,14 @@ func (a *App) oidcCallback(c *gin.Context) {
 		return
 	}
 	settings, settingsErr := a.readPlatformSettings(c)
+	if settingsErr != nil {
+		var existingAdmin bool
+		_ = a.DB.QueryRowContext(c, `SELECT COALESCE(is_platform_admin, FALSE) FROM oidc_identities oi JOIN users u ON u.id = oi.user_id WHERE oi.issuer = $1 AND oi.subject = $2`, provider.Issuer, claims.Subject).Scan(&existingAdmin)
+		if !existingAdmin {
+			middleware.AbortError(c, http.StatusServiceUnavailable, "platform_controls_unavailable", "Platform controls are temporarily unavailable")
+			return
+		}
+	}
 	if settingsErr == nil && (!settings.LoginEnabled || (!settings.SignupEnabled && !identityExists)) {
 		var existingAdmin bool
 		_ = a.DB.QueryRowContext(c, `SELECT COALESCE(is_platform_admin, FALSE) FROM oidc_identities oi JOIN users u ON u.id = oi.user_id WHERE oi.issuer = $1 AND oi.subject = $2`, provider.Issuer, claims.Subject).Scan(&existingAdmin)
