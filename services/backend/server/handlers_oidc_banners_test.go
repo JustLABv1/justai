@@ -106,7 +106,7 @@ func TestOIDCCallbackRejectsMissingExpiredOrReplayedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	query := "SELECT p.id, p.slug, p.display_name, p.issuer, p.client_id, p.client_secret_ciphertext, p.scopes, p.enabled, p.last_error, s.nonce, s.code_verifier, s.next_path"
+	query := "SELECT p.id, p.slug, p.display_name, p.issuer, p.client_id, p.client_secret_ciphertext, p.scopes, p.redirect_url, p.enabled, p.last_error, s.nonce, s.code_verifier, s.next_path"
 	for _, state := range []string{"expired-state", "replayed-state"} {
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(state).WillReturnError(sql.ErrNoRows)
@@ -182,7 +182,7 @@ func TestAuthConfigIncludesProviderSummariesAndActiveBannersWithoutSecrets(t *te
 		sqlmock.NewRows([]string{"login_enabled", "local_auth_enabled", "signup_enabled", "ai_enabled", "voice_enabled", "transcription_enabled", "mcp_enabled", "knowledge_enabled", "attachments_enabled", "maintenance_message", "updated_by", "updated_at"}).AddRow(true, false, true, true, true, true, true, true, true, "", nil, nil),
 	)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, slug, display_name, issuer")).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "slug", "display_name", "issuer", "client_id", "client_secret_ciphertext", "scopes", "enabled", "last_tested_at", "last_error"}).AddRow(providerID, "company", "Company SSO", "https://login.example.com", "client-id", []byte("encrypted-secret"), "openid profile email", true, nil, ""),
+		sqlmock.NewRows([]string{"id", "slug", "display_name", "issuer", "client_id", "client_secret_ciphertext", "scopes", "redirect_url", "enabled", "last_tested_at", "last_error"}).AddRow(providerID, "company", "Company SSO", "https://login.example.com", "client-id", []byte("encrypted-secret"), "openid profile email", "https://app.example.com/oidc/company", true, nil, ""),
 	)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, message, severity")).WillReturnRows(
 		sqlmock.NewRows([]string{"id", "message", "severity", "coalesce", "priority", "enabled", "dismissible", "starts_at", "ends_at", "created_at", "updated_at"}).AddRow(bannerID, "Maintenance tonight", "warning", "", 10, true, true, now.Add(-time.Hour), nil, now, now),
@@ -231,14 +231,14 @@ func TestCreateOIDCProviderEncryptsSecretAndReturnsRedactedMetadata(t *testing.T
 
 	userID := uuid.New()
 	providerID := uuid.New()
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO oidc_providers (id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, enabled, created_by, updated_by)")).WithArgs(
-		sqlmock.AnyArg(), "company", "Company SSO", "https://login.example.com", "client-id", sqlmock.AnyArg(), "openid profile email", true, userID,
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO oidc_providers (id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, redirect_url, enabled, created_by, updated_by)")).WithArgs(
+		sqlmock.AnyArg(), "company", "Company SSO", "https://login.example.com", "client-id", sqlmock.AnyArg(), "openid profile email", "https://app.example.com/oidc/company", true, userID,
 	).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_events (user_id, organization_id, action, resource_type, resource_id, details)")).WithArgs(
 		userID, nil, "platform.oidc_provider.created", "oidc_provider", sqlmock.AnyArg(), sqlmock.AnyArg(),
 	).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, slug, display_name, issuer, client_id, client_secret_ciphertext")).WithArgs("company").WillReturnRows(
-		sqlmock.NewRows([]string{"id", "slug", "display_name", "issuer", "client_id", "client_secret_ciphertext", "scopes", "enabled", "last_tested_at", "last_error"}).AddRow(providerID, "company", "Company SSO", "https://login.example.com", "client-id", []byte("encrypted-secret"), "openid profile email", true, nil, ""),
+		sqlmock.NewRows([]string{"id", "slug", "display_name", "issuer", "client_id", "client_secret_ciphertext", "scopes", "redirect_url", "enabled", "last_tested_at", "last_error"}).AddRow(providerID, "company", "Company SSO", "https://login.example.com", "client-id", []byte("encrypted-secret"), "openid profile email", "https://app.example.com/oidc/company", true, nil, ""),
 	)
 
 	app := &App{
@@ -248,7 +248,7 @@ func TestCreateOIDCProviderEncryptsSecretAndReturnsRedactedMetadata(t *testing.T
 	}
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
-	context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/oidc/providers", strings.NewReader(`{"slug":"company","displayName":"Company SSO","issuer":"https://login.example.com/","clientId":"client-id","clientSecret":"super-secret"}`))
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/oidc/providers", strings.NewReader(`{"slug":"company","displayName":"Company SSO","issuer":"https://login.example.com/","clientId":"client-id","clientSecret":"super-secret","redirectUrl":"https://app.example.com/oidc/company"}`))
 	context.Request.Header.Set("Content-Type", "application/json")
 	context.Set(middleware.PrincipalKey, middleware.Principal{UserID: userID, PlatformAdmin: true})
 	app.createPlatformOIDCProvider(context)
@@ -262,8 +262,27 @@ func TestCreateOIDCProviderEncryptsSecretAndReturnsRedactedMetadata(t *testing.T
 	if !bytes.Contains(recorder.Body.Bytes(), []byte(`"secretConfigured":true`)) {
 		t.Fatalf("provider response did not report configured secret: %s", recorder.Body.String())
 	}
+	if !bytes.Contains(recorder.Body.Bytes(), []byte(`"redirectUrl":"https://app.example.com/oidc/company"`)) {
+		t.Fatalf("provider response did not include its redirect URL: %s", recorder.Body.String())
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOIDCRedirectURLIsResolvedPerProvider(t *testing.T) {
+	app := &App{Config: config.Config{OIDC: config.OIDCConfig{RedirectURL: "https://app.example.com/oidc/default"}}}
+	first := oidcProviderRecord{RedirectURL: "https://first.example.com/oidc/callback"}
+	second := oidcProviderRecord{RedirectURL: "https://second.example.com/login/oidc"}
+
+	if got := app.oidcRedirectURL(first); got != first.RedirectURL {
+		t.Fatalf("first provider redirect = %q, want %q", got, first.RedirectURL)
+	}
+	if got := app.oidcRedirectURL(second); got != second.RedirectURL {
+		t.Fatalf("second provider redirect = %q, want %q", got, second.RedirectURL)
+	}
+	if got := app.oidcRedirectURL(oidcProviderRecord{}); got != app.Config.OIDC.RedirectURL {
+		t.Fatalf("legacy redirect fallback = %q, want %q", got, app.Config.OIDC.RedirectURL)
 	}
 }
 
@@ -285,8 +304,8 @@ func TestImportLegacyOIDCProviderIsIdempotent(t *testing.T) {
 		Secrets: security.NewSecretBox([]byte("01234567890123456789012345678901")),
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM oidc_providers WHERE issuer = $1")).WithArgs("https://legacy.example.com").WillReturnError(sql.ErrNoRows)
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO oidc_providers (slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, enabled)")).WithArgs(
-		"OIDC", "https://legacy.example.com", "legacy-client", sqlmock.AnyArg(), "openid profile email",
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO oidc_providers (slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, redirect_url, enabled)")).WithArgs(
+		"OIDC", "https://legacy.example.com", "legacy-client", sqlmock.AnyArg(), "openid profile email", "http://localhost:8080/api/v1/auth/oidc/callback",
 	).WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := app.ImportLegacyOIDCProvider(context.Background()); err != nil {
 		t.Fatal(err)

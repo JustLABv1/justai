@@ -19,6 +19,7 @@ type oidcProviderRequest struct {
 	ClientID     string `json:"clientId"`
 	ClientSecret string `json:"clientSecret"`
 	Scopes       string `json:"scopes"`
+	RedirectURL  string `json:"redirectUrl"`
 	Enabled      *bool  `json:"enabled"`
 }
 
@@ -33,17 +34,13 @@ func (a *App) listPlatformOIDCProviders(c *gin.Context) {
 	}
 	result := make([]gin.H, 0, len(providers))
 	for _, provider := range providers {
-		result = append(result, oidcProviderPublicJSON(provider, a.Config.OIDC.RedirectURL))
+		result = append(result, oidcProviderPublicJSON(provider, a.oidcRedirectURL(provider)))
 	}
 	c.JSON(http.StatusOK, gin.H{"providers": result, "callbackUrl": a.Config.OIDC.RedirectURL})
 }
 
 func (a *App) createPlatformOIDCProvider(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
-		return
-	}
-	if err := validateOIDCCallbackURL(a.Config.OIDC.RedirectURL); err != nil {
-		writeError(c, http.StatusFailedDependency, fmt.Errorf("configure the backend OIDC redirect URL before adding a provider: %w", err))
 		return
 	}
 	var request oidcProviderRequest
@@ -56,10 +53,18 @@ func (a *App) createPlatformOIDCProvider(c *gin.Context) {
 	request.ClientID = strings.TrimSpace(request.ClientID)
 	request.ClientSecret = strings.TrimSpace(request.ClientSecret)
 	request.Scopes = strings.TrimSpace(request.Scopes)
+	request.RedirectURL = strings.TrimSpace(request.RedirectURL)
+	if request.RedirectURL == "" {
+		request.RedirectURL = strings.TrimSpace(a.Config.OIDC.RedirectURL)
+	}
 	if request.Scopes == "" {
 		request.Scopes = "openid profile email"
 	}
 	if err := validateOIDCProviderInput(request.DisplayName, request.Slug, request.Issuer, request.ClientID, request.Scopes); err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := validateOIDCCallbackURL(request.RedirectURL); err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
@@ -79,7 +84,7 @@ func (a *App) createPlatformOIDCProvider(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	providerID := uuid.New()
 	enabled := request.Enabled == nil || *request.Enabled
-	_, err = a.DB.ExecContext(c, `INSERT INTO oidc_providers (id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, enabled, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`, providerID, request.Slug, request.DisplayName, request.Issuer, request.ClientID, ciphertext, request.Scopes, enabled, principal.UserID)
+	_, err = a.DB.ExecContext(c, `INSERT INTO oidc_providers (id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, redirect_url, enabled, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`, providerID, request.Slug, request.DisplayName, request.Issuer, request.ClientID, ciphertext, request.Scopes, request.RedirectURL, enabled, principal.UserID)
 	if err != nil {
 		writeError(c, http.StatusConflict, fmt.Errorf("OIDC provider could not be created: %w", err))
 		return
@@ -90,7 +95,7 @@ func (a *App) createPlatformOIDCProvider(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, oidcProviderPublicJSON(provider, a.Config.OIDC.RedirectURL))
+	c.JSON(http.StatusCreated, oidcProviderPublicJSON(provider, a.oidcRedirectURL(provider)))
 }
 
 func (a *App) updatePlatformOIDCProvider(c *gin.Context) {
@@ -108,7 +113,7 @@ func (a *App) updatePlatformOIDCProvider(c *gin.Context) {
 	}
 	var current oidcProviderRecord
 	var lastTested sql.NullTime
-	if err := a.DB.QueryRowContext(c, `SELECT id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, enabled, last_tested_at, last_error FROM oidc_providers WHERE id = $1`, id).Scan(&current.ID, &current.Slug, &current.DisplayName, &current.Issuer, &current.ClientID, &current.ClientSecretCiphertext, &current.Scopes, &current.Enabled, &lastTested, &current.LastError); err != nil {
+	if err := a.DB.QueryRowContext(c, `SELECT id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, redirect_url, enabled, last_tested_at, last_error FROM oidc_providers WHERE id = $1`, id).Scan(&current.ID, &current.Slug, &current.DisplayName, &current.Issuer, &current.ClientID, &current.ClientSecretCiphertext, &current.Scopes, &current.RedirectURL, &current.Enabled, &lastTested, &current.LastError); err != nil {
 		writeError(c, http.StatusNotFound, fmt.Errorf("OIDC provider not found"))
 		return
 	}
@@ -135,10 +140,18 @@ func (a *App) updatePlatformOIDCProvider(c *gin.Context) {
 		current.Scopes = strings.TrimSpace(request.Scopes)
 		connectionChanged = true
 	}
+	if strings.TrimSpace(request.RedirectURL) != "" {
+		current.RedirectURL = strings.TrimSpace(request.RedirectURL)
+		connectionChanged = true
+	}
 	if request.Enabled != nil {
 		current.Enabled = *request.Enabled
 	}
 	if err := validateOIDCProviderInput(current.DisplayName, current.Slug, current.Issuer, current.ClientID, current.Scopes); err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := validateOIDCCallbackURL(a.oidcRedirectURL(current)); err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
@@ -156,7 +169,7 @@ func (a *App) updatePlatformOIDCProvider(c *gin.Context) {
 		connectionChanged = true
 	}
 	principal, _ := middleware.GetPrincipal(c)
-	_, err = a.DB.ExecContext(c, `UPDATE oidc_providers SET slug = $2, display_name = $3, issuer = $4, client_id = $5, client_secret_ciphertext = $6, scopes = $7, enabled = $8, updated_by = $9, last_tested_at = CASE WHEN $10 THEN NULL ELSE last_tested_at END, last_error = CASE WHEN $10 THEN '' ELSE last_error END, updated_at = now() WHERE id = $1`, id, current.Slug, current.DisplayName, current.Issuer, current.ClientID, secret, current.Scopes, current.Enabled, principal.UserID, connectionChanged)
+	_, err = a.DB.ExecContext(c, `UPDATE oidc_providers SET slug = $2, display_name = $3, issuer = $4, client_id = $5, client_secret_ciphertext = $6, scopes = $7, redirect_url = $8, enabled = $9, updated_by = $10, last_tested_at = CASE WHEN $11 THEN NULL ELSE last_tested_at END, last_error = CASE WHEN $11 THEN '' ELSE last_error END, updated_at = now() WHERE id = $1`, id, current.Slug, current.DisplayName, current.Issuer, current.ClientID, secret, current.Scopes, current.RedirectURL, current.Enabled, principal.UserID, connectionChanged)
 	if err != nil {
 		writeError(c, http.StatusConflict, fmt.Errorf("OIDC provider could not be updated: %w", err))
 		return
@@ -167,7 +180,7 @@ func (a *App) updatePlatformOIDCProvider(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, oidcProviderPublicJSON(provider, a.Config.OIDC.RedirectURL))
+	c.JSON(http.StatusOK, oidcProviderPublicJSON(provider, a.oidcRedirectURL(provider)))
 }
 
 func (a *App) deletePlatformOIDCProvider(c *gin.Context) {

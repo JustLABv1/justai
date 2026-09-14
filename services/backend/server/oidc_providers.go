@@ -20,6 +20,7 @@ type oidcProviderRecord struct {
 	ClientID               string
 	ClientSecretCiphertext []byte
 	Scopes                 string
+	RedirectURL            string
 	Enabled                bool
 	LastTestedAt           *time.Time
 	LastError              string
@@ -41,6 +42,7 @@ func (a *App) legacyOIDCProvider() (oidcProviderRecord, bool) {
 		Issuer:      a.Config.OIDC.Issuer,
 		ClientID:    a.Config.OIDC.ClientID,
 		Scopes:      "openid profile email",
+		RedirectURL: a.Config.OIDC.RedirectURL,
 		Enabled:     true,
 	}, true
 }
@@ -66,7 +68,7 @@ func (a *App) syncLegacyOIDCProvider(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = a.DB.ExecContext(ctx, `INSERT INTO oidc_providers (slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, enabled) VALUES ('legacy', $1, $2, $3, $4, $5, TRUE) ON CONFLICT (issuer) DO NOTHING`, legacy.DisplayName, legacy.Issuer, legacy.ClientID, ciphertext, legacy.Scopes)
+	_, err = a.DB.ExecContext(ctx, `INSERT INTO oidc_providers (slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, redirect_url, enabled) VALUES ('legacy', $1, $2, $3, $4, $5, $6, TRUE) ON CONFLICT (issuer) DO NOTHING`, legacy.DisplayName, legacy.Issuer, legacy.ClientID, ciphertext, legacy.Scopes, legacy.RedirectURL)
 	return err
 }
 
@@ -95,7 +97,7 @@ func (a *App) loadOIDCProvider(ctx context.Context, slug string, includeDisabled
 	}
 	var provider oidcProviderRecord
 	var lastTested sql.NullTime
-	err := a.DB.QueryRowContext(ctx, `SELECT id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, enabled, last_tested_at, last_error FROM oidc_providers WHERE slug = $1`+whereEnabled, slug).Scan(
+	err := a.DB.QueryRowContext(ctx, `SELECT id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, redirect_url, enabled, last_tested_at, last_error FROM oidc_providers WHERE slug = $1`+whereEnabled, slug).Scan(
 		&provider.ID,
 		&provider.Slug,
 		&provider.DisplayName,
@@ -103,6 +105,7 @@ func (a *App) loadOIDCProvider(ctx context.Context, slug string, includeDisabled
 		&provider.ClientID,
 		&provider.ClientSecretCiphertext,
 		&provider.Scopes,
+		&provider.RedirectURL,
 		&provider.Enabled,
 		&lastTested,
 		&provider.LastError,
@@ -133,7 +136,7 @@ func (a *App) listOIDCProviders(ctx context.Context, enabledOnly bool) ([]oidcPr
 	if enabledOnly {
 		whereEnabled = " WHERE enabled = TRUE"
 	}
-	rows, err := a.DB.QueryContext(ctx, `SELECT id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, enabled, last_tested_at, last_error FROM oidc_providers`+whereEnabled+` ORDER BY display_name, created_at`)
+	rows, err := a.DB.QueryContext(ctx, `SELECT id, slug, display_name, issuer, client_id, client_secret_ciphertext, scopes, redirect_url, enabled, last_tested_at, last_error FROM oidc_providers`+whereEnabled+` ORDER BY display_name, created_at`)
 	if err != nil {
 		if legacy, ok := a.legacyOIDCProvider(); ok {
 			return []oidcProviderRecord{legacy}, nil
@@ -145,7 +148,7 @@ func (a *App) listOIDCProviders(ctx context.Context, enabledOnly bool) ([]oidcPr
 	for rows.Next() {
 		var provider oidcProviderRecord
 		var lastTested sql.NullTime
-		if err := rows.Scan(&provider.ID, &provider.Slug, &provider.DisplayName, &provider.Issuer, &provider.ClientID, &provider.ClientSecretCiphertext, &provider.Scopes, &provider.Enabled, &lastTested, &provider.LastError); err != nil {
+		if err := rows.Scan(&provider.ID, &provider.Slug, &provider.DisplayName, &provider.Issuer, &provider.ClientID, &provider.ClientSecretCiphertext, &provider.Scopes, &provider.RedirectURL, &provider.Enabled, &lastTested, &provider.LastError); err != nil {
 			return nil, err
 		}
 		if lastTested.Valid {
@@ -176,6 +179,13 @@ func (a *App) publicOIDCProviders(ctx context.Context) []oidcProviderPublic {
 	return result
 }
 
+func (a *App) oidcRedirectURL(provider oidcProviderRecord) string {
+	if redirectURL := strings.TrimSpace(provider.RedirectURL); redirectURL != "" {
+		return redirectURL
+	}
+	return strings.TrimSpace(a.Config.OIDC.RedirectURL)
+}
+
 func oidcProviderPublicJSON(provider oidcProviderRecord, callbackURL string) gin.H {
 	return gin.H{
 		"id":               provider.ID,
@@ -188,7 +198,7 @@ func oidcProviderPublicJSON(provider oidcProviderRecord, callbackURL string) gin
 		"secretConfigured": len(provider.ClientSecretCiphertext) > 0,
 		"lastTestedAt":     provider.LastTestedAt,
 		"lastError":        provider.LastError,
-		"callbackUrl":      callbackURL,
+		"redirectUrl":      callbackURL,
 	}
 }
 

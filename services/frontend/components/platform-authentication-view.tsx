@@ -44,6 +44,7 @@ type ProviderForm = {
   clientId: string
   clientSecret: string
   scopes: string
+  redirectUrl: string
   enabled: boolean
 }
 
@@ -58,12 +59,12 @@ const emptyForm: ProviderForm = {
   clientId: "",
   clientSecret: "",
   scopes: "openid profile email",
+  redirectUrl: "",
   enabled: true,
 }
 
 export function PlatformAuthenticationView({ createRequest }: Props) {
   const [providers, setProviders] = useState<AdminOIDCProvider[]>([])
-  const [callbackUrl, setCallbackUrl] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState("")
@@ -82,10 +83,8 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
     try {
       const result = await api.get<{
         providers: AdminOIDCProvider[]
-        callbackUrl: string
       }>("/api/v1/admin/oidc/providers")
       setProviders(result.providers)
-      setCallbackUrl(result.callbackUrl)
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -124,6 +123,7 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
       clientId: provider.clientId,
       clientSecret: "",
       scopes: provider.scopes,
+      redirectUrl: provider.redirectUrl,
       enabled: provider.enabled,
     })
     setError("")
@@ -137,9 +137,12 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
       !form.displayName.trim() ||
       !form.slug.trim() ||
       !form.issuer.trim() ||
-      !form.clientId.trim()
+      !form.clientId.trim() ||
+      !form.redirectUrl.trim()
     ) {
-      setError("Display name, slug, issuer, and client ID are required.")
+      setError(
+        "Display name, slug, issuer, client ID, and redirect URL are required."
+      )
       return
     }
     if (!editingId && !form.clientSecret.trim()) {
@@ -245,20 +248,6 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
           </CardAction>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
-            <p className="font-medium text-foreground">Callback URL</p>
-            <p className="mt-1 break-all">
-              {callbackUrl ||
-                "Configure oidc.redirect_url on the backend first."}
-            </p>
-            {callbackUrl && (
-              <p className="mt-1 inline-flex items-center gap-1">
-                Register this URL with every identity provider.{" "}
-                <ExternalLink className="size-3" />
-              </p>
-            )}
-          </div>
-
           {loading ? (
             <div
               aria-live="polite"
@@ -295,6 +284,9 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
                     {provider.lastTestedAt
                       ? ` · tested ${new Date(provider.lastTestedAt).toLocaleString()}`
                       : ""}
+                  </p>
+                  <p className="mt-1 flex items-center gap-1 break-all text-xs text-muted-foreground">
+                    {provider.redirectUrl} <ExternalLink className="size-3 shrink-0" />
                   </p>
                   {provider.lastError && (
                     <p className="mt-1 text-xs text-destructive">
@@ -443,6 +435,26 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
                 }
                 placeholder={editingId ? "Leave blank to preserve" : "Required"}
               />
+            </label>
+            <label
+              className="grid gap-1.5 text-xs font-medium sm:col-span-2"
+              htmlFor="oidc-redirect-url"
+            >
+              Redirect URL
+              <Input
+                disabled={saving}
+                id="oidc-redirect-url"
+                required
+                type="url"
+                value={form.redirectUrl}
+                onChange={(event) =>
+                  setForm({ ...form, redirectUrl: event.target.value })
+                }
+                placeholder="https://app.example.com/api/v1/auth/oidc/callback"
+              />
+              <span className="font-normal text-muted-foreground">
+                Register this exact callback URL with this identity provider.
+              </span>
             </label>
             <label
               className="grid gap-1.5 text-xs font-medium sm:col-span-2"

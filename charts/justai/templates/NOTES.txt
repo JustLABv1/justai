@@ -6,7 +6,7 @@ Public URL:
   http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
 {{- end }}
 
-Register this OIDC callback URL with every identity provider:
+Default OIDC callback URL (providers may override it in the platform admin UI):
   {{ include "justai.publicOrigin" . }}/api/v1/auth/oidc/callback
 {{- else }}
 The ingress is disabled. Expose the frontend service and configure
