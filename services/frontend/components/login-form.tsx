@@ -349,7 +349,17 @@ export function LoginForm({
                             variant: "outline",
                             className: styles.authSso,
                           })}
-                          href={`${API_URL}${oidcLoginPath(provider.slug, safeNext(typeof window === "undefined" ? "" : window.location.search))}`}
+                          href={`${API_URL}${oidcLoginPath(
+                            provider.slug,
+                            safeNext(
+                              typeof window === "undefined"
+                                ? ""
+                                : window.location.search
+                            ),
+                            typeof window === "undefined"
+                              ? ""
+                              : window.location.origin
+                          )}`}
                         >
                           <KeyRound
                             data-icon="inline-start"

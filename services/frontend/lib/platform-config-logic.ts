@@ -1,10 +1,16 @@
 import type { PlatformBanner } from "@/lib/types"
 
-export function oidcLoginPath(providerSlug: string, nextPath: string) {
+export function oidcLoginPath(
+  providerSlug: string,
+  nextPath: string,
+  frontendOrigin = ""
+) {
   const providerPath = providerSlug
     ? `/api/v1/auth/oidc/${encodeURIComponent(providerSlug)}/start`
     : "/api/v1/auth/oidc/start"
-  return `${providerPath}?next=${encodeURIComponent(safeInternalPath(nextPath))}`
+  const params = new URLSearchParams({ next: safeInternalPath(nextPath) })
+  if (frontendOrigin) params.set("origin", frontendOrigin)
+  return `${providerPath}?${params.toString()}`
 }
 
 export function safeInternalPath(value: string) {

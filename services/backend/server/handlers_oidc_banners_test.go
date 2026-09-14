@@ -106,7 +106,7 @@ func TestOIDCCallbackRejectsMissingExpiredOrReplayedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	query := "SELECT p.id, p.slug, p.display_name, p.issuer, p.client_id, p.client_secret_ciphertext, p.scopes, p.redirect_url, p.enabled, p.last_error, s.nonce, s.code_verifier, s.next_path"
+	query := "SELECT p.id, p.slug, p.display_name, p.issuer, p.client_id, p.client_secret_ciphertext, p.scopes, p.redirect_url, p.enabled, p.last_error, s.nonce, s.code_verifier, s.next_path, s.frontend_origin"
 	for _, state := range []string{"expired-state", "replayed-state"} {
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(state).WillReturnError(sql.ErrNoRows)
@@ -283,6 +283,23 @@ func TestOIDCRedirectURLIsResolvedPerProvider(t *testing.T) {
 	}
 	if got := app.oidcRedirectURL(oidcProviderRecord{}); got != app.Config.OIDC.RedirectURL {
 		t.Fatalf("legacy redirect fallback = %q, want %q", got, app.Config.OIDC.RedirectURL)
+	}
+}
+
+func TestOIDCFrontendOriginUsesOnlyConfiguredIngress(t *testing.T) {
+	app := &App{Config: config.Config{FrontendOrigins: []string{
+		"https://ingress-1.example.com",
+		"https://ingress-2.example.com/",
+	}}}
+
+	if got := app.oidcFrontendOrigin("https://ingress-2.example.com"); got != "https://ingress-2.example.com" {
+		t.Fatalf("second ingress origin = %q", got)
+	}
+	if got := app.oidcFrontendOrigin("https://attacker.example.com"); got != "https://ingress-1.example.com" {
+		t.Fatalf("untrusted origin did not fall back to the first configured ingress: %q", got)
+	}
+	if got := app.oidcFrontendOrigin("https://ingress-2.example.com.evil.test"); got != "https://ingress-1.example.com" {
+		t.Fatalf("lookalike origin was accepted: %q", got)
 	}
 }
 

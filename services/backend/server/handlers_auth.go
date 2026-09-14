@@ -237,7 +237,8 @@ func (a *App) oidcStart(c *gin.Context) {
 	challengeSum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(challengeSum[:])
 	next := safeOIDCNext(c.Query("next"))
-	if _, err := a.DB.ExecContext(c, `INSERT INTO oidc_auth_states (state, provider_id, nonce, code_verifier, next_path, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`, state, provider.ID, nonce, verifier, next, time.Now().Add(10*time.Minute)); err != nil {
+	frontendOrigin := a.oidcFrontendOrigin(c.Query("origin"))
+	if _, err := a.DB.ExecContext(c, `INSERT INTO oidc_auth_states (state, provider_id, nonce, code_verifier, next_path, frontend_origin, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, state, provider.ID, nonce, verifier, next, frontendOrigin, time.Now().Add(10*time.Minute)); err != nil {
 		writeError(c, http.StatusInternalServerError, fmt.Errorf("could not start OIDC authentication: %w", err))
 		return
 	}
@@ -276,14 +277,14 @@ func (a *App) oidcCallback(c *gin.Context) {
 		return
 	}
 	var provider oidcProviderRecord
-	var nonce, verifier, next string
+	var nonce, verifier, next, frontendOrigin string
 	transaction, err := a.DB.BeginTx(c, nil)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
 	defer transaction.Rollback()
-	if err := transaction.QueryRowContext(c, `SELECT p.id, p.slug, p.display_name, p.issuer, p.client_id, p.client_secret_ciphertext, p.scopes, p.redirect_url, p.enabled, p.last_error, s.nonce, s.code_verifier, s.next_path FROM oidc_auth_states s JOIN oidc_providers p ON p.id = s.provider_id WHERE s.state = $1 AND s.expires_at > now() FOR UPDATE`, state).Scan(&provider.ID, &provider.Slug, &provider.DisplayName, &provider.Issuer, &provider.ClientID, &provider.ClientSecretCiphertext, &provider.Scopes, &provider.RedirectURL, &provider.Enabled, &provider.LastError, &nonce, &verifier, &next); err != nil {
+	if err := transaction.QueryRowContext(c, `SELECT p.id, p.slug, p.display_name, p.issuer, p.client_id, p.client_secret_ciphertext, p.scopes, p.redirect_url, p.enabled, p.last_error, s.nonce, s.code_verifier, s.next_path, s.frontend_origin FROM oidc_auth_states s JOIN oidc_providers p ON p.id = s.provider_id WHERE s.state = $1 AND s.expires_at > now() FOR UPDATE`, state).Scan(&provider.ID, &provider.Slug, &provider.DisplayName, &provider.Issuer, &provider.ClientID, &provider.ClientSecretCiphertext, &provider.Scopes, &provider.RedirectURL, &provider.Enabled, &provider.LastError, &nonce, &verifier, &next, &frontendOrigin); err != nil {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid or expired OIDC state"))
 		return
 	}
@@ -387,11 +388,34 @@ func (a *App) oidcCallback(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	frontend := "/"
-	if len(a.Config.FrontendOrigins) > 0 && a.Config.FrontendOrigins[0] != "*" {
-		frontend = strings.TrimRight(a.Config.FrontendOrigins[0], "/")
+	c.Redirect(http.StatusFound, a.oidcFrontendOrigin(frontendOrigin)+safeOIDCNext(next))
+}
+
+// oidcFrontendOrigin only returns origins present in the configured allowlist.
+// The first configured origin remains the fallback for legacy authorization states.
+func (a *App) oidcFrontendOrigin(requested string) string {
+	normalize := func(value string) string {
+		parsed, err := url.Parse(strings.TrimSpace(value))
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return ""
+		}
+		return parsed.Scheme + "://" + parsed.Host
 	}
-	c.Redirect(http.StatusFound, frontend+safeOIDCNext(next))
+	requested = normalize(requested)
+	fallback := ""
+	for _, configured := range a.Config.FrontendOrigins {
+		allowed := normalize(configured)
+		if allowed == "" {
+			continue
+		}
+		if fallback == "" {
+			fallback = allowed
+		}
+		if requested != "" && requested == allowed {
+			return requested
+		}
+	}
+	return fallback
 }
 
 func validOIDCIdentityClaims(claims oidcIdentityClaims, expectedNonce string) bool {

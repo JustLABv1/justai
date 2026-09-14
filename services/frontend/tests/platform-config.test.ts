@@ -17,6 +17,10 @@ test("builds an independent login URL for each OIDC provider", () => {
     oidcLoginPath("", "/"),
     "/api/v1/auth/oidc/start?next=%2F"
   )
+  assert.equal(
+    oidcLoginPath("company", "/", "https://ingress-2.example.com"),
+    "/api/v1/auth/oidc/company/start?next=%2F&origin=https%3A%2F%2Fingress-2.example.com"
+  )
 })
 
 test("rejects unsafe OIDC redirect targets", () => {
