@@ -214,7 +214,8 @@ func (a *App) oidcStart(c *gin.Context) {
 		writeError(c, http.StatusNotFound, fmt.Errorf("OIDC provider is not available"))
 		return
 	}
-	if err := validateOIDCCallbackURL(a.Config.OIDC.RedirectURL); err != nil {
+	redirectURL := a.oidcRedirectURL(provider)
+	if err := validateOIDCCallbackURL(redirectURL); err != nil {
 		writeError(c, http.StatusFailedDependency, err)
 		return
 	}
@@ -258,7 +259,7 @@ func (a *App) oidcStart(c *gin.Context) {
 		ClientID:     provider.ClientID,
 		ClientSecret: secret,
 		Endpoint:     discovered.Endpoint(),
-		RedirectURL:  a.Config.OIDC.RedirectURL,
+		RedirectURL:  redirectURL,
 		Scopes:       strings.Fields(provider.Scopes),
 	}
 	c.Redirect(http.StatusFound, oauthConfig.AuthCodeURL(state,
@@ -282,7 +283,7 @@ func (a *App) oidcCallback(c *gin.Context) {
 		return
 	}
 	defer transaction.Rollback()
-	if err := transaction.QueryRowContext(c, `SELECT p.id, p.slug, p.display_name, p.issuer, p.client_id, p.client_secret_ciphertext, p.scopes, p.enabled, p.last_error, s.nonce, s.code_verifier, s.next_path FROM oidc_auth_states s JOIN oidc_providers p ON p.id = s.provider_id WHERE s.state = $1 AND s.expires_at > now() FOR UPDATE`, state).Scan(&provider.ID, &provider.Slug, &provider.DisplayName, &provider.Issuer, &provider.ClientID, &provider.ClientSecretCiphertext, &provider.Scopes, &provider.Enabled, &provider.LastError, &nonce, &verifier, &next); err != nil {
+	if err := transaction.QueryRowContext(c, `SELECT p.id, p.slug, p.display_name, p.issuer, p.client_id, p.client_secret_ciphertext, p.scopes, p.redirect_url, p.enabled, p.last_error, s.nonce, s.code_verifier, s.next_path FROM oidc_auth_states s JOIN oidc_providers p ON p.id = s.provider_id WHERE s.state = $1 AND s.expires_at > now() FOR UPDATE`, state).Scan(&provider.ID, &provider.Slug, &provider.DisplayName, &provider.Issuer, &provider.ClientID, &provider.ClientSecretCiphertext, &provider.Scopes, &provider.RedirectURL, &provider.Enabled, &provider.LastError, &nonce, &verifier, &next); err != nil {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid or expired OIDC state"))
 		return
 	}
@@ -312,7 +313,12 @@ func (a *App) oidcCallback(c *gin.Context) {
 		writeError(c, http.StatusBadGateway, err)
 		return
 	}
-	oauthConfig := &oauth2.Config{ClientID: provider.ClientID, ClientSecret: secret, Endpoint: discovered.Endpoint(), RedirectURL: a.Config.OIDC.RedirectURL, Scopes: strings.Fields(provider.Scopes)}
+	redirectURL := a.oidcRedirectURL(provider)
+	if err := validateOIDCCallbackURL(redirectURL); err != nil {
+		writeError(c, http.StatusFailedDependency, err)
+		return
+	}
+	oauthConfig := &oauth2.Config{ClientID: provider.ClientID, ClientSecret: secret, Endpoint: discovered.Endpoint(), RedirectURL: redirectURL, Scopes: strings.Fields(provider.Scopes)}
 	token, err := oauthConfig.Exchange(c, c.Query("code"), oauth2.SetAuthURLParam("code_verifier", verifier))
 	if err != nil {
 		writeError(c, http.StatusBadGateway, err)

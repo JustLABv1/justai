@@ -44,13 +44,14 @@ use the runtime-default seccomp profile, and run without a privileged data
 directory init container. PostgreSQL volume ownership is handled with `fsGroup`
 (`999`) instead.
 
-The OIDC callback defaults to the first Ingress host:
+The default OIDC callback (used when a provider has no override) is the first Ingress host:
 
 ```text
 https://justai.example.com/api/v1/auth/oidc/callback
 ```
 
-Override `config.oidc.redirectUrl` when the backend uses another public host.
+Override `config.oidc.redirectUrl` for the deployment-wide fallback, or set a
+different redirect URL on each provider in the platform admin UI.
 
 ## Custom CA for backend connections
 

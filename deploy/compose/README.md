@@ -18,7 +18,9 @@ local port. The backend and frontend ports are also bound to loopback for
 debugging, but should not be used as the public entry point with a published
 same-origin frontend image.
 
-Register `JUSTAI_OIDC_REDIRECT_URL` with each identity provider. For a local
+`JUSTAI_OIDC_REDIRECT_URL` is the default for providers that do not define a
+redirect URL in the platform admin UI. Register each provider's effective URL
+with that identity provider. For a local
 default deployment this is:
 
 ```text

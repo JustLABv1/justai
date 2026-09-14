@@ -193,6 +193,7 @@ export type AdminOIDCProvider = OIDCProviderSummary & {
   issuer: string
   clientId: string
   scopes: string
+  redirectUrl: string
   enabled: boolean
   secretConfigured: boolean
   lastTestedAt?: string | null
