@@ -45,7 +45,7 @@ jobs:
 
       - name: Build and push shared FFmpeg artifact
         id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: docker/ffmpeg
           file: docker/ffmpeg/Dockerfile
@@ -84,7 +84,7 @@ jobs:
             type=raw,value=backend-beta,enable=${{ contains(github.ref_name, '-beta.') }}
             type=raw,value=backend-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
 
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: services/backend
           file: services/backend/Dockerfile
@@ -125,7 +125,7 @@ jobs:
             type=raw,value=frontend-beta,enable=${{ contains(github.ref_name, '-beta.') }}
             type=raw,value=frontend-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
 
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: services/frontend
           file: services/frontend/Dockerfile
@@ -167,7 +167,7 @@ jobs:
             type=raw,value=beta,enable=${{ contains(github.ref_name, '-beta.') }}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-beta.') }}
 
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: Dockerfile
@@ -209,7 +209,7 @@ jobs:
             type=raw,value=pyannote-beta,enable=${{ contains(github.ref_name, '-beta.') }}
             type=raw,value=pyannote-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
 
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: services/pyannote-diarizer
           file: services/pyannote-diarizer/Dockerfile
@@ -232,7 +232,7 @@ jobs:
             type=raw,value=pyannote-gpu-beta,enable=${{ contains(github.ref_name, '-beta.') }}
             type=raw,value=pyannote-gpu-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
 
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: services/pyannote-diarizer
           file: services/pyannote-diarizer/Dockerfile
