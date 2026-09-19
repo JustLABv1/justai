@@ -70,7 +70,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { api, socketURL } from "@/lib/api"
+import { api, eventStreamURL } from "@/lib/api"
+import { SSETransport } from "@/lib/sse-transport"
 import {
   mergeTranscriptionSegments,
   transcriptionJoinPath,
@@ -153,7 +154,7 @@ type BotSetup = {
   token: string
   protocol: string
   ticketPath: string
-  websocketPath: string
+  streamPath: string
   warning: string
 }
 
@@ -223,8 +224,8 @@ export function LiveTranscriptionView({
   const [workspaceSpeakerName, setWorkspaceSpeakerName] = useState("")
   const [workspaceSpeakerSaving, setWorkspaceSpeakerSaving] = useState(false)
 
-  const viewerSocketRef = useRef<WebSocket | null>(null)
-  const captureSocketRef = useRef<WebSocket | null>(null)
+  const viewerSocketRef = useRef<SSETransport | null>(null)
+  const captureSocketRef = useRef<SSETransport | null>(null)
   const connectViewerRef = useRef<
     (id: string, reconnect?: boolean) => Promise<void>
   >(() => Promise.resolve())
@@ -683,12 +684,15 @@ export function LiveTranscriptionView({
       closeViewer(!reconnect)
       const attempt = viewerAttemptRef.current
       const ticketResponse = await api.post<{ ticket: string }>(
-        "/api/v1/ws/tickets",
+        "/api/v1/stream-tickets",
         { kind: "transcription-viewer", sessionId: id }
       )
       if (viewerAttemptRef.current !== attempt) return
-      const socket = new WebSocket(
-        socketURL("/api/v1/ws/transcription", ticketResponse.ticket)
+      const socket = new SSETransport(
+        eventStreamURL(
+          "/api/v1/streams/transcription",
+          ticketResponse.ticket
+        )
       )
       viewerSocketRef.current = socket
       let opened = false
@@ -751,7 +755,7 @@ export function LiveTranscriptionView({
       })
       if (
         viewerAttemptRef.current !== attempt ||
-        socket.readyState !== WebSocket.OPEN
+        socket.readyState !== SSETransport.OPEN
       ) {
         socket.close()
         return
@@ -809,7 +813,7 @@ export function LiveTranscriptionView({
 
   const beginAudio = useCallback(
     async (
-      socket: WebSocket,
+      socket: SSETransport,
       session: TranscriptionSession,
       source: TranscriptionSource,
       attempt: number
@@ -828,7 +832,7 @@ export function LiveTranscriptionView({
       const isCurrent = () =>
         captureAttemptRef.current === attempt &&
         captureSocketRef.current === socket &&
-        socket.readyState === WebSocket.OPEN
+        socket.readyState === SSETransport.OPEN
       let stream: MediaStream | null = null
       let context: AudioContext | null = null
       let worklet: AudioWorkletNode | null = null
@@ -969,7 +973,7 @@ export function LiveTranscriptionView({
           Math.sqrt(total / levelBuffer.length) * 3.2
         )
         setLevel(nextLevel)
-        if (socket.readyState === WebSocket.OPEN)
+        if (socket.readyState === SSETransport.OPEN)
           socket.send(
             JSON.stringify({ type: "source.level", level: nextLevel })
           )
@@ -1041,7 +1045,7 @@ export function LiveTranscriptionView({
       closeCapture()
       const attempt = captureAttemptRef.current
       const ticketResponse = await api.post<{ ticket: string }>(
-        "/api/v1/ws/tickets",
+        "/api/v1/stream-tickets",
         {
           kind: "transcription-capture",
           sessionId: session.id,
@@ -1050,8 +1054,11 @@ export function LiveTranscriptionView({
       )
       if (captureAttemptRef.current !== attempt) return
       captureSourceIdRef.current = source.id
-      const socket = new WebSocket(
-        socketURL("/api/v1/ws/transcription", ticketResponse.ticket)
+      const socket = new SSETransport(
+        eventStreamURL(
+          "/api/v1/streams/transcription",
+          ticketResponse.ticket
+        )
       )
       captureSocketRef.current = socket
       socket.onmessage = (message) => {
@@ -1107,7 +1114,7 @@ export function LiveTranscriptionView({
       })
       if (
         captureAttemptRef.current !== attempt ||
-        socket.readyState !== WebSocket.OPEN
+        socket.readyState !== SSETransport.OPEN
       ) {
         socket.close()
         return
@@ -2609,13 +2616,14 @@ export function LiveTranscriptionView({
                 </p>
                 <p>
                   2. Open{" "}
-                  <code>{botSetup.websocketPath}?ticket=&lt;ticket&gt;</code>.
+                  <code>{botSetup.streamPath}?ticket=&lt;ticket&gt;</code>.
                 </p>
                 <p>
-                  3. Send <code>transcription.start</code>, then binary PCM16
-                  frames using the existing <code>{botSetup.protocol}</code>{" "}
-                  wire format. Send <code>transcription.stop</code> when the
-                  meeting ends.
+                  3. Read the <code>streamId</code> from{" "}
+                  <code>transport.ready</code>, POST{" "}
+                  <code>transcription.start</code> to its <code>/events</code>
+                  endpoint, and batched PCM16 frames to <code>/audio</code> using
+                  the <code>{botSetup.protocol}</code> format.
                 </p>
               </div>
               <DialogFooter>

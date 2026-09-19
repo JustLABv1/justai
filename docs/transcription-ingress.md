@@ -16,7 +16,7 @@ When creating a live session, select **Browser tab or system audio** as the
 host audio source. The browser opens its native screen-share picker. Select a
 tab, window, or screen and enable **Share audio**. The video track is used only
 to keep the browser capture alive; JustAI sends the selected audio track to the
-transcription WebSocket. You can also select **External stream or meeting bot**
+transcription stream over bounded HTTP audio uploads. You can also select **External stream or meeting bot**
 to create the room without requesting browser permissions, then add one of the
 server-side sources below.
 
@@ -66,7 +66,7 @@ The create body is:
 `POST /api/v1/transcription/sessions/:sessionId/bot-sources` creates a
 platform-labelled source and returns an ingest token once. The token is not a
 JustAI user token and does not grant access to the workspace. It only exchanges
-for a short-lived, one-use transcription WebSocket ticket for that source.
+for a short-lived, one-use transcription stream ticket for that source.
 
 The adapter flow is:
 
@@ -75,9 +75,13 @@ POST /api/v1/transcription/sessions/:sessionId/bot-sources
   -> save the returned token
 POST /api/v1/transcription/bot-sources/:sourceId/tickets
   Authorization: Bearer <ingest-token>
-  -> short-lived WebSocket ticket
-GET /api/v1/ws/transcription?ticket=<ticket>
-  -> audio ingress
+  -> short-lived stream ticket
+GET /api/v1/streams/transcription?ticket=<ticket>
+  -> SSE events, beginning with transport.ready and its streamId
+POST /api/v1/streams/:streamId/audio
+  -> batched audio ingress
+POST /api/v1/streams/:streamId/events
+  -> JSON controls
 ```
 
 The platform field accepts `generic`, `zoom`, `google-meet`, and
@@ -87,13 +91,15 @@ Actual Zoom/Google Meet/Teams joining still belongs in a separately deployed
 adapter or desktop companion with the organization's platform credentials and
 consent flow.
 
-After the WebSocket opens, the adapter sends:
+After the SSE stream emits `transport.ready`, the adapter POSTs this JSON to
+the returned stream's `/events` endpoint:
 
 ```json
 {"type":"transcription.start","sessionId":"...","sourceId":"..."}
 ```
 
-Each binary message is a little-endian frame:
+The `/audio` request body contains one or more frames. Each frame is prefixed
+by its 4-byte big-endian length; the frame itself uses this little-endian format:
 
 ```text
 1 byte   protocol version (1)
@@ -103,8 +109,8 @@ Each binary message is a little-endian frame:
 N bytes  mono signed PCM16 audio
 ```
 
-The adapter can send `source.level`, `source.pause`, `source.resume`, `ping`,
-and `transcription.stop` text messages. The server emits the same
+The adapter can POST `source.level`, `source.pause`, `source.resume`, `ping`,
+and `transcription.stop` JSON events. The server emits the same
 `transcription.partial`, `transcription.final`, source, and error events
 that browser captures receive.
 

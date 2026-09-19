@@ -3717,7 +3717,7 @@ function AssistantChatSurface({
     return () => {
       // A route change can unmount the surface while the browser still owns
       // the microphone. Always close the Assistant UI voice session so the
-      // WebSocket, worklet, and tracks cannot outlive the thread runtime.
+      // SSE stream, worklet, and tracks cannot outlive the thread runtime.
       runtime.thread.disconnectVoice()
     }
   }, [runtime])
@@ -4009,7 +4009,7 @@ export function ChatView({
     // The active Assistant UI runtime owns in-flight text and voice turns.
     // Conversation metadata refreshes can change messageCount without a route
     // change; reloading history for those updates would unmount the runtime
-    // and terminate an otherwise healthy voice WebSocket.
+    // and terminate an otherwise healthy voice stream.
     if (conversationId && pendingConversationRef.current) {
       // The workspace creates the conversation as part of the first send or
       // attachment. Keep the mounted "new" runtime alive while the URL

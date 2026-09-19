@@ -299,15 +299,14 @@ export const api = {
   },
 }
 
-export function socketURL(path: string, ticket: string) {
-  const httpURL = new URL(
+export function eventStreamURL(path: string, ticket: string) {
+  const url = new URL(
     API_URL ||
       (typeof window !== "undefined"
         ? window.location.origin
         : "http://localhost:3000")
   )
-  httpURL.protocol = httpURL.protocol === "https:" ? "wss:" : "ws:"
-  httpURL.pathname = path
-  httpURL.search = `?ticket=${encodeURIComponent(ticket)}`
-  return httpURL.toString()
+  url.pathname = path
+  url.search = `?ticket=${encodeURIComponent(ticket)}`
+  return url.toString()
 }

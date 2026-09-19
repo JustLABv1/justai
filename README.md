@@ -84,7 +84,7 @@ For Kubernetes, provide a Secret containing `database-url`, `jwt-secret`, and
 ## Product boundaries
 
 - Provider keys and MCP credentials are encrypted and stay in the Go backend.
-- Chat and transcription use short-lived WebSocket tickets rather than putting bearer tokens in socket URLs.
+- Chat, voice, and transcription stream server events over SSE. Voice and transcription send audio and controls through bounded HTTP uploads authorized by short-lived stream tickets.
 - Live transcription accepts browser microphone/tab audio, encrypted HLS/HTTP/RTMP-style sources with FFmpeg reconnects, and scoped meeting-bot ingress tokens. Browser tab capture is the supported path for YouTube or TV livestream audio; platform-specific Zoom, Google Meet, and Teams adapters remain separately deployed because they require third-party credentials and consent.
 - RAG sources are scoped to an organization or user. URL ingestion blocks private and loopback targets by default.
 - Repository context accepts GitHub.com and GitLab.com URLs, optionally uses an encrypted read-only access token, imports bounded text files, and attaches them to the current chat as searchable Knowledge sources. A repository index is user-persistent and is reused across new chats; the default import cap is 200 files and can be changed with `JUSTAI_REPOSITORY_MAX_FILES` (up to 5,000). The composer’s optional Deep context mode retrieves a broader, diversified sample across files for architecture questions; regular chat keeps the smaller quick-retrieval path. It performs provider GET requests only; it does not clone, execute, or modify repositories.

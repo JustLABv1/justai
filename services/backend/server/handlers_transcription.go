@@ -20,7 +20,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 
 	"justai-backend/auth"
 	"justai-backend/middleware"
@@ -319,7 +318,7 @@ func (a *App) deleteTranscriptionSession(c *gin.Context) {
 	}
 	a.Live.clearPCMForSession(id)
 	// Stop active capture/viewer sockets before deleting the session. This
-	// prevents a late websocket frame from recreating state after cleanup.
+	// prevents a late audio frame from recreating state after cleanup.
 	a.Live.closeSession(id)
 	_, err = a.DB.ExecContext(c, `DELETE FROM transcription_sessions WHERE id = $1 AND user_id = $2 AND organization_id = $3`, id, principal.UserID, organizationID)
 	if err != nil {
@@ -883,7 +882,7 @@ func (a *App) getTranscriptionJoinRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-func (a *App) createCaptureWSTicket(c *gin.Context) {
+func (a *App) createCaptureStreamTicket(c *gin.Context) {
 	grant := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
 	if grant == "" {
 		writeError(c, http.StatusUnauthorized, fmt.Errorf("capture grant is required"))
@@ -924,21 +923,30 @@ func (a *App) createCaptureWSTicket(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"ticket": value, "expiresAt": ticketExpires, "kind": "transcription-capture"})
 }
 
-func (a *App) transcriptionWebSocket(c *gin.Context) {
+func (a *App) transcriptionSSE(c *gin.Context) {
 	info, err := a.consumeTranscriptionTicket(c, c.Query("ticket"))
 	if err != nil {
 		writeError(c, http.StatusUnauthorized, err)
 		return
 	}
-	connection, err := a.upgradeWebSocket(c)
-	if err != nil {
-		return
-	}
-	defer connection.Close()
-	a.runRoomTranscriptionSocket(c, connection, info)
+	connection := newHTTPStreamConnection(info.UserID, info.OrganizationID)
+	a.registerHTTPStream(connection)
+	defer func() {
+		select {
+		case <-connection.done:
+		case <-time.After(time.Second):
+		}
+		a.unregisterHTTPStream(connection)
+	}()
+	streamContext := c.Copy()
+	go func() {
+		defer connection.Close()
+		a.runRoomTranscriptionSocket(streamContext, connection, info)
+	}()
+	serveSSE(c, connection)
 }
 
-func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket.Conn, info transcriptionTicketInfo) {
+func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection realtimeConnection, info transcriptionTicketInfo) {
 	client := &transcriptionClient{connection: connection, role: info.Kind, sourceID: info.SourceID}
 	a.Live.register(info.SessionID, client)
 	defer a.Live.unregister(info.SessionID, client)
@@ -995,7 +1003,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 				if message.err != nil {
 					return
 				}
-				if message.messageType == websocket.TextMessage {
+				if message.messageType == streamTextMessage {
 					var event struct {
 						Type string `json:"type"`
 					}
@@ -1008,7 +1016,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			case <-pingTicker.C:
 				client.writeMu.Lock()
 				_ = connection.SetWriteDeadline(time.Now().Add(viewerWriteWait))
-				err := connection.WriteControl(websocket.PingMessage, nil, time.Now().Add(viewerWriteWait))
+				err := connection.WriteControl(0, nil, time.Now().Add(viewerWriteWait))
 				_ = connection.SetWriteDeadline(time.Time{})
 				client.writeMu.Unlock()
 				if err != nil {
@@ -1126,7 +1134,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 		if err != nil {
 			return
 		}
-		if messageType == websocket.TextMessage {
+		if messageType == streamTextMessage {
 			var event struct {
 				Type  string  `json:"type"`
 				Level float64 `json:"level"`
@@ -1157,7 +1165,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection *websocket
 			}
 			continue
 		}
-		if messageType != websocket.BinaryMessage {
+		if messageType != streamBinaryMessage {
 			continue
 		}
 		if time.Since(lastStatusCheck) >= time.Second {
@@ -1647,7 +1655,7 @@ func (a *App) streamTranscriptionRecording(c *gin.Context) {
 
 func (a *App) consumeTranscriptionTicket(ctx context.Context, value string) (transcriptionTicketInfo, error) {
 	if value == "" {
-		return transcriptionTicketInfo{}, fmt.Errorf("websocket ticket is required")
+		return transcriptionTicketInfo{}, fmt.Errorf("stream ticket is required")
 	}
 	hash := hashToken(value)
 	transaction, err := a.DB.BeginTx(ctx, nil)
@@ -1659,7 +1667,7 @@ func (a *App) consumeTranscriptionTicket(ctx context.Context, value string) (tra
 	var ticketUser uuid.UUID
 	err = transaction.QueryRowContext(ctx, `SELECT user_id, organization_id, COALESCE(session_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(source_id, '00000000-0000-0000-0000-000000000000'::uuid), kind FROM ws_tickets WHERE token_hash = $1 AND kind IN ('transcription', 'transcription-viewer', 'transcription-capture') AND expires_at > now() AND used_at IS NULL FOR UPDATE`, hash).Scan(&ticketUser, &info.OrganizationID, &info.SessionID, &info.SourceID, &info.Kind)
 	if err != nil {
-		return transcriptionTicketInfo{}, fmt.Errorf("invalid or expired websocket ticket")
+		return transcriptionTicketInfo{}, fmt.Errorf("invalid or expired stream ticket")
 	}
 	info.UserID = ticketUser
 	if _, err := transaction.ExecContext(ctx, `UPDATE ws_tickets SET used_at = now() WHERE token_hash = $1`, hash); err != nil {

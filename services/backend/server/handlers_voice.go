@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 
 	"justai-backend/mcp"
 	"justai-backend/middleware"
@@ -90,24 +89,34 @@ type voiceState struct {
 	lastVoiceAt             time.Time
 }
 
-func (a *App) voiceWebSocket(c *gin.Context) {
+func (a *App) voiceSSE(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	ticket, err := a.consumeVoiceTicket(c.Request.Context(), c.Query("ticket"), principal.UserID)
 	if err != nil {
 		writeError(c, http.StatusUnauthorized, err)
 		return
 	}
-	connection, err := a.upgradeWebSocket(c)
-	if err != nil {
-		return
-	}
-	defer connection.Close()
-	a.runVoiceSocket(c.Request.Context(), connection, principal.UserID, ticket.OrganizationID, ticket.ConversationID)
+	connection := newHTTPStreamConnection(principal.UserID, ticket.OrganizationID)
+	a.registerHTTPStream(connection)
+	defer func() {
+		// Keep the upload half alive briefly so a final session.stop POST issued
+		// immediately before EventSource.close() can still be delivered.
+		select {
+		case <-connection.done:
+		case <-time.After(time.Second):
+		}
+		a.unregisterHTTPStream(connection)
+	}()
+	go func() {
+		defer connection.Close()
+		a.runVoiceSocket(c.Request.Context(), connection, principal.UserID, ticket.OrganizationID, ticket.ConversationID)
+	}()
+	serveSSE(c, connection)
 }
 
 func (a *App) consumeVoiceTicket(ctx context.Context, value string, userID uuid.UUID) (voiceTicket, error) {
 	if value == "" {
-		return voiceTicket{}, fmt.Errorf("websocket ticket is required")
+		return voiceTicket{}, fmt.Errorf("stream ticket is required")
 	}
 	transaction, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -119,7 +128,7 @@ func (a *App) consumeVoiceTicket(ctx context.Context, value string, userID uuid.
 	var conversationID uuid.NullUUID
 	err = transaction.QueryRowContext(ctx, `SELECT organization_id, user_id, conversation_id FROM ws_tickets WHERE token_hash = $1 AND kind = 'voice' AND expires_at > now() AND used_at IS NULL FOR UPDATE`, hashToken(value)).Scan(&ticket.OrganizationID, &ticketUser, &conversationID)
 	if err != nil || ticketUser != userID || !conversationID.Valid {
-		return voiceTicket{}, fmt.Errorf("invalid or expired websocket ticket")
+		return voiceTicket{}, fmt.Errorf("invalid or expired stream ticket")
 	}
 	ticket.ConversationID = conversationID.UUID
 	var allowed bool
@@ -135,7 +144,7 @@ func (a *App) consumeVoiceTicket(ctx context.Context, value string, userID uuid.
 	return ticket, nil
 }
 
-func (a *App) runVoiceSocket(ctx context.Context, connection *websocket.Conn, userID, organizationID, ticketConversationID uuid.UUID) {
+func (a *App) runVoiceSocket(ctx context.Context, connection realtimeConnection, userID, organizationID, ticketConversationID uuid.UUID) {
 	state := &voiceState{pending: map[string]*voiceApproval{}}
 	defer func() {
 		state.turnMu.Lock()
@@ -159,7 +168,7 @@ func (a *App) runVoiceSocket(ctx context.Context, connection *websocket.Conn, us
 		if err != nil {
 			return
 		}
-		if messageType == websocket.BinaryMessage {
+		if messageType == streamBinaryMessage {
 			if state.transcription == nil {
 				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "voice session has not started"}})
 				continue
@@ -193,7 +202,7 @@ func (a *App) runVoiceSocket(ctx context.Context, connection *websocket.Conn, us
 			}
 			continue
 		}
-		if messageType != websocket.TextMessage {
+		if messageType != streamTextMessage {
 			continue
 		}
 		var event voiceEvent
@@ -242,7 +251,7 @@ func (a *App) runVoiceSocket(ctx context.Context, connection *websocket.Conn, us
 	}
 }
 
-func (a *App) startVoiceSession(ctx context.Context, connection *websocket.Conn, state *voiceState, userID, organizationID, ticketConversationID uuid.UUID, requestID string, data voiceSessionStartData) error {
+func (a *App) startVoiceSession(ctx context.Context, connection realtimeConnection, state *voiceState, userID, organizationID, ticketConversationID uuid.UUID, requestID string, data voiceSessionStartData) error {
 	if state.transcription != nil {
 		return fmt.Errorf("voice session has already started")
 	}
@@ -310,7 +319,7 @@ func (a *App) startVoiceSession(ctx context.Context, connection *websocket.Conn,
 	return nil
 }
 
-func (a *App) readVoiceTranscription(ctx context.Context, connection *websocket.Conn, state *voiceState, userID, organizationID uuid.UUID, stream provider.TranscriptionStream) {
+func (a *App) readVoiceTranscription(ctx context.Context, connection realtimeConnection, state *voiceState, userID, organizationID uuid.UUID, stream provider.TranscriptionStream) {
 	defer close(state.transcriptionDone)
 	for event := range stream.Events() {
 		if event.Err != nil {
@@ -333,7 +342,7 @@ func (a *App) readVoiceTranscription(ctx context.Context, connection *websocket.
 	}
 }
 
-func (a *App) queueVoiceTurn(ctx context.Context, connection *websocket.Conn, state *voiceState, userID, organizationID uuid.UUID, content string) {
+func (a *App) queueVoiceTurn(ctx context.Context, connection realtimeConnection, state *voiceState, userID, organizationID uuid.UUID, content string) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return
@@ -395,7 +404,7 @@ func (a *App) decideVoiceApproval(state *voiceState, approvalID string, approved
 	return true
 }
 
-func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, state *voiceState, userID, organizationID uuid.UUID, content string) {
+func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, state *voiceState, userID, organizationID uuid.UUID, content string) {
 	requestID := "voice-" + uuid.NewString()
 	conversationID := state.conversationID
 	endpointID := state.endpointID
@@ -664,7 +673,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection *websocket.Conn, stat
 	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.completed", RequestID: requestID, Data: gin.H{"conversationId": conversationID, "content": assistantContent, "citations": citations}})
 }
 
-func (a *App) streamVoiceWithoutTools(ctx context.Context, connection *websocket.Conn, state *voiceState, requestID string, endpoint provider.Endpoint, history []provider.Message, response *strings.Builder) error {
+func (a *App) streamVoiceWithoutTools(ctx context.Context, connection realtimeConnection, state *voiceState, requestID string, endpoint provider.Endpoint, history []provider.Message, response *strings.Builder) error {
 	return provider.StreamChat(ctx, endpoint, provider.ChatOptions{Messages: history}, func(delta string) error {
 		response.WriteString(delta)
 		return a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": delta}})
@@ -905,7 +914,7 @@ func normalizeVoiceToolPart(value string) string {
 	return strings.Trim(builder.String(), "_")
 }
 
-func (a *App) awaitVoiceApproval(ctx context.Context, connection *websocket.Conn, state *voiceState, userID, organizationID uuid.UUID, requestID string, messageID uuid.UUID, event *chatToolEvent, binding voiceToolBinding, call provider.ToolCall, arguments map[string]any, round int) (string, bool, error) {
+func (a *App) awaitVoiceApproval(ctx context.Context, connection realtimeConnection, state *voiceState, userID, organizationID uuid.UUID, requestID string, messageID uuid.UUID, event *chatToolEvent, binding voiceToolBinding, call provider.ToolCall, arguments map[string]any, round int) (string, bool, error) {
 	approvalID := uuid.NewString()
 	event.ApprovalID = approvalID
 	event.Status = "awaiting_approval"
@@ -999,7 +1008,7 @@ func (a *App) auditVoiceTool(_ context.Context, userID, organizationID uuid.UUID
 	_, _ = a.DB.ExecContext(auditContext, `INSERT INTO audit_events (user_id, organization_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, 'mcp_tool', $4, $5)`, userID, organizationID, action, resourceID, jsonRaw(details))
 }
 
-func (a *App) sendVoiceSocket(connection *websocket.Conn, state *voiceState, envelope models.SocketEnvelope) error {
+func (a *App) sendVoiceSocket(connection realtimeConnection, state *voiceState, envelope models.SocketEnvelope) error {
 	state.writeMu.Lock()
 	defer state.writeMu.Unlock()
 	state.sequence++

@@ -24,7 +24,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { VoiceOrb } from "@/components/assistant-ui/voice"
-import { api, socketURL } from "@/lib/api"
+import { api, eventStreamURL } from "@/lib/api"
+import { SSETransport } from "@/lib/sse-transport"
 import {
   mergeTranscriptionSegments,
   transcriptionJoinPath,
@@ -156,7 +157,7 @@ export function TranscriptionJoin() {
   const [microphoneActive, setMicrophoneActive] = useState(false)
   const [currentSourceId, setCurrentSourceId] = useState<string | null>(null)
 
-  const socketRef = useRef<WebSocket | null>(null)
+  const socketRef = useRef<SSETransport | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const contextRef = useRef<AudioContext | null>(null)
   const workletRef = useRef<AudioWorkletNode | null>(null)
@@ -345,7 +346,7 @@ export function TranscriptionJoin() {
   const startMicrophone = useCallback(
     async (attempt = captureAttemptRef.current) => {
       const socket = socketRef.current
-      if (!socket || socket.readyState !== WebSocket.OPEN)
+      if (!socket || socket.readyState !== SSETransport.OPEN)
         throw new Error("The room connection is not ready yet.")
       if (!navigator.mediaDevices?.getUserMedia)
         throw new Error("This browser does not support microphone capture.")
@@ -355,7 +356,7 @@ export function TranscriptionJoin() {
         !intentionalCloseRef.current &&
         captureAttemptRef.current === attempt &&
         socketRef.current === socket &&
-        socket.readyState === WebSocket.OPEN
+        socket.readyState === SSETransport.OPEN
       let stream: MediaStream | null = null
       let context: AudioContext | null = null
       let node: AudioWorkletNode | null = null
@@ -455,7 +456,7 @@ export function TranscriptionJoin() {
         })
         const nextLevel = Math.min(1, Math.sqrt(total / meter.length) * 3)
         setLevel(nextLevel)
-        if (socket.readyState === WebSocket.OPEN)
+        if (socket.readyState === SSETransport.OPEN)
           socket.send(
             JSON.stringify({ type: "source.level", level: nextLevel })
           )
@@ -471,7 +472,7 @@ export function TranscriptionJoin() {
         cleanupLocal()
         return
       }
-      if (socket.readyState !== WebSocket.OPEN)
+      if (socket.readyState !== SSETransport.OPEN)
         throw new Error(
           "The room connection closed while opening the microphone."
         )
@@ -501,8 +502,8 @@ export function TranscriptionJoin() {
         captureAttemptRef.current !== attempt
       )
         return
-      const socket = new WebSocket(
-        socketURL("/api/v1/ws/transcription", ticket.ticket)
+      const socket = new SSETransport(
+        eventStreamURL("/api/v1/streams/transcription", ticket.ticket)
       )
       socketRef.current = socket
       socket.onmessage = (message) => {
@@ -747,7 +748,7 @@ export function TranscriptionJoin() {
     if (microphoneActive) {
       captureAttemptRef.current += 1
       stopAudio()
-      if (socketRef.current?.readyState === WebSocket.OPEN)
+      if (socketRef.current?.readyState === SSETransport.OPEN)
         socketRef.current.send(JSON.stringify({ type: "source.pause" }))
       setState("paused")
       return

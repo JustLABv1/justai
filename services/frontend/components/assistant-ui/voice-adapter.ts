@@ -7,7 +7,8 @@ import {
   type VoiceSessionHelpers,
   type VoiceSessionControls,
 } from "@assistant-ui/react"
-import { api, socketURL } from "@/lib/api"
+import { api, eventStreamURL } from "@/lib/api"
+import { SSETransport } from "@/lib/sse-transport"
 
 type VoiceEnvelope = { type: string; data?: Record<string, unknown> }
 
@@ -95,7 +96,7 @@ async function setupVoiceSession(
   void audioContext.resume().catch(() => undefined)
 
   let stream: MediaStream | null = null
-  let socket: WebSocket | null = null
+  let socket: SSETransport | null = null
   let worklet: AudioWorkletNode | null = null
   let source: MediaStreamAudioSourceNode | null = null
   let silentGain: GainNode | null = null
@@ -131,7 +132,7 @@ async function setupVoiceSession(
   }
 
   const sendJSON = (value: unknown) => {
-    if (!socket || socket.readyState !== WebSocket.OPEN || closed) return
+    if (!socket || socket.readyState !== SSETransport.OPEN || closed) return
     socket.send(JSON.stringify(value))
   }
 
@@ -179,7 +180,7 @@ async function setupVoiceSession(
     closed = true
     options.onToolApproval?.(null)
     stopAssistantPlayback()
-    if (socket && socket.readyState === WebSocket.OPEN) socket.close()
+    if (socket && socket.readyState === SSETransport.OPEN) socket.close()
     worklet?.disconnect()
     source?.disconnect()
     silentGain?.disconnect()
@@ -187,7 +188,7 @@ async function setupVoiceSession(
     void audioContext.close().catch(() => undefined)
     // Keep the runtime mounted for the whole voice session. The root route is
     // promoted only after the session ends, otherwise changing the thread id
-    // would tear down the live microphone/WebSocket session.
+    // would tear down the live microphone/SSE session.
     notifyConversationCreated()
   }
 
@@ -210,11 +211,13 @@ async function setupVoiceSession(
       conversationId = response.conversation.id
       createdConversationId = conversationId
     }
-    const ticket = await api.post<{ ticket: string }>("/api/v1/ws/tickets", {
+    const ticket = await api.post<{ ticket: string }>("/api/v1/stream-tickets", {
       kind: "voice",
       conversationId,
     })
-    socket = new WebSocket(socketURL("/api/v1/ws/voice", ticket.ticket))
+    socket = new SSETransport(
+      eventStreamURL("/api/v1/streams/voice", ticket.ticket)
+    )
 
     socket.onopen = () => {
       resolveOpen?.()
@@ -414,7 +417,7 @@ async function setupVoiceSession(
     worklet.connect(silentGain)
     silentGain.connect(audioContext.destination)
     worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
-      if (!socket || socket.readyState !== WebSocket.OPEN || closed) return
+      if (!socket || socket.readyState !== SSETransport.OPEN || closed) return
       const samples = downsample(event.data, audioContext.sampleRate, 16000)
       let total = 0
       samples.forEach((value) => {
