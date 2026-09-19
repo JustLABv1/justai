@@ -126,7 +126,7 @@ func (a *App) createStreamTicket(c *gin.Context) {
 		return
 	}
 	expiresAt := time.Now().Add(2 * time.Minute)
-	if _, err := a.DB.ExecContext(c, `INSERT INTO ws_tickets (token_hash, user_id, organization_id, kind, conversation_id, session_id, source_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, hash, principal.UserID, organizationID, request.Kind, conversationID, sessionID, sourceID, expiresAt); err != nil {
+	if _, err := a.DB.ExecContext(c, `INSERT INTO stream_tickets (token_hash, user_id, organization_id, kind, conversation_id, session_id, source_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, hash, principal.UserID, organizationID, request.Kind, conversationID, sessionID, sourceID, expiresAt); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}

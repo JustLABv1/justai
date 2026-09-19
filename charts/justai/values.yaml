@@ -236,7 +236,13 @@ pyannote:
 ingress:
   enabled: true
   className: ""
-  annotations: {}
+  # SSE and its corresponding HTTP audio/control uploads keep in-memory
+  # realtime state on one backend replica. These ingress-nginx annotations
+  # preserve that affinity when the backend is scaled horizontally.
+  annotations:
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/session-cookie-name: justai-stream-affinity
+    nginx.ingress.kubernetes.io/session-cookie-samesite: Lax
   hosts:
     - host: justai.example.com
       paths:

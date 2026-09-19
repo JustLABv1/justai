@@ -77,10 +77,13 @@ POST /api/v1/transcription/bot-sources/:sourceId/tickets
   Authorization: Bearer <ingest-token>
   -> short-lived stream ticket
 GET /api/v1/streams/transcription?ticket=<ticket>
-  -> SSE events, beginning with transport.ready and its streamId
+  -> SSE events, beginning with transport.ready and its streamId,
+     uploadToken, and resumeToken
 POST /api/v1/streams/:streamId/audio
+  X-Stream-Token: <uploadToken>
   -> batched audio ingress
 POST /api/v1/streams/:streamId/events
+  X-Stream-Token: <uploadToken>
   -> JSON controls
 ```
 
@@ -95,7 +98,7 @@ After the SSE stream emits `transport.ready`, the adapter POSTs this JSON to
 the returned stream's `/events` endpoint:
 
 ```json
-{"type":"transcription.start","sessionId":"...","sourceId":"..."}
+{"type":"transcription.start","sessionId":"...","sourceId":"...","transportSequence":1}
 ```
 
 The `/audio` request body contains one or more frames. Each frame is prefixed
@@ -109,10 +112,17 @@ by its 4-byte big-endian length; the frame itself uses this little-endian format
 N bytes  mono signed PCM16 audio
 ```
 
-The adapter can POST `source.level`, `source.pause`, `source.resume`, `ping`,
-and `transcription.stop` JSON events. The server emits the same
+Every control carries a strictly increasing `transportSequence`; retries are
+idempotent and stale duplicates are ignored. The adapter can POST
+`source.level`, `source.pause`, `source.resume`, `ping`, and
+`transcription.stop` JSON events. The server emits the same
 `transcription.partial`, `transcription.final`, source, and error events
 that browser captures receive.
+
+SSE events carry monotonically increasing `id` fields and the server retains a
+bounded replay window. Reconnect within 15 seconds with
+`GET /api/v1/streams/transcription?resume=<resumeToken>&lastEventId=<id>`.
+The upload and resume tokens are bearer secrets and must never be logged.
 
 Rotate a bot token with:
 

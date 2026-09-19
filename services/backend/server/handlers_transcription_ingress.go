@@ -324,7 +324,7 @@ func (a *App) createTranscriptionBotStreamTicket(c *gin.Context) {
 		return
 	}
 	expiresAt := time.Now().Add(2 * time.Minute)
-	if _, err := transaction.ExecContext(c, `INSERT INTO ws_tickets (token_hash, user_id, organization_id, kind, session_id, source_id, expires_at) VALUES ($1, $2, $3, 'transcription-capture', $4, $5, $6)`, ticketHash, userID, organizationID, sessionID, sourceID, expiresAt); err != nil {
+	if _, err := transaction.ExecContext(c, `INSERT INTO stream_tickets (token_hash, user_id, organization_id, kind, session_id, source_id, expires_at) VALUES ($1, $2, $3, 'transcription-capture', $4, $5, $6)`, ticketHash, userID, organizationID, sessionID, sourceID, expiresAt); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}

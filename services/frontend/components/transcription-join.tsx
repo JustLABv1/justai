@@ -505,6 +505,8 @@ export function TranscriptionJoin() {
       const socket = new SSETransport(
         eventStreamURL("/api/v1/streams/transcription", ticket.ticket)
       )
+      socket.ontransporterror = (transportError) =>
+        setError(transportError.message)
       socketRef.current = socket
       socket.onmessage = (message) => {
         if (

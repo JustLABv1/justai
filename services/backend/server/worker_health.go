@@ -244,6 +244,22 @@ func (a *App) metricsHandler(c *gin.Context) {
 		}
 		fmt.Fprintf(&builder, "justai_worker_heartbeat_age_seconds{worker=%q} %d\n", view.Name, age)
 	}
+	builder.WriteString("# HELP justai_http_streams_active Active SSE realtime streams.\n# TYPE justai_http_streams_active gauge\n")
+	fmt.Fprintf(&builder, "justai_http_streams_active %d\n", a.httpStreamMetrics.active.Load())
+	builder.WriteString("# HELP justai_http_stream_upload_bytes_total Bytes accepted by realtime HTTP audio uploads.\n# TYPE justai_http_stream_upload_bytes_total counter\n")
+	fmt.Fprintf(&builder, "justai_http_stream_upload_bytes_total %d\n", a.httpStreamMetrics.uploadBytes.Load())
+	builder.WriteString("# HELP justai_http_stream_audio_frames_total Audio frames accepted by realtime HTTP uploads.\n# TYPE justai_http_stream_audio_frames_total counter\n")
+	fmt.Fprintf(&builder, "justai_http_stream_audio_frames_total %d\n", a.httpStreamMetrics.audioFrames.Load())
+	builder.WriteString("# HELP justai_http_stream_rejected_total Rejected realtime stream requests.\n# TYPE justai_http_stream_rejected_total counter\n")
+	fmt.Fprintf(&builder, "justai_http_stream_rejected_total %d\n", a.httpStreamMetrics.rejected.Load())
+	builder.WriteString("# HELP justai_http_stream_control_dedupes_total Duplicate or stale controls ignored.\n# TYPE justai_http_stream_control_dedupes_total counter\n")
+	fmt.Fprintf(&builder, "justai_http_stream_control_dedupes_total %d\n", a.httpStreamMetrics.controlDedupes.Load())
+	builder.WriteString("# HELP justai_http_stream_queue_depth Queued realtime input and output items.\n# TYPE justai_http_stream_queue_depth gauge\n")
+	fmt.Fprintf(&builder, "justai_http_stream_queue_depth %d\n", a.httpStreamQueueDepth())
+	builder.WriteString("# HELP justai_http_stream_upload_duration_seconds_total Cumulative realtime upload handler time.\n# TYPE justai_http_stream_upload_duration_seconds_total counter\n")
+	fmt.Fprintf(&builder, "justai_http_stream_upload_duration_seconds_total %.6f\n", float64(a.httpStreamMetrics.uploadMicros.Load())/1_000_000)
+	builder.WriteString("# HELP justai_http_stream_upload_requests_total Realtime audio and control upload requests.\n# TYPE justai_http_stream_upload_requests_total counter\n")
+	fmt.Fprintf(&builder, "justai_http_stream_upload_requests_total %d\n", a.httpStreamMetrics.uploadRequests.Load())
 	c.Data(http.StatusOK, "text/plain; version=0.0.4", []byte(builder.String()))
 }
 

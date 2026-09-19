@@ -912,7 +912,7 @@ func (a *App) createCaptureStreamTicket(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if _, err := transaction.ExecContext(c, `INSERT INTO ws_tickets (token_hash, user_id, organization_id, kind, session_id, source_id, expires_at) VALUES ($1, $2, $3, 'transcription-capture', $4, $5, $6)`, hash, userID, organizationID, sessionID, sourceID, ticketExpires); err != nil {
+	if _, err := transaction.ExecContext(c, `INSERT INTO stream_tickets (token_hash, user_id, organization_id, kind, session_id, source_id, expires_at) VALUES ($1, $2, $3, 'transcription-capture', $4, $5, $6)`, hash, userID, organizationID, sessionID, sourceID, ticketExpires); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -924,6 +924,15 @@ func (a *App) createCaptureStreamTicket(c *gin.Context) {
 }
 
 func (a *App) transcriptionSSE(c *gin.Context) {
+	if resume := c.Query("resume"); resume != "" {
+		connection := a.lookupHTTPStreamResume(resume)
+		if connection == nil {
+			writeError(c, http.StatusUnauthorized, fmt.Errorf("invalid stream resume token"))
+			return
+		}
+		serveSSE(c, connection)
+		return
+	}
 	info, err := a.consumeTranscriptionTicket(c, c.Query("ticket"))
 	if err != nil {
 		writeError(c, http.StatusUnauthorized, err)
@@ -931,16 +940,10 @@ func (a *App) transcriptionSSE(c *gin.Context) {
 	}
 	connection := newHTTPStreamConnection(info.UserID, info.OrganizationID)
 	a.registerHTTPStream(connection)
-	defer func() {
-		select {
-		case <-connection.done:
-		case <-time.After(time.Second):
-		}
-		a.unregisterHTTPStream(connection)
-	}()
 	streamContext := c.Copy()
+	streamContext.Request = c.Request.WithContext(connection.ctx)
 	go func() {
-		defer connection.Close()
+		defer a.unregisterHTTPStream(connection)
 		a.runRoomTranscriptionSocket(streamContext, connection, info)
 	}()
 	serveSSE(c, connection)
@@ -1665,12 +1668,12 @@ func (a *App) consumeTranscriptionTicket(ctx context.Context, value string) (tra
 	defer transaction.Rollback()
 	var info transcriptionTicketInfo
 	var ticketUser uuid.UUID
-	err = transaction.QueryRowContext(ctx, `SELECT user_id, organization_id, COALESCE(session_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(source_id, '00000000-0000-0000-0000-000000000000'::uuid), kind FROM ws_tickets WHERE token_hash = $1 AND kind IN ('transcription', 'transcription-viewer', 'transcription-capture') AND expires_at > now() AND used_at IS NULL FOR UPDATE`, hash).Scan(&ticketUser, &info.OrganizationID, &info.SessionID, &info.SourceID, &info.Kind)
+	err = transaction.QueryRowContext(ctx, `SELECT user_id, organization_id, COALESCE(session_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(source_id, '00000000-0000-0000-0000-000000000000'::uuid), kind FROM stream_tickets WHERE token_hash = $1 AND kind IN ('transcription', 'transcription-viewer', 'transcription-capture') AND expires_at > now() AND used_at IS NULL FOR UPDATE`, hash).Scan(&ticketUser, &info.OrganizationID, &info.SessionID, &info.SourceID, &info.Kind)
 	if err != nil {
 		return transcriptionTicketInfo{}, fmt.Errorf("invalid or expired stream ticket")
 	}
 	info.UserID = ticketUser
-	if _, err := transaction.ExecContext(ctx, `UPDATE ws_tickets SET used_at = now() WHERE token_hash = $1`, hash); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE stream_tickets SET used_at = now() WHERE token_hash = $1`, hash); err != nil {
 		return transcriptionTicketInfo{}, err
 	}
 	if err := transaction.Commit(); err != nil {

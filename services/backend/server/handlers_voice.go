@@ -91,6 +91,15 @@ type voiceState struct {
 
 func (a *App) voiceSSE(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
+	if resume := c.Query("resume"); resume != "" {
+		connection := a.lookupHTTPStreamResume(resume)
+		if connection == nil || connection.userID != principal.UserID {
+			writeError(c, http.StatusUnauthorized, fmt.Errorf("invalid stream resume token"))
+			return
+		}
+		serveSSE(c, connection)
+		return
+	}
 	ticket, err := a.consumeVoiceTicket(c.Request.Context(), c.Query("ticket"), principal.UserID)
 	if err != nil {
 		writeError(c, http.StatusUnauthorized, err)
@@ -98,18 +107,9 @@ func (a *App) voiceSSE(c *gin.Context) {
 	}
 	connection := newHTTPStreamConnection(principal.UserID, ticket.OrganizationID)
 	a.registerHTTPStream(connection)
-	defer func() {
-		// Keep the upload half alive briefly so a final session.stop POST issued
-		// immediately before EventSource.close() can still be delivered.
-		select {
-		case <-connection.done:
-		case <-time.After(time.Second):
-		}
-		a.unregisterHTTPStream(connection)
-	}()
 	go func() {
-		defer connection.Close()
-		a.runVoiceSocket(c.Request.Context(), connection, principal.UserID, ticket.OrganizationID, ticket.ConversationID)
+		defer a.unregisterHTTPStream(connection)
+		a.runVoiceSocket(connection.ctx, connection, principal.UserID, ticket.OrganizationID, ticket.ConversationID)
 	}()
 	serveSSE(c, connection)
 }
@@ -126,7 +126,7 @@ func (a *App) consumeVoiceTicket(ctx context.Context, value string, userID uuid.
 	var ticket voiceTicket
 	var ticketUser uuid.UUID
 	var conversationID uuid.NullUUID
-	err = transaction.QueryRowContext(ctx, `SELECT organization_id, user_id, conversation_id FROM ws_tickets WHERE token_hash = $1 AND kind = 'voice' AND expires_at > now() AND used_at IS NULL FOR UPDATE`, hashToken(value)).Scan(&ticket.OrganizationID, &ticketUser, &conversationID)
+	err = transaction.QueryRowContext(ctx, `SELECT organization_id, user_id, conversation_id FROM stream_tickets WHERE token_hash = $1 AND kind = 'voice' AND expires_at > now() AND used_at IS NULL FOR UPDATE`, hashToken(value)).Scan(&ticket.OrganizationID, &ticketUser, &conversationID)
 	if err != nil || ticketUser != userID || !conversationID.Valid {
 		return voiceTicket{}, fmt.Errorf("invalid or expired stream ticket")
 	}
@@ -135,7 +135,7 @@ func (a *App) consumeVoiceTicket(ctx context.Context, value string, userID uuid.
 	if err := transaction.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND organization_id = $3 AND (user_id = $2 OR visibility = 'workspace'))`, ticket.ConversationID, userID, ticket.OrganizationID).Scan(&allowed); err != nil || !allowed {
 		return voiceTicket{}, fmt.Errorf("conversation is not available")
 	}
-	if _, err := transaction.ExecContext(ctx, `UPDATE ws_tickets SET used_at = now() WHERE token_hash = $1`, hashToken(value)); err != nil {
+	if _, err := transaction.ExecContext(ctx, `UPDATE stream_tickets SET used_at = now() WHERE token_hash = $1`, hashToken(value)); err != nil {
 		return voiceTicket{}, err
 	}
 	if err := transaction.Commit(); err != nil {
@@ -170,7 +170,7 @@ func (a *App) runVoiceSocket(ctx context.Context, connection realtimeConnection,
 		}
 		if messageType == streamBinaryMessage {
 			if state.transcription == nil {
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "voice session has not started"}})
+				_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "voice session has not started"}})
 				continue
 			}
 			frame := parseAudioFrame(payload)
@@ -186,7 +186,7 @@ func (a *App) runVoiceSocket(ctx context.Context, connection realtimeConnection,
 					state.voiceActive = false
 					if committer, ok := state.transcription.(provider.TurnCommitter); ok {
 						if err := committer.CommitTurn(); err != nil && ctx.Err() == nil {
-							_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "voice turn commit failed: " + err.Error()}})
+							_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "voice turn commit failed: " + err.Error()}})
 						}
 					}
 				}
@@ -198,7 +198,7 @@ func (a *App) runVoiceSocket(ctx context.Context, connection realtimeConnection,
 				}
 			}
 			if err := state.transcription.SendPCM(ctx, frame.PCM, frame.SampleRate); err != nil && ctx.Err() == nil {
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "voice audio transport failed: " + err.Error()}})
+				_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "voice audio transport failed: " + err.Error()}})
 			}
 			continue
 		}
@@ -207,46 +207,46 @@ func (a *App) runVoiceSocket(ctx context.Context, connection realtimeConnection,
 		}
 		var event voiceEvent
 		if err := json.Unmarshal(payload, &event); err != nil {
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "invalid voice event"}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "invalid voice event"}})
 			continue
 		}
 		switch event.Type {
 		case "session.start":
 			var data voiceSessionStartData
 			if err := json.Unmarshal(event.Data, &data); err != nil {
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "invalid session.start payload"}})
+				_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "invalid session.start payload"}})
 				continue
 			}
 			if err := a.startVoiceSession(ctx, connection, state, userID, organizationID, ticketConversationID, event.RequestID, data); err != nil {
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": err.Error()}})
+				_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": err.Error()}})
 			}
 		case "tool.approve", "tool.reject", "tool.decision":
 			var data voiceApprovalData
 			if err := json.Unmarshal(event.Data, &data); err != nil || data.ApprovalID == "" {
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "approvalId is required"}})
+				_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "approvalId is required"}})
 				continue
 			}
 			if event.Type == "tool.reject" {
 				data.Approved = false
 			}
 			if !a.decideVoiceApproval(state, data.ApprovalID, data.Approved) {
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "approval is no longer pending"}})
+				_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "approval is no longer pending"}})
 			}
 		case "turn.cancel", "cancel":
 			if a.cancelVoiceTurn(state) {
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "turn.cancelled", RequestID: event.RequestID, Data: gin.H{"message": "voice turn cancelled"}})
+				_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "turn.cancelled", RequestID: event.RequestID, Data: gin.H{"message": "voice turn cancelled"}})
 			}
 		case "session.stop":
 			if state.transcription != nil {
 				if err := state.transcription.Commit(); err != nil {
-					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "voice finalization failed: " + err.Error()}})
+					_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "voice finalization failed: " + err.Error()}})
 				}
 			}
 		case "source.level", "input.level":
 			// Audio levels are rendered locally; accepting the event keeps the
 			// protocol compatible with the existing transcription worklet.
 		default:
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "unsupported voice event: " + event.Type}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: event.RequestID, Data: gin.H{"message": "unsupported voice event: " + event.Type}})
 		}
 	}
 }
@@ -308,7 +308,7 @@ func (a *App) startVoiceSession(ctx context.Context, connection realtimeConnecti
 	state.transcription = stream
 	state.transcriptionDone = make(chan struct{})
 	go a.readVoiceTranscription(ctx, connection, state, userID, organizationID, stream)
-	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "session.ready", RequestID: requestID, Data: gin.H{
+	_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "session.ready", RequestID: requestID, Data: gin.H{
 		"conversationId":          conversationID,
 		"endpointId":              endpointID,
 		"transcriptionEndpointId": transcriptionEndpointID,
@@ -324,7 +324,7 @@ func (a *App) readVoiceTranscription(ctx context.Context, connection realtimeCon
 	for event := range stream.Events() {
 		if event.Err != nil {
 			if ctx.Err() == nil {
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "transcription provider error: " + event.Err.Error()}})
+				_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", Data: gin.H{"message": "transcription provider error: " + event.Err.Error()}})
 			}
 			continue
 		}
@@ -334,9 +334,9 @@ func (a *App) readVoiceTranscription(ctx context.Context, connection realtimeCon
 		}
 		switch event.Kind {
 		case "partial":
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "input.transcript.partial", Data: gin.H{"text": text}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "input.transcript.partial", Data: gin.H{"text": text}})
 		case "final":
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "input.transcript.final", Data: gin.H{"text": text}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "input.transcript.final", Data: gin.H{"text": text}})
 			a.queueVoiceTurn(ctx, connection, state, userID, organizationID, text)
 		}
 	}
@@ -411,30 +411,30 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 	indexing, err := a.conversationHasIndexingKnowledge(ctx, conversationID, organizationID, userID, nil)
 	if err != nil {
 		if ctx.Err() == nil {
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "conversation context could not be checked: " + err.Error()}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "conversation context could not be checked: " + err.Error()}})
 		}
 		return
 	}
 	if indexing {
 		if ctx.Err() == nil {
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "attached Knowledge is still indexing; detach it or wait for indexing to finish"}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "attached Knowledge is still indexing; detach it or wait for indexing to finish"}})
 		}
 		return
 	}
 	if _, err := a.persistAssistantUITextMessage(ctx, conversationID, "user", content, nil); err != nil {
 		if ctx.Err() == nil {
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
 		}
 		return
 	}
 	if _, err := a.DB.ExecContext(ctx, `UPDATE conversations SET title = CASE WHEN title = $2 THEN $3 ELSE title END, updated_at = now() WHERE id = $1`, conversationID, defaultConversationTitle, conversationTitle(content)); err != nil {
 		if ctx.Err() == nil {
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
 		}
 		return
 	}
-	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
-	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
+	_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "message.accepted", RequestID: requestID, Data: gin.H{"conversationId": conversationID}})
+	_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "retrieval.started", RequestID: requestID, Data: gin.H{"query": content}})
 	resolution := knowledgeContextResolution{}
 	if a.syncKnowledgeCatalog(ctx) == nil {
 		if resolved, resolveErr := a.resolveKnowledgeContext(ctx, organizationID, userID, conversationID, content, nil, nil); resolveErr == nil {
@@ -450,11 +450,11 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 	if err != nil {
 		citations = nil
 	}
-	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "retrieval.completed", RequestID: requestID, Data: gin.H{"citations": citations}})
+	_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "retrieval.completed", RequestID: requestID, Data: gin.H{"citations": citations}})
 	history, err := a.conversationHistory(ctx, conversationID)
 	if err != nil {
 		if ctx.Err() == nil {
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
 		}
 		return
 	}
@@ -464,7 +464,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 	endpoint, err := a.providerEndpoint(ctx, endpointID)
 	if err != nil {
 		if ctx.Err() == nil {
-			_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "endpoint could not be loaded: " + err.Error()}})
+			_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": "endpoint could not be loaded: " + err.Error()}})
 		}
 		return
 	}
@@ -482,7 +482,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 			toolHistory, historyErr := a.conversationToolHistory(ctx, conversationID)
 			if historyErr != nil {
 				if ctx.Err() == nil {
-					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": historyErr.Error()}})
+					_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": historyErr.Error()}})
 				}
 				return
 			}
@@ -499,7 +499,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 				if reason := toolLoopGuard.stopReason(); reason != chatToolLoopContinue {
 					message := chatToolLoopStopMessage(reason)
 					response.WriteString(message)
-					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
+					_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
 					break
 				}
 				response.Reset()
@@ -507,7 +507,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 				err = provider.StreamChatWithTools(ctx, endpoint, provider.ToolChatOptions{Messages: toolMessages, Tools: definitions, Model: endpoint.ChatModel}, func(event provider.ToolChatEvent) error {
 					if event.Delta != "" {
 						response.WriteString(event.Delta)
-						return a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": event.Delta}})
+						return a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": event.Delta}})
 					}
 					if len(event.ToolCalls) > 0 {
 						calls = append(calls, event.ToolCalls...)
@@ -516,7 +516,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 				})
 				if err != nil {
 					if ctx.Err() == nil {
-						_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
+						_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
 					}
 					return
 				}
@@ -543,7 +543,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 						outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: map[string]any{}, result: toolResult, failed: true})
 						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: toolResult})
 						if messageID != uuid.Nil {
-							_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
+							_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
 						}
 						continue
 					}
@@ -556,7 +556,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 							messageID := a.persistChatToolEvent(ctx, conversationID, event)
 							toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: errorText})
 							if messageID != uuid.Nil {
-								_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
+								_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: chatToolEventData(messageID, event)})
 							}
 							continue
 						}
@@ -578,7 +578,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 							event.Status = "failed"
 							event.Error = approvalErr.Error()
 							a.updateChatToolEvent(ctx, conversationID, messageID, event)
-							_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": approvalErr.Error()}})
+							_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": approvalErr.Error()}})
 							return
 						}
 					} else if !binding.Builtin {
@@ -600,7 +600,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 						event.ApprovalID = approvalID
 						event.Error = "declined by user"
 						a.updateChatToolEvent(ctx, conversationID, messageID, event)
-						_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": "declined by user"}})
+						_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": "declined by user"}})
 						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: "The user declined this MCP tool call."})
 						continue
 					}
@@ -627,7 +627,7 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 						event.Status = "failed"
 						event.Error = callErr.Error()
 						a.updateChatToolEvent(ctx, conversationID, messageID, event)
-						_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": callErr.Error()}})
+						_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": false, "error": callErr.Error()}})
 						toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: toolResult})
 						continue
 					}
@@ -637,20 +637,20 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 					event.ResultPreview = toolResultPreview(result)
 					event.Error = ""
 					a.updateChatToolEvent(ctx, conversationID, messageID, event)
-					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": true}})
+					_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "tool.completed", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "toolName": binding.ToolName, "success": true}})
 					toolMessages = append(toolMessages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: string(result)})
 				}
 				if stopReason := toolLoopGuard.observeRound(outcomes); stopReason != chatToolLoopContinue {
 					message := chatToolLoopStopMessage(stopReason)
 					response.WriteString(message)
-					_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
+					_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
 					break
 				}
 			}
 			if lastHadTools && toolRounds >= maxChatToolRounds && strings.TrimSpace(response.String()) == "" {
 				message := fmt.Sprintf("I stopped after %d MCP tool rounds to keep this turn safe.", maxChatToolRounds)
 				response.WriteString(message)
-				_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
+				_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": message}})
 			}
 		} else {
 			err = a.streamVoiceWithoutTools(ctx, connection, state, requestID, endpoint, history, &response)
@@ -666,17 +666,17 @@ func (a *App) runVoiceTurn(ctx context.Context, connection realtimeConnection, s
 		assistantContent = "I couldn't produce a response for that request."
 	}
 	if _, err := a.persistAssistantUITextMessage(ctx, conversationID, "assistant", assistantContent, citations); err != nil {
-		_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
+		_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "error", RequestID: requestID, Data: gin.H{"message": err.Error()}})
 		return
 	}
 	_, _ = a.DB.ExecContext(ctx, `UPDATE conversations SET endpoint_id = $2, updated_at = now() WHERE id = $1`, conversationID, endpointID)
-	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.completed", RequestID: requestID, Data: gin.H{"conversationId": conversationID, "content": assistantContent, "citations": citations}})
+	_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "message.completed", RequestID: requestID, Data: gin.H{"conversationId": conversationID, "content": assistantContent, "citations": citations}})
 }
 
 func (a *App) streamVoiceWithoutTools(ctx context.Context, connection realtimeConnection, state *voiceState, requestID string, endpoint provider.Endpoint, history []provider.Message, response *strings.Builder) error {
 	return provider.StreamChat(ctx, endpoint, provider.ChatOptions{Messages: history}, func(delta string) error {
 		response.WriteString(delta)
-		return a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": delta}})
+		return a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "message.delta", RequestID: requestID, Data: gin.H{"delta": delta}})
 	})
 }
 
@@ -923,7 +923,7 @@ func (a *App) awaitVoiceApproval(ctx context.Context, connection realtimeConnect
 	state.pendingMu.Lock()
 	state.pending[approvalID] = pending
 	state.pendingMu.Unlock()
-	_ = a.sendVoiceSocket(connection, state, models.SocketEnvelope{Type: "tool.approval_required", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "serverId": binding.ServerID, "serverName": binding.ServerName, "toolName": binding.ToolName, "arguments": arguments, "round": round}})
+	_ = a.sendVoiceEvent(connection, state, models.SocketEnvelope{Type: "tool.approval_required", RequestID: requestID, Data: gin.H{"approvalId": approvalID, "callId": call.ID, "serverId": binding.ServerID, "serverName": binding.ServerName, "toolName": binding.ToolName, "arguments": arguments, "round": round}})
 	timeout := time.NewTimer(2 * time.Minute)
 	defer timeout.Stop()
 	select {
@@ -1008,7 +1008,7 @@ func (a *App) auditVoiceTool(_ context.Context, userID, organizationID uuid.UUID
 	_, _ = a.DB.ExecContext(auditContext, `INSERT INTO audit_events (user_id, organization_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, 'mcp_tool', $4, $5)`, userID, organizationID, action, resourceID, jsonRaw(details))
 }
 
-func (a *App) sendVoiceSocket(connection realtimeConnection, state *voiceState, envelope models.SocketEnvelope) error {
+func (a *App) sendVoiceEvent(connection realtimeConnection, state *voiceState, envelope models.SocketEnvelope) error {
 	state.writeMu.Lock()
 	defer state.writeMu.Unlock()
 	state.sequence++

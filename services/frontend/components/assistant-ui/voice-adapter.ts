@@ -218,6 +218,7 @@ async function setupVoiceSession(
     socket = new SSETransport(
       eventStreamURL("/api/v1/streams/voice", ticket.ticket)
     )
+    socket.ontransporterror = (error) => options.onError?.(error)
 
     socket.onopen = () => {
       resolveOpen?.()

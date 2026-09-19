@@ -694,6 +694,8 @@ export function LiveTranscriptionView({
           ticketResponse.ticket
         )
       )
+      socket.ontransporterror = (transportError) =>
+        setError(transportError.message)
       viewerSocketRef.current = socket
       let opened = false
       let openTimer: number | null = null
@@ -1060,6 +1062,8 @@ export function LiveTranscriptionView({
           ticketResponse.ticket
         )
       )
+      socket.ontransporterror = (transportError) =>
+        setError(transportError.message)
       captureSocketRef.current = socket
       socket.onmessage = (message) => {
         if (captureAttemptRef.current !== attempt) return
@@ -2620,10 +2624,11 @@ export function LiveTranscriptionView({
                 </p>
                 <p>
                   3. Read the <code>streamId</code> from{" "}
-                  <code>transport.ready</code>, POST{" "}
-                  <code>transcription.start</code> to its <code>/events</code>
-                  endpoint, and batched PCM16 frames to <code>/audio</code> using
-                  the <code>{botSetup.protocol}</code> format.
+                  <code>transport.ready</code>. Use its <code>uploadToken</code>{" "}
+                  as <code>X-Stream-Token</code>, POST sequenced{" "}
+                  <code>transcription.start</code> to <code>/events</code>, and
+                  batched PCM16 frames to <code>/audio</code> using the{" "}
+                  <code>{botSetup.protocol}</code> format.
                 </p>
               </div>
               <DialogFooter>

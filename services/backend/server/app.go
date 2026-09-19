@@ -43,6 +43,8 @@ type App struct {
 	workerHealth          map[string]workerHealthStatus
 	httpStreamsMu         sync.RWMutex
 	httpStreams           map[uuid.UUID]*httpStreamConnection
+	httpStreamResumes     map[[32]byte]*httpStreamConnection
+	httpStreamMetrics     httpStreamMetrics
 	instanceID            string
 }
 
@@ -66,6 +68,7 @@ func New(cfg config.Config, db *sql.DB) *App {
 		repositoryImportSlots: make(chan struct{}, 2),
 		workerHealth:          make(map[string]workerHealthStatus),
 		httpStreams:           make(map[uuid.UUID]*httpStreamConnection),
+		httpStreamResumes:     make(map[[32]byte]*httpStreamConnection),
 		instanceID:            uuid.NewString(),
 	}
 	application.RAG.SetSecretBox(application.Secrets)
@@ -229,7 +232,7 @@ func (a *App) Router() *gin.Engine {
 	org.DELETE("/endpoints/:id", a.deleteEndpoint)
 	org.POST("/endpoints/:id/test", a.platformFeature("ai"), a.testEndpoint)
 	org.GET("/endpoints/:id/models", a.platformFeature("ai"), a.discoverEndpointModels)
-	org.POST("/stream-tickets", a.platformFeature("ai"), a.createStreamTicket)
+	org.POST("/stream-tickets", a.platformFeature("ai"), a.scopedRateLimit("stream-ticket", 120), a.createStreamTicket)
 	org.POST("/voice/speech", a.platformFeature("voice"), a.synthesizeVoiceSpeech)
 	org.GET("/transcription/sessions", a.platformFeature("transcription"), a.listTranscriptionSessions)
 	org.POST("/transcription/sessions", a.platformFeature("transcription"), a.createTranscriptionSession)
