@@ -16,6 +16,8 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { SignalBars } from "@/components/live-transcription-primitives"
+import { RealtimeConnectionStatus } from "@/components/realtime-connection-status"
+import type { SSEConnectionState } from "@/lib/sse-transport"
 import {
   formatTranscriptionOffset,
   groupTranscriptionSegments,
@@ -37,6 +39,8 @@ export function TranscriptionParticipantRoom({
   snapshot,
   currentSourceId,
   connectionState,
+  transportStatus,
+  interruptionAt,
   error,
   level,
   microphoneActive,
@@ -49,6 +53,8 @@ export function TranscriptionParticipantRoom({
   snapshot: LiveTranscriptionSnapshot
   currentSourceId: string | null
   connectionState: "connecting" | "connected" | "paused"
+  transportStatus: SSEConnectionState
+  interruptionAt?: Date | null
   error: string
   level: number
   microphoneActive: boolean
@@ -208,7 +214,7 @@ export function TranscriptionParticipantRoom({
                 ) : (
                   <Mic data-icon="inline-start" />
                 )}
-                {microphoneActive ? "Stop microphone" : "Start microphone"}
+                {microphoneActive ? "Pause microphone" : "Start microphone"}
               </Button>
               <Button onClick={onLeaveRoom} size="sm" variant="ghost">
                 <LogOut data-icon="inline-start" /> Leave room
@@ -216,6 +222,11 @@ export function TranscriptionParticipantRoom({
             </div>
           </CardHeader>
         </Card>
+
+        <RealtimeConnectionStatus
+          interruptionAt={interruptionAt}
+          status={transportStatus}
+        />
 
         {error ? (
           <Alert variant="destructive">
@@ -374,7 +385,7 @@ export function TranscriptionParticipantRoom({
               <CardHeader className="gap-1 py-4">
                 <CardTitle className="text-sm">Your microphone</CardTitle>
                 <CardDescription>
-                  Stopping capture keeps you in the room and preserves the live
+                  Pausing capture keeps you in the room and preserves the live
                   feed.
                 </CardDescription>
               </CardHeader>

@@ -26,6 +26,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { VoiceOrb } from "@/components/assistant-ui/voice"
 import { api, eventStreamURL } from "@/lib/api"
 import { SSETransport } from "@/lib/sse-transport"
+import type { SSEConnectionState } from "@/lib/sse-transport"
+import { initialRealtimeState } from "@/components/realtime-connection-status"
 import {
   mergeTranscriptionSegments,
   transcriptionJoinPath,
@@ -145,6 +147,9 @@ export function TranscriptionJoin() {
   const [state, setState] = useState<JoinState>("form")
   const [title, setTitle] = useState("")
   const [error, setError] = useState("")
+  const [transportStatus, setTransportStatus] =
+    useState<SSEConnectionState>(initialRealtimeState)
+  const [interruptionAt, setInterruptionAt] = useState<Date | null>(null)
   const [level, setLevel] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [restoring, setRestoring] = useState(true)
@@ -505,8 +510,21 @@ export function TranscriptionJoin() {
       const socket = new SSETransport(
         eventStreamURL("/api/v1/streams/transcription", ticket.ticket)
       )
-      socket.ontransporterror = (transportError) =>
-        setError(transportError.message)
+      socket.onconnectionstatechange = (next) => {
+        setTransportStatus(next)
+        if (next.state === "reconnecting" || next.audioQuality !== "good") {
+          setInterruptionAt(new Date())
+        }
+      }
+      socket.ontransporterror = (transportError) => {
+        if (
+          !["stream_reconnecting", "audio_backpressure"].includes(
+            transportError.code
+          )
+        ) {
+          setError(transportError.message)
+        }
+      }
       socketRef.current = socket
       socket.onmessage = (message) => {
         if (
@@ -817,6 +835,7 @@ export function TranscriptionJoin() {
         }
         currentSourceId={currentSourceId}
         error={error}
+        interruptionAt={interruptionAt}
         level={level}
         microphoneActive={microphoneActive}
         onLeaveRoom={leaveRoom}
@@ -825,6 +844,7 @@ export function TranscriptionJoin() {
         partialSourceId={partialSourceId}
         partialSpeakerId={partialSpeakerId}
         snapshot={snapshot}
+        transportStatus={transportStatus}
       />
     )
   }

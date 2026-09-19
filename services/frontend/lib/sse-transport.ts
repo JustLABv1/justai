@@ -3,6 +3,13 @@ import { resolveAPIURL } from "@/lib/api"
 type MessageHandler = ((event: MessageEvent<string>) => void) | null
 type EventHandler = ((event: Event) => void) | null
 
+export type SSEConnectionState = {
+  state: "connecting" | "live" | "reconnecting" | "degraded" | "disconnected"
+  audioQuality: "good" | "delayed" | "dropping"
+  attempt: number
+  maxAttempts: number
+}
+
 export class SSETransportError extends Error {
   constructor(
     message: string,
@@ -29,6 +36,7 @@ export class SSETransport {
   onerror: EventHandler = null
   onclose: EventHandler = null
   ontransporterror: ((error: SSETransportError) => void) | null = null
+  onconnectionstatechange: ((state: SSEConnectionState) => void) | null = null
 
   private source: EventSource | null = null
   private readonly path: string
@@ -48,6 +56,12 @@ export class SSETransport {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private closeListeners = new Set<EventHandler>()
   private audioAbort = new AbortController()
+  private connectionState: SSEConnectionState = {
+    state: "connecting",
+    audioQuality: "good",
+    attempt: 0,
+    maxAttempts: 5,
+  }
 
   constructor(path: string) {
     this.path = resolveAPIURL(path)
@@ -70,13 +84,21 @@ export class SSETransport {
       } catch {
         return
       }
-      if (value.type === "transport.ready" || value.type === "transport.resumed") {
+      if (
+        value.type === "transport.ready" ||
+        value.type === "transport.resumed"
+      ) {
         this.streamId = String(value.data?.streamId ?? "")
         this.uploadToken = String(value.data?.uploadToken ?? "")
         this.resumeToken = String(value.data?.resumeToken ?? this.resumeToken)
         if (!this.streamId || !this.uploadToken) return
         this.readyState = OPEN
         this.reconnectAttempts = 0
+        this.setConnectionState({
+          state: "live",
+          audioQuality: "good",
+          attempt: 0,
+        })
         if (value.type === "transport.ready") this.onopen?.(new Event("open"))
         const queued = this.pendingJSON
         this.pendingJSON = []
@@ -95,6 +117,10 @@ export class SSETransport {
         this.readyState = CONNECTING
         const delay = Math.min(10_000, 500 * 2 ** this.reconnectAttempts)
         this.reconnectAttempts += 1
+        this.setConnectionState({
+          state: "reconnecting",
+          attempt: this.reconnectAttempts,
+        })
         this.reportError(
           new SSETransportError(
             "The realtime stream was interrupted; reconnecting.",
@@ -103,16 +129,20 @@ export class SSETransport {
           ),
           false
         )
-        this.reconnectTimer = setTimeout(() => {
-          const resumeURL = new URL(this.path)
-          resumeURL.search = ""
-          resumeURL.searchParams.set("resume", this.resumeToken)
-          resumeURL.searchParams.set("lastEventId", this.lastEventId)
-          this.openSource(resumeURL.toString())
-        }, delay + Math.random() * 250)
+        this.reconnectTimer = setTimeout(
+          () => {
+            const resumeURL = new URL(this.path)
+            resumeURL.search = ""
+            resumeURL.searchParams.set("resume", this.resumeToken)
+            resumeURL.searchParams.set("lastEventId", this.lastEventId)
+            this.openSource(resumeURL.toString())
+          },
+          delay + Math.random() * 250
+        )
         return
       }
       this.onerror?.(new Event("error"))
+      this.setConnectionState({ state: "disconnected" })
       this.close()
     }
   }
@@ -134,7 +164,9 @@ export class SSETransport {
       envelope.transportSequence = ++this.controlSequence
       const payload = JSON.stringify(envelope)
       this.controlUpload = this.controlUpload
-        .then(() => this.postWithRetry("events", payload, "application/json", 2))
+        .then(() =>
+          this.postWithRetry("events", payload, "application/json", 2)
+        )
         .catch((caught) => this.reportError(this.toError(caught)))
       return
     }
@@ -147,6 +179,7 @@ export class SSETransport {
     if (this.queuedAudioBytes + frame.byteLength > maxQueuedAudioBytes) {
       this.droppedAudioFrames += 1
       if (this.droppedAudioFrames === 1 || this.droppedAudioFrames % 25 === 0) {
+        this.setConnectionState({ state: "degraded", audioQuality: "dropping" })
         this.reportError(
           new SSETransportError(
             "The audio connection is slower than realtime; buffered audio was dropped.",
@@ -156,6 +189,9 @@ export class SSETransport {
         )
       }
       return
+    }
+    if (this.queuedAudioBytes > maxQueuedAudioBytes / 2) {
+      this.setConnectionState({ state: "degraded", audioQuality: "delayed" })
     }
     this.audioFrames.push(frame)
     this.queuedAudioBytes += frame.byteLength
@@ -175,6 +211,7 @@ export class SSETransport {
     this.queuedAudioBytes = 0
     this.audioAbort.abort()
     if (notify) {
+      this.setConnectionState({ state: "disconnected" })
       const event = new Event("close")
       this.onclose?.(event)
       this.closeListeners.forEach((listener) => listener?.(event))
@@ -191,8 +228,14 @@ export class SSETransport {
     const frames = this.audioFrames
     this.audioFrames = []
     if (frames.length === 0) return
-    const frameBytes = frames.reduce((total, frame) => total + frame.byteLength, 0)
-    const size = frames.reduce((total, frame) => total + 4 + frame.byteLength, 0)
+    const frameBytes = frames.reduce(
+      (total, frame) => total + frame.byteLength,
+      0
+    )
+    const size = frames.reduce(
+      (total, frame) => total + 4 + frame.byteLength,
+      0
+    )
     const body = new Uint8Array(size)
     const view = new DataView(body.buffer)
     let offset = 0
@@ -207,6 +250,9 @@ export class SSETransport {
       .catch((caught) => this.reportError(this.toError(caught)))
       .finally(() => {
         this.queuedAudioBytes = Math.max(0, this.queuedAudioBytes - frameBytes)
+        if (this.queuedAudioBytes === 0 && this.readyState === OPEN) {
+          this.setConnectionState({ state: "live", audioQuality: "good" })
+        }
       })
   }
 
@@ -224,7 +270,9 @@ export class SSETransport {
       } catch (caught) {
         lastError = caught
         if (attempt < retries) {
-          await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** attempt))
+          await new Promise((resolve) =>
+            setTimeout(resolve, 100 * 2 ** attempt)
+          )
         }
       }
     }
@@ -281,5 +329,17 @@ export class SSETransport {
     if (this.readyState === CLOSED) return
     this.ontransporterror?.(error)
     if (emitGeneric) this.onerror?.(new CustomEvent("error", { detail: error }))
+  }
+
+  private setConnectionState(next: Partial<SSEConnectionState>) {
+    const value = { ...this.connectionState, ...next }
+    if (
+      value.state === this.connectionState.state &&
+      value.audioQuality === this.connectionState.audioQuality &&
+      value.attempt === this.connectionState.attempt
+    )
+      return
+    this.connectionState = value
+    this.onconnectionstatechange?.(value)
   }
 }

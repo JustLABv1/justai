@@ -211,14 +211,21 @@ async function setupVoiceSession(
       conversationId = response.conversation.id
       createdConversationId = conversationId
     }
-    const ticket = await api.post<{ ticket: string }>("/api/v1/stream-tickets", {
-      kind: "voice",
-      conversationId,
-    })
+    const ticket = await api.post<{ ticket: string }>(
+      "/api/v1/stream-tickets",
+      {
+        kind: "voice",
+        conversationId,
+      }
+    )
     socket = new SSETransport(
       eventStreamURL("/api/v1/streams/voice", ticket.ticket)
     )
-    socket.ontransporterror = (error) => options.onError?.(error)
+    socket.ontransporterror = (error) => {
+      if (!["stream_reconnecting", "audio_backpressure"].includes(error.code)) {
+        options.onError?.(error)
+      }
+    }
 
     socket.onopen = () => {
       resolveOpen?.()
