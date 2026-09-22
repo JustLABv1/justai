@@ -9,6 +9,7 @@ import {
   ChevronRight,
   FileVideo,
   FolderKanban,
+  FileText,
   Headphones,
   LogOut,
   MessageSquare,
@@ -113,6 +114,13 @@ const railNavigation: Array<{
     icon: FileVideo,
     group: "Capture",
     feature: "transcription",
+  },
+  {
+    id: "templates",
+    label: "Templates",
+    hint: "Reusable document templates",
+    icon: FileText,
+    group: "Storage",
   },
   {
     id: "knowledge",

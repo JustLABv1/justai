@@ -118,10 +118,16 @@ WORKDIR /app
 RUN apk add --upgrade --no-cache \
     ca-certificates \
     tini \
+    python3 \
+    py3-pip \
     tzdata \
     wget \
     libcrypto3 \
     libssl3
+
+RUN python3 -m venv /opt/templates-venv \
+    && /opt/templates-venv/bin/pip install --no-cache-dir pypdf==6.19.0
+ENV JUSTAI_TEMPLATE_PYTHON=/opt/templates-venv/bin/python
 
 COPY --from=poppler-runtime /opt/poppler /opt/poppler
 COPY --from=poppler-runtime /usr/local/bin/pdftotext /usr/local/bin/pdftotext

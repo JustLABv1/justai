@@ -48,6 +48,16 @@ function toolLabel(toolName: string) {
       return "Edit image"
     case "create_pdf":
       return "Create PDF"
+    case "list_templates":
+      return "Find templates"
+    case "read_template":
+      return "Read template"
+    case "fill_template":
+      return "Fill template"
+    case "list_attachments":
+      return "List attachments"
+    case "read_attachment":
+      return "Read attachment"
     case "create_file":
       return "Create file"
     default:
@@ -493,7 +503,11 @@ export function ToolResultContent({
   if (toolName === "generate_image" || toolName === "edit_image") {
     return <GeneratedImageCard value={value} />
   }
-  if (toolName === "create_pdf" || toolName === "create_file") {
+  if (
+    toolName === "create_pdf" ||
+    toolName === "create_file" ||
+    toolName === "fill_template"
+  ) {
     return <GeneratedFileCard value={value} />
   }
   if (toolName === "web_search" || toolName === "browse_url") {
@@ -527,7 +541,7 @@ export const ToolFallback: ToolCallMessagePartComponent = (
     props.isError === true
   const hasResult = props.result !== undefined
   const argsText =
-    ["create_pdf", "create_file"].includes(props.toolName) &&
+    ["create_pdf", "create_file", "fill_template"].includes(props.toolName) &&
     (props.argsText?.length ?? 0) > 4_000
       ? `${props.argsText?.slice(0, 4_000)}\n… File content truncated in this preview.`
       : props.argsText
@@ -587,7 +601,11 @@ export const ToolFallback: ToolCallMessagePartComponent = (
         <div className="space-y-2 border-t px-3 py-3 text-xs">
           {argsText && (
             <details
-              open={!["create_pdf", "create_file"].includes(props.toolName)}
+              open={
+                !["create_pdf", "create_file", "fill_template"].includes(
+                  props.toolName
+                )
+              }
               className="rounded-lg border bg-background/60 px-2 py-1.5"
             >
               <summary className="cursor-pointer font-medium">

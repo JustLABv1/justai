@@ -1,6 +1,7 @@
 import type { AdminTab, AgentTab, SettingsTab, ViewId } from "@/lib/types"
 
 const validViews: ViewId[] = [
+  "templates",
   "chat",
   "transcription",
   "video-transcription",

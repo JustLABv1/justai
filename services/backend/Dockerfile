@@ -93,8 +93,14 @@ RUN apk add --upgrade --no-cache \
     libcrypto3 \
     libssl3 \
     poppler-utils \
+    python3 \
+    py3-pip \
     tzdata \
     wget
+
+RUN python3 -m venv /opt/templates-venv \
+    && /opt/templates-venv/bin/pip install --no-cache-dir pypdf==6.19.0
+ENV JUSTAI_TEMPLATE_PYTHON=/opt/templates-venv/bin/python
 
 COPY --from=builder /app/justai-backend /app/
 COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg

@@ -125,6 +125,14 @@ const navigationItems: NavigationItem[] = [
     settingsTab: "endpoints",
   },
   {
+    id: "templates",
+    label: "Templates",
+    hint: "Reusable document templates",
+    keywords: ["templates", "vorlagen", "expense", "documents"],
+    icon: BookOpenText,
+    view: "templates",
+  },
+  {
     id: "knowledge",
     label: "Knowledge",
     hint: "Sources and indexing",
