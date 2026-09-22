@@ -100,6 +100,9 @@ func chatToolEventKindForName(name string) string {
 }
 
 func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID, conversationID uuid.UUID, toolName string, arguments map[string]any, latestUser *assistantUserMessage) (json.RawMessage, error) {
+	if latestUser != nil && latestUser.SelectedOnlyContext && !selectedContextToolAllowed(toolName) {
+		return nil, fmt.Errorf("this action is unavailable while using only selected sources")
+	}
 	if isAttachmentReadTool(toolName) {
 		return a.readAttachmentTool(ctx, userID, organizationID, conversationID, toolName, arguments)
 	}

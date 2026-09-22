@@ -22,12 +22,17 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
       : undefined
   const locator = typeof metadata?.locator === "string" ? metadata.locator : ""
   const snippet = typeof metadata?.snippet === "string" ? metadata.snippet : ""
+  const contextOrigin = metadata?.contextOrigin
   const chunkIndex =
     typeof metadata?.chunkIndex === "number" ? metadata.chunkIndex : undefined
   const quoteText = snippet || part.title || part.id
   const isExternal = Boolean(part.url)
   const provenance = isExternal ? "External source" : "Workspace source"
-  const trustLabel = isExternal ? "Linked source" : "Attached context"
+  const trustLabel = contextOrigin === "selected"
+    ? "Selected source"
+    : contextOrigin === "automatic"
+      ? "Found automatically"
+      : isExternal ? "Linked source" : "Source provided to model"
 
   return (
     <details className="my-2 max-w-xl rounded-xl bg-card px-2.5 py-1.5 text-xs text-card-foreground">

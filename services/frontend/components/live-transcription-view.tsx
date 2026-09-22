@@ -26,7 +26,6 @@ import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-
 import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
 import { TranscriptWorkspace } from "@/components/transcript-workspace"
-import { WorkspaceDetailHeader } from "@/components/workspace-detail-header"
 import {
   Dialog,
   DialogContent,
@@ -435,6 +434,7 @@ export function LiveTranscriptionView({
   user,
   onSessionCreated,
   onSessionsChanged,
+  onStartChat,
   createSessionRequested = false,
   onCreateSessionRequestHandled,
 }: {
@@ -444,6 +444,7 @@ export function LiveTranscriptionView({
   user: User
   onSessionCreated: (session: TranscriptionSession) => void
   onSessionsChanged: () => void
+  onStartChat: (sessionId: string) => Promise<void>
   createSessionRequested?: boolean
   onCreateSessionRequestHandled?: () => void
 }) {
@@ -2120,25 +2121,6 @@ export function LiveTranscriptionView({
         </>
       ) : snapshot.session.status === "completed" ? (
         <>
-          <WorkspaceDetailHeader
-            className="rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5"
-            eyebrow={<Badge variant="secondary">Capture complete</Badge>}
-            icon={<Check aria-hidden="true" />}
-            meta={
-              <>
-                <Badge variant="outline">
-                  {snapshot.segments.length} segments
-                </Badge>
-                <Badge variant="outline">
-                  {snapshot.recordings.length > 0
-                    ? "Audio recording available"
-                    : "Transcript only"}
-                </Badge>
-              </>
-            }
-            title="Your transcript is ready to review"
-            description="Edit the wording, add notes, inspect speakers, generate insights, or export the finished transcript from one shared workspace."
-          />
           <TranscriptWorkspace
             key={snapshot.session.id}
             currentTimeMs={workspaceTimeMs}
@@ -2147,6 +2129,7 @@ export function LiveTranscriptionView({
             onError={setError}
             onRefreshPlayback={async () => undefined}
             onRenameSpeaker={openWorkspaceSpeakerRename}
+            onStartChat={onStartChat}
             onSnapshotChange={(updater) =>
               setSnapshot((current) =>
                 current ? { ...current, ...updater(current) } : current

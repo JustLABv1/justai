@@ -524,7 +524,7 @@ function SourceGroup({ indices }: { indices: readonly number[] }) {
     <details className="my-2 w-full max-w-2xl overflow-hidden rounded-xl bg-muted/40 text-xs">
       <summary className="group flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 font-medium text-foreground [&::-webkit-details-marker]:hidden">
         <Files className="size-3.5 text-muted-foreground" aria-hidden="true" />
-        <span>Sources used</span>
+        <span>Sources provided</span>
         <span className="font-normal text-muted-foreground">
           · {sourceParts.length} sources
         </span>

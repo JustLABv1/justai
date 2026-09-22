@@ -174,6 +174,7 @@ export function VideoTranscriptionView({
   user,
   onSessionCreated,
   onSessionsChanged,
+  onStartChat,
   createSessionRequested = false,
   onCreateSessionRequestHandled,
 }: {
@@ -182,6 +183,7 @@ export function VideoTranscriptionView({
   user: User
   onSessionCreated: (session: TranscriptionSession) => void
   onSessionsChanged: () => void
+  onStartChat: (sessionId: string) => Promise<void>
   createSessionRequested?: boolean
   onCreateSessionRequestHandled?: () => void
 }) {
@@ -1802,6 +1804,7 @@ export function VideoTranscriptionView({
             onError={setError}
             onRefreshPlayback={refreshVideoPlayback}
             onRenameSpeaker={openSpeakerRename}
+            onStartChat={onStartChat}
             onSnapshotChange={(updater) =>
               setSnapshot((current) => (current ? updater(current) : current))
             }

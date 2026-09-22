@@ -760,6 +760,9 @@ type Citation struct {
 	ChunkIndex int       `json:"chunkIndex,omitempty"`
 	Locator    string    `json:"locator,omitempty"`
 	Snippet    string    `json:"snippet"`
+	// ContextOrigin records whether a source was deliberately selected for this
+	// conversation or was found by automatic retrieval.
+	ContextOrigin string `json:"contextOrigin,omitempty"`
 	// PromptText keeps the complete retrieved chunk in memory for the provider
 	// prompt. It is intentionally excluded from API responses and persistence;
 	// Snippet remains the compact UI citation representation.

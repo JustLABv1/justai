@@ -786,6 +786,28 @@ export function Workspace() {
     ]
   )
 
+  const startChatWithTranscription = useCallback(
+    async (sessionId: string) => {
+      const result = await api.post<{ conversation: Conversation }>(
+        "/api/v1/conversations",
+        {
+          assistantId: draftAssistantId || undefined,
+        }
+      )
+      await api.post(
+        `/api/v1/conversations/${result.conversation.id}/context/transcription/${sessionId}`
+      )
+      setConversations((current) => {
+        if (current.some((item) => item.id === result.conversation.id)) {
+          return current
+        }
+        return [result.conversation, ...current]
+      })
+      navigate("chat", result.conversation.id)
+    },
+    [draftAssistantId, navigate]
+  )
+
   const settlePendingConversation = useCallback(() => {
     const id = pendingConversationIdRef.current
     if (!id) return
@@ -1230,6 +1252,7 @@ export function Workspace() {
               ) : (
                 <LiveTranscriptionView
                   endpoints={endpoints}
+                  onStartChat={startChatWithTranscription}
                   onSessionCreated={handleTranscriptionSessionCreated}
                   onSessionsChanged={handleTranscriptionSessionsChanged}
                   onCreateSessionRequestHandled={() =>
@@ -1250,6 +1273,7 @@ export function Workspace() {
               ) : (
                 <VideoTranscriptionView
                   endpoints={endpoints}
+                  onStartChat={startChatWithTranscription}
                   onSessionCreated={(session) =>
                     handleTranscriptionSessionCreated(
                       session,

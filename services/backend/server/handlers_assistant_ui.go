@@ -23,6 +23,7 @@ import (
 	"justai-backend/middleware"
 	"justai-backend/models"
 	"justai-backend/provider"
+	"justai-backend/rag"
 )
 
 // assistantUIRequest is intentionally provider-neutral. The browser sends
@@ -345,27 +346,38 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	knowledgeStatusRequested := false
 	contextResolution := knowledgeContextResolution{}
 	var persistentSourceIDs []uuid.UUID
+	var persistentTranscriptionSessionIDs []uuid.UUID
+	selectedOnlyContext := false
+	selection := chatContextSelection{}
 	if knowledgeEnabled {
-		selectedSourceIDs := latestUserAttachmentSourceIDs(latestUser)
 		if latestUser != nil {
 			var persistentErr error
 			persistentSourceIDs, persistentErr = a.conversationPersistentSourceIDs(c, conversationID, organizationID, principal.UserID)
 			if persistentErr != nil {
-				slog.Warn("explicit Knowledge references could not be loaded", "error", persistentErr)
-				persistentSourceIDs = nil
+				writeError(c, http.StatusInternalServerError, persistentErr)
+				runStatus = "error"
+				return
 			}
-			var knowledgeErr error
-			if len(selectedSourceIDs) > 0 {
-				indexing, indexingErr := a.conversationHasIndexingKnowledge(c, conversationID, organizationID, principal.UserID, selectedSourceIDs)
-				knowledgeErr = indexingErr
-				if indexing {
-					runStatus = "error"
-					writeError(c, http.StatusConflict, fmt.Errorf("attached Knowledge is still indexing; detach it or wait for indexing to finish"))
-					return
-				}
-				knowledgeAttached, knowledgeErr = a.conversationHasKnowledge(c, conversationID, organizationID, principal.UserID, selectedSourceIDs)
-				knowledgeStatusRequested = knowledgeAttached
-			} else if len(persistentSourceIDs) == 0 && len(request.IncludeSpaceIDs) == 0 && len(request.ExcludeSpaceIDs) == 0 && assistantUIRequestsImageGeneration(latestUser) {
+			persistentTranscriptionSessionIDs, persistentErr = a.conversationTranscriptionSessionIDs(c, conversationID, organizationID, principal.UserID)
+			if persistentErr != nil {
+				writeError(c, http.StatusInternalServerError, persistentErr)
+				runStatus = "error"
+				return
+			}
+			// A deliberately attached source is an allowlist, never a hint for
+			// broader workspace retrieval. Enforce this on the server.
+			selection = selectChatContext(latestUser, persistentSourceIDs, persistentTranscriptionSessionIDs)
+			selectedOnlyContext = selection.SelectedOnly
+			latestUser.SelectedOnlyContext = selectedOnlyContext
+			if selectedOnlyContext {
+				request.ContextPolicy = "selected-only"
+			} else {
+				request.ContextPolicy = "automatic"
+			}
+			if selectedOnlyContext {
+				knowledgeAttached = true
+				knowledgeStatusRequested = true
+			} else if len(request.IncludeSpaceIDs) == 0 && len(request.ExcludeSpaceIDs) == 0 && assistantUIRequestsImageGeneration(latestUser) {
 				// Image generation is a self-contained built-in action. Do not
 				// turn a word in the image prompt (for example, "Katze") into
 				// unrelated Knowledge grounding unless the user explicitly
@@ -406,20 +418,23 @@ func (a *App) assistantUIChat(c *gin.Context) {
 				knowledgeAttached = true
 				knowledgeStatusRequested = len(persistentSourceIDs) > 0 || len(request.IncludeSpaceIDs) > 0 || len(request.ExcludeSpaceIDs) > 0
 			}
-			if knowledgeErr != nil {
-				runStatus = "error"
-				writeError(c, http.StatusInternalServerError, knowledgeErr)
-				return
-			}
 		}
 	}
-	attachedNotes, notesErr := a.attachedNotesPrompt(c, conversationID)
+	attachedNotes := ""
+	var notesErr error
+	if !selectedOnlyContext {
+		attachedNotes, notesErr = a.attachedNotesPrompt(c, conversationID)
+	}
 	if notesErr != nil {
 		runStatus = "error"
 		writeError(c, http.StatusInternalServerError, notesErr)
 		return
 	}
-	projectContext, projectErr := a.projectPrompt(c, conversationID)
+	projectContext := ""
+	var projectErr error
+	if !selectedOnlyContext {
+		projectContext, projectErr = a.projectPrompt(c, conversationID)
+	}
 	if projectErr != nil {
 		runStatus = "error"
 		writeError(c, http.StatusInternalServerError, projectErr)
@@ -542,21 +557,10 @@ func (a *App) assistantUIChat(c *gin.Context) {
 
 	var citations []models.Citation
 	if latestUser != nil && knowledgeEnabled && knowledgeAttached {
-		explicitSourceIDs := append([]uuid.UUID(nil), persistentSourceIDs...)
-		seenExplicitSourceIDs := make(map[uuid.UUID]struct{}, len(explicitSourceIDs))
-		for _, sourceID := range explicitSourceIDs {
-			seenExplicitSourceIDs[sourceID] = struct{}{}
-		}
-		for _, sourceID := range latestUser.AttachmentSourceIDs {
-			if _, exists := seenExplicitSourceIDs[sourceID]; exists {
-				continue
-			}
-			seenExplicitSourceIDs[sourceID] = struct{}{}
-			explicitSourceIDs = append(explicitSourceIDs, sourceID)
-		}
+		explicitSourceIDs := selection.SourceIDs
 		selectedSpaceNames := resolvedKnowledgeSpaceNames(contextResolution)
-		if len(latestUser.AttachmentSourceIDs) > 0 {
-			selectedSpaceNames = []string{"Message attachments"}
+		if selectedOnlyContext {
+			selectedSpaceNames = []string{selection.Label}
 		}
 		if len(selectedSpaceNames) == 0 {
 			if contextResolution.Restricted {
@@ -593,24 +597,44 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		retrievalStarted := time.Now()
 		var automaticCitations []models.Citation
 		var explicitCitations []models.Citation
-		if len(latestUser.AttachmentSourceIDs) == 0 && contextResolution.Restricted {
+		citationLimit := 6
+		if selectedOnlyContext {
+			citationLimit = rag.AttachedDocumentContextLimit
+		}
+		if !selectedOnlyContext && len(latestUser.AttachmentSourceIDs) == 0 && contextResolution.Restricted {
 			automaticCitations, retrievalErr = a.searchKnowledgeInSpaces(c, organizationID, principal.UserID, latestUser.Text, 6, contextResolution)
-		} else if len(latestUser.AttachmentSourceIDs) == 0 {
+		} else if !selectedOnlyContext && len(latestUser.AttachmentSourceIDs) == 0 {
 			automaticCitations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6, nil, request.DeepContext)
 		}
 		if retrievalErr == nil && len(explicitSourceIDs) > 0 {
-			explicitCitations, retrievalErr = a.searchKnowledge(c, organizationID, principal.UserID, conversationID, latestUser.Text, 6, explicitSourceIDs, request.DeepContext)
+			explicitCitations, retrievalErr = a.selectedFileContext(c, conversationID, organizationID, principal.UserID, explicitSourceIDs, len(latestUser.AttachmentSourceIDs) > 0)
 		}
-		if retrievalErr == nil && len(explicitSourceIDs) > 0 {
-			transcriptCitations, transcriptErr := a.searchConversationTranscripts(c, conversationID, latestUser.Text, 6)
+		if retrievalErr == nil && len(selection.TranscriptIDs) > 0 {
+			transcriptCitations, transcriptErr := a.selectedTranscriptContext(c, conversationID, organizationID, principal.UserID, selection.TranscriptIDs)
 			if transcriptErr != nil {
 				retrievalErr = transcriptErr
 			} else {
-				explicitCitations = interleaveKnowledgeCitations(6, explicitCitations, transcriptCitations)
+				explicitCitations = append(explicitCitations, transcriptCitations...)
 			}
 		}
+		if retrievalErr == nil && selectedOnlyContext && latestUser.HasAttachments && len(explicitCitations) == 0 && len(assistantUIProviderImageParts(latestUser.Parts)) == 0 {
+			retrievalErr = fmt.Errorf("the attached document is not ready to use yet; wait for its upload to finish and send the message again")
+		}
+		if retrievalErr == nil && selectedOnlyContext {
+			explicitCitations, retrievalErr = a.prepareSelectedContext(c, endpoint, runID, latestUser.Text, explicitCitations)
+		}
 		if retrievalErr == nil {
-			citations = interleaveKnowledgeCitations(6, explicitCitations, automaticCitations)
+			for index := range explicitCitations {
+				explicitCitations[index].ContextOrigin = "selected"
+			}
+			for index := range automaticCitations {
+				automaticCitations[index].ContextOrigin = "automatic"
+			}
+			if selectedOnlyContext {
+				citations = explicitCitations
+			} else {
+				citations = interleaveKnowledgeCitations(citationLimit, automaticCitations)
+			}
 		}
 		slog.Info("knowledge retrieval completed", "organizationId", organizationID, "userId", principal.UserID, "durationMs", time.Since(retrievalStarted).Milliseconds(), "resultCount", len(citations), "status", map[bool]string{true: "failed", false: "completed"}[retrievalErr != nil])
 		if retrievalErr != nil {
@@ -623,6 +647,11 @@ func (a *App) assistantUIChat(c *gin.Context) {
 					"id":   "retrieval-status",
 					"data": map[string]any{"status": "failed", "mode": assistantUIRetrievalMode(request.DeepContext), "error": retrievalErr.Error()},
 				})
+			}
+			if selectedOnlyContext {
+				_ = writeChunk(map[string]any{"type": "error", "errorText": retrievalErr.Error()})
+				_ = writeChunk(map[string]any{"type": "finish", "finishReason": "error"})
+				return
 			}
 		} else {
 			includeIDs, _ := parseContextSpaceIDs(request.IncludeSpaceIDs)
@@ -673,6 +702,10 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	toolParts := assistantUIApprovalToolParts(requestMessages)
 	var resumedAutomaticEvent *chatToolEvent
 	if approval != nil {
+		if selectedOnlyContext {
+			_ = writeChunk(map[string]any{"type": "error", "errorText": "External tool approvals are unavailable while using only selected sources."})
+			return
+		}
 		resumedEvent, resumedMessageID, resumeErr := a.resumeAssistantUIApproval(c, principal.UserID, organizationID, conversationID, *approval)
 		if resumeErr != nil {
 			_ = writeChunk(map[string]any{"type": "error", "errorText": resumeErr.Error()})
@@ -719,7 +752,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 	for name, binding := range builtInTools.Bindings {
 		bindings[name] = binding
 	}
-	if a.platformCapabilityEnabled(c, "mcp") {
+	if !selectedOnlyContext && a.platformCapabilityEnabled(c, "mcp") {
 		router := automaticMCPRouterDiscovery()
 		definitions = mergeVoiceToolDiscovery(definitions, bindings, router)
 		toolDiscovery := a.discoverConversationTools(c, principal.UserID, organizationID, conversationID)
@@ -734,6 +767,17 @@ func (a *App) assistantUIChat(c *gin.Context) {
 				definitions = append(definitions, binding.Definition)
 			}
 		}
+	}
+	if selectedOnlyContext {
+		filtered := definitions[:0]
+		for _, definition := range definitions {
+			if selectedContextToolAllowed(definition.Name) {
+				filtered = append(filtered, definition)
+			} else {
+				delete(bindings, definition.Name)
+			}
+		}
+		definitions = filtered
 	}
 	if len(definitions) > 0 && !provider.SupportsToolCalling(endpoint) {
 		definitions = nil
@@ -795,7 +839,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		if assistantPrompt := savedAssistantInstructions(savedAssistant); assistantPrompt != "" {
 			toolHistory = append([]provider.ToolMessage{{Role: "system", Content: assistantPrompt}}, toolHistory...)
 		}
-		if request.UseMemory {
+		if request.UseMemory && !selectedOnlyContext {
 			memory, memoryErr := a.memoryPrompt(c, principal.UserID, organizationID)
 			if memoryErr != nil {
 				persistError(memoryErr)
@@ -848,7 +892,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		if assistantPrompt := savedAssistantInstructions(savedAssistant); assistantPrompt != "" {
 			history = append([]provider.Message{{Role: "system", Content: assistantPrompt}}, history...)
 		}
-		if request.UseMemory {
+		if request.UseMemory && !selectedOnlyContext {
 			memory, memoryErr := a.memoryPrompt(c, principal.UserID, organizationID)
 			if memoryErr != nil {
 				persistError(memoryErr)
@@ -912,6 +956,8 @@ type assistantUserMessage struct {
 	Parts               []json.RawMessage
 	Metadata            json.RawMessage
 	AttachmentSourceIDs []uuid.UUID
+	HasAttachments      bool
+	SelectedOnlyContext bool
 }
 
 func parseAssistantUIMessages(raw []json.RawMessage) []assistantUIMessage {
@@ -988,7 +1034,7 @@ func latestAssistantUserMessage(messages []assistantUIMessage) *assistantUserMes
 		if index > 0 {
 			parentID = messages[index-1].ID
 		}
-		return &assistantUserMessage{ID: messages[index].ID, Text: text, ParentID: parentID, Parts: messages[index].Parts, Metadata: messages[index].Metadata, AttachmentSourceIDs: attachmentSourceIDs}
+		return &assistantUserMessage{ID: messages[index].ID, Text: text, ParentID: parentID, Parts: messages[index].Parts, Metadata: messages[index].Metadata, AttachmentSourceIDs: attachmentSourceIDs, HasAttachments: hasFile || hasImage}
 	}
 	return nil
 }
@@ -1591,10 +1637,11 @@ func (a *App) conversationHead(ctx context.Context, conversationID uuid.UUID) (a
 func (a *App) assistantUICitationPart(ctx context.Context, citation models.Citation) map[string]any {
 	metadata := map[string]any{
 		"justai": map[string]any{
-			"kind":       citation.Kind,
-			"locator":    citation.Locator,
-			"snippet":    citation.Snippet,
-			"chunkIndex": citation.ChunkIndex,
+			"kind":          citation.Kind,
+			"contextOrigin": citation.ContextOrigin,
+			"locator":       citation.Locator,
+			"snippet":       citation.Snippet,
+			"chunkIndex":    citation.ChunkIndex,
 		},
 	}
 	if citation.Kind == "knowledge" {
@@ -1893,13 +1940,17 @@ func (a *App) streamAssistantUIWithTools(ctx context.Context, userID, organizati
 				}
 			}
 			binding, exists := findVoiceToolBinding(bindings, call.Name)
-			if !exists && !freshDiscoveryAttempted {
+			restricted := latestUser != nil && latestUser.SelectedOnlyContext
+			if restricted && (!exists || !binding.Builtin || !selectedContextToolAllowed(binding.ToolName)) {
+				exists = false
+			}
+			if !exists && !restricted && !freshDiscoveryAttempted {
 				freshDiscoveryAttempted = true
 				fresh := a.discoverConversationToolsFresh(ctx, userID, organizationID, conversationID)
 				definitions = mergeVoiceToolDiscovery(definitions, bindings, fresh)
 				binding, exists = findVoiceToolBinding(bindings, call.Name)
 			}
-			if !exists {
+			if !exists && !restricted {
 				if historyHead, ok := assistantUIParentUUID(*parentID); ok {
 					historical := a.discoverHistoricalAutomaticMCPTool(ctx, userID, organizationID, conversationID, historyHead, call.Name)
 					definitions = mergeVoiceToolDiscovery(definitions, bindings, historical)
