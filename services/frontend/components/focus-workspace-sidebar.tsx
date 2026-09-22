@@ -384,34 +384,20 @@ export function FocusWorkspaceSidebar({
     if (railItem?.feature && disabledFeatures[railItem.feature]) return
 
     if (view === "chat") {
-      onNavigate(
-        "chat",
-        activeView === "chat"
-          ? activeConversationId
-          : (conversations[0]?.id ?? null)
-      )
+      // The primary rail is a creation shortcut. Conversation history remains
+      // available in the secondary rail, where reopening an existing item is
+      // an explicit choice.
+      onNavigate("chat", null)
       return
     }
 
     if (view === "transcription") {
-      onNavigate(
-        "transcription",
-        null,
-        activeView === "transcription"
-          ? activeSessionId
-          : (liveSessions[0]?.id ?? null)
-      )
+      onNewTranscriptionSession()
       return
     }
 
     if (view === "video-transcription") {
-      onNavigate(
-        "video-transcription",
-        null,
-        activeView === "video-transcription"
-          ? activeSessionId
-          : (videoSessions[0]?.id ?? null)
-      )
+      onNewVideoTranscription()
       return
     }
 
