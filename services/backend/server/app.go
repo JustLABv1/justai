@@ -41,6 +41,10 @@ type App struct {
 	passwordHashSlots     chan struct{}
 	workerHealthMu        sync.RWMutex
 	workerHealth          map[string]workerHealthStatus
+	httpStreamsMu         sync.RWMutex
+	httpStreams           map[uuid.UUID]*httpStreamConnection
+	httpStreamResumes     map[[32]byte]*httpStreamConnection
+	httpStreamMetrics     httpStreamMetrics
 	instanceID            string
 }
 
@@ -63,6 +67,8 @@ func New(cfg config.Config, db *sql.DB) *App {
 		RAG:                   rag.NewWorker(db, cfg.AllowPrivate),
 		repositoryImportSlots: make(chan struct{}, 2),
 		workerHealth:          make(map[string]workerHealthStatus),
+		httpStreams:           make(map[uuid.UUID]*httpStreamConnection),
+		httpStreamResumes:     make(map[[32]byte]*httpStreamConnection),
 		instanceID:            uuid.NewString(),
 	}
 	application.RAG.SetSecretBox(application.Secrets)
@@ -151,8 +157,8 @@ func (a *App) Router() *gin.Engine {
 	transcriptionPublic := router.Group("/api/v1/transcription")
 	transcriptionPublic.POST("/join-requests", a.platformFeature("transcription"), a.createTranscriptionJoinRequest)
 	transcriptionPublic.GET("/join-requests/:id", a.platformFeature("transcription"), a.getTranscriptionJoinRequest)
-	transcriptionPublic.POST("/capture-tickets", a.platformFeature("transcription"), a.createCaptureWSTicket)
-	transcriptionPublic.POST("/bot-sources/:id/tickets", a.platformFeature("transcription"), a.createTranscriptionBotWSTicket)
+	transcriptionPublic.POST("/capture-tickets", a.platformFeature("transcription"), a.createCaptureStreamTicket)
+	transcriptionPublic.POST("/bot-sources/:id/tickets", a.platformFeature("transcription"), a.createTranscriptionBotStreamTicket)
 
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.RequireAuth(a.Tokens, a.DB))
@@ -226,7 +232,7 @@ func (a *App) Router() *gin.Engine {
 	org.DELETE("/endpoints/:id", a.deleteEndpoint)
 	org.POST("/endpoints/:id/test", a.platformFeature("ai"), a.testEndpoint)
 	org.GET("/endpoints/:id/models", a.platformFeature("ai"), a.discoverEndpointModels)
-	org.POST("/ws/tickets", a.platformFeature("ai"), a.createWSTicket)
+	org.POST("/stream-tickets", a.platformFeature("ai"), a.scopedRateLimit("stream-ticket", 120), a.createStreamTicket)
 	org.POST("/voice/speech", a.platformFeature("voice"), a.synthesizeVoiceSpeech)
 	org.GET("/transcription/sessions", a.platformFeature("transcription"), a.listTranscriptionSessions)
 	org.POST("/transcription/sessions", a.platformFeature("transcription"), a.createTranscriptionSession)
@@ -414,11 +420,13 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/chat", a.platformFeature("ai"), a.scopedRateLimit("chat", 60), a.assistantUIChat)
 	org.GET("/chat/resume/:streamId", a.platformFeature("ai"), a.resumeChatStream)
 
-	protected.GET("/ws/voice", a.platformFeature("voice"), a.voiceWebSocket)
+	protected.GET("/streams/voice", a.platformFeature("voice"), a.voiceSSE)
 	protected.GET("/mcp/servers/:id/icon", a.serveMCPServerIcon)
 	protected.POST("/mcp/servers/:id/icon", a.uploadMCPServerIcon)
 	protected.DELETE("/mcp/servers/:id/icon", a.deleteMCPServerIcon)
-	router.GET("/api/v1/ws/transcription", a.platformFeature("transcription"), a.transcriptionWebSocket)
+	router.GET("/api/v1/streams/transcription", a.platformFeature("transcription"), a.transcriptionSSE)
+	router.POST("/api/v1/streams/:streamId/events", a.writeHTTPStreamEvent)
+	router.POST("/api/v1/streams/:streamId/audio", a.writeHTTPStreamAudio)
 	protected.GET("/organizations/:id/members/:userId/avatar", a.serveOrganizationMemberAvatar)
 	organizationRoutes := protected.Group("/organizations/:id")
 	organizationRoutes.Use(middleware.RequireOrg(a.DB))

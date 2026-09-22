@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	transcriptionBotProtocol = "justai-transcription-v1"
-	transcriptionBotWSSPath  = "/api/v1/ws/transcription"
+	transcriptionBotProtocol   = "justai-transcription-sse-v1"
+	transcriptionBotStreamPath = "/api/v1/streams/transcription"
 )
 
 type transcriptionStreamSourceRequest struct {
@@ -226,14 +226,14 @@ func (a *App) createTranscriptionBotSource(c *gin.Context) {
 	}
 	a.activateTranscriptionIngressSession(sessionID)
 	c.JSON(http.StatusCreated, gin.H{
-		"source":        source,
-		"bot":           bot,
-		"token":         botToken,
-		"meetingUrl":    meetingURL,
-		"protocol":      transcriptionBotProtocol,
-		"ticketPath":    "/api/v1/transcription/bot-sources/" + source.ID.String() + "/tickets",
-		"websocketPath": transcriptionBotWSSPath,
-		"warning":       "Store this ingest token now. It will not be shown again.",
+		"source":     source,
+		"bot":        bot,
+		"token":      botToken,
+		"meetingUrl": meetingURL,
+		"protocol":   transcriptionBotProtocol,
+		"ticketPath": "/api/v1/transcription/bot-sources/" + source.ID.String() + "/tickets",
+		"streamPath": transcriptionBotStreamPath,
+		"warning":    "Store this ingest token now. It will not be shown again.",
 	})
 }
 
@@ -260,12 +260,12 @@ func (a *App) rotateTranscriptionBotSourceToken(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"sourceId":      sourceID,
-		"token":         token,
-		"protocol":      transcriptionBotProtocol,
-		"ticketPath":    "/api/v1/transcription/bot-sources/" + sourceID.String() + "/tickets",
-		"websocketPath": transcriptionBotWSSPath,
-		"warning":       "Store this ingest token now. It will not be shown again.",
+		"sourceId":   sourceID,
+		"token":      token,
+		"protocol":   transcriptionBotProtocol,
+		"ticketPath": "/api/v1/transcription/bot-sources/" + sourceID.String() + "/tickets",
+		"streamPath": transcriptionBotStreamPath,
+		"warning":    "Store this ingest token now. It will not be shown again.",
 	})
 }
 
@@ -290,11 +290,11 @@ func (a *App) stopTranscriptionBotSource(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// createTranscriptionBotWSTicket is intentionally bearer-authenticated rather
+// createTranscriptionBotStreamTicket is intentionally bearer-authenticated rather
 // than cookie-authenticated. Platform adapters and desktop meeting bridges can
-// exchange their durable source token for a short-lived, one-use WebSocket
+// exchange their durable source token for a short-lived, one-use stream
 // ticket without receiving a user's JustAI session cookie.
-func (a *App) createTranscriptionBotWSTicket(c *gin.Context) {
+func (a *App) createTranscriptionBotStreamTicket(c *gin.Context) {
 	token := bearerToken(c.GetHeader("Authorization"))
 	if token == "" {
 		writeError(c, http.StatusUnauthorized, fmt.Errorf("bot ingest token is required"))
@@ -324,7 +324,7 @@ func (a *App) createTranscriptionBotWSTicket(c *gin.Context) {
 		return
 	}
 	expiresAt := time.Now().Add(2 * time.Minute)
-	if _, err := transaction.ExecContext(c, `INSERT INTO ws_tickets (token_hash, user_id, organization_id, kind, session_id, source_id, expires_at) VALUES ($1, $2, $3, 'transcription-capture', $4, $5, $6)`, ticketHash, userID, organizationID, sessionID, sourceID, expiresAt); err != nil {
+	if _, err := transaction.ExecContext(c, `INSERT INTO stream_tickets (token_hash, user_id, organization_id, kind, session_id, source_id, expires_at) VALUES ($1, $2, $3, 'transcription-capture', $4, $5, $6)`, ticketHash, userID, organizationID, sessionID, sourceID, expiresAt); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -345,7 +345,7 @@ func (a *App) createTranscriptionBotWSTicket(c *gin.Context) {
 	if sessionStatus == "waiting" {
 		a.Live.broadcast(sessionID, "transcription.session", ginData{"status": "live"})
 	}
-	c.JSON(http.StatusCreated, gin.H{"ticket": ticket, "expiresAt": expiresAt, "kind": "transcription-capture", "protocol": transcriptionBotProtocol, "websocketPath": transcriptionBotWSSPath})
+	c.JSON(http.StatusCreated, gin.H{"ticket": ticket, "expiresAt": expiresAt, "kind": "transcription-capture", "protocol": transcriptionBotProtocol, "streamPath": transcriptionBotStreamPath})
 }
 
 func createIngressTranscriptionSource(ctx context.Context, transaction *sql.Tx, sessionID uuid.UUID, name, kind, deviceLabel string) (models.TranscriptionSource, error) {

@@ -5,6 +5,11 @@ The chart supports two modes:
 - `microservices` (default): separate backend and frontend images.
 - `monolith`: the combined image built by the root `Dockerfile`.
 
+The default ingress annotations enable cookie affinity for resumable SSE voice
+and transcription sessions. Keep equivalent session affinity when using a
+non-nginx ingress controller or more than one backend replica; the SSE request
+and its HTTP audio/control uploads must reach the same backend instance.
+
 The default chart expects an existing Kubernetes Secret. It must contain these
 keys (or configure `secrets.refs` to use different names/keys):
 

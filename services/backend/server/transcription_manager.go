@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 
 	"justai-backend/config"
 	"justai-backend/models"
@@ -29,7 +28,7 @@ import (
 )
 
 type transcriptionClient struct {
-	connection *websocket.Conn
+	connection realtimeConnection
 	writeMu    sync.Mutex
 	role       string
 	sourceID   uuid.UUID
@@ -250,14 +249,14 @@ func (m *TranscriptionManager) broadcast(sessionID uuid.UUID, eventType string, 
 	}
 }
 
-// closeSession terminates every websocket attached to a session. A session
+// closeSession terminates every realtime stream attached to a session. A session
 // reaching a terminal state must not leave a capture connection streaming
 // audio into a provider after the UI has stopped it.
 func (m *TranscriptionManager) closeSession(sessionID uuid.UUID) {
 	m.stopStreamSources(sessionID)
 	if m.DB != nil {
 		// External sources have a durable worker state in addition to their
-		// websocket/source state. Mark them terminal before the worker's
+		// stream/source state. Mark them terminal before the worker's
 		// cancellation defer runs so a session stop cannot leave a reconnecting
 		// stream or bot behind.
 		_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = 'stopped', updated_at = now() WHERE session_id = $1 AND kind IN ('stream', 'meeting-bot') AND status <> 'stopped'`, sessionID)
@@ -283,7 +282,7 @@ func (m *TranscriptionManager) closeSession(sessionID uuid.UUID) {
 			continue
 		}
 		client.writeMu.Lock()
-		_ = client.connection.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "session completed"), deadline)
+		_ = client.connection.WriteControl(streamCloseMessage, nil, deadline)
 		_ = client.connection.Close()
 		client.writeMu.Unlock()
 	}
@@ -307,7 +306,7 @@ func (m *TranscriptionManager) closeSource(sessionID, sourceID uuid.UUID) {
 	deadline := time.Now().Add(time.Second)
 	for _, client := range clients {
 		client.writeMu.Lock()
-		_ = client.connection.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "source stopped"), deadline)
+		_ = client.connection.WriteControl(streamCloseMessage, nil, deadline)
 		_ = client.connection.Close()
 		client.writeMu.Unlock()
 	}

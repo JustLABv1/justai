@@ -13,7 +13,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 	"github.com/lib/pq"
 
 	"justai-backend/auth"
@@ -23,7 +22,7 @@ import (
 	"justai-backend/rag"
 )
 
-type wsTicketRequest struct {
+type streamTicketRequest struct {
 	Kind           string `json:"kind"`
 	SessionID      string `json:"sessionId"`
 	SourceID       string `json:"sourceId"`
@@ -53,37 +52,13 @@ type chatToolEvent struct {
 	Automatic         bool           `json:"automatic,omitempty"`
 }
 
-var websocketUpgrader = websocket.Upgrader{
-	ReadBufferSize:  16 * 1024,
-	WriteBufferSize: 16 * 1024,
-}
-
-func (a *App) upgradeWebSocket(c *gin.Context) (*websocket.Conn, error) {
-	upgrader := websocketUpgrader
-	upgrader.CheckOrigin = func(request *http.Request) bool {
-		origin := request.Header.Get("Origin")
-		if origin == "" {
-			return true
-		}
-		for _, allowed := range a.Config.FrontendOrigins {
-			// A wildcard Origin is not safe for cookie-authenticated sockets;
-			// fail closed rather than treating every caller as a configured app.
-			if allowed != "*" && allowed == origin {
-				return true
-			}
-		}
-		return false
-	}
-	return upgrader.Upgrade(c.Writer, c.Request, nil)
-}
-
-func (a *App) createWSTicket(c *gin.Context) {
-	var request wsTicketRequest
+func (a *App) createStreamTicket(c *gin.Context) {
+	var request streamTicketRequest
 	if !decodeJSON(c, &request) {
 		return
 	}
 	if request.Kind != "voice" && request.Kind != "transcription" && request.Kind != "transcription-viewer" && request.Kind != "transcription-capture" {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported websocket ticket kind"))
+		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported stream ticket kind"))
 		return
 	}
 	principal, _ := middleware.GetPrincipal(c)
@@ -151,7 +126,7 @@ func (a *App) createWSTicket(c *gin.Context) {
 		return
 	}
 	expiresAt := time.Now().Add(2 * time.Minute)
-	if _, err := a.DB.ExecContext(c, `INSERT INTO ws_tickets (token_hash, user_id, organization_id, kind, conversation_id, session_id, source_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, hash, principal.UserID, organizationID, request.Kind, conversationID, sessionID, sourceID, expiresAt); err != nil {
+	if _, err := a.DB.ExecContext(c, `INSERT INTO stream_tickets (token_hash, user_id, organization_id, kind, conversation_id, session_id, source_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, hash, principal.UserID, organizationID, request.Kind, conversationID, sessionID, sourceID, expiresAt); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}

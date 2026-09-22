@@ -44,33 +44,39 @@ export function VoiceControl({
   const muted = state?.isMuted === true
   const orbState = error
     ? "error"
-    : state?.status.type === "starting"
-      ? "connecting"
-      : muted
-        ? "muted"
-        : state?.mode === "speaking"
-          ? "speaking"
-          : active
-            ? "listening"
-            : "idle"
+    : toolApproval
+      ? "muted"
+      : state?.status.type === "starting"
+        ? "connecting"
+        : muted
+          ? "muted"
+          : state?.mode === "speaking"
+            ? "speaking"
+            : active
+              ? "listening"
+              : "idle"
 
   if (centered) {
     const statusLabel = error
       ? "Voice unavailable"
-      : state?.status.type === "starting"
-        ? "Connecting to voice"
-        : active
-          ? muted
-            ? "Voice muted"
-            : state?.mode === "speaking"
-              ? "Assistant is speaking"
-              : "Listening"
-          : "Voice mode"
+      : toolApproval
+        ? "Approval required"
+        : state?.status.type === "starting"
+          ? "Connecting to voice"
+          : active
+            ? muted
+              ? "Voice muted"
+              : state?.mode === "speaking"
+                ? "Assistant is speaking"
+                : "Listening"
+            : "Voice mode"
     const statusDescription = error
       ? error
-      : active
-        ? "Speak naturally. You can interrupt the assistant at any time."
-        : "Start a hands-free conversation with JustAI."
+      : toolApproval
+        ? "Voice is paused while you review this action."
+        : active
+          ? "Speak naturally. You can interrupt the assistant at any time."
+          : "Start a hands-free conversation with JustAI."
 
     return (
       <div
@@ -169,7 +175,10 @@ export function VoiceControl({
             </div>
           )}
           {toolApproval && (
-            <div className="w-full max-w-lg">
+            <div
+              className="w-full max-w-lg rounded-xl border bg-card p-2 text-left shadow-sm"
+              aria-label="Tool approval required"
+            >
               <ToolFallback {...toolApproval} />
             </div>
           )}
@@ -246,7 +255,7 @@ export function VoiceControl({
         <span
           className={cn(
             "size-2 rounded-full bg-muted-foreground",
-            active && "animate-pulse bg-emerald-500"
+            active && "bg-emerald-500"
           )}
         />
         {state?.status.type === "starting"
@@ -309,32 +318,43 @@ export function VoiceOrb({
   state?: "idle" | "connecting" | "listening" | "speaking" | "muted" | "error"
   volume?: number
 }) {
-  const effectiveVolume = volume
+  const effectiveVolume = Math.min(Math.max(volume, 0), 1)
+  const scale =
+    state === "speaking"
+      ? 1 + effectiveVolume * 0.06
+      : state === "listening"
+        ? 1 + effectiveVolume * 0.035
+        : 1
   return (
     <div
-      aria-label={`Voice state: ${state}`}
+      aria-hidden="true"
       className={cn(
         "relative flex items-center justify-center rounded-full border border-primary/20 bg-primary/10 shadow-[0_0_80px_rgba(99,102,241,0.22)]",
         compact ? "size-6" : "size-40",
-        (state === "connecting" || state === "speaking") && "animate-pulse",
         state === "error" && "border-destructive/40 bg-destructive/10",
         state === "muted" && "opacity-60 saturate-50",
         className
       )}
-      role="img"
-      style={{ transform: `scale(${1 + Math.min(effectiveVolume, 1) * 0.08})` }}
     >
+      {state === "connecting" ? (
+        <span className="absolute inset-[-5px] rounded-full border border-transparent border-t-primary motion-safe:animate-spin motion-reduce:border-primary/40" />
+      ) : null}
+      {state === "listening" ? (
+        <span className="absolute inset-[12%] rounded-full border border-primary/30 opacity-70" />
+      ) : null}
       <div
         className={cn(
-          "rounded-full bg-gradient-to-br from-primary/80 via-primary/40 to-transparent blur-[1px]",
+          "rounded-full bg-gradient-to-br from-primary/80 via-primary/40 to-transparent blur-[1px] transition-transform duration-150 ease-out motion-reduce:transform-none motion-reduce:transition-none",
           compact ? "size-4" : "size-28"
         )}
+        style={{ transform: `scale(${scale})` }}
       />
       <div
         className={cn(
-          "absolute rounded-full bg-primary/80 blur-md",
+          "absolute rounded-full bg-primary/80 blur-md transition-transform duration-150 ease-out motion-reduce:transform-none motion-reduce:transition-none",
           compact ? "size-2.5" : "size-16"
         )}
+        style={{ transform: `scale(${Math.max(1, scale - 0.015)})` }}
       />
     </div>
   )

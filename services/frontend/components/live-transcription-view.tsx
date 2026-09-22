@@ -70,7 +70,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { api, socketURL } from "@/lib/api"
+import { api, eventStreamURL } from "@/lib/api"
+import { SSETransport } from "@/lib/sse-transport"
+import type { SSEConnectionState } from "@/lib/sse-transport"
+import { initialRealtimeState } from "@/components/realtime-connection-status"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   mergeTranscriptionSegments,
   transcriptionJoinPath,
@@ -153,7 +161,7 @@ type BotSetup = {
   token: string
   protocol: string
   ticketPath: string
-  websocketPath: string
+  streamPath: string
   warning: string
 }
 
@@ -179,6 +187,9 @@ export function LiveTranscriptionView({
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [transportStatus, setTransportStatus] =
+    useState<SSEConnectionState>(initialRealtimeState)
+  const [interruptionAt, setInterruptionAt] = useState<Date | null>(null)
   const [partial, setPartial] = useState("")
   const [partialSourceId, setPartialSourceId] = useState<string | null>(null)
   const [partialSpeakerId, setPartialSpeakerId] = useState<string | null>(null)
@@ -223,8 +234,8 @@ export function LiveTranscriptionView({
   const [workspaceSpeakerName, setWorkspaceSpeakerName] = useState("")
   const [workspaceSpeakerSaving, setWorkspaceSpeakerSaving] = useState(false)
 
-  const viewerSocketRef = useRef<WebSocket | null>(null)
-  const captureSocketRef = useRef<WebSocket | null>(null)
+  const viewerSocketRef = useRef<SSETransport | null>(null)
+  const captureSocketRef = useRef<SSETransport | null>(null)
   const connectViewerRef = useRef<
     (id: string, reconnect?: boolean) => Promise<void>
   >(() => Promise.resolve())
@@ -683,13 +694,26 @@ export function LiveTranscriptionView({
       closeViewer(!reconnect)
       const attempt = viewerAttemptRef.current
       const ticketResponse = await api.post<{ ticket: string }>(
-        "/api/v1/ws/tickets",
+        "/api/v1/stream-tickets",
         { kind: "transcription-viewer", sessionId: id }
       )
       if (viewerAttemptRef.current !== attempt) return
-      const socket = new WebSocket(
-        socketURL("/api/v1/ws/transcription", ticketResponse.ticket)
+      const socket = new SSETransport(
+        eventStreamURL("/api/v1/streams/transcription", ticketResponse.ticket)
       )
+      socket.onconnectionstatechange = (next) => {
+        setTransportStatus(next)
+        if (next.state === "reconnecting" || next.audioQuality !== "good")
+          setInterruptionAt(new Date())
+      }
+      socket.ontransporterror = (transportError) => {
+        if (
+          !["stream_reconnecting", "audio_backpressure"].includes(
+            transportError.code
+          )
+        )
+          setError(transportError.message)
+      }
       viewerSocketRef.current = socket
       let opened = false
       let openTimer: number | null = null
@@ -751,7 +775,7 @@ export function LiveTranscriptionView({
       })
       if (
         viewerAttemptRef.current !== attempt ||
-        socket.readyState !== WebSocket.OPEN
+        socket.readyState !== SSETransport.OPEN
       ) {
         socket.close()
         return
@@ -809,7 +833,7 @@ export function LiveTranscriptionView({
 
   const beginAudio = useCallback(
     async (
-      socket: WebSocket,
+      socket: SSETransport,
       session: TranscriptionSession,
       source: TranscriptionSource,
       attempt: number
@@ -828,7 +852,7 @@ export function LiveTranscriptionView({
       const isCurrent = () =>
         captureAttemptRef.current === attempt &&
         captureSocketRef.current === socket &&
-        socket.readyState === WebSocket.OPEN
+        socket.readyState === SSETransport.OPEN
       let stream: MediaStream | null = null
       let context: AudioContext | null = null
       let worklet: AudioWorkletNode | null = null
@@ -969,7 +993,7 @@ export function LiveTranscriptionView({
           Math.sqrt(total / levelBuffer.length) * 3.2
         )
         setLevel(nextLevel)
-        if (socket.readyState === WebSocket.OPEN)
+        if (socket.readyState === SSETransport.OPEN)
           socket.send(
             JSON.stringify({ type: "source.level", level: nextLevel })
           )
@@ -1041,7 +1065,7 @@ export function LiveTranscriptionView({
       closeCapture()
       const attempt = captureAttemptRef.current
       const ticketResponse = await api.post<{ ticket: string }>(
-        "/api/v1/ws/tickets",
+        "/api/v1/stream-tickets",
         {
           kind: "transcription-capture",
           sessionId: session.id,
@@ -1050,9 +1074,22 @@ export function LiveTranscriptionView({
       )
       if (captureAttemptRef.current !== attempt) return
       captureSourceIdRef.current = source.id
-      const socket = new WebSocket(
-        socketURL("/api/v1/ws/transcription", ticketResponse.ticket)
+      const socket = new SSETransport(
+        eventStreamURL("/api/v1/streams/transcription", ticketResponse.ticket)
       )
+      socket.onconnectionstatechange = (next) => {
+        setTransportStatus(next)
+        if (next.state === "reconnecting" || next.audioQuality !== "good")
+          setInterruptionAt(new Date())
+      }
+      socket.ontransporterror = (transportError) => {
+        if (
+          !["stream_reconnecting", "audio_backpressure"].includes(
+            transportError.code
+          )
+        )
+          setError(transportError.message)
+      }
       captureSocketRef.current = socket
       socket.onmessage = (message) => {
         if (captureAttemptRef.current !== attempt) return
@@ -1107,7 +1144,7 @@ export function LiveTranscriptionView({
       })
       if (
         captureAttemptRef.current !== attempt ||
-        socket.readyState !== WebSocket.OPEN
+        socket.readyState !== SSETransport.OPEN
       ) {
         socket.close()
         return
@@ -1859,6 +1896,8 @@ export function LiveTranscriptionView({
             snapshot={snapshot}
             user={user}
             mode={captureViewMode}
+            transportStatus={transportStatus}
+            interruptionAt={interruptionAt}
           />
         </>
       )}
@@ -2602,22 +2641,41 @@ export function LiveTranscriptionView({
                   {botSetup.token}
                 </code>
               </div>
-              <div className="flex flex-col gap-2 text-xs text-muted-foreground">
-                <p>
-                  1. POST to <code>{botSetup.ticketPath}</code> with
-                  <code> Authorization: Bearer &lt;token&gt;</code>.
-                </p>
-                <p>
-                  2. Open{" "}
-                  <code>{botSetup.websocketPath}?ticket=&lt;ticket&gt;</code>.
-                </p>
-                <p>
-                  3. Send <code>transcription.start</code>, then binary PCM16
-                  frames using the existing <code>{botSetup.protocol}</code>{" "}
-                  wire format. Send <code>transcription.stop</code> when the
-                  meeting ends.
+              <div className="rounded-xl border bg-background p-4 text-sm">
+                <p className="font-medium">Adapter setup</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Give the adapter the ingest token above. It will exchange it
+                  for a short-lived connection and begin sending meeting audio.
                 </p>
               </div>
+              <Collapsible>
+                <CollapsibleTrigger
+                  render={
+                    <Button className="w-fit" size="sm" variant="ghost" />
+                  }
+                >
+                  Advanced protocol details
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2 flex flex-col gap-2 rounded-xl border bg-muted/30 p-4 text-xs text-muted-foreground">
+                  <p>
+                    1. POST to <code>{botSetup.ticketPath}</code> with
+                    <code> Authorization: Bearer &lt;token&gt;</code>.
+                  </p>
+                  <p>
+                    2. Open{" "}
+                    <code>{botSetup.streamPath}?ticket=&lt;ticket&gt;</code>.
+                  </p>
+                  <p>
+                    3. Read the <code>streamId</code> from{" "}
+                    <code>transport.ready</code>. Use its{" "}
+                    <code>uploadToken</code> as <code>X-Stream-Token</code>,
+                    POST sequenced <code>transcription.start</code> to{" "}
+                    <code>/events</code>, and batched PCM16 frames to{" "}
+                    <code>/audio</code> using the{" "}
+                    <code>{botSetup.protocol}</code> format.
+                  </p>
+                </CollapsibleContent>
+              </Collapsible>
               <DialogFooter>
                 <Button onClick={() => setBotDialogOpen(false)}>Done</Button>
               </DialogFooter>
