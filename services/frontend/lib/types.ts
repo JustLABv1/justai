@@ -882,6 +882,8 @@ export type TranscriptionSource = {
   clockOffsetMs: number
   connectedAt?: string | null
   lastSeenAt?: string | null
+  scheduledStartAt?: string | null
+  scheduledEndAt?: string | null
   signalLevel: number
 }
 

@@ -83,6 +83,7 @@ func TestRunMigrationsIntegration(t *testing.T) {
 		"generated PDFs":                       `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'generated_pdfs')`,
 		"generated PDF metadata":               `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'generated_pdfs' AND column_name = 'filename') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'generated_pdfs' AND column_name = 'size_bytes') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'generated_pdfs' AND column_name = 'pdf_data')`,
 		"transcription stream sources":         `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transcription_stream_sources')`,
+		"scheduled transcription streams":      `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'transcription_stream_sources' AND column_name = 'scheduled_start_at') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'transcription_stream_sources' AND column_name = 'reconnect_grace_seconds')`,
 		"transcription bot sources":            `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transcription_bot_sources')`,
 	}
 	for name, query := range checks {

@@ -61,6 +61,24 @@ The create body is:
 }
 ```
 
+To schedule unattended capture, include an RFC 3339 start time and optionally
+an end time:
+
+```json
+{
+  "name": "Evening news",
+  "url": "https://media.example.test/live/channel.m3u8",
+  "scheduledStartAt": "2026-09-22T20:00:00+02:00",
+  "scheduledEndAt": null
+}
+```
+
+Scheduled sources remain dormant until their start time, so they do not consume
+a transcription connection or start the session-duration clock early. Without
+an end time, a clean stream end completes the capture immediately. Unexpected
+disconnects are retried for 15 minutes before the capture is completed; the
+configured maximum session duration remains the final safety limit.
+
 ## Meeting-bot ingress
 
 `POST /api/v1/transcription/sessions/:sessionId/bot-sources` creates a
@@ -137,3 +155,26 @@ POST /api/v1/transcription/bot-sources/:sourceId/stop
 ```
 
 Stop the source or the whole session when the meeting ends.
+# Transcription reliability
+
+Browser capture forwards continuous mono PCM16 audio, including silence. The
+backend retains silence for providers with their own voice activity detection;
+explicit-commit transports finalize turns locally. The local energy threshold is
+not a speech classifier: music and background noise can still reach the model.
+
+Live browser and direct-stream results use the same conservative repetition
+cleanup. Raw provider text is retained separately from the displayed final text.
+Cleanup does not recover missing speech or establish factual accuracy. When a
+chunk contains a detected repetition loop, prompt carry-over is disabled for the
+remaining stream to avoid feeding the loop back into the decoder.
+
+Rolling-window overlap is retained while flushing the final tail, and reset for
+the next utterance. Streaming delta fields are appended verbatim; complete text
+fields replace the partial result.
+
+Before changing models or chunk durations, replay the same recorded speech
+through the configured endpoint and compare raw responses, displayed results,
+word error rate, omissions, repetitions, and finalization latency. Include quiet
+speech, music, silence, interruptions, repeated words, and mixed-language speech.
+The default 2.5-second window favors latency; longer windows must be evaluated
+against actual audio and the deployed model rather than assumed to be better.

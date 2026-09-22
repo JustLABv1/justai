@@ -647,7 +647,7 @@ func ValidateMediaSourceURL(rawURL string, allowPrivate bool) error {
 	}
 	host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
 	if host == "youtube.com" || host == "m.youtube.com" || host == "youtu.be" || host == "youtube-nocookie.com" {
-		return fmt.Errorf("YouTube page URLs are not direct media sources; use browser tab audio capture")
+		return fmt.Errorf("YouTube watch-page URLs are not direct media sources; capture the browser tab and enable Share audio")
 	}
 	if allowPrivate {
 		return nil

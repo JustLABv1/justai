@@ -1082,6 +1082,10 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection realtimeCo
 	_ = a.Live.send(client, "transcription.ready", ginData{"sessionId": info.SessionID, "sourceId": info.SourceID, "provider": endpoint.ProviderType, "model": endpoint.TranscriptionModel, "mode": mode})
 	providerDone := make(chan struct{})
 	voiceActive := false
+	forwardSilence := false
+	if forwarder, ok := stream.(provider.SilenceForwarder); ok {
+		forwardSilence = forwarder.ForwardSilence()
+	}
 	lastVoiceAt := time.Time{}
 	const voiceHangover = 650 * time.Millisecond
 	lastStatusCheck := time.Now()
@@ -1093,7 +1097,8 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection realtimeCo
 				_ = connection.Close()
 				return
 			}
-			event.Text = provider.CleanTranscriptText(event.Text)
+			rawText := firstNonEmptyString(event.RawText, event.Text)
+			event.Text = provider.SanitizeTranscriptRepetition(provider.CleanTranscriptText(event.Text))
 			if event.Text == "" {
 				continue
 			}
@@ -1115,7 +1120,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection realtimeCo
 					startOffset = maxInt64(0, event.StartOffsetMs)
 					endOffset = event.EndOffsetMs
 				}
-				segment, persistErr := a.persistTranscriptionSegment(ctx, info.SessionID, info.SourceID, strings.TrimSpace(event.Text), startOffset, endOffset)
+				segment, persistErr := a.persistTranscriptionSegmentWithRaw(ctx, info.SessionID, info.SourceID, strings.TrimSpace(event.Text), rawText, startOffset, endOffset)
 				if persistErr != nil {
 					a.Live.broadcast(info.SessionID, "error", ginData{"sourceId": info.SourceID, "message": "could not persist transcript: " + persistErr.Error()})
 					continue
@@ -1193,7 +1198,7 @@ func (a *App) runRoomTranscriptionSocket(ctx *gin.Context, connection realtimeCo
 		if hasSpeech {
 			voiceActive = true
 			lastVoiceAt = time.Now()
-		} else if !voiceActive || time.Since(lastVoiceAt) > voiceHangover {
+		} else if !forwardSilence && (!voiceActive || time.Since(lastVoiceAt) > voiceHangover) {
 			if voiceActive {
 				voiceActive = false
 				if committer, ok := stream.(provider.TurnCommitter); ok {
@@ -1866,7 +1871,7 @@ func loadTranscriptionSources(ctx context.Context, db *sql.DB, sessionID uuid.UU
 		       source.status, source.clock_offset_ms, source.connected_at, source.last_seen_at,
 		       COALESCE(stream.protocol, ''), COALESCE(stream.status, bot.status, ''),
 		       COALESCE(stream.reconnect_count, 0), COALESCE(stream.last_error, ''),
-		       COALESCE(bot.platform, '')
+		       COALESCE(bot.platform, ''), stream.scheduled_start_at, stream.scheduled_end_at
 		FROM transcription_sources source
 		LEFT JOIN transcription_stream_sources stream ON stream.source_id = source.id
 		LEFT JOIN transcription_bot_sources bot ON bot.source_id = source.id
@@ -1879,7 +1884,7 @@ func loadTranscriptionSources(ctx context.Context, db *sql.DB, sessionID uuid.UU
 	result := make([]models.TranscriptionSource, 0)
 	for rows.Next() {
 		var item models.TranscriptionSource
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.Name, &item.Kind, &item.DeviceLabel, &item.Status, &item.ClockOffsetMs, &item.ConnectedAt, &item.LastSeenAt, &item.Protocol, &item.TransportStatus, &item.ReconnectCount, &item.LastError, &item.Platform); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.Name, &item.Kind, &item.DeviceLabel, &item.Status, &item.ClockOffsetMs, &item.ConnectedAt, &item.LastSeenAt, &item.Protocol, &item.TransportStatus, &item.ReconnectCount, &item.LastError, &item.Platform, &item.ScheduledStartAt, &item.ScheduledEndAt); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

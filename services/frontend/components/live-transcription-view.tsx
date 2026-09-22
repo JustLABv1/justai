@@ -5,6 +5,7 @@ import {
   ArrowRight,
   AudioLines,
   Bot,
+  CalendarDays,
   Check,
   Copy,
   LoaderCircle,
@@ -37,6 +38,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import {
   Empty,
   EmptyDescription,
@@ -52,6 +54,11 @@ import {
   FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   PageDescription,
   PageEyebrow,
@@ -115,6 +122,262 @@ const liveSessionWizardSteps = [
   { label: "Options", description: "Tune room" },
   { label: "Review", description: "Start safely" },
 ] as const
+
+function localDateTimeValue(date: Date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16)
+}
+
+function parseLocalDateTime(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return null
+  const [, year, month, day, hour, minute] = match
+  const result = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute)
+  )
+  return Number.isNaN(result.getTime()) ? null : result
+}
+
+function formatScheduleDateTime(value: string) {
+  const date = parseLocalDateTime(value)
+  if (!date) return "Select date and time"
+  return `${String(date.getDate()).padStart(2, "0")}.${String(
+    date.getMonth() + 1
+  ).padStart(2, "0")}.${date.getFullYear()} · ${String(
+    date.getHours()
+  ).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+}
+
+function updateLocalDateTime(
+  value: string,
+  update: Partial<{
+    date: Date
+    hour: number
+    minute: number
+  }>
+) {
+  const current = parseLocalDateTime(value) ?? new Date()
+  const date = update.date ?? current
+  return localDateTimeValue(
+    new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      update.hour ?? current.getHours(),
+      update.minute ?? current.getMinutes()
+    )
+  )
+}
+
+function isYouTubePageURL(value: string) {
+  try {
+    const host = new URL(value.trim()).hostname
+      .toLowerCase()
+      .replace(/^www\./, "")
+    return [
+      "youtube.com",
+      "m.youtube.com",
+      "youtu.be",
+      "youtube-nocookie.com",
+    ].includes(host)
+  } catch {
+    return false
+  }
+}
+
+function DialogError({ message }: { message: string }) {
+  return (
+    <Alert variant="destructive">
+      <AlertTitle>Live transcription needs attention</AlertTitle>
+      <AlertDescription>{message}</AlertDescription>
+    </Alert>
+  )
+}
+
+const youtubeCaptureGuidance =
+  "A YouTube watch page must be captured from the browser. Choose Browser tab or system, then select the YouTube tab and enable Share audio."
+
+function ScheduleDateTimePicker({
+  idPrefix,
+  label,
+  value,
+  minimum,
+  optional = false,
+  onChange,
+}: {
+  idPrefix: string
+  label: string
+  value: string
+  minimum?: string
+  optional?: boolean
+  onChange: (value: string) => void
+}) {
+  const timeZone =
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "Browser time zone"
+  const selected = parseLocalDateTime(value)
+  const minimumDate = minimum ? parseLocalDateTime(minimum) : undefined
+  const hours = Array.from({ length: 24 }, (_, hour) => hour)
+  const minutes = Array.from({ length: 60 }, (_, minute) => minute)
+
+  return (
+    <Field>
+      <FieldLabel>
+        {label}
+        {optional ? " (optional)" : ""}
+      </FieldLabel>
+      <div className="flex flex-col gap-2">
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button
+                aria-label={`${label}: select date and time`}
+                className="w-full justify-start"
+                id={`${idPrefix}-trigger`}
+                variant="outline"
+              >
+                <CalendarDays data-icon="inline-start" />
+                {formatScheduleDateTime(value)}
+              </Button>
+            }
+          />
+          <PopoverContent align="start" className="w-auto p-0">
+            <Calendar
+              disabled={minimumDate ? { before: minimumDate } : undefined}
+              mode="single"
+              onSelect={(date) => {
+                if (date) onChange(updateLocalDateTime(value, { date }))
+              }}
+              selected={selected ?? undefined}
+            />
+          </PopoverContent>
+        </Popover>
+        <div className="grid grid-cols-2 gap-2">
+          <Select
+            onValueChange={(next) => {
+              if (next)
+                onChange(updateLocalDateTime(value, { hour: Number(next) }))
+            }}
+            value={
+              selected
+                ? String(selected.getHours()).padStart(2, "0")
+                : undefined
+            }
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Hour" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Hour (24-hour)</SelectLabel>
+                {hours.map((hour) => (
+                  <SelectItem key={hour} value={String(hour).padStart(2, "0")}>
+                    {String(hour).padStart(2, "0")}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <Select
+            onValueChange={(next) => {
+              if (next)
+                onChange(updateLocalDateTime(value, { minute: Number(next) }))
+            }}
+            value={
+              selected
+                ? String(selected.getMinutes()).padStart(2, "0")
+                : undefined
+            }
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Minute" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Minute</SelectLabel>
+                {minutes.map((minute) => (
+                  <SelectItem
+                    key={minute}
+                    value={String(minute).padStart(2, "0")}
+                  >
+                    {String(minute).padStart(2, "0")}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+        <FieldDescription>
+          Local browser time · {timeZone} · 24-hour format
+        </FieldDescription>
+      </div>
+    </Field>
+  )
+}
+
+function StreamScheduleFields({
+  idPrefix,
+  scheduled,
+  start,
+  end,
+  onScheduledChange,
+  onStartChange,
+  onEndChange,
+}: {
+  idPrefix: string
+  scheduled: boolean
+  start: string
+  end: string
+  onScheduledChange: (checked: boolean) => void
+  onStartChange: (value: string) => void
+  onEndChange: (value: string) => void
+}) {
+  return (
+    <>
+      <div className="flex items-center justify-between rounded-xl bg-muted/50 p-3">
+        <div>
+          <p className="text-sm font-medium">Schedule capture</p>
+          <p className="text-xs text-muted-foreground">
+            JustAI connects automatically at the selected local time.
+          </p>
+        </div>
+        <Switch
+          aria-label="Schedule livestream capture"
+          checked={scheduled}
+          onCheckedChange={onScheduledChange}
+        />
+      </div>
+      {scheduled ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <ScheduleDateTimePicker
+            idPrefix={`${idPrefix}-scheduled-start`}
+            label="Start time"
+            minimum={localDateTimeValue(new Date())}
+            onChange={onStartChange}
+            value={start}
+          />
+          <ScheduleDateTimePicker
+            idPrefix={`${idPrefix}-scheduled-end`}
+            label="End time"
+            minimum={start || localDateTimeValue(new Date())}
+            onChange={onEndChange}
+            optional
+            value={end}
+          />
+          <FieldDescription className="sm:col-span-2">
+            Without an end time, capture stops when the stream ends. Temporary
+            disconnects are retried for 15 minutes; the eight-hour session limit
+            remains the final safeguard.
+          </FieldDescription>
+        </div>
+      ) : null}
+    </>
+  )
+}
 
 const liveSessionSourceOptions: Array<{
   key: SessionSourceChoice
@@ -219,6 +482,9 @@ export function LiveTranscriptionView({
   const [streamDialogOpen, setStreamDialogOpen] = useState(false)
   const [streamName, setStreamName] = useState("Live stream")
   const [streamURL, setStreamURL] = useState("")
+  const [streamScheduled, setStreamScheduled] = useState(false)
+  const [streamScheduledStart, setStreamScheduledStart] = useState("")
+  const [streamScheduledEnd, setStreamScheduledEnd] = useState("")
   const [streamStarting, setStreamStarting] = useState(false)
   const [botDialogOpen, setBotDialogOpen] = useState(false)
   const [botName, setBotName] = useState("Meeting bot")
@@ -822,15 +1088,6 @@ export function LiveTranscriptionView({
     return buffer
   }
 
-  const calculateRMS = (input: Float32Array) => {
-    if (input.length === 0) return 0
-    let total = 0
-    input.forEach((value) => {
-      total += value * value
-    })
-    return Math.sqrt(total / input.length)
-  }
-
   const beginAudio = useCallback(
     async (
       socket: SSETransport,
@@ -958,16 +1215,11 @@ export function LiveTranscriptionView({
       analyserRef.current = analyser
       workletRef.current = worklet
       let sequence = 0
-      let voiceUntil = 0
-      const voiceThreshold = 0.01
-      const voiceHangoverMs = 650
       worklet.port.onmessage = (message: MessageEvent<Float32Array>) => {
         if (!isCurrent()) return
         const samples = downsample(message.data, context!.sampleRate, 16000)
-        const rms = calculateRMS(samples)
-        const now = performance.now()
-        if (rms >= voiceThreshold) voiceUntil = now + voiceHangoverMs
-        if (now > voiceUntil) return
+        // Preserve the audio timeline, including silence. The backend chooses
+        // provider-side VAD or local turn commits for the selected transport.
         const pcm = encodePCM16(samples)
         const frame = new ArrayBuffer(17 + pcm.byteLength)
         const view = new DataView(frame)
@@ -1267,6 +1519,15 @@ export function LiveTranscriptionView({
   ])
 
   const createSession = async () => {
+    if (
+      captureMode === "external" &&
+      externalSourceType === "stream" &&
+      isYouTubePageURL(streamURL)
+    ) {
+      setError(youtubeCaptureGuidance)
+      setCreateStep(1)
+      return
+    }
     setStarting(true)
     setError("")
     try {
@@ -1299,6 +1560,14 @@ export function LiveTranscriptionView({
           {
             name: streamName.trim() || "Live stream",
             url: streamURL.trim(),
+            scheduledStartAt:
+              streamScheduled && streamScheduledStart
+                ? new Date(streamScheduledStart).toISOString()
+                : undefined,
+            scheduledEndAt:
+              streamScheduled && streamScheduledEnd
+                ? new Date(streamScheduledEnd).toISOString()
+                : undefined,
           }
         )
         createdSource = {
@@ -1336,7 +1605,8 @@ export function LiveTranscriptionView({
         createdSource = source.source
       }
       const sessionWithExternalSource =
-        captureMode === "external"
+        captureMode === "external" &&
+        !(externalSourceType === "stream" && streamScheduled)
           ? { ...createdSession, status: "live" as const }
           : createdSession
       onSessionCreated(sessionWithExternalSource)
@@ -1630,6 +1900,10 @@ export function LiveTranscriptionView({
 
   const addStreamSource = async () => {
     if (!snapshot || !streamURL.trim() || streamStarting) return
+    if (isYouTubePageURL(streamURL)) {
+      setError(youtubeCaptureGuidance)
+      return
+    }
     setStreamStarting(true)
     setError("")
     try {
@@ -1641,6 +1915,14 @@ export function LiveTranscriptionView({
         {
           name: streamName.trim() || "Live stream",
           url: streamURL.trim(),
+          scheduledStartAt:
+            streamScheduled && streamScheduledStart
+              ? new Date(streamScheduledStart).toISOString()
+              : undefined,
+          scheduledEndAt:
+            streamScheduled && streamScheduledEnd
+              ? new Date(streamScheduledEnd).toISOString()
+              : undefined,
         }
       )
       setSnapshot((current) =>
@@ -1658,7 +1940,8 @@ export function LiveTranscriptionView({
               session: {
                 ...current.session,
                 status:
-                  current.session.status === "waiting"
+                  current.session.status === "waiting" &&
+                  result.stream.status !== "scheduled"
                     ? "live"
                     : current.session.status,
               },
@@ -1666,6 +1949,9 @@ export function LiveTranscriptionView({
           : current
       )
       setStreamURL("")
+      setStreamScheduled(false)
+      setStreamScheduledStart("")
+      setStreamScheduledEnd("")
       setStreamDialogOpen(false)
       onSessionsChanged()
     } catch (caught) {
@@ -1757,7 +2043,11 @@ export function LiveTranscriptionView({
   const sourceSetupReady =
     captureMode !== "external" ||
     externalSourceType === "meeting-bot" ||
-    streamURL.trim().length > 0
+    (streamURL.trim().length > 0 &&
+      (!streamScheduled ||
+        (Boolean(streamScheduledStart) &&
+          (!streamScheduledEnd ||
+            new Date(streamScheduledEnd) > new Date(streamScheduledStart)))))
   const canContinueWizard =
     createStep === 0 ||
     (createStep === 1 && sourceSetupReady) ||
@@ -1787,15 +2077,16 @@ export function LiveTranscriptionView({
         ? ("audio" as const)
         : ("none" as const)
       : ("none" as const)
+  const dialogOpen =
+    (createOpen && !sessionId) ||
+    streamDialogOpen ||
+    botDialogOpen ||
+    shareOpen ||
+    Boolean(workspaceSpeaker)
 
   return (
     <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
-      {error && (
-        <Alert variant="destructive">
-          <AlertTitle>Live transcription needs attention</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      {error && !dialogOpen ? <DialogError message={error} /> : null}
 
       {!snapshot ? (
         <>
@@ -1906,6 +2197,7 @@ export function LiveTranscriptionView({
         open={createOpen && !sessionId}
         onOpenChange={(open) => {
           setCreateOpen(open)
+          if (!open) setError("")
           if (open) {
             setCreateStep(0)
             void refreshDevices()
@@ -1976,6 +2268,25 @@ export function LiveTranscriptionView({
               })}
             </div>
           </DialogHeader>
+
+          {error ? (
+            <div className="flex flex-col gap-3">
+              <DialogError message={error} />
+              {error === youtubeCaptureGuidance ? (
+                <Button
+                  className="w-fit"
+                  onClick={() => {
+                    setError("")
+                    setCaptureMode("system-audio")
+                    setCreateStep(1)
+                  }}
+                  variant="outline"
+                >
+                  <MonitorUp data-icon="inline-start" /> Use browser tab audio
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
 
           {createStep === 0 ? (
             <div
@@ -2182,6 +2493,22 @@ export function LiveTranscriptionView({
                       URLs.
                     </FieldDescription>
                   </Field>
+                  <StreamScheduleFields
+                    end={streamScheduledEnd}
+                    idPrefix="session-stream"
+                    onEndChange={setStreamScheduledEnd}
+                    onScheduledChange={(checked) => {
+                      setStreamScheduled(checked)
+                      if (checked && !streamScheduledStart) {
+                        setStreamScheduledStart(
+                          localDateTimeValue(new Date(Date.now() + 15 * 60_000))
+                        )
+                      }
+                    }}
+                    onStartChange={setStreamScheduledStart}
+                    scheduled={streamScheduled}
+                    start={streamScheduledStart}
+                  />
                 </FieldGroup>
               ) : (
                 <FieldGroup>
@@ -2544,7 +2871,13 @@ export function LiveTranscriptionView({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={streamDialogOpen} onOpenChange={setStreamDialogOpen}>
+      <Dialog
+        open={streamDialogOpen}
+        onOpenChange={(open) => {
+          setStreamDialogOpen(open)
+          if (!open) setError("")
+        }}
+      >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Capture a live stream</DialogTitle>
@@ -2554,6 +2887,7 @@ export function LiveTranscriptionView({
               YouTube watch-page URL is not a media stream URL.
             </DialogDescription>
           </DialogHeader>
+          {error ? <DialogError message={error} /> : null}
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="stream-source-name">Source name</FieldLabel>
@@ -2577,16 +2911,45 @@ export function LiveTranscriptionView({
                 snapshots or source lists.
               </FieldDescription>
             </Field>
+            <StreamScheduleFields
+              end={streamScheduledEnd}
+              idPrefix="stream-source"
+              onEndChange={setStreamScheduledEnd}
+              onScheduledChange={(checked) => {
+                setStreamScheduled(checked)
+                if (checked && !streamScheduledStart) {
+                  setStreamScheduledStart(
+                    localDateTimeValue(new Date(Date.now() + 15 * 60_000))
+                  )
+                }
+              }}
+              onStartChange={setStreamScheduledStart}
+              scheduled={streamScheduled}
+              start={streamScheduledStart}
+            />
           </FieldGroup>
           <DialogFooter>
             <Button
-              onClick={() => setStreamDialogOpen(false)}
+              onClick={() => {
+                setError("")
+                setStreamDialogOpen(false)
+              }}
               variant="outline"
             >
               Cancel
             </Button>
             <Button
-              disabled={streamStarting || !streamURL.trim()}
+              disabled={
+                streamStarting ||
+                !streamURL.trim() ||
+                (streamScheduled &&
+                  (!streamScheduledStart ||
+                    Boolean(
+                      streamScheduledEnd &&
+                      new Date(streamScheduledEnd) <=
+                        new Date(streamScheduledStart)
+                    )))
+              }
               onClick={() => void addStreamSource()}
             >
               {streamStarting ? (
@@ -2599,7 +2962,8 @@ export function LiveTranscriptionView({
                 </>
               ) : (
                 <>
-                  <Tv data-icon="inline-start" /> Connect stream
+                  <Tv data-icon="inline-start" />
+                  {streamScheduled ? "Schedule stream" : "Connect stream"}
                 </>
               )}
             </Button>
@@ -2607,7 +2971,13 @@ export function LiveTranscriptionView({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={botDialogOpen} onOpenChange={setBotDialogOpen}>
+      <Dialog
+        open={botDialogOpen}
+        onOpenChange={(open) => {
+          setBotDialogOpen(open)
+          if (!open) setError("")
+        }}
+      >
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Connect a meeting bot</DialogTitle>
@@ -2617,6 +2987,7 @@ export function LiveTranscriptionView({
               its meeting audio.
             </DialogDescription>
           </DialogHeader>
+          {error ? <DialogError message={error} /> : null}
           {botSetup ? (
             <div className="flex flex-col gap-4">
               <div className="rounded-xl bg-muted/50 p-4">
@@ -2762,7 +3133,13 @@ export function LiveTranscriptionView({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+      <Dialog
+        open={shareOpen}
+        onOpenChange={(open) => {
+          setShareOpen(open)
+          if (!open) setError("")
+        }}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Join this room</DialogTitle>
@@ -2771,6 +3148,7 @@ export function LiveTranscriptionView({
               approve the request here.
             </DialogDescription>
           </DialogHeader>
+          {error ? <DialogError message={error} /> : null}
           {snapshot?.session.joinCode ? (
             <div className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/50 p-3">
               <code className="min-w-0 flex-1 text-xs break-all text-muted-foreground">
@@ -2824,7 +3202,10 @@ export function LiveTranscriptionView({
       <Dialog
         open={Boolean(workspaceSpeaker)}
         onOpenChange={(open) => {
-          if (!open && !workspaceSpeakerSaving) setWorkspaceSpeaker(null)
+          if (!open && !workspaceSpeakerSaving) {
+            setError("")
+            setWorkspaceSpeaker(null)
+          }
         }}
       >
         <DialogContent className="sm:max-w-md">
@@ -2835,6 +3216,7 @@ export function LiveTranscriptionView({
               exports.
             </DialogDescription>
           </DialogHeader>
+          {error ? <DialogError message={error} /> : null}
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="workspace-speaker-name">Name</FieldLabel>
@@ -2851,7 +3233,10 @@ export function LiveTranscriptionView({
           <DialogFooter>
             <Button
               disabled={workspaceSpeakerSaving}
-              onClick={() => setWorkspaceSpeaker(null)}
+              onClick={() => {
+                setError("")
+                setWorkspaceSpeaker(null)
+              }}
               variant="outline"
             >
               Cancel
