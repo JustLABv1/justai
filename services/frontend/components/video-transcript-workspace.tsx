@@ -122,6 +122,7 @@ export type TranscriptWorkspaceProps = {
   onVideoPlaybackError: (value: string) => void
   onRefreshPlayback: () => Promise<void>
   onRenameSpeaker: (speaker: TranscriptionSpeaker) => void
+  onStartChat: (sessionId: string) => Promise<void>
   onError: (value: string) => void
   mediaKind?: TranscriptWorkspaceMediaKind
 }
@@ -335,6 +336,7 @@ export function TranscriptWorkspace({
   onVideoPlaybackError,
   onRefreshPlayback,
   onRenameSpeaker,
+  onStartChat,
   onError,
   mediaKind = "video",
 }: VideoTranscriptWorkspaceProps) {
@@ -375,6 +377,7 @@ export function TranscriptWorkspace({
   )
   const [polishGenerating, setPolishGenerating] = useState(false)
   const [insightsGenerating, setInsightsGenerating] = useState(false)
+  const [chatStarting, setChatStarting] = useState(false)
   const [insightLanguage, setInsightLanguage] = useState(
     () => snapshot.insights?.language ?? "auto"
   )
@@ -994,6 +997,74 @@ export function TranscriptWorkspace({
     }
   }
 
+  const startChat = async () => {
+    if (chatStarting) return
+    setChatStarting(true)
+    try {
+      await onStartChat(snapshot.session.id)
+      onError("")
+    } catch (caught) {
+      onError(
+        caught instanceof Error
+          ? caught.message
+          : "A chat could not be started from this transcript."
+      )
+    } finally {
+      setChatStarting(false)
+    }
+  }
+
+  const exportInsights = (format: "md" | "json") => {
+    if (!insightsReady) return
+    const title = snapshot.session.title || "Transcript insights"
+    const safeName =
+      title
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9äöüß]+/gi, "-")
+        .replace(/^-+|-+$/g, "") || "transcript"
+    const markdown = [
+      `# ${title} — AI insights`,
+      insights.summary ? `## Summary\n\n${insights.summary}` : "",
+      insights.chapters?.length
+        ? `## Chapters\n\n${insights.chapters
+            .map(
+              (chapter) =>
+                `- **${formatVideoTimestamp(chapter.startOffsetMs)} · ${chapter.title}**${chapter.summary ? ` — ${chapter.summary}` : ""}`
+            )
+            .join("\n")}`
+        : "",
+      insights.topics?.length
+        ? `## Topics\n\n${insights.topics.map((topic) => `- ${topic}`).join("\n")}`
+        : "",
+      insights.actionItems?.length
+        ? `## Action items\n\n${insights.actionItems.map((item) => `- ${item}`).join("\n")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+    const blob = new Blob(
+      [
+        format === "json"
+          ? JSON.stringify({ title, insights }, null, 2)
+          : markdown,
+      ],
+      {
+        type:
+          format === "json"
+            ? "application/json;charset=utf-8"
+            : "text/markdown;charset=utf-8",
+      }
+    )
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${safeName}-insights.${format}`
+    link.click()
+    URL.revokeObjectURL(url)
+    onError("")
+  }
+
   const exportTranscript = async () => {
     try {
       const includeInsights =
@@ -1026,49 +1097,66 @@ export function TranscriptWorkspace({
 
   return (
     <div className="space-y-3">
-      <Tabs
-        aria-label="Transcript workspace sections"
-        className="min-w-0"
-        onValueChange={(value) => {
-          if (
-            value === "review" ||
-            value === "insights" ||
-            value === "speakers" ||
-            value === "details"
-          ) {
-            setWorkspaceView(value)
-          }
-        }}
-        value={workspaceView}
-      >
-        <TabsList className="w-full justify-start overflow-x-auto">
-          <TabsTrigger value="review">
-            Review
-            {annotations.length > 0 ? (
-              <span className="text-[10px] text-muted-foreground">
-                {annotations.length}
-              </span>
-            ) : null}
-          </TabsTrigger>
-          <TabsTrigger value="insights">
-            Insights
-            {insightsReady ? (
-              <Badge className="h-4 px-1.5 text-[9px]" variant="secondary">
-                Ready
-              </Badge>
-            ) : null}
-          </TabsTrigger>
-          <TabsTrigger value="speakers">
-            Speakers
-            {snapshot.speakers.length > 0 ? (
-              <span className="text-[10px] text-muted-foreground">
-                {snapshot.speakers.length}
-              </span>
-            ) : null}
-          </TabsTrigger>
-          <TabsTrigger value="details">Details</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Tabs
+          aria-label="Transcript workspace sections"
+          className="min-w-0 flex-1"
+          onValueChange={(value) => {
+            if (
+              value === "review" ||
+              value === "insights" ||
+              value === "speakers" ||
+              value === "details"
+            ) {
+              setWorkspaceView(value)
+            }
+          }}
+          value={workspaceView}
+        >
+          <TabsList className="w-full justify-start overflow-x-auto">
+            <TabsTrigger value="review">
+              Review
+              {annotations.length > 0 ? (
+                <span className="text-[10px] text-muted-foreground">
+                  {annotations.length}
+                </span>
+              ) : null}
+            </TabsTrigger>
+            <TabsTrigger value="insights">
+              Insights
+              {insightsReady ? (
+                <Badge className="h-4 px-1.5 text-[9px]" variant="secondary">
+                  Ready
+                </Badge>
+              ) : null}
+            </TabsTrigger>
+            <TabsTrigger value="speakers">
+              Speakers
+              {snapshot.speakers.length > 0 ? (
+                <span className="text-[10px] text-muted-foreground">
+                  {snapshot.speakers.length}
+                </span>
+              ) : null}
+            </TabsTrigger>
+            <TabsTrigger value="details">Details</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <Button
+          disabled={chatStarting || !snapshot.segments.length}
+          onClick={() => void startChat()}
+          size="sm"
+        >
+          {chatStarting ? (
+            <LoaderCircle
+              className="motion-safe:animate-spin motion-reduce:animate-none"
+              data-icon="inline-start"
+            />
+          ) : (
+            <MessageSquarePlus data-icon="inline-start" />
+          )}
+          {chatStarting ? "Starting chat…" : "Chat with transcript"}
+        </Button>
+      </div>
 
       <div className={workspaceGridClass}>
         <Card
@@ -1837,26 +1925,47 @@ export function TranscriptWorkspace({
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Sparkles className="size-4 text-primary" /> AI insights
                 </CardTitle>
-                <Button
-                  disabled={insightsProcessing || !snapshot.segments.length}
-                  onClick={() => void generateInsights()}
-                  size="sm"
-                  variant="outline"
-                >
-                  {insightsProcessing ? (
-                    <LoaderCircle
-                      className="motion-safe:animate-spin motion-reduce:animate-none"
-                      data-icon="inline-start"
-                    />
-                  ) : (
-                    <Sparkles data-icon="inline-start" />
-                  )}{" "}
-                  {insightsProcessing
-                    ? "Writing…"
-                    : insights.status === "completed"
-                      ? "Regenerate"
-                      : "Generate"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  {insightsReady ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={<Button size="sm" variant="outline" />}
+                      >
+                        <Download data-icon="inline-start" /> Export insights
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => exportInsights("md")}>
+                          <FileText data-icon="inline-start" /> Markdown
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => exportInsights("json")}
+                        >
+                          <Download data-icon="inline-start" /> JSON
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
+                  <Button
+                    disabled={insightsProcessing || !snapshot.segments.length}
+                    onClick={() => void generateInsights()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {insightsProcessing ? (
+                      <LoaderCircle
+                        className="motion-safe:animate-spin motion-reduce:animate-none"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <Sparkles data-icon="inline-start" />
+                    )}{" "}
+                    {insightsProcessing
+                      ? "Writing…"
+                      : insights.status === "completed"
+                        ? "Regenerate"
+                        : "Generate"}
+                  </Button>
+                </div>
               </div>
               <CardDescription>
                 Summary, chapters, topics, and action items from the transcript.

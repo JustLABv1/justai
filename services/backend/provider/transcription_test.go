@@ -324,6 +324,48 @@ func TestChunkedStreamDeduplicatesRollingWindowOverlap(t *testing.T) {
 	}
 }
 
+func TestStreamingDeltasPreserveRepeatedTokens(t *testing.T) {
+	for _, pair := range [][2]string{{"ja ", "ja "}, {"theatre", "the"}, {"a", "abc"}} {
+		if got := appendTranscriptDelta(pair[0], pair[1]); got != pair[0]+pair[1] {
+			t.Fatalf("delta was discarded or replaced: %q", got)
+		}
+	}
+}
+
+func TestRepetitionFilterHandlesMultipleShortWordLoops(t *testing.T) {
+	input := "Vorher " + strings.Repeat("in der ", 20) + "Mitte " + strings.Repeat("der ", 20) + "Danach"
+	want := "Vorher in der in der Mitte der der Danach"
+	if got := SanitizeTranscriptRepetition(input); got != want {
+		t.Fatalf("unexpected loop cleanup: %q", got)
+	}
+}
+
+func TestRepetitionFilterHandlesConcatenatedLoop(t *testing.T) {
+	input := "München RheinRuhr" + strings.Repeat("Rhein", 30) + " Region"
+	if got := SanitizeTranscriptRepetition(input); got != "München RheinRuhrRheinRhein Region" {
+		t.Fatalf("unexpected concatenated cleanup: %q", got)
+	}
+}
+
+func TestChunkedTurnResetAppliesToNextUtterance(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &ChunkedStream{ctx: ctx, minimumBytes: 2, jobs: make(chan chunkedAudio, 2), buffer: speechPCM(time.Second)}
+	if err := s.CommitTurn(); err != nil {
+		t.Fatal(err)
+	}
+	if job := <-s.jobs; job.resetPrevious {
+		t.Fatal("tail must retain overlap context")
+	}
+	s.buffer = speechPCM(time.Second)
+	if err := s.CommitTurn(); err != nil {
+		t.Fatal(err)
+	}
+	if job := <-s.jobs; !job.resetPrevious {
+		t.Fatal("next utterance must reset context")
+	}
+}
+
 func TestSanitizeTranscriptRepetitionKeepsNaturalRepetition(t *testing.T) {
 	input := strings.TrimSpace(strings.Repeat("ich sage ", 7) + "dann sprechen wir weiter über das thema")
 	if got := SanitizeTranscriptRepetition(input); got != input {

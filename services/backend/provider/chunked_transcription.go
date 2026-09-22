@@ -104,6 +104,7 @@ type ChunkedStream struct {
 	bufferMu      sync.Mutex
 	buffer        []byte
 	bufferStartMs int64
+	resetNext     bool
 	committed     bool
 	closed        bool
 
@@ -207,9 +208,12 @@ func (s *ChunkedStream) takeChunkLocked(length, advance int) chunkedAudio {
 	chunk := make([]byte, length)
 	copy(chunk, s.buffer[:length])
 	start := s.bufferStartMs
+	resetPrevious := s.resetNext
+	s.resetNext = false
 	s.buffer = append([]byte(nil), s.buffer[advance:]...)
 	s.bufferStartMs += int64(advance/2) * 1000 / 16000
 	return chunkedAudio{
+		resetPrevious: resetPrevious,
 		pcm:           chunk,
 		startOffsetMs: start,
 		endOffsetMs:   start + int64(length/2)*1000/16000,
@@ -232,7 +236,6 @@ func (s *ChunkedStream) Commit() error {
 		s.bufferMu.Lock()
 		if !s.closed && len(s.buffer) >= s.minimumBytes {
 			value := s.takeChunkLocked(len(s.buffer), len(s.buffer))
-			value.resetPrevious = true
 			job = &value
 		}
 		s.committed = true
@@ -264,9 +267,11 @@ func (s *ChunkedStream) CommitTurn() error {
 	s.bufferMu.Lock()
 	if !s.closed && !s.committed && len(s.buffer) >= s.minimumBytes {
 		value := s.takeChunkLocked(len(s.buffer), len(s.buffer))
-		value.resetPrevious = true
 		job = &value
 	}
+	// Clear carry-over for the next utterance, not the tail being flushed:
+	// that tail may still overlap the previous rolling window.
+	s.resetNext = true
 	s.bufferMu.Unlock()
 	if job == nil {
 		return nil
@@ -365,15 +370,21 @@ func (s *ChunkedStream) transcribe(job chunkedAudio) error {
 	if textValue == "" {
 		return nil
 	}
+	rawText := textValue
+	textValue = SanitizeTranscriptRepetition(textValue)
 	novel := removeTranscriptOverlap(s.previousText, textValue)
 	s.previousText = textValue
+	if textValue != rawText {
+		// Never condition subsequent requests on a degenerate decoder response.
+		s.promptDisabled = true
+	}
 	if strings.TrimSpace(novel) == "" {
 		return nil
 	}
 	event := RealtimeEvent{
 		Kind:          "final",
 		Text:          strings.TrimSpace(novel),
-		RawText:       textValue,
+		RawText:       rawText,
 		StartOffsetMs: job.startOffsetMs,
 		EndOffsetMs:   job.endOffsetMs,
 	}
@@ -577,12 +588,8 @@ func appendTranscriptDelta(current, delta string) string {
 	if current == "" {
 		return delta
 	}
-	if strings.HasPrefix(delta, current) {
-		return delta
-	}
-	if strings.HasPrefix(current, delta) {
-		return current
-	}
+	// Delta fields contain tokens, not cumulative snapshots. Repeated tokens
+	// (and prefixes such as "the" after "theatre") are legitimate speech.
 	return current + delta
 }
 

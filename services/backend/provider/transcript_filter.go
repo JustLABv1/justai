@@ -73,6 +73,23 @@ const (
 // retain the original provider response separately when using this function.
 func SanitizeTranscriptRepetition(value string) string {
 	words := strings.Fields(value)
+	for index, word := range words {
+		// Decoder loops can concatenate tokens without spaces (RheinRhein…).
+		runes := []rune(word)
+		for size := 2; size <= 24 && size*12 <= len(runes); size++ {
+			for start := 0; start+size*12 <= len(runes); start++ {
+				phrase := string(runes[start : start+size])
+				end := start + size
+				for end+size <= len(runes) && string(runes[end:end+size]) == phrase {
+					end += size
+				}
+				if end-start >= size*12 {
+					words[index] = string(runes[:start]) + phrase + phrase + string(runes[end:])
+					return SanitizeTranscriptRepetition(strings.Join(words, " "))
+				}
+			}
+		}
+	}
 	if len(words) < minimumRepeatedSingleWords {
 		return value
 	}
@@ -125,7 +142,7 @@ func SanitizeTranscriptRepetition(value string) string {
 	cleaned := make([]string, 0, len(words)-bestSpan+2*bestPhraseLength)
 	cleaned = append(cleaned, words[:keepEnd]...)
 	cleaned = append(cleaned, words[bestEnd:]...)
-	return strings.Join(cleaned, " ")
+	return SanitizeTranscriptRepetition(strings.Join(cleaned, " "))
 }
 
 func repeatedPhraseCopies(words []string, start, phraseLength int) int {
@@ -156,7 +173,7 @@ func sameTranscriptWords(left, right []string) bool {
 
 func hasRepeatedPhraseContent(words []string) bool {
 	for _, word := range words {
-		if len([]rune(word)) >= 4 {
+		if len([]rune(word)) >= 2 {
 			return true
 		}
 	}

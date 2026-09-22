@@ -388,6 +388,19 @@ func TestCitationPromptUsesFullRetrievedChunkForDocumentGrounding(t *testing.T) 
 	}
 }
 
+func TestCitationPromptForSelectedContextForbidsOtherWorkspaceSources(t *testing.T) {
+	prompt := citationPromptForMode([]models.Citation{{
+		Title:         "Welt Livestream",
+		PromptText:    "Opening remarks",
+		ContextOrigin: "selected",
+	}}, false)
+	for _, expected := range []string{"Only sources explicitly selected", "Welt Livestream", "chronological order"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("expected selected-context prompt to contain %q, got %q", expected, prompt)
+		}
+	}
+}
+
 func TestAssistantUIApprovalArgumentsMatchTreatsEmptyObjectsAsEqual(t *testing.T) {
 	if !assistantUIApprovalArgumentsMatch(nil, map[string]any{}) {
 		t.Fatal("expected nil and empty arguments to match")

@@ -24,9 +24,13 @@ const (
 )
 
 type transcriptionStreamSourceRequest struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	Name             string     `json:"name"`
+	URL              string     `json:"url"`
+	ScheduledStartAt *time.Time `json:"scheduledStartAt"`
+	ScheduledEndAt   *time.Time `json:"scheduledEndAt"`
 }
+
+const defaultLiveStreamReconnectGraceSeconds = 15 * 60
 
 type transcriptionBotSourceRequest struct {
 	Name       string `json:"name"`
@@ -68,6 +72,12 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 		return
 	}
 	parsedURL, _ := url.Parse(streamURL)
+	now := time.Now().UTC()
+	scheduledStartAt, scheduledEndAt, scheduleErr := validateTranscriptionStreamSchedule(request.ScheduledStartAt, request.ScheduledEndAt, now)
+	if scheduleErr != nil {
+		writeError(c, http.StatusBadRequest, scheduleErr)
+		return
+	}
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
 		name = "Live stream"
@@ -97,13 +107,21 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 		return
 	}
 	stream := models.TranscriptionStreamSource{
-		SourceID: source.ID,
-		Protocol: strings.ToLower(parsedURL.Scheme),
-		Status:   "pending",
+		SourceID:              source.ID,
+		Protocol:              strings.ToLower(parsedURL.Scheme),
+		Status:                "pending",
+		ScheduledStartAt:      scheduledStartAt,
+		ScheduledEndAt:        scheduledEndAt,
+		ReconnectGraceSeconds: defaultLiveStreamReconnectGraceSeconds,
+	}
+	if scheduledStartAt != nil {
+		stream.Status = "scheduled"
 	}
 	source.Protocol = stream.Protocol
 	source.TransportStatus = stream.Status
-	if _, err := transaction.ExecContext(c, `INSERT INTO transcription_stream_sources (source_id, url_ciphertext, protocol) VALUES ($1, $2, $3)`, source.ID, encryptedURL, stream.Protocol); err != nil {
+	source.ScheduledStartAt = scheduledStartAt
+	source.ScheduledEndAt = scheduledEndAt
+	if _, err := transaction.ExecContext(c, `INSERT INTO transcription_stream_sources (source_id, url_ciphertext, protocol, status, scheduled_start_at, scheduled_end_at, reconnect_grace_seconds) VALUES ($1, $2, $3, $4, $5, $6, $7)`, source.ID, encryptedURL, stream.Protocol, stream.Status, scheduledStartAt, scheduledEndAt, stream.ReconnectGraceSeconds); err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -111,9 +129,33 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	a.activateTranscriptionIngressSession(sessionID)
-	a.Live.startStreamSource(sessionID, source.ID)
+	if scheduledStartAt == nil {
+		a.activateTranscriptionIngressSession(sessionID)
+		a.Live.startStreamSource(sessionID, source.ID)
+	}
 	c.JSON(http.StatusCreated, gin.H{"source": source, "stream": stream})
+}
+
+func validateTranscriptionStreamSchedule(startAt, endAt *time.Time, now time.Time) (*time.Time, *time.Time, error) {
+	var start, end *time.Time
+	if startAt != nil {
+		value := startAt.UTC()
+		if value.Before(now.UTC().Add(-time.Minute)) {
+			return nil, nil, fmt.Errorf("scheduled start must be in the future")
+		}
+		start = &value
+	}
+	if endAt != nil {
+		if start == nil {
+			return nil, nil, fmt.Errorf("scheduled end requires a scheduled start")
+		}
+		value := endAt.UTC()
+		if !value.After(*start) {
+			return nil, nil, fmt.Errorf("scheduled end must be after scheduled start")
+		}
+		end = &value
+	}
+	return start, end, nil
 }
 
 func (a *App) stopTranscriptionStreamSource(c *gin.Context) {

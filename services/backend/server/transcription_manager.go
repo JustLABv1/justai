@@ -101,7 +101,7 @@ func (m *TranscriptionManager) Start(ctx context.Context) {
 	m.mu.Unlock()
 	go m.cleanupLoop(ctx)
 	m.startVideoWorker(ctx)
-	m.startConfiguredStreamSources(ctx)
+	go m.streamSourceSchedulerLoop(ctx)
 }
 
 func (m *TranscriptionManager) cleanupLoop(ctx context.Context) {
@@ -340,11 +340,11 @@ func (m *TranscriptionManager) markSource(sessionID, sourceID uuid.UUID, status 
 		       source.status, source.clock_offset_ms, source.connected_at, source.last_seen_at,
 		       COALESCE(stream.protocol, ''), COALESCE(stream.status, bot.status, ''),
 		       COALESCE(stream.reconnect_count, 0), COALESCE(stream.last_error, ''),
-		       COALESCE(bot.platform, '')
+		       COALESCE(bot.platform, ''), stream.scheduled_start_at, stream.scheduled_end_at
 		FROM transcription_sources source
 		LEFT JOIN transcription_stream_sources stream ON stream.source_id = source.id
 		LEFT JOIN transcription_bot_sources bot ON bot.source_id = source.id
-		WHERE source.id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&source.ID, &source.SessionID, &source.Name, &source.Kind, &source.DeviceLabel, &source.Status, &source.ClockOffsetMs, &source.ConnectedAt, &source.LastSeenAt, &source.Protocol, &source.TransportStatus, &source.ReconnectCount, &source.LastError, &source.Platform); err == nil {
+		WHERE source.id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&source.ID, &source.SessionID, &source.Name, &source.Kind, &source.DeviceLabel, &source.Status, &source.ClockOffsetMs, &source.ConnectedAt, &source.LastSeenAt, &source.Protocol, &source.TransportStatus, &source.ReconnectCount, &source.LastError, &source.Platform, &source.ScheduledStartAt, &source.ScheduledEndAt); err == nil {
 		m.broadcast(sessionID, "transcription.source", ginData{"sourceId": sourceID, "status": source.Status, "lastSeenAt": now, "source": source})
 		return
 	}

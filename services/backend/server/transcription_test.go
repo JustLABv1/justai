@@ -130,6 +130,29 @@ func TestTranscriptionIngressNormalizesBotPlatformsAndBearerTokens(t *testing.T)
 	}
 }
 
+func TestValidateTranscriptionStreamSchedule(t *testing.T) {
+	now := time.Date(2026, time.September, 22, 18, 0, 0, 0, time.UTC)
+	start := now.Add(2 * time.Hour)
+	end := start.Add(time.Hour)
+	normalizedStart, normalizedEnd, err := validateTranscriptionStreamSchedule(&start, &end, now)
+	if err != nil || normalizedStart == nil || normalizedEnd == nil {
+		t.Fatalf("valid schedule was rejected: start=%v end=%v err=%v", normalizedStart, normalizedEnd, err)
+	}
+	if !normalizedStart.Equal(start) || !normalizedEnd.Equal(end) {
+		t.Fatalf("schedule was not preserved: start=%v end=%v", normalizedStart, normalizedEnd)
+	}
+	if _, _, err := validateTranscriptionStreamSchedule(nil, &end, now); err == nil {
+		t.Fatal("end without start should be rejected")
+	}
+	past := now.Add(-2 * time.Minute)
+	if _, _, err := validateTranscriptionStreamSchedule(&past, nil, now); err == nil {
+		t.Fatal("past start should be rejected")
+	}
+	if _, _, err := validateTranscriptionStreamSchedule(&start, &start, now); err == nil {
+		t.Fatal("end at start should be rejected")
+	}
+}
+
 func TestLiveStreamFFmpegArgsKeepInputAsOneArgument(t *testing.T) {
 	streamURL := "https://example.com/live/playlist.m3u8?token=one%20two"
 	args := ffmpegLiveAudioArgs(streamURL, "https")

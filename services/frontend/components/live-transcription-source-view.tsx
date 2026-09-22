@@ -479,7 +479,9 @@ function CaptureConnectionCard({
         ? [
             [config.transportLabel, formatTransportStatus(transportStatus)],
             ["Protocol", source?.protocol || "Remote media"],
-            ["Reconnects", String(source?.reconnectCount ?? 0)],
+            source?.scheduledStartAt
+              ? ["Starts", new Date(source.scheduledStartAt).toLocaleString()]
+              : ["Reconnects", String(source?.reconnectCount ?? 0)],
           ]
         : [
             ["Adapter", formatTransportStatus(transportStatus)],
@@ -590,6 +592,7 @@ type TranscriptionSourceLike = LiveTranscriptionSnapshot["sources"][number]
 type CaptureStatus = {
   key:
     | "connected"
+    | "scheduled"
     | "waiting"
     | "reconnecting"
     | "paused"
@@ -621,6 +624,9 @@ function getCaptureStatus(
   }
   if (source?.status === "stopped" || source?.transportStatus === "stopped") {
     return { key: "stopped", label: "Stopped", variant: "secondary" }
+  }
+  if (source?.transportStatus === "scheduled") {
+    return { key: "scheduled", label: "Scheduled", variant: "outline" }
   }
   if (source?.lastError || source?.transportStatus === "failed") {
     return { key: "failed", label: "Needs attention", variant: "destructive" }
@@ -776,6 +782,8 @@ function getTransportValue(
 
 function formatTransportStatus(value?: string) {
   switch (value) {
+    case "scheduled":
+      return "Scheduled"
     case "connected":
       return "Connected"
     case "connecting":

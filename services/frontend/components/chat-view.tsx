@@ -85,6 +85,7 @@ import {
   UserMessageParts,
 } from "@/components/assistant-ui/message-parts"
 import { ChatAttachmentPreview } from "@/components/assistant-ui/attachment-preview"
+import { ComposerSuggestions } from "@/components/assistant-ui/composer-suggestions"
 import { VoiceControl } from "@/components/assistant-ui/voice"
 import {
   MCPApprovalCards,
@@ -108,14 +109,15 @@ import type {
   Conversation,
   ConversationContext,
   Endpoint,
-  KnowledgeSpace,
   KnowledgeSource,
+  KnowledgeItem,
   MCPServer,
   Note,
   SavedAssistant,
   ViewId,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { chatContextLabel } from "@/lib/chat-context"
 
 type EnsureConversationOptions = {
   activate?: boolean
@@ -1235,11 +1237,24 @@ function ContextDisplay({
   )
 }
 
+function StorageReferenceSearch({ onQuery, loading, error }: {
+  onQuery: (query: string | null) => void
+  loading: boolean
+  error: string | null
+}) {
+  const scope = unstable_useTriggerPopoverScopeContext()
+  useEffect(() => { onQuery(scope.open ? scope.query : null) }, [onQuery, scope.open, scope.query])
+  if (!scope.open) return null
+  if (error) return <p role="alert" className="px-2.5 py-2 text-xs text-destructive">{error}</p>
+  if (loading) return <p role="status" className="px-2.5 py-2 text-xs text-muted-foreground">Searching Storage…</p>
+  return <p className="px-2.5 py-2 text-xs text-muted-foreground">Choose a file to use only that file for this message.</p>
+}
+
 function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
   return (
     <ComposerPrimitive.Unstable_TriggerPopoverItems
       aria-label={ariaLabel}
-      className="flex max-h-56 flex-col gap-1 overflow-y-auto"
+      className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain [&>button]:shrink-0"
     >
       {(items) =>
         items.map((item, index) => {
@@ -2511,14 +2526,6 @@ function Composer({
   onRemoveNote,
   onRemoveRepository,
   onSaveKnowledge,
-  knowledgeSpaces,
-  includedSpaceIds,
-  excludedSpaceIds,
-  pinnedSpaceIds,
-  onToggleKnowledgeSpace,
-  onToggleKnowledgeSpaceExclusion,
-  onToggleKnowledgeSpacePin,
-  onResetKnowledgeScope,
   toolApproval,
 }: {
   assistants: SavedAssistant[]
@@ -2545,21 +2552,32 @@ function Composer({
   onRemoveNote: (noteId: string) => Promise<void>
   onRemoveRepository: (repositoryId: string) => Promise<void>
   onSaveKnowledge: (sourceId: string) => Promise<void>
-  knowledgeSpaces: KnowledgeSpace[]
-  includedSpaceIds: string[]
-  excludedSpaceIds: string[]
-  pinnedSpaceIds: string[]
-  onToggleKnowledgeSpace: (spaceId: string) => void
-  onToggleKnowledgeSpaceExclusion: (spaceId: string) => void
-  onToggleKnowledgeSpacePin: (spaceId: string) => void
-  onResetKnowledgeScope: () => void
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
 }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+  const composerAnchor = useRef<HTMLDivElement | null>(null)
   const hasThreadMessages = useAuiState(
     (state) => state.thread.messages.length > 0
   )
   const composerAttachments = useAuiState((state) => state.composer.attachments)
+  const [storageQuery, setStorageQuery] = useState<string | null>(null)
+  const [storageFiles, setStorageFiles] = useState<KnowledgeItem[]>([])
+  const [storageLoading, setStorageLoading] = useState(false)
+  const [storageError, setStorageError] = useState<string | null>(null)
+  useEffect(() => {
+    if (storageQuery === null) return
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      setStorageLoading(true)
+      setStorageError(null)
+      const params = new URLSearchParams({ type: "source", limit: "100", q: storageQuery })
+      void api.get<{ items: KnowledgeItem[] }>(`/api/v1/knowledge/items?${params}`, { signal: controller.signal })
+        .then(({ items }) => { if (!controller.signal.aborted) setStorageFiles(items) })
+        .catch(() => { if (!controller.signal.aborted) { setStorageFiles([]); setStorageError("Storage files could not be loaded. Close and reopen @ to retry.") } })
+        .finally(() => { if (!controller.signal.aborted) setStorageLoading(false) })
+    }, 150)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [storageQuery])
   const assistantSelectionLocked = assistantLocked || hasThreadMessages
   const hasAttachments = composerAttachments.length > 0
   const hasUnreadyAttachments = composerAttachments.some(
@@ -2578,126 +2596,6 @@ function Composer({
     : (conversationContext.repositories ?? []).length > 0
       ? "Repository is still indexing"
       : "Connect a repository in Context first"
-  const activeKnowledgeSpaceIds = new Set([
-    ...includedSpaceIds,
-    ...pinnedSpaceIds,
-  ])
-  const activeKnowledgeSpaceNames = knowledgeSpaces
-    .filter((space) => activeKnowledgeSpaceIds.has(space.id))
-    .map((space) => space.name)
-  const knowledgeScopeLabel = activeKnowledgeSpaceNames.length
-    ? activeKnowledgeSpaceNames.join(" · ")
-    : excludedSpaceIds.length
-      ? "All except excluded"
-      : "Automatic"
-  const knowledgeScopeControl = (
-    <PopoverPrimitive.Root>
-      <PopoverPrimitive.Trigger
-        aria-label="Choose storage folders for the next message"
-        render={
-          <button
-            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-muted/50 px-1.5 py-0.5 text-left text-[10px] font-medium text-foreground/80 transition-colors hover:bg-primary/10"
-            type="button"
-          />
-        }
-      >
-        <Sparkles className="size-3 shrink-0 text-primary" aria-hidden="true" />
-        <span className="whitespace-nowrap">
-          Storage · {knowledgeScopeLabel}
-        </span>
-        <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
-      </PopoverPrimitive.Trigger>
-      <PopoverPrimitive.Portal>
-        <PopoverPrimitive.Positioner
-          align="start"
-          className="z-50 outline-none"
-          side="top"
-          sideOffset={8}
-        >
-          <PopoverPrimitive.Popup className="w-[min(24rem,calc(100vw-2rem))] rounded-2xl bg-popover p-3 text-popover-foreground shadow-xl outline-none">
-            <PopoverPrimitive.Title className="text-xs font-semibold">
-              Storage folders
-            </PopoverPrimitive.Title>
-            <PopoverPrimitive.Description className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-              Reference one or more folders directly. Their current contents,
-              including subfolders, become context for the next messages.
-            </PopoverPrimitive.Description>
-            <div className="mt-3 flex max-h-56 flex-col gap-1 overflow-y-auto">
-              {knowledgeSpaces.length === 0 ? (
-                <p className="rounded-lg bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground">
-                  No storage folders yet. Create one in Storage.
-                </p>
-              ) : (
-                knowledgeSpaces.map((space) => {
-                  const included =
-                    includedSpaceIds.includes(space.id) ||
-                    pinnedSpaceIds.includes(space.id)
-                  const excluded = excludedSpaceIds.includes(space.id)
-                  const pinned = pinnedSpaceIds.includes(space.id)
-                  return (
-                    <div
-                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted"
-                      key={space.id}
-                    >
-                      <button
-                        aria-pressed={included && !excluded}
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-left text-[11px]",
-                          included && !excluded
-                            ? "font-medium text-foreground"
-                            : "text-muted-foreground"
-                        )}
-                        onClick={() => onToggleKnowledgeSpace(space.id)}
-                        type="button"
-                      >
-                        {space.name}
-                      </button>
-                      <button
-                        aria-label={`${excluded ? "Include" : "Exclude"} ${space.name}`}
-                        className={cn(
-                          "rounded-md px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background hover:text-foreground",
-                          excluded && "bg-destructive/10 text-destructive"
-                        )}
-                        onClick={() =>
-                          onToggleKnowledgeSpaceExclusion(space.id)
-                        }
-                        type="button"
-                      >
-                        {excluded ? "Excluded" : "Exclude"}
-                      </button>
-                      <button
-                        aria-pressed={pinned}
-                        aria-label={`${pinned ? "Unpin" : "Pin"} ${space.name}`}
-                        className={cn(
-                          "rounded-md px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background hover:text-foreground",
-                          pinned && "bg-primary/10 text-primary"
-                        )}
-                        onClick={() => onToggleKnowledgeSpacePin(space.id)}
-                        type="button"
-                      >
-                        {pinned ? "Pinned" : "Pin"}
-                      </button>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-            {includedSpaceIds.length > 0 ||
-            excludedSpaceIds.length > 0 ||
-            pinnedSpaceIds.length > 0 ? (
-              <button
-                className="mt-2 w-full rounded-lg border px-2.5 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                onClick={onResetKnowledgeScope}
-                type="button"
-              >
-                Reset to automatic routing
-              </button>
-            ) : null}
-          </PopoverPrimitive.Popup>
-        </PopoverPrimitive.Positioner>
-      </PopoverPrimitive.Portal>
-    </PopoverPrimitive.Root>
-  )
 
   useEffect(() => {
     if (!deepContextAvailable && deepContext) {
@@ -2767,11 +2665,13 @@ function Composer({
   }, [conversationContext.notes, notes])
 
   const contextTriggerAdapter = useMemo(() => {
+    const files = new Map<string, { id: string; title: string; status: string }>(conversationContext.knowledgeSources.map((source) => [source.id, { id: source.id, title: source.title, status: source.status }]))
+    for (const file of storageFiles) files.set(file.resourceId, { id: file.resourceId, title: file.title, status: file.status })
     const groups = [
       {
         id: "knowledge",
-        label: "Knowledge",
-        items: conversationContext.knowledgeSources.map((source) => ({
+        label: "Storage files",
+        items: Array.from(files.values()).map((source) => ({
           id: `knowledge:${source.id}`,
           type: "knowledge",
           label: source.title,
@@ -2818,7 +2718,7 @@ function Composer({
         )
       },
     }
-  }, [conversationContext, mcpItems, noteItems])
+  }, [conversationContext, mcpItems, noteItems, storageFiles])
 
   const mcpTriggerAdapter = useMemo(
     () => ({
@@ -2926,16 +2826,17 @@ function Composer({
       )}
     >
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
-        <div className="relative">
-          <ComposerPrimitive.Unstable_TriggerPopover
+        <div className="relative" ref={composerAnchor}>
+          <ComposerSuggestions
+            anchor={composerAnchor}
             adapter={contextTriggerAdapter}
             char="@"
-            className="absolute bottom-full left-0 z-40 mb-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-background p-2 shadow-xl"
           >
             <ComposerPrimitive.Unstable_TriggerPopover.Directive
               formatter={contextDirectiveFormatter}
               onInserted={attachContextFromTrigger}
             />
+            <StorageReferenceSearch onQuery={setStorageQuery} loading={storageLoading} error={storageError} />
             <ComposerPrimitive.Unstable_TriggerPopoverCategories className="flex flex-col gap-1">
               {(categories) =>
                 categories.map((category) => (
@@ -2951,11 +2852,11 @@ function Composer({
             </ComposerPrimitive.Unstable_TriggerPopoverCategories>
             <ContextTriggerItems ariaLabel="Context resources" />
             <TriggerPopoverKeyboardHint />
-          </ComposerPrimitive.Unstable_TriggerPopover>
-          <ComposerPrimitive.Unstable_TriggerPopover
+          </ComposerSuggestions>
+          <ComposerSuggestions
+            anchor={composerAnchor}
             adapter={mcpTriggerAdapter}
             char="/"
-            className="absolute bottom-full left-0 z-40 mb-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-background p-2 shadow-xl"
           >
             <ComposerPrimitive.Unstable_TriggerPopover.Action
               onExecute={attachMcpFromTrigger}
@@ -2964,11 +2865,11 @@ function Composer({
             <McpTriggerPopoverHeader />
             <ContextTriggerItems ariaLabel="MCP servers" />
             <TriggerPopoverKeyboardHint />
-          </ComposerPrimitive.Unstable_TriggerPopover>
-          <ComposerPrimitive.Unstable_TriggerPopover
+          </ComposerSuggestions>
+          <ComposerSuggestions
+            anchor={composerAnchor}
             adapter={mcpTriggerAdapter}
             char="$"
-            className="absolute bottom-full left-0 z-40 mb-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-background p-2 shadow-xl"
           >
             <ComposerPrimitive.Unstable_TriggerPopover.Action
               onExecute={attachMcpFromTrigger}
@@ -2977,11 +2878,10 @@ function Composer({
             <McpTriggerPopoverHeader />
             <ContextTriggerItems ariaLabel="MCP servers" />
             <TriggerPopoverKeyboardHint />
-          </ComposerPrimitive.Unstable_TriggerPopover>
+          </ComposerSuggestions>
           <div className="mx-auto w-[calc(100%-2rem)]">
             <ContextDisplay
               context={conversationContext}
-              leading={knowledgeScopeControl}
               onRemoveMCP={onRemoveMCP}
               onRemoveNote={onRemoveNote}
               onRemoveRepository={onRemoveRepository}
@@ -3322,14 +3222,6 @@ function AssistantChatSurface({
   onOpenHistory,
   onAssistantSelectionChange,
   conversationContext,
-  knowledgeSpaces,
-  includedSpaceIds,
-  excludedSpaceIds,
-  pinnedSpaceIds,
-  onToggleKnowledgeSpace,
-  onToggleKnowledgeSpaceExclusion,
-  onToggleKnowledgeSpacePin,
-  onResetKnowledgeScope,
 }: {
   conversationId: string | null
   cacheScope: string
@@ -3357,14 +3249,6 @@ function AssistantChatSurface({
   onOpenHistory?: () => void
   onAssistantSelectionChange?: (assistantId: string | null) => void
   conversationContext: ConversationContext
-  knowledgeSpaces: KnowledgeSpace[]
-  includedSpaceIds: string[]
-  excludedSpaceIds: string[]
-  pinnedSpaceIds: string[]
-  onToggleKnowledgeSpace: (spaceId: string) => void
-  onToggleKnowledgeSpaceExclusion: (spaceId: string) => void
-  onToggleKnowledgeSpacePin: (spaceId: string) => void
-  onResetKnowledgeScope: () => void
 }) {
   const initialAssistant = assistants.find(
     (assistant) => assistant.id === conversationAssistantId
@@ -3409,10 +3293,6 @@ function AssistantChatSurface({
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [deepContext, setDeepContext] = useState(
     initialAssistant?.deepContext ?? false
-  )
-  const effectiveKnowledgeSpaceIds = useMemo(
-    () => Array.from(new Set([...includedSpaceIds, ...pinnedSpaceIds])),
-    [includedSpaceIds, pinnedSpaceIds]
   )
   const selectedAssistant = assistants.find(
     (assistant) => assistant.id === selectedAssistantId
@@ -3546,6 +3426,10 @@ function AssistantChatSurface({
       }),
     [cacheScope, conversationId]
   )
+  const contextPolicy =
+    chatContextLabel(conversationContext, false, "")
+      ? "selected-only"
+      : "automatic"
   const transport = useMemo(
     () =>
       new AssistantChatTransport<UIMessage>({
@@ -3565,9 +3449,7 @@ function AssistantChatSurface({
           model: selectedModel,
           useMemory: selectedAssistant?.useMemory ?? true,
           deepContext,
-          contextPolicy: "automatic",
-          includeSpaceIds: effectiveKnowledgeSpaceIds,
-          excludeSpaceIds: excludedSpaceIds,
+          contextPolicy,
         }),
         resumable: {
           storage: resumableStorage,
@@ -3607,9 +3489,7 @@ function AssistantChatSurface({
               model: selectedModel,
               useMemory: selectedAssistant?.useMemory ?? true,
               deepContext,
-              contextPolicy: "automatic",
-              includeSpaceIds: effectiveKnowledgeSpaceIds,
-              excludeSpaceIds: excludedSpaceIds,
+              contextPolicy,
               requestId,
             },
           }
@@ -3618,13 +3498,12 @@ function AssistantChatSurface({
     [
       ensureSelectedConversation,
       deepContext,
+      contextPolicy,
       resumableStorage,
       selectedAssistant?.useMemory,
       selectedAssistantId,
       selectedEndpointId,
       selectedModel,
-      effectiveKnowledgeSpaceIds,
-      excludedSpaceIds,
     ]
   )
 
@@ -3787,14 +3666,6 @@ function AssistantChatSurface({
           onRemoveNote,
           onRemoveRepository,
           onSaveKnowledge,
-          knowledgeSpaces,
-          includedSpaceIds,
-          excludedSpaceIds,
-          pinnedSpaceIds,
-          onToggleKnowledgeSpace,
-          onToggleKnowledgeSpaceExclusion,
-          onToggleKnowledgeSpacePin,
-          onResetKnowledgeScope,
           toolApproval: voiceApproval,
         }}
         onVoiceErrorClear={() => setVoiceError(null)}
@@ -3836,10 +3707,6 @@ export function ChatView({
   const [historyRetryToken, setHistoryRetryToken] = useState(0)
   const [conversationContext, setConversationContext] =
     useState<ConversationContext>(EMPTY_CONTEXT)
-  const [knowledgeSpaces, setKnowledgeSpaces] = useState<KnowledgeSpace[]>([])
-  const [includedSpaceIds, setIncludedSpaceIds] = useState<string[]>([])
-  const [excludedSpaceIds, setExcludedSpaceIds] = useState<string[]>([])
-  const [pinnedSpaceIds, setPinnedSpaceIds] = useState<string[]>([])
   const locallyCreatedConversationRef = useRef<string | null>(null)
   const pendingConversationRef = useRef(false)
   const conversationCreationRef = useRef<Promise<string> | null>(null)
@@ -3852,57 +3719,6 @@ export function ChatView({
   const selectedAssistantIdRef = useRef<string | null>(
     conversation?.assistantId ?? null
   )
-
-  useEffect(() => {
-    let cancelled = false
-    void api
-      .get<{ spaces: KnowledgeSpace[] }>("/api/v1/knowledge/spaces")
-      .then((result) => {
-        if (!cancelled) setKnowledgeSpaces(result.spaces)
-      })
-      .catch(() => {
-        // Knowledge is optional during a rolling migration. The chat remains
-        // usable with server-side automatic routing when the catalog endpoint
-        // is temporarily unavailable.
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [cacheScope])
-
-  const toggleKnowledgeSpace = useCallback((spaceId: string) => {
-    setExcludedSpaceIds((current) => current.filter((id) => id !== spaceId))
-    setIncludedSpaceIds((current) =>
-      current.includes(spaceId)
-        ? current.filter((id) => id !== spaceId)
-        : [...current, spaceId]
-    )
-  }, [])
-
-  const toggleKnowledgeSpaceExclusion = useCallback((spaceId: string) => {
-    setIncludedSpaceIds((current) => current.filter((id) => id !== spaceId))
-    setPinnedSpaceIds((current) => current.filter((id) => id !== spaceId))
-    setExcludedSpaceIds((current) =>
-      current.includes(spaceId)
-        ? current.filter((id) => id !== spaceId)
-        : [...current, spaceId]
-    )
-  }, [])
-
-  const toggleKnowledgeSpacePin = useCallback((spaceId: string) => {
-    setExcludedSpaceIds((current) => current.filter((id) => id !== spaceId))
-    setPinnedSpaceIds((current) =>
-      current.includes(spaceId)
-        ? current.filter((id) => id !== spaceId)
-        : [...current, spaceId]
-    )
-  }, [])
-
-  const resetKnowledgeScope = useCallback(() => {
-    setIncludedSpaceIds([])
-    setExcludedSpaceIds([])
-    setPinnedSpaceIds([])
-  }, [])
 
   const handleAssistantSelectionChange = useCallback(
     (assistantId: string | null) => {
@@ -4472,14 +4288,6 @@ export function ChatView({
               onRemoveUpload={removeUploadedFile}
               onUpload={uploadFile}
               conversationContext={conversationContext}
-              knowledgeSpaces={knowledgeSpaces}
-              includedSpaceIds={includedSpaceIds}
-              excludedSpaceIds={excludedSpaceIds}
-              pinnedSpaceIds={pinnedSpaceIds}
-              onToggleKnowledgeSpace={toggleKnowledgeSpace}
-              onToggleKnowledgeSpaceExclusion={toggleKnowledgeSpaceExclusion}
-              onToggleKnowledgeSpacePin={toggleKnowledgeSpacePin}
-              onResetKnowledgeScope={resetKnowledgeScope}
             />
           </div>
         )}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -18,17 +19,33 @@ import (
 )
 
 var errTranscriptionStreamStopped = errors.New("transcription stream stopped")
+var errTranscriptionStreamEnded = errors.New("live stream ended")
+
+func (m *TranscriptionManager) streamSourceSchedulerLoop(ctx context.Context) {
+	m.startConfiguredStreamSources(ctx)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.startConfiguredStreamSources(ctx)
+		}
+	}
+}
 
 func (m *TranscriptionManager) startConfiguredStreamSources(ctx context.Context) {
 	if m.DB == nil {
 		return
 	}
 	rows, err := m.DB.QueryContext(ctx, `
-		SELECT source.session_id, source.id
+		SELECT source.session_id, source.id, stream.status
 		FROM transcription_stream_sources stream
 		JOIN transcription_sources source ON source.id = stream.source_id
 		JOIN transcription_sessions session ON session.id = source.session_id
-		WHERE stream.status IN ('pending', 'connecting', 'connected', 'reconnecting')
+		WHERE (stream.status IN ('pending', 'connecting', 'connected', 'reconnecting')
+		       OR (stream.status = 'scheduled' AND stream.scheduled_start_at <= now()))
 		  AND source.status <> 'stopped'
 		  AND session.status IN ('waiting', 'live', 'paused')`)
 	if err != nil {
@@ -37,7 +54,19 @@ func (m *TranscriptionManager) startConfiguredStreamSources(ctx context.Context)
 	defer rows.Close()
 	for rows.Next() {
 		var sessionID, sourceID uuid.UUID
-		if rows.Scan(&sessionID, &sourceID) == nil {
+		var status string
+		if rows.Scan(&sessionID, &sourceID, &status) == nil {
+			if status == "scheduled" {
+				result, updateErr := m.DB.ExecContext(ctx, `UPDATE transcription_stream_sources SET status = 'pending', updated_at = now() WHERE source_id = $1 AND status = 'scheduled' AND scheduled_start_at <= now()`, sourceID)
+				if updateErr != nil {
+					continue
+				}
+				claimed, _ := result.RowsAffected()
+				if claimed == 0 {
+					continue
+				}
+				m.app.activateTranscriptionIngressSession(sessionID)
+			}
 			m.startStreamSource(sessionID, sourceID)
 		}
 	}
@@ -99,20 +128,35 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 	var encryptedURL []byte
 	var protocol, language, sessionStatus string
 	var endpointID uuid.NullUUID
+	var scheduledStartAt, scheduledEndAt sql.NullTime
+	var reconnectGraceSeconds int
 	var model string
 	var recordAudio bool
 	if err := m.DB.QueryRowContext(ctx, `
 		SELECT stream.url_ciphertext, stream.protocol, session.transcription_endpoint_id,
 		       COALESCE(session.transcription_model, ''), session.language, session.status,
-		       session.record_audio
+		       session.record_audio, stream.scheduled_start_at, stream.scheduled_end_at,
+		       stream.reconnect_grace_seconds
 		FROM transcription_stream_sources stream
 		JOIN transcription_sources source ON source.id = stream.source_id
 		JOIN transcription_sessions session ON session.id = source.session_id
-		WHERE stream.source_id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&encryptedURL, &protocol, &endpointID, &model, &language, &sessionStatus, &recordAudio); err != nil {
+		WHERE stream.source_id = $1 AND source.session_id = $2`, sourceID, sessionID).Scan(&encryptedURL, &protocol, &endpointID, &model, &language, &sessionStatus, &recordAudio, &scheduledStartAt, &scheduledEndAt, &reconnectGraceSeconds); err != nil {
 		return err
 	}
 	if sessionStatus == "completed" || sessionStatus == "processing" {
 		return errTranscriptionStreamStopped
+	}
+	if scheduledEndAt.Valid && !scheduledEndAt.Time.After(time.Now()) {
+		m.finishLiveStream(sessionID, sourceID, "scheduled end reached")
+		return errTranscriptionStreamStopped
+	}
+	if reconnectGraceSeconds <= 0 {
+		reconnectGraceSeconds = defaultLiveStreamReconnectGraceSeconds
+	}
+	if scheduledEndAt.Valid {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, scheduledEndAt.Time)
+		defer cancel()
 	}
 	if !endpointID.Valid {
 		m.setStreamStatus(sessionID, sourceID, "failed", "transcription endpoint is not configured", false)
@@ -175,20 +219,40 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 	}()
 
 	var sourceOffset atomic.Int64
+	reconnectDeadline := time.Now().Add(time.Duration(reconnectGraceSeconds) * time.Second)
 	for {
+		if scheduledEndAt.Valid && !time.Now().Before(scheduledEndAt.Time) {
+			m.finishLiveStream(sessionID, sourceID, "scheduled end reached")
+			return errTranscriptionStreamStopped
+		}
 		if err := m.liveStreamSessionStatus(ctx, sessionID); err != nil {
+			if scheduledEndAt.Valid && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				m.finishLiveStream(sessionID, sourceID, "scheduled end reached")
+				return errTranscriptionStreamStopped
+			}
 			return err
 		}
 		stream, openErr := m.openVideoTranscriptionStream(ctx, endpoint, mode, language)
 		if openErr != nil {
 			m.markSource(sessionID, sourceID, "disconnected")
 			m.setStreamStatus(sessionID, sourceID, "reconnecting", redactTranscriptionStreamError(openErr, streamURL), true)
+			if !time.Now().Before(reconnectDeadline) {
+				m.finishLiveStream(sessionID, sourceID, "stream was unavailable for the reconnect grace period")
+				return errTranscriptionStreamStopped
+			}
 			if err := waitTranscriptionStreamReconnect(ctx, m.Config.Transcription.LiveStreamReconnectSeconds); err != nil {
 				return err
 			}
 			continue
 		}
-		attemptErr := m.runLiveStreamAttempt(ctx, stream, streamURL, protocol, mode, sessionID, sourceID, &sourceOffset, recordingStreamID, &recordingPart)
+		connected, attemptErr := m.runLiveStreamAttempt(ctx, stream, streamURL, protocol, mode, sessionID, sourceID, &sourceOffset, recordingStreamID, &recordingPart)
+		if connected {
+			reconnectDeadline = time.Now().Add(time.Duration(reconnectGraceSeconds) * time.Second)
+		}
+		if errors.Is(attemptErr, errTranscriptionStreamEnded) {
+			m.finishLiveStream(sessionID, sourceID, "stream ended")
+			return errTranscriptionStreamStopped
+		}
 		if errors.Is(attemptErr, errTranscriptionStreamStopped) || errors.Is(attemptErr, context.Canceled) {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -196,17 +260,25 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 			return attemptErr
 		}
 		if err := m.liveStreamSessionStatus(ctx, sessionID); err != nil {
+			if scheduledEndAt.Valid && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				m.finishLiveStream(sessionID, sourceID, "scheduled end reached")
+				return errTranscriptionStreamStopped
+			}
 			return err
 		}
 		m.markSource(sessionID, sourceID, "disconnected")
 		m.setStreamStatus(sessionID, sourceID, "reconnecting", redactTranscriptionStreamError(attemptErr, streamURL), true)
+		if !time.Now().Before(reconnectDeadline) {
+			m.finishLiveStream(sessionID, sourceID, "stream did not recover within the reconnect grace period")
+			return errTranscriptionStreamStopped
+		}
 		if err := waitTranscriptionStreamReconnect(ctx, m.Config.Transcription.LiveStreamReconnectSeconds); err != nil {
 			return err
 		}
 	}
 }
 
-func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream provider.TranscriptionStream, streamURL, protocol, mode string, sessionID, sourceID uuid.UUID, sourceOffset *atomic.Int64, recordingID uuid.UUID, recordingPart *int) (resultErr error) {
+func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream provider.TranscriptionStream, streamURL, protocol, mode string, sessionID, sourceID uuid.UUID, sourceOffset *atomic.Int64, recordingID uuid.UUID, recordingPart *int) (connected bool, resultErr error) {
 	attemptCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	baseOffset := sourceOffset.Load()
@@ -221,7 +293,8 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 				cancel()
 				continue
 			}
-			textValue := provider.CleanTranscriptText(event.Text)
+			rawText := firstNonEmptyString(event.RawText, event.Text)
+			textValue := provider.SanitizeTranscriptRepetition(provider.CleanTranscriptText(event.Text))
 			if textValue == "" || isTranscriptionProtocolPayload(textValue) {
 				continue
 			}
@@ -243,7 +316,7 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 				endOffset = baseOffset + event.EndOffsetMs
 			}
 			persistCtx := context.WithoutCancel(ctx)
-			segment, persistErr := m.app.persistTranscriptionSegmentWithRaw(persistCtx, sessionID, sourceID, textValue, textValue, startOffset, endOffset)
+			segment, persistErr := m.app.persistTranscriptionSegmentWithRaw(persistCtx, sessionID, sourceID, textValue, rawText, startOffset, endOffset)
 			if persistErr != nil {
 				if eventErr == nil {
 					eventErr = persistErr
@@ -263,12 +336,12 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 	if err != nil {
 		stream.Close()
 		<-eventsDone
-		return err
+		return connected, err
 	}
 	if err := ffmpeg.Start(); err != nil {
 		stream.Close()
 		<-eventsDone
-		return fmt.Errorf("start live stream decoder: %w", err)
+		return connected, fmt.Errorf("start live stream decoder: %w", err)
 	}
 	defer func() {
 		stream.Close()
@@ -285,7 +358,6 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 		forwardSilence = silenceForwarder.ForwardSilence()
 	}
 	buffer := make([]byte, 64*1024)
-	connected := false
 	lastLevelAt := time.Time{}
 	lastStatusCheck := time.Time{}
 	sessionPaused := false
@@ -373,36 +445,51 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 			waitErr := ffmpeg.Wait()
 			if waitErr != nil && attemptCtx.Err() == nil {
 				resultErr = fmt.Errorf("live stream decoder stopped: %s", redactTranscriptionStreamError(fmt.Errorf("%s", firstNonEmptyString(strings.TrimSpace(stderr.String()), waitErr.Error())), streamURL))
-				return resultErr
+				return connected, resultErr
 			}
 			if attemptCtx.Err() != nil {
 				if ctx.Err() != nil {
-					return ctx.Err()
+					return connected, ctx.Err()
 				}
-				return attemptCtx.Err()
+				return connected, attemptCtx.Err()
 			}
 			if commitErr := stream.Commit(); commitErr != nil {
-				return commitErr
+				return connected, commitErr
 			}
-			return fmt.Errorf("live stream ended")
+			return connected, errTranscriptionStreamEnded
 		}
 		if readErr != nil {
 			cancel()
 			_ = ffmpeg.Wait()
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return connected, ctx.Err()
 			}
-			return readErr
+			return connected, readErr
 		}
 		if attemptCtx.Err() != nil {
 			_ = ffmpeg.Wait()
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return connected, ctx.Err()
 			}
-			return attemptCtx.Err()
+			return connected, attemptCtx.Err()
 		}
 	}
-	return resultErr
+	return connected, resultErr
+}
+
+func (m *TranscriptionManager) finishLiveStream(sessionID, sourceID uuid.UUID, reason string) {
+	now := time.Now().UTC()
+	_, _ = m.DB.Exec(`UPDATE transcription_stream_sources SET status = 'stopped', last_error = '', updated_at = $2 WHERE source_id = $1`, sourceID, now)
+	_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = 'stopped', updated_at = $2 WHERE id = $1`, sourceID, now)
+	result, _ := m.DB.Exec(`UPDATE transcription_sessions SET status = 'completed', ended_at = COALESCE(ended_at, $2), join_code_hash = NULL, join_code_expires_at = NULL, updated_at = $2 WHERE id = $1 AND status IN ('waiting', 'live', 'paused') AND EXISTS (SELECT 1 FROM transcription_stream_sources WHERE source_id = $3 AND scheduled_start_at IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM transcription_sources other WHERE other.session_id = $1 AND other.id <> $3 AND other.status <> 'stopped')`, sessionID, now, sourceID)
+	m.markSource(sessionID, sourceID, "stopped")
+	m.broadcast(sessionID, "transcription.stream", ginData{"sourceId": sourceID, "status": "stopped", "reason": reason})
+	if result != nil {
+		completed, _ := result.RowsAffected()
+		if completed > 0 {
+			m.broadcast(sessionID, "transcription.session", ginData{"id": sessionID, "status": "completed", "endedAt": now})
+		}
+	}
 }
 
 func (m *TranscriptionManager) liveStreamSessionStatus(ctx context.Context, sessionID uuid.UUID) error {
