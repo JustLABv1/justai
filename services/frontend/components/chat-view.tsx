@@ -1449,7 +1449,7 @@ function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
       if (["generate_image", "edit_image"].includes(toolCall.toolName)) {
         return "Creating image"
       }
-      if (["create_pdf", "create_file"].includes(toolCall.toolName)) {
+      if (["create_pdf", "create_file", "fill_template"].includes(toolCall.toolName)) {
         return "Creating file"
       }
       return `Using ${toolCall.toolName.replaceAll("_", " ")}`

@@ -63,6 +63,8 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"agentId":{"type":"string","description":"The allowlisted agent id to run."},"task":{"type":"string","description":"The self-contained task for the delegated agent.","minLength":1,"maxLength":30000},"input":{"type":"object","description":"Optional structured input for the delegated agent."}},"required":["agentId","task"],"additionalProperties":false}`),
 		},
 	}
+	definitions = append(definitions, templateTools()...)
+	definitions = append(definitions, attachmentReadTools()...)
 	bindings := make(map[string]voiceToolBinding, len(definitions))
 	for _, definition := range definitions {
 		bindings[definition.Name] = voiceToolBinding{
@@ -75,6 +77,9 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 }
 
 func isAssistantBuiltInToolName(name string) bool {
+	if isTemplateTool(name) || isAttachmentReadTool(name) {
+		return true
+	}
 	switch name {
 	case "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "create_file", "delegate_agent", "discover_mcp_tools":
 		return true
@@ -95,6 +100,23 @@ func chatToolEventKindForName(name string) string {
 }
 
 func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID, conversationID uuid.UUID, toolName string, arguments map[string]any, latestUser *assistantUserMessage) (json.RawMessage, error) {
+	if isAttachmentReadTool(toolName) {
+		return a.readAttachmentTool(ctx, userID, organizationID, conversationID, toolName, arguments)
+	}
+	if isTemplateTool(toolName) {
+		result, artifact, err := a.templateTool(ctx, userID, organizationID, toolName, arguments)
+		if err != nil {
+			return nil, err
+		}
+		if artifact == nil {
+			return result, nil
+		}
+		item, err := a.storeGeneratedChatFile(ctx, userID, organizationID, artifact.Name, artifact.Name, artifact.MimeType, artifact.Content)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(map[string]any{"file": item, "template": artifact.Metadata})
+	}
 	switch toolName {
 	case "web_search":
 		query := strings.TrimSpace(stringToolArgument(arguments, "query"))

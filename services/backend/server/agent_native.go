@@ -547,8 +547,38 @@ func (e *AgentEngine) nativeAgentToolLoop(ctx context.Context, request agentExec
 					continue
 				}
 			}
-			if call.Name == "justai_create_file" {
-				artifact, fileErr := makeAgentFile(arguments)
+			if isAttachmentReadTool(call.Name) && request.ConversationID != nil {
+				result, err := e.app.readAttachmentTool(ctx, request.UserID, request.OrganizationID, *request.ConversationID, call.Name, arguments)
+				toolResult := string(result)
+				if err != nil {
+					toolResult = err.Error()
+				}
+				outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: toolResult, failed: err != nil})
+				messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: toolResult})
+				continue
+			}
+			if isTemplateTool(call.Name) && call.Name != "fill_template" {
+				result, _, err := e.app.templateTool(ctx, request.UserID, request.OrganizationID, call.Name, arguments)
+				toolResult := string(result)
+				if err != nil {
+					toolResult = err.Error()
+				}
+				outcomes = append(outcomes, chatToolLoopOutcome{call: call, arguments: arguments, result: toolResult, failed: err != nil})
+				messages = append(messages, provider.ToolMessage{Role: "tool", ToolCallID: call.ID, Content: toolResult})
+				continue
+			}
+			if call.Name == "justai_create_file" || call.Name == "fill_template" {
+				var artifact a2aArtifact
+				var fileErr error
+				if call.Name == "fill_template" {
+					_, generated, err := e.app.templateTool(ctx, request.UserID, request.OrganizationID, call.Name, arguments)
+					fileErr = err
+					if generated != nil {
+						artifact = *generated
+					}
+				} else {
+					artifact, fileErr = makeAgentFile(arguments)
+				}
 				totalBytes := len(artifact.Content)
 				for _, existing := range artifacts {
 					totalBytes += len(existing.Content)

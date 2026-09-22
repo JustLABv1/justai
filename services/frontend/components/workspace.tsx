@@ -6,6 +6,7 @@ import { Info } from "lucide-react"
 import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
+import { TemplatesView } from "@/components/templates-view"
 import { KnowledgeWorkspace } from "@/components/knowledge-workspace"
 import { ProfileView } from "@/components/profile-view"
 import { PlatformAdminShell } from "@/components/platform-admin-shell"
@@ -1294,6 +1295,9 @@ export function Workspace() {
                 onUserChange={setUser}
                 user={user}
               />
+            )}
+            {activeView === "templates" && (
+              <TemplatesView key={activeOrganization?.id} />
             )}
             {activeView === "knowledge" &&
               (disabledFeatures.knowledge ? (

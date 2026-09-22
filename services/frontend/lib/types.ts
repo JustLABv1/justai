@@ -1,4 +1,5 @@
 export type ViewId =
+  | "templates"
   | "chat"
   | "transcription"
   | "video-transcription"

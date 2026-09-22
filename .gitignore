@@ -93,3 +93,7 @@ csv-files/
 /graphify-out/cost.json
 /graphify-out/cache/
 /services/backend/graphify-out/
+
+# Document template processor local test state
+services/backend/server/templates/__pycache__/
+.venv-templates/
