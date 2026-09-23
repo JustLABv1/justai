@@ -530,6 +530,28 @@ export function FocusWorkspaceSidebar({
             <TooltipContent side="right">{showContextLabel}</TooltipContent>
           </Tooltip>
         )}
+        <Separator className="my-1 w-5" />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                aria-current={activeView === "settings" ? "page" : undefined}
+                aria-label="Workspace settings"
+                className={cn(
+                  "relative h-9 w-14 gap-1 rounded-xl px-0 text-[10px] text-muted-foreground",
+                  activeView === "settings" &&
+                    "bg-accent text-accent-foreground"
+                )}
+                onClick={() => onNavigate("settings")}
+                variant="ghost"
+              >
+                <Settings2 className="size-4 shrink-0" />
+                <span>Settings</span>
+              </Button>
+            }
+          />
+          <TooltipContent side="right">Workspace settings</TooltipContent>
+        </Tooltip>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
