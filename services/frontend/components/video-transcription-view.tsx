@@ -1,6 +1,8 @@
 "use client"
 
 import {
+  ArrowLeft,
+  ArrowRight,
   AudioLines,
   Check,
   ChevronDown,
@@ -32,6 +34,7 @@ import {
   useState,
 } from "react"
 
+import { TranscriptionCreationFlow } from "@/components/transcription-creation-flow"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -195,6 +198,7 @@ export function VideoTranscriptionView({
   }
   const [error, setError] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
+  const [createStep, setCreateStep] = useState(0)
   const [title, setTitle] = useState("Video transcript")
   const [language, setLanguage] = useState("auto")
   const [selectedEndpoint, setSelectedEndpoint] = useState("")
@@ -531,6 +535,7 @@ export function VideoTranscriptionView({
   useEffect(() => {
     if (!createSessionRequested || sessionId) return
     queueMicrotask(() => {
+      setCreateStep(0)
       setCreateOpen(true)
       onCreateSessionRequestHandled?.()
     })
@@ -1152,7 +1157,7 @@ export function VideoTranscriptionView({
         </Alert>
       )}
 
-      {!snapshot ? (
+      {!snapshot && !createOpen ? (
         <>
           <PageHeader className="shrink-0">
             <PageHeading>
@@ -1175,13 +1180,13 @@ export function VideoTranscriptionView({
                 Processing continues in the background.
               </EmptyDescription>
             </EmptyHeader>
-            <Button onClick={() => setCreateOpen(true)}>
+            <Button onClick={() => { setCreateStep(0); setCreateOpen(true) }}>
               <Upload data-icon="inline-start" />
               New video transcription
             </Button>
           </Empty>
         </>
-      ) : (
+      ) : !createOpen ? (
         <>
           <WorkspaceDetailHeader
             actions={
@@ -1201,7 +1206,7 @@ export function VideoTranscriptionView({
                 ) : null}
                 <Button
                   className="flex-1 sm:flex-none"
-                  onClick={() => setCreateOpen(true)}
+                  onClick={() => { setCreateStep(0); setCreateOpen(true) }}
                   size="sm"
                   variant="outline"
                 >
@@ -1819,24 +1824,45 @@ export function VideoTranscriptionView({
             videoRef={videoRef}
           />
         </>
-      )}
+      ) : null}
 
-      <Dialog
-        open={createOpen}
-        onOpenChange={(open) => {
-          setCreateOpen(open)
-          if (!open && !videoUploadInFlightRef.current) setVideoFile(null)
-        }}
-      >
-        <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>New video transcription</DialogTitle>
-            <DialogDescription>
-              Upload a prerecorded video. JustAI will process it in the
-              background and keep a timestamped transcript.
-            </DialogDescription>
-          </DialogHeader>
-          <FieldGroup>
+      {createOpen ? (
+        <TranscriptionCreationFlow
+          title="New video transcription"
+          description="Turn a recording into a transcript, one step at a time."
+          steps={[
+            { label: "Recording", description: "Choose your video" },
+            { label: "Processing", description: "Set up the transcript" },
+            { label: "Review", description: "Ready to upload" },
+          ]}
+          step={createStep}
+          onStepChange={setCreateStep}
+          busy={videoStarting}
+          footer={(
+            <footer className="flex items-center justify-between gap-3">
+              <Button disabled={videoStarting} variant="outline" onClick={() => {
+                if (createStep > 0) { setCreateStep(createStep - 1); return }
+                setCreateOpen(false)
+                if (!videoUploadInFlightRef.current) setVideoFile(null)
+              }}>
+                {createStep > 0 ? <><ArrowLeft data-icon="inline-start" /> Back</> : "Cancel"}
+              </Button>
+              {createStep < 2 ? (
+                <Button disabled={createStep === 0 ? !videoFile : !effectiveSelectedEndpoint} onClick={() => setCreateStep(createStep + 1)}>
+                  Continue <ArrowRight data-icon="inline-end" />
+                </Button>
+              ) : (
+                <Button disabled={videoStarting || !videoFile || !effectiveSelectedEndpoint} onClick={() => void createVideoSession()}>
+                  {videoStarting ? <><LoaderCircle className="animate-spin" data-icon="inline-start" /> Preparing upload…</> : <><Upload data-icon="inline-start" /> Start upload</>}
+                </Button>
+              )}
+            </footer>
+          )}
+        >
+          {createStep === 0 ? (
+            <FieldGroup>
+              <div><h2 className="text-lg font-semibold">Choose a recording</h2><p className="mt-1 text-sm text-muted-foreground">Meetings, interviews, lectures — start with your video.</p></div>
+
             <Field>
               <FieldLabel htmlFor="video-session-title">
                 Transcript name
@@ -1847,21 +1873,23 @@ export function VideoTranscriptionView({
                 value={title}
               />
             </Field>
+
             <Field>
-              <FieldLabel htmlFor="video-file">Video file</FieldLabel>
-              <Input
-                accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv"
-                id="video-file"
-                onChange={(event) =>
-                  setVideoFile(event.target.files?.[0] ?? null)
-                }
-                type="file"
-              />
-              <FieldDescription>
-                Four-hour videos are supported when configured storage and
-                upload limits allow them.
-              </FieldDescription>
+              <label htmlFor="video-file" className="group relative flex min-h-52 cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl bg-muted/60 p-6 text-center transition-colors hover:bg-muted focus-within:ring-2 focus-within:ring-ring">
+                <span key={videoFile?.name || "empty"} className="flex flex-col items-center gap-3 animate-in duration-200 fade-in-0 zoom-in-95 motion-reduce:animate-none">
+                  <span className="flex size-14 items-center justify-center rounded-2xl bg-background text-primary"><FileVideo className="size-6" aria-hidden="true" /></span>
+                  <span className="max-w-full break-all text-sm font-medium">{videoFile?.name || "Choose your video"}</span>
+                  <span className="text-xs text-muted-foreground">{videoFile ? `${(videoFile.size / 1024 / 1024).toFixed(1)} MB · Click to replace` : "Select a recording from your device"}</span>
+                </span>
+                <Input accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv" id="video-file" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) setVideoFile(file) }} type="file" />
+              </label>
+              <FieldDescription>Upload begins after you review your settings.</FieldDescription>
             </Field>
+
+            </FieldGroup>
+          ) : createStep === 1 ? (
+            <FieldGroup>
+              <div><h2 className="text-lg font-semibold">Shape your transcript</h2><p className="mt-1 text-sm text-muted-foreground">Choose a language and the services to process your recording.</p></div>
             <Field>
               <FieldLabel htmlFor="video-language">Language</FieldLabel>
               <Input
@@ -2041,34 +2069,26 @@ export function VideoTranscriptionView({
                 value={grammarModel}
               />
             ) : null}
-          </FieldGroup>
-          <DialogFooter>
-            <Button onClick={() => setCreateOpen(false)} variant="outline">
-              Cancel
-            </Button>
-            <Button
-              disabled={
-                videoStarting || !videoFile || !effectiveSelectedEndpoint
-              }
-              onClick={() => void createVideoSession()}
-            >
-              {videoStarting ? (
-                <>
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />
-                  Uploading…
-                </>
-              ) : (
-                <>
-                  <Upload data-icon="inline-start" /> Start upload
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
+            </FieldGroup>
+          ) : (
+            <div className="flex flex-col gap-6">
+              <div><h2 className="text-lg font-semibold">Ready when you are</h2><p className="mt-1 text-sm text-muted-foreground">Your video will upload first. Transcription then continues in the background.</p></div>
+              <div className="flex items-center gap-4 rounded-2xl bg-muted/60 p-4">
+                <FileVideo className="size-8 shrink-0 text-primary" aria-hidden="true" />
+                <div className="min-w-0"><p className="truncate text-sm font-medium">{videoFile?.name}</p><p className="text-xs text-muted-foreground">{((videoFile?.size || 0) / 1024 / 1024).toFixed(1)} MB</p></div>
+              </div>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-4 text-sm">
+                <dt className="text-muted-foreground">Name</dt><dd className="break-words">{title.trim() || "Video transcript"}</dd>
+                <dt className="text-muted-foreground">Language</dt><dd>{language === "auto" ? "Detect automatically" : language}</dd>
+                <dt className="text-muted-foreground">Transcription</dt><dd className="break-words">{selectedTranscriptionEndpoint?.name || "No endpoint selected"}</dd>
+                <dt className="text-muted-foreground">Speakers</dt><dd className="break-words">{selectedDiarizationEndpointItem?.name || "Keep one transcript stream"}</dd>
+                <dt className="text-muted-foreground">Grammar</dt><dd className="break-words">{selectedGrammarEndpoint?.name || "Keep verbatim transcript"}</dd>
+              </dl>
+            </div>
+          )}
+        </TranscriptionCreationFlow>
+      ) : null}
 
       <Dialog
         open={Boolean(speakerToRename)}

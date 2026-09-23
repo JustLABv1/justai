@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
 import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
+import { TranscriptionCreationFlow } from "@/components/transcription-creation-flow"
 import { TranscriptWorkspace } from "@/components/transcript-workspace"
 import {
   Dialog,
@@ -65,7 +66,6 @@ import {
   PageHeading,
   PageTitle,
 } from "@/components/ui/page"
-import { Progress } from "@/components/ui/progress"
 import {
   Select,
   SelectContent,
@@ -2089,7 +2089,7 @@ export function LiveTranscriptionView({
     <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
       {error && !dialogOpen ? <DialogError message={error} /> : null}
 
-      {!snapshot ? (
+      {!snapshot && !createOpen ? (
         <>
           <PageHeader className="shrink-0">
             <PageHeading>
@@ -2119,7 +2119,7 @@ export function LiveTranscriptionView({
             </Button>
           </Empty>
         </>
-      ) : snapshot.session.status === "completed" ? (
+      ) : snapshot && !createOpen && snapshot.session.status === "completed" ? (
         <>
           <TranscriptWorkspace
             key={snapshot.session.id}
@@ -2143,7 +2143,7 @@ export function LiveTranscriptionView({
             videoRef={workspaceVideoRef}
           />
         </>
-      ) : (
+      ) : snapshot && !createOpen ? (
         <>
           <LiveTranscriptionConversationView
             capturing={capturing}
@@ -2174,83 +2174,59 @@ export function LiveTranscriptionView({
             interruptionAt={interruptionAt}
           />
         </>
-      )}
+      ) : null}
 
-      <Dialog
-        open={createOpen && !sessionId}
-        onOpenChange={(open) => {
-          setCreateOpen(open)
-          if (!open) setError("")
-          if (open) {
-            setCreateStep(0)
-            void refreshDevices()
-          }
-        }}
-      >
-        <DialogContent className="max-h-[min(760px,calc(100svh-2rem))] overflow-y-auto p-5 sm:max-w-2xl sm:p-6">
-          <DialogHeader className="gap-4">
-            <div className="flex items-start justify-between gap-4 pr-6">
-              <div className="min-w-0">
-                <DialogTitle>New live session</DialogTitle>
-                <DialogDescription className="mt-1 max-w-xl">
-                  A short setup tour helps you choose the right audio path
-                  before the room starts listening.
-                </DialogDescription>
-              </div>
-              <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-[0.625rem] font-medium text-muted-foreground">
-                Step {createStep + 1} of {liveSessionWizardSteps.length}
-              </span>
+      {createOpen && !sessionId ? (
+        <TranscriptionCreationFlow
+          title="New live session"
+          description="Bring your conversation into focus. Start with an audio source."
+          steps={liveSessionWizardSteps}
+          step={createStep}
+          onStepChange={(step) => setCreateStep(step as SessionWizardStep)}
+          busy={starting}
+          footer={(
+          <footer className="flex flex-wrap items-center justify-end gap-4 pt-4">
+            <div className="flex items-center justify-end gap-2">
+              {createStep > 0 ? (
+                <Button disabled={starting} onClick={goToPreviousWizardStep} variant="outline">
+                  <ArrowLeft data-icon="inline-start" /> Back
+                </Button>
+              ) : (
+                <Button onClick={() => setCreateOpen(false)} variant="outline">
+                  Cancel
+                </Button>
+              )}
+              {createStep < 3 ? (
+                <Button
+                  disabled={!canContinueWizard}
+                  onClick={goToNextWizardStep}
+                >
+                  Continue <ArrowRight data-icon="inline-end" />
+                </Button>
+              ) : (
+                <Button
+                  disabled={starting || !effectiveSelectedEndpoint}
+                  onClick={() => void createSession()}
+                >
+                  {starting ? (
+                    <>
+                      <LoaderCircle
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                      Starting…
+                    </>
+                  ) : (
+                    <>
+                      <Play data-icon="inline-start" /> Start session
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
-            <div
-              aria-label="Live session setup progress"
-              className="grid grid-cols-4 gap-1.5"
-            >
-              {liveSessionWizardSteps.map((step, index) => {
-                const active = createStep === index
-                const complete = createStep > index
-                return (
-                  <button
-                    aria-current={active ? "step" : undefined}
-                    className={cn(
-                      "flex min-w-0 flex-col gap-1 rounded-lg p-1.5 text-left transition-colors duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring/30",
-                      active
-                        ? "bg-primary/10 text-foreground"
-                        : "text-muted-foreground hover:bg-muted/60",
-                      index > createStep && "cursor-default opacity-60"
-                    )}
-                    disabled={index > createStep}
-                    key={step.label}
-                    onClick={() => {
-                      if (index <= createStep)
-                        setCreateStep(index as SessionWizardStep)
-                    }}
-                    type="button"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className={cn(
-                          "flex size-5 shrink-0 items-center justify-center rounded-full border text-[0.625rem] font-semibold",
-                          active
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : complete
-                              ? "border-primary/30 bg-primary/10 text-primary"
-                              : "border-border bg-background"
-                        )}
-                      >
-                        {complete ? <Check className="size-3" /> : index + 1}
-                      </span>
-                      <span className="truncate text-[0.625rem] font-medium">
-                        {step.label}
-                      </span>
-                    </span>
-                    <span className="truncate pl-6 text-[0.625rem] text-muted-foreground">
-                      {step.description}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </DialogHeader>
+          </footer>
+          )}
+        >
 
           {error ? (
             <div className="flex flex-col gap-3">
@@ -2273,7 +2249,7 @@ export function LiveTranscriptionView({
 
           {createStep === 0 ? (
             <div
-              className="flex animate-in flex-col gap-4 duration-200 fade-in-0 slide-in-from-right-1 motion-reduce:animate-none"
+              className="flex flex-col gap-5"
               key="source-step"
             >
               <div>
@@ -2343,7 +2319,7 @@ export function LiveTranscriptionView({
             </div>
           ) : createStep === 1 ? (
             <div
-              className="flex animate-in flex-col gap-4 duration-200 fade-in-0 slide-in-from-right-1 motion-reduce:animate-none"
+              className="flex flex-col gap-5"
               key="setup-step"
             >
               <div className="flex items-start gap-3">
@@ -2555,7 +2531,7 @@ export function LiveTranscriptionView({
             </div>
           ) : createStep === 2 ? (
             <div
-              className="flex animate-in flex-col gap-4 duration-200 fade-in-0 slide-in-from-right-1 motion-reduce:animate-none"
+              className="flex flex-col gap-5"
               key="options-step"
             >
               <div className="flex items-start gap-3">
@@ -2563,7 +2539,7 @@ export function LiveTranscriptionView({
                   <Settings2 aria-hidden="true" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">Tune the room</p>
+                  <h2 className="text-lg font-semibold">Tune the room</h2>
                   <p className="mt-1 text-xs text-muted-foreground">
                     These settings control how JustAI transcribes, labels, and
                     retains this session.
@@ -2595,95 +2571,114 @@ export function LiveTranscriptionView({
                     <FieldDescription>BCP-47 code or auto.</FieldDescription>
                   </Field>
                 </div>
-                <Field>
-                  <FieldLabel>Transcription endpoint</FieldLabel>
-                  <Select
-                    onValueChange={(value) => setSelectedEndpoint(value ?? "")}
-                    value={effectiveSelectedEndpoint}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select a transcription endpoint" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectLabel>Transcription providers</SelectLabel>
-                        {transcriptionEndpoints.map((endpoint) => (
-                          <SelectItem key={endpoint.id} value={endpoint.id}>
-                            {endpoint.name} · {endpoint.providerType} ·{" "}
-                            {transcriptionModeLabel(endpoint)}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    Native providers use Realtime WebSockets. Whisper-style
-                    gateways use rolling HTTP chunks.
-                  </FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel>Diarization endpoint</FieldLabel>
-                  <Select
-                    onValueChange={(value) =>
-                      setSelectedDiarizationEndpoint(
-                        value === "none" ? "" : (value ?? "")
-                      )
-                    }
-                    value={selectedDiarizationEndpoint || "none"}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Optional speaker separation" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectLabel>Speaker providers</SelectLabel>
-                        <SelectItem value="none">
-                          No speaker separation
-                        </SelectItem>
-                        {diarizationEndpoints.map((endpoint) => (
-                          <SelectItem key={endpoint.id} value={endpoint.id}>
-                            {endpoint.name} · {endpoint.providerType}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    Speaker labels arrive after a short rolling audio window.
-                  </FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel>Grammar polish</FieldLabel>
-                  <Select
-                    onValueChange={(value) =>
-                      setSelectedGrammarEndpoint(
-                        value === "none" ? "" : (value ?? "")
-                      )
-                    }
-                    value={selectedGrammarEndpoint || "none"}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Optional grammar polish" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectLabel>Writing providers</SelectLabel>
-                        <SelectItem value="none">
-                          Keep verbatim transcript
-                        </SelectItem>
-                        {grammarEndpoints.map((endpoint) => (
-                          <SelectItem key={endpoint.id} value={endpoint.id}>
-                            {endpoint.name} · {endpoint.providerType}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    You can generate the polished version from the transcript
-                    workspace after capture.
-                  </FieldDescription>
-                </Field>
+                <div className="flex flex-col gap-4 rounded-2xl bg-muted/40 p-4 sm:p-5">
+                  <div>
+                    <h3 className="text-sm font-semibold">Processing</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Choose the services that turn audio into a transcript.
+                    </p>
+                  </div>
+                  <Field>
+                    <FieldLabel>Transcription endpoint</FieldLabel>
+                    <Select
+                      items={transcriptionEndpoints.map((endpoint) => ({
+                        value: endpoint.id,
+                        label: endpoint.name,
+                      }))}
+                      onValueChange={(value) =>
+                        setSelectedEndpoint(value ?? "")
+                      }
+                      value={effectiveSelectedEndpoint}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a transcription endpoint" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectLabel>Transcription providers</SelectLabel>
+                          {transcriptionEndpoints.map((endpoint) => (
+                            <SelectItem key={endpoint.id} value={endpoint.id}>
+                              {endpoint.name} · {endpoint.providerType} ·{" "}
+                              {transcriptionModeLabel(endpoint)}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel>Diarization endpoint</FieldLabel>
+                      <Select
+                        items={[
+                          { value: "none", label: "No speaker separation" },
+                          ...diarizationEndpoints.map((endpoint) => ({
+                            value: endpoint.id,
+                            label: endpoint.name,
+                          })),
+                        ]}
+                        onValueChange={(value) =>
+                          setSelectedDiarizationEndpoint(
+                            value === "none" ? "" : (value ?? "")
+                          )
+                        }
+                        value={selectedDiarizationEndpoint || "none"}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Optional speaker separation" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectLabel>Speaker providers</SelectLabel>
+                            <SelectItem value="none">
+                              No speaker separation
+                            </SelectItem>
+                            {diarizationEndpoints.map((endpoint) => (
+                              <SelectItem key={endpoint.id} value={endpoint.id}>
+                                {endpoint.name} · {endpoint.providerType}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field>
+                      <FieldLabel>Grammar polish</FieldLabel>
+                      <Select
+                        items={[
+                          { value: "none", label: "Keep verbatim transcript" },
+                          ...grammarEndpoints.map((endpoint) => ({
+                            value: endpoint.id,
+                            label: endpoint.name,
+                          })),
+                        ]}
+                        onValueChange={(value) =>
+                          setSelectedGrammarEndpoint(
+                            value === "none" ? "" : (value ?? "")
+                          )
+                        }
+                        value={selectedGrammarEndpoint || "none"}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Optional grammar polish" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectLabel>Writing providers</SelectLabel>
+                            <SelectItem value="none">
+                              Keep verbatim transcript
+                            </SelectItem>
+                            {grammarEndpoints.map((endpoint) => (
+                              <SelectItem key={endpoint.id} value={endpoint.id}>
+                                {endpoint.name} · {endpoint.providerType}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                </div>
                 <div className="flex items-center justify-between rounded-xl bg-muted/50 p-3">
                   <div>
                     <p className="text-sm font-medium">Record source audio</p>
@@ -2702,7 +2697,7 @@ export function LiveTranscriptionView({
             </div>
           ) : (
             <div
-              className="flex animate-in flex-col gap-4 duration-200 fade-in-0 slide-in-from-right-1 motion-reduce:animate-none"
+              className="flex flex-col gap-5"
               key="review-step"
             >
               <div className="flex items-start gap-3">
@@ -2801,58 +2796,8 @@ export function LiveTranscriptionView({
             </div>
           )}
 
-          <DialogFooter className="items-center border-t pt-4 sm:justify-between">
-            <div className="flex min-w-0 items-center gap-2">
-              <Progress
-                aria-label="Session setup progress"
-                className="w-24"
-                value={((createStep + 1) / liveSessionWizardSteps.length) * 100}
-              />
-              <span className="shrink-0 text-[0.625rem] text-muted-foreground tabular-nums">
-                {createStep + 1}/{liveSessionWizardSteps.length}
-              </span>
-            </div>
-            <div className="flex items-center justify-end gap-2">
-              {createStep > 0 ? (
-                <Button onClick={goToPreviousWizardStep} variant="outline">
-                  <ArrowLeft data-icon="inline-start" /> Back
-                </Button>
-              ) : (
-                <Button onClick={() => setCreateOpen(false)} variant="outline">
-                  Cancel
-                </Button>
-              )}
-              {createStep < 3 ? (
-                <Button
-                  disabled={!canContinueWizard}
-                  onClick={goToNextWizardStep}
-                >
-                  Continue <ArrowRight data-icon="inline-end" />
-                </Button>
-              ) : (
-                <Button
-                  disabled={starting || !effectiveSelectedEndpoint}
-                  onClick={() => void createSession()}
-                >
-                  {starting ? (
-                    <>
-                      <LoaderCircle
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />
-                      Starting…
-                    </>
-                  ) : (
-                    <>
-                      <Play data-icon="inline-start" /> Start session
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </TranscriptionCreationFlow>
+      ) : null}
 
       <Dialog
         open={streamDialogOpen}
