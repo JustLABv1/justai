@@ -1247,7 +1247,12 @@ function StorageReferenceSearch({ onQuery, loading, error }: {
   if (!scope.open) return null
   if (error) return <p role="alert" className="px-2.5 py-2 text-xs text-destructive">{error}</p>
   if (loading) return <p role="status" className="px-2.5 py-2 text-xs text-muted-foreground">Searching Storage…</p>
-  return <p className="px-2.5 py-2 text-xs text-muted-foreground">Choose a file to use only that file for this message.</p>
+  return (
+    <p className="px-2.5 py-2 text-xs text-muted-foreground">
+      Open Storage files or type a name to search, then choose a file for this
+      message.
+    </p>
+  )
 }
 
 function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
@@ -2560,27 +2565,10 @@ function Composer({
     (state) => state.thread.messages.length > 0
   )
   const composerAttachments = useAuiState((state) => state.composer.attachments)
-  const composerText = useAuiState((state) => state.composer.text)
-  const composerCanSend = useAuiState((state) => state.composer.canSend)
-  const duplicateSubmitText = useRef<string | null>(null)
   const [storageQuery, setStorageQuery] = useState<string | null>(null)
   const [storageFiles, setStorageFiles] = useState<KnowledgeItem[]>([])
   const [storageLoading, setStorageLoading] = useState(false)
   const [storageError, setStorageError] = useState<string | null>(null)
-  useEffect(() => {
-    if (duplicateSubmitText.current !== composerText.trim()) {
-      duplicateSubmitText.current = null
-    }
-  }, [composerText])
-
-  const isDuplicateSubmit = () => {
-    const text = composerText.trim()
-    if (!text || !composerCanSend) return false
-    if (duplicateSubmitText.current === text) return true
-    duplicateSubmitText.current = text
-    return false
-  }
-
   useEffect(() => {
     if (storageQuery === null) return
     const controller = new AbortController()
@@ -2914,10 +2902,6 @@ function Composer({
                     "flex flex-wrap items-center gap-2 rounded-[1.75rem]"
                 )}
                 data-running={isThreadRunning}
-                onSubmit={(event) => {
-                  if (!isDuplicateSubmit()) return
-                  event.preventDefault()
-                }}
               >
                 <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
                   <Quote className="size-3.5 shrink-0" aria-hidden="true" />
@@ -3102,9 +3086,6 @@ function Composer({
                         aria-label="Send message"
                         className="flex size-8 items-center justify-center rounded-full bg-[var(--composer-accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                         disabled={hasUnreadyAttachments}
-                        onClick={(event) => {
-                          if (isDuplicateSubmit()) event.preventDefault()
-                        }}
                       >
                         <ArrowUp className="size-4" />
                       </ComposerPrimitive.Send>
@@ -3116,13 +3097,15 @@ function Composer({
           </div>
         </div>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-      {!compact && (
-        <p className="mt-2 text-center text-[11px] text-muted-foreground">
-          Type <kbd className="rounded border px-1 font-mono">@</kbd> to find
-          Storage files and attach them as context. JustAI can make mistakes;
-          verify important information.
-        </p>
-      )}
+      <p
+        className={cn(
+          "text-center text-muted-foreground",
+          compact ? "mt-1 text-[10px]" : "mt-2 text-[11px]"
+        )}
+      >
+        Type <kbd className="rounded border px-1 font-mono">@</kbd> to search
+        Storage and attach a file as context.
+      </p>
     </div>
   )
 }

@@ -325,11 +325,72 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			return
 		}
 		if duplicate {
-			writeError(c, http.StatusConflict, fmt.Errorf("chat request is already being processed"))
+			// A transport retry can arrive while the original request is still
+			// preparing its stream. Rejoin that durable stream instead of turning
+			// one user turn into a visible conflict error.
+			streamID, found, streamErr := a.waitForChatRunStream(c, runID)
+			if streamErr != nil {
+				if c.Request.Context().Err() == nil {
+					writeError(c, http.StatusInternalServerError, streamErr)
+				}
+				return
+			}
+			if !found {
+				slog.Warn("duplicate assistant UI chat request has no resumable stream", "conversationId", conversationID, "requestId", requestID, "runId", runID)
+				writeError(c, http.StatusConflict, fmt.Errorf("chat request is already being processed"))
+				return
+			}
+			slog.Warn("replaying existing stream for duplicate assistant UI chat request", "conversationId", conversationID, "requestId", requestID, "runId", runID, "streamId", streamID)
+			a.serveChatStream(c, streamID, principal.UserID, organizationID)
 			return
 		}
 	}
 	defer finishRun()
+
+	streamID := uuid.New()
+	if err := a.createChatStream(context.Background(), streamID, conversationID, principal.UserID, organizationID, runID); err != nil {
+		runStatus = "error"
+		writeError(c, http.StatusInternalServerError, fmt.Errorf("resumable chat stream could not be created: %w", err))
+		return
+	}
+	assistantMessageID := uuid.NewString()
+	if approval != nil {
+		// The AI SDK resubmits the same assistant message when an approval is
+		// answered. Reusing that id keeps the resumed turn attached to its original
+		// durable message.
+		if parsed, parseErr := uuid.Parse(approval.MessageID); parseErr == nil {
+			assistantMessageID = parsed.String()
+		}
+	}
+	streamFinished := false
+	defer func() {
+		if streamFinished {
+			return
+		}
+		if c.Request.Context().Err() != nil {
+			runStatus = "cancelled"
+		} else if runStatus == "complete" {
+			runStatus = "error"
+		}
+		finishRun()
+
+		appendPersistedChunk := func(value any) {
+			payload, marshalErr := json.Marshal(value)
+			if marshalErr == nil {
+				_ = a.appendChatStreamChunk(context.Background(), streamID, string(payload))
+			}
+		}
+		appendPersistedChunk(map[string]any{"type": "start", "messageId": assistantMessageID})
+		if runStatus == "cancelled" {
+			appendPersistedChunk(map[string]any{"type": "abort", "reason": "request was cancelled before the stream started"})
+		} else {
+			appendPersistedChunk(map[string]any{"type": "error", "errorText": "The chat request failed before the response stream started."})
+			appendPersistedChunk(map[string]any{"type": "finish", "finishReason": "error"})
+		}
+		_ = a.appendChatStreamChunk(context.Background(), streamID, "[DONE]")
+		_ = a.finishChatStream(context.Background(), streamID, runStatus)
+		streamFinished = true
+	}()
 
 	if approval == nil {
 		if latestUser != nil {
@@ -440,13 +501,6 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, projectErr)
 		return
 	}
-	streamID := uuid.New()
-	if err := a.createChatStream(context.Background(), streamID, conversationID, principal.UserID, organizationID, runID); err != nil {
-		runStatus = "error"
-		writeError(c, http.StatusInternalServerError, fmt.Errorf("resumable chat stream could not be created: %w", err))
-		return
-	}
-
 	// The UI Message Stream is deliberately emitted directly from Go. This
 	// keeps provider credentials and MCP execution on the backend while making
 	// the browser transport interchangeable with the AI SDK runtime.
@@ -522,20 +576,12 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		_ = a.appendChatStreamChunk(context.Background(), streamID, "[DONE]")
 		_, _ = fmt.Fprint(writer, "data: [DONE]\n\n")
 		_ = a.finishChatStream(context.Background(), streamID, streamStatus)
+		streamFinished = true
 		if flusher != nil {
 			flusher.Flush()
 		}
 	}
 
-	assistantMessageID := uuid.NewString()
-	if approval != nil {
-		// The AI SDK resubmits the same assistant message when an approval is
-		// answered. Reusing that id makes the stream completion and the history
-		// adapter upsert the same durable message instead of creating a sibling.
-		if parsed, parseErr := uuid.Parse(approval.MessageID); parseErr == nil {
-			assistantMessageID = parsed.String()
-		}
-	}
 	textID := assistantMessageID + ":text"
 	defer finishStream()
 	if err := writeChunk(map[string]any{"type": "start", "messageId": assistantMessageID}); err != nil {
