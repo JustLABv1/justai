@@ -380,16 +380,6 @@ export function FocusWorkspaceSidebar({
       return
     }
 
-    if (view === "transcription") {
-      onNewTranscriptionSession()
-      return
-    }
-
-    if (view === "video-transcription") {
-      onNewVideoTranscription()
-      return
-    }
-
     onNavigate(view)
   }
 
@@ -408,8 +398,9 @@ export function FocusWorkspaceSidebar({
   return (
     <aside
       className={cn(
-        "relative mx-2 my-2 flex h-[calc(100%-1rem)] min-h-0 w-14 shrink-0 gap-2 overflow-visible",
-        isSecondaryHistoryRail && "md:w-28"
+        "relative mx-2 my-2 flex h-[calc(100%-1rem)] min-h-0 w-14 shrink-0 gap-2 overflow-visible transition-[width] duration-200",
+        isSecondaryHistoryRail &&
+          (secondaryHistoryExpanded ? "md:w-80" : "md:w-28")
       )}
       aria-label="Workspace navigation"
       data-history-open={historyVisible}
@@ -619,7 +610,7 @@ export function FocusWorkspaceSidebar({
             ? "relative flex h-full w-12 shrink-0 overflow-visible rounded-[1.5rem] bg-[var(--sidebar-secondary)] transition-[width] duration-200 md:overflow-hidden"
             : "contents",
           secondaryHistoryExpanded &&
-            "md:absolute md:inset-y-0 md:left-16 md:z-30 md:w-64 md:shadow-xl"
+            "md:w-64 md:shadow-xl"
         )}
         onBlurCapture={(event) => {
           if (

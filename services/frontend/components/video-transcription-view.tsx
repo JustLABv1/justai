@@ -1477,12 +1477,15 @@ export function VideoTranscriptionView({
                         Speaker summary
                       </CardTitle>
                       <CardDescription>
-                        Name each speaker and play a short sample from their
-                        first detected line.
+                        {speakerSummaries.length === 1
+                          ? "1 speaker"
+                          : `${speakerSummaries.length} speakers`}{" "}
+                        detected. Rename speakers and play a short sample from
+                        their first detected line.
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="flex flex-col gap-2 px-4 pb-4">
-                      <div className="max-h-72 min-h-0 space-y-2 overflow-y-auto pr-1">
+                      <div className="space-y-2">
                         {speakerSummaries.map((summary) => {
                           const speakerName =
                             summary.speaker.displayName || summary.speaker.label

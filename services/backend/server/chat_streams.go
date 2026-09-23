@@ -70,6 +70,46 @@ func (a *App) finishChatStream(ctx context.Context, streamID uuid.UUID, status s
 	return err
 }
 
+func (a *App) waitForChatRunStream(ctx context.Context, runID uuid.UUID) (uuid.UUID, bool, error) {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(30 * time.Second)
+	defer timeout.Stop()
+
+	for {
+		var streamID uuid.UUID
+		err := a.DB.QueryRowContext(ctx, `
+			SELECT id
+			FROM chat_streams
+			WHERE run_id = $1 AND expires_at > now()
+			ORDER BY created_at DESC
+			LIMIT 1
+		`, runID).Scan(&streamID)
+		if err == nil {
+			return streamID, true, nil
+		}
+		if err != sql.ErrNoRows {
+			return uuid.Nil, false, err
+		}
+
+		var status string
+		if err := a.DB.QueryRowContext(ctx, `SELECT status FROM chat_runs WHERE id = $1`, runID).Scan(&status); err != nil {
+			return uuid.Nil, false, err
+		}
+		if status != "running" {
+			return uuid.Nil, false, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return uuid.Nil, false, ctx.Err()
+		case <-timeout.C:
+			return uuid.Nil, false, nil
+		case <-ticker.C:
+		}
+	}
+}
+
 func (a *App) resumeChatStream(c *gin.Context) {
 	principal, ok := middleware.GetPrincipal(c)
 	if !ok {
@@ -87,13 +127,17 @@ func (a *App) resumeChatStream(c *gin.Context) {
 		return
 	}
 
-	var conversationID, ownerID, streamOrganizationID uuid.UUID
+	a.serveChatStream(c, streamID, principal.UserID, organizationID)
+}
+
+func (a *App) serveChatStream(c *gin.Context, streamID, userID, organizationID uuid.UUID) {
+	var ownerID, streamOrganizationID uuid.UUID
 	var status string
 	if err := a.DB.QueryRowContext(c, `
-		SELECT conversation_id, user_id, organization_id, status
+		SELECT user_id, organization_id, status
 		FROM chat_streams
 		WHERE id = $1 AND expires_at > now()
-	`, streamID).Scan(&conversationID, &ownerID, &streamOrganizationID, &status); err != nil {
+	`, streamID).Scan(&ownerID, &streamOrganizationID, &status); err != nil {
 		if err == sql.ErrNoRows {
 			writeError(c, http.StatusNotFound, fmt.Errorf("stream not found or expired"))
 			return
@@ -101,12 +145,11 @@ func (a *App) resumeChatStream(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if ownerID != principal.UserID || streamOrganizationID != organizationID {
+	if ownerID != userID || streamOrganizationID != organizationID {
 		// Do not reveal whether a stream id belongs to another tenant.
 		writeError(c, http.StatusNotFound, fmt.Errorf("stream not found"))
 		return
 	}
-	_ = conversationID // The ownership check above is intentionally stream-scoped.
 
 	writer := c.Writer
 	writer.Header().Set("Content-Type", "text/event-stream")

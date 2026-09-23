@@ -1247,7 +1247,12 @@ function StorageReferenceSearch({ onQuery, loading, error }: {
   if (!scope.open) return null
   if (error) return <p role="alert" className="px-2.5 py-2 text-xs text-destructive">{error}</p>
   if (loading) return <p role="status" className="px-2.5 py-2 text-xs text-muted-foreground">Searching Storage…</p>
-  return <p className="px-2.5 py-2 text-xs text-muted-foreground">Choose a file to use only that file for this message.</p>
+  return (
+    <p className="px-2.5 py-2 text-xs text-muted-foreground">
+      Open Storage files or type a name to search, then choose a file for this
+      message.
+    </p>
+  )
 }
 
 function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
@@ -2705,7 +2710,9 @@ function Composer({
     return {
       categories: () =>
         groups
-          .filter((group) => group.items.length > 0)
+          .filter(
+            (group) => group.id === "knowledge" || group.items.length > 0
+          )
           .map(({ id, label }) => ({ id, label })),
       categoryItems: (categoryId: string) =>
         groups.find((group) => group.id === categoryId)?.items ?? [],
@@ -3090,11 +3097,15 @@ function Composer({
           </div>
         </div>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-      {!compact && (
-        <p className="mt-2 text-center text-[11px] text-muted-foreground">
-          JustAI can make mistakes. Verify important information.
-        </p>
-      )}
+      <p
+        className={cn(
+          "text-center text-muted-foreground",
+          compact ? "mt-1 text-[10px]" : "mt-2 text-[11px]"
+        )}
+      >
+        Type <kbd className="rounded border px-1 font-mono">@</kbd> to search
+        Storage and attach a file as context.
+      </p>
     </div>
   )
 }
