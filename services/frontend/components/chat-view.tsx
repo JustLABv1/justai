@@ -2560,10 +2560,27 @@ function Composer({
     (state) => state.thread.messages.length > 0
   )
   const composerAttachments = useAuiState((state) => state.composer.attachments)
+  const composerText = useAuiState((state) => state.composer.text)
+  const composerCanSend = useAuiState((state) => state.composer.canSend)
+  const duplicateSubmitText = useRef<string | null>(null)
   const [storageQuery, setStorageQuery] = useState<string | null>(null)
   const [storageFiles, setStorageFiles] = useState<KnowledgeItem[]>([])
   const [storageLoading, setStorageLoading] = useState(false)
   const [storageError, setStorageError] = useState<string | null>(null)
+  useEffect(() => {
+    if (duplicateSubmitText.current !== composerText.trim()) {
+      duplicateSubmitText.current = null
+    }
+  }, [composerText])
+
+  const isDuplicateSubmit = () => {
+    const text = composerText.trim()
+    if (!text || !composerCanSend) return false
+    if (duplicateSubmitText.current === text) return true
+    duplicateSubmitText.current = text
+    return false
+  }
+
   useEffect(() => {
     if (storageQuery === null) return
     const controller = new AbortController()
@@ -2705,7 +2722,9 @@ function Composer({
     return {
       categories: () =>
         groups
-          .filter((group) => group.items.length > 0)
+          .filter(
+            (group) => group.id === "knowledge" || group.items.length > 0
+          )
           .map(({ id, label }) => ({ id, label })),
       categoryItems: (categoryId: string) =>
         groups.find((group) => group.id === categoryId)?.items ?? [],
@@ -2895,6 +2914,10 @@ function Composer({
                     "flex flex-wrap items-center gap-2 rounded-[1.75rem]"
                 )}
                 data-running={isThreadRunning}
+                onSubmit={(event) => {
+                  if (!isDuplicateSubmit()) return
+                  event.preventDefault()
+                }}
               >
                 <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
                   <Quote className="size-3.5 shrink-0" aria-hidden="true" />
@@ -3079,6 +3102,9 @@ function Composer({
                         aria-label="Send message"
                         className="flex size-8 items-center justify-center rounded-full bg-[var(--composer-accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                         disabled={hasUnreadyAttachments}
+                        onClick={(event) => {
+                          if (isDuplicateSubmit()) event.preventDefault()
+                        }}
                       >
                         <ArrowUp className="size-4" />
                       </ComposerPrimitive.Send>
@@ -3092,7 +3118,9 @@ function Composer({
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       {!compact && (
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
-          JustAI can make mistakes. Verify important information.
+          Type <kbd className="rounded border px-1 font-mono">@</kbd> to find
+          Storage files and attach them as context. JustAI can make mistakes;
+          verify important information.
         </p>
       )}
     </div>
