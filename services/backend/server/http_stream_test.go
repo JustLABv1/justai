@@ -83,6 +83,51 @@ func TestHTTPStreamAudioExpandsBatchedFrames(t *testing.T) {
 	}
 }
 
+func TestHTTPStreamAudioDeduplicatesRetriedBatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app := &App{httpStreams: make(map[uuid.UUID]*httpStreamConnection)}
+	connection := newHTTPStreamConnection(uuid.Nil, uuid.Nil)
+	app.registerHTTPStream(connection)
+	defer app.unregisterHTTPStream(connection)
+	frame := bytes.Repeat([]byte{3}, 21)
+	var body bytes.Buffer
+	_ = binary.Write(&body, binary.BigEndian, uint32(len(frame)))
+	_, _ = body.Write(frame)
+	post := func(sequence string, data []byte) int {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Params = gin.Params{{Key: "streamId", Value: connection.id.String()}}
+		context.Request = httptest.NewRequest(http.MethodPost, "/audio", bytes.NewReader(data))
+		context.Request.Header.Set("Content-Type", "application/octet-stream")
+		context.Request.Header.Set("X-Stream-Token", connection.uploadToken)
+		context.Request.Header.Set("X-Audio-Batch-Sequence", sequence)
+		app.writeHTTPStreamAudio(context)
+		return recorder.Code
+	}
+	if status := post("2", body.Bytes()); status != http.StatusConflict {
+		t.Fatalf("expected out-of-order batch rejected, got %d", status)
+	}
+	if status := post("1", body.Bytes()); status != http.StatusAccepted {
+		t.Fatalf("expected first batch accepted, got %d", status)
+	}
+	if status := post("1", body.Bytes()); status != http.StatusNoContent {
+		t.Fatalf("expected retried batch deduplicated, got %d", status)
+	}
+	if queued := len(connection.in); queued != 1 {
+		t.Fatalf("expected one queued batch, got %d", queued)
+	}
+	messageType, payload, err := connection.ReadMessage()
+	if err != nil || messageType != streamBinaryMessage || !bytes.Equal(payload, frame) {
+		t.Fatalf("unexpected audio frame: type=%d payload=%v error=%v", messageType, payload, err)
+	}
+	if status := post("2", append(body.Bytes(), []byte{0, 0, 0}...)); status != http.StatusBadRequest {
+		t.Fatalf("expected invalid batch rejected before enqueue, got %d", status)
+	}
+	if status := post("2", body.Bytes()); status != http.StatusAccepted {
+		t.Fatalf("expected valid next batch accepted, got %d", status)
+	}
+}
+
 func TestHTTPStreamRejectsMissingUploadToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	app := &App{httpStreams: make(map[uuid.UUID]*httpStreamConnection)}

@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+
 import {
   Bookmark,
   Check,
@@ -12,6 +14,7 @@ import {
   FileAudio,
   FileText,
   FileVideo,
+  GitBranch,
   GitMerge,
   LoaderCircle,
   MessageSquarePlus,
@@ -76,6 +79,14 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
+import { workflowInputNames } from "@/lib/agent-workflow-logic"
+import {
+  TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT,
+  transcriptionWorkflowInput,
+  transcriptionWorkflowPrefill,
+  transcriptionWorkflowTranscript,
+  type TranscriptionWorkflowSource,
+} from "@/lib/transcription-workflow"
 import {
   activeTranscriptionMessageId,
   activeTranscriptionSegmentId,
@@ -84,6 +95,8 @@ import {
 } from "@/lib/transcription"
 import { cn } from "@/lib/utils"
 import type {
+  AgentRun,
+  AgentWorkflow,
   TranscriptionAnnotation,
   TranscriptionInsights,
   TranscriptionRecording,
@@ -384,6 +397,18 @@ export function TranscriptWorkspace({
   const [exportFormat, setExportFormat] = useState("pdf")
   const [includeInsightsInExport, setIncludeInsightsInExport] = useState(true)
   const [actionItemsCopied, setActionItemsCopied] = useState(false)
+  const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false)
+  const [workflowChoices, setWorkflowChoices] = useState<AgentWorkflow[]>([])
+  const [workflowLoading, setWorkflowLoading] = useState(false)
+  const [workflowId, setWorkflowId] = useState("")
+  const [workflowFields, setWorkflowFields] = useState<Record<string, string>>(
+    {}
+  )
+  const [workflowRunning, setWorkflowRunning] = useState(false)
+  const [workflowRunId, setWorkflowRunId] = useState("")
+  const [workflowError, setWorkflowError] = useState("")
+  const [workflowTranscriptTruncated, setWorkflowTranscriptTruncated] =
+    useState(false)
   const [speakerSample, setSpeakerSample] = useState<{
     speakerId: string
     endOffsetMs: number
@@ -577,6 +602,12 @@ export function TranscriptWorkspace({
     actionItems: [],
     updatedAt: "",
   }
+  const selectedWorkflow = workflowChoices.find(
+    (item) => item.id === workflowId
+  )
+  const workflowInputFields = selectedWorkflow
+    ? workflowInputNames(selectedWorkflow.definition)
+    : []
   const validInsightChapters = useMemo(() => {
     const chapters = insights.chapters ?? []
     return chapters.filter(
@@ -994,6 +1025,80 @@ export function TranscriptWorkspace({
       onError("")
     } catch {
       onError("Action items could not be copied. Check clipboard permissions.")
+    }
+  }
+
+  const workflowSource = (): TranscriptionWorkflowSource => ({
+    session: snapshot.session,
+    segments: snapshot.segments,
+    speakers: snapshot.speakers,
+    insights,
+    url:
+      typeof window === "undefined"
+        ? ""
+        : `${window.location.origin}${window.location.pathname}`,
+  })
+
+  const openWorkflowDialog = async () => {
+    setWorkflowDialogOpen(true)
+    setWorkflowLoading(true)
+    setWorkflowChoices([])
+    setWorkflowError("")
+    setWorkflowRunId("")
+    setWorkflowTranscriptTruncated(
+      transcriptionWorkflowTranscript(workflowSource()).truncated
+    )
+    try {
+      const result = await api.get<{ workflows: AgentWorkflow[] }>(
+        "/api/v1/agent-workflows"
+      )
+      setWorkflowChoices(result.workflows)
+      const selected =
+        result.workflows.find((item) => item.id === workflowId) ??
+        result.workflows.find((item) =>
+          item.name.toLowerCase().includes("meeting")
+        ) ??
+        result.workflows[0]
+      setWorkflowId(selected?.id ?? "")
+      setWorkflowFields(
+        selected ? transcriptionWorkflowPrefill(selected, workflowSource()) : {}
+      )
+    } catch (caught) {
+      setWorkflowError(
+        caught instanceof Error
+          ? caught.message
+          : "Workflows could not be loaded."
+      )
+    } finally {
+      setWorkflowLoading(false)
+    }
+  }
+
+  const runInsightWorkflow = async () => {
+    if (!workflowId || workflowRunning) return
+    const input = transcriptionWorkflowInput(workflowSource(), workflowFields)
+    if (new TextEncoder().encode(JSON.stringify(input)).length > 512 * 1024) {
+      setWorkflowError(
+        "The workflow input is too large. Shorten the transcript field before starting."
+      )
+      return
+    }
+    setWorkflowRunning(true)
+    setWorkflowError("")
+    try {
+      const result = await api.post<{ run: AgentRun }>(
+        `/api/v1/agent-workflows/${workflowId}/runs`,
+        { input }
+      )
+      setWorkflowRunId(result.run.id)
+    } catch (caught) {
+      setWorkflowError(
+        caught instanceof Error
+          ? caught.message
+          : "The workflow could not be started."
+      )
+    } finally {
+      setWorkflowRunning(false)
     }
   }
 
@@ -1927,6 +2032,15 @@ export function TranscriptWorkspace({
                 </CardTitle>
                 <div className="flex items-center gap-2">
                   {insightsReady ? (
+                    <Button
+                      onClick={() => void openWorkflowDialog()}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <GitBranch data-icon="inline-start" /> Use in workflow
+                    </Button>
+                  ) : null}
+                  {insightsReady ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={<Button size="sm" variant="outline" />}
@@ -2512,6 +2626,147 @@ export function TranscriptWorkspace({
           </Card>
         </div>
       </div>
+
+      <Dialog open={workflowDialogOpen} onOpenChange={setWorkflowDialogOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Use transcript insights in a workflow</DialogTitle>
+            <DialogDescription>
+              Choose a saved workflow and review its inputs. The run receives
+              this transcript, its summary, topics, chapters, and action items.
+            </DialogDescription>
+          </DialogHeader>
+          {workflowLoading ? (
+            <p className="text-sm text-muted-foreground">Loading workflows…</p>
+          ) : workflowChoices.length === 0 ? (
+            workflowError ? null : (
+              <p className="text-sm text-muted-foreground">
+                No saved workflows are available. Create one in{" "}
+                <Link
+                  className="text-primary underline"
+                  href="/agents?tab=workflows"
+                >
+                  Agent workflows
+                </Link>
+                .
+              </p>
+            )
+          ) : (
+            <div className="space-y-4">
+              <Select
+                items={workflowChoices.map((item) => ({
+                  value: item.id,
+                  label: item.name,
+                }))}
+                onValueChange={(value) => {
+                  const next = workflowChoices.find((item) => item.id === value)
+                  setWorkflowId(value ?? "")
+                  setWorkflowFields(
+                    next
+                      ? transcriptionWorkflowPrefill(next, workflowSource())
+                      : {}
+                  )
+                  setWorkflowRunId("")
+                  setWorkflowError("")
+                }}
+                value={workflowId}
+              >
+                <SelectTrigger aria-label="Workflow" className="w-full">
+                  <SelectValue placeholder="Choose a workflow" />
+                </SelectTrigger>
+                <SelectContent>
+                  {workflowChoices.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedWorkflow?.description ? (
+                <p className="text-xs text-muted-foreground">
+                  {selectedWorkflow.description}
+                </p>
+              ) : null}
+              {workflowInputFields.map((name) => (
+                <label className="block space-y-1.5" key={name}>
+                  <span className="text-xs font-medium">{name}</span>
+                  <Textarea
+                    onChange={(event) =>
+                      setWorkflowFields((current) => ({
+                        ...current,
+                        [name]: event.target.value,
+                      }))
+                    }
+                    rows={name.toLowerCase().includes("transcript") ? 6 : 3}
+                    value={workflowFields[name] ?? ""}
+                  />
+                </label>
+              ))}
+              {workflowInputFields.length === 0 ? (
+                <p className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
+                  This workflow has no named input fields. It receives the
+                  structured transcript context directly.
+                </p>
+              ) : null}
+              {workflowTranscriptTruncated ? (
+                <p className="text-xs text-amber-600 dark:text-amber-300">
+                  The transcript exceeds{" "}
+                  {TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT.toLocaleString()}{" "}
+                  characters. The run includes the opening excerpt and all
+                  generated insights.
+                </p>
+              ) : null}
+              {selectedWorkflow?.visibility === "workspace" ? (
+                <p className="text-xs text-muted-foreground">
+                  Workspace members can inspect this workflow run and its input.
+                </p>
+              ) : null}
+            </div>
+          )}
+          {workflowError ? (
+            <p className="text-sm text-destructive" role="alert">
+              {workflowError}
+            </p>
+          ) : null}
+          {workflowRunId ? (
+            <p className="text-sm" role="status">
+              Workflow started.{" "}
+              <Link
+                className="text-primary underline"
+                href={
+                  "/agents?tab=runs&run=" + encodeURIComponent(workflowRunId)
+                }
+              >
+                Open run
+              </Link>
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button
+              onClick={() => setWorkflowDialogOpen(false)}
+              variant="outline"
+            >
+              {workflowRunId ? "Done" : "Cancel"}
+            </Button>
+            {!workflowRunId && workflowChoices.length > 0 ? (
+              <Button
+                disabled={!workflowId || workflowLoading || workflowRunning}
+                onClick={() => void runInsightWorkflow()}
+              >
+                {workflowRunning ? (
+                  <LoaderCircle
+                    className="motion-safe:animate-spin"
+                    data-icon="inline-start"
+                  />
+                ) : (
+                  <GitBranch data-icon="inline-start" />
+                )}{" "}
+                Start workflow
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(annotationTarget)}
