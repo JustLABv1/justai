@@ -629,7 +629,7 @@ export function FocusWorkspaceSidebar({
       <div
         className={cn(
           isSecondaryHistoryRail
-            ? "relative flex h-full w-12 shrink-0 overflow-visible rounded-[1.5rem] bg-[var(--sidebar-secondary)] transition-[width] duration-200 md:overflow-hidden"
+            ? "relative flex h-full w-0 shrink-0 overflow-visible rounded-[1.5rem] bg-transparent transition-[width] duration-200 md:w-12 md:overflow-hidden md:bg-[var(--sidebar-secondary)]"
             : "contents",
           secondaryHistoryExpanded &&
             "md:w-64 md:shadow-xl"
@@ -673,7 +673,7 @@ export function FocusWorkspaceSidebar({
         }}
       >
         {isSecondaryHistoryRail && !secondaryHistoryExpanded && (
-          <div className="flex h-full w-12 flex-col items-center gap-1 py-3">
+          <div className="hidden h-full w-12 flex-col items-center gap-1 py-3 md:flex">
             <Tooltip>
               <TooltipTrigger
                 render={

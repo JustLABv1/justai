@@ -1211,7 +1211,7 @@ export function VideoTranscriptionView({
                   variant="outline"
                 >
                   <Upload data-icon="inline-start" />
-                  <span className="hidden sm:inline">New video</span>
+                  <span>New video</span>
                 </Button>
               </>
             }

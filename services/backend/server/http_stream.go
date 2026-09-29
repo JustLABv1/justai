@@ -30,9 +30,16 @@ const (
 	streamCloseMessage  = 8
 )
 
+var (
+	errAudioBatchOutOfOrder = errors.New("audio batch sequence is out of order")
+	errAudioUploadRate      = errors.New("audio upload rate exceeded")
+	errStreamInputQueue     = errors.New("stream input queue is full")
+)
+
 type streamMessage struct {
 	messageType int
 	payload     []byte
+	frames      [][]byte
 }
 
 type streamOutput struct {
@@ -67,6 +74,11 @@ type httpStreamConnection struct {
 	uploadHash     [32]byte
 	controlMu      sync.Mutex
 	controlSeq     int64
+	audioMu        sync.Mutex
+	audioBatchSeq  int64
+	queuedAudio    int
+	readMu         sync.Mutex
+	pendingAudio   [][]byte
 	rateMu         sync.Mutex
 	rateStarted    time.Time
 	rateBytes      int64
@@ -111,11 +123,65 @@ func newHTTPStreamConnection(userID, organizationID uuid.UUID) *httpStreamConnec
 }
 
 func (s *httpStreamConnection) ReadMessage() (int, []byte, error) {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	if len(s.pendingAudio) > 0 {
+		return s.nextAudioFrame()
+	}
 	select {
 	case message := <-s.in:
+		if len(message.frames) > 0 {
+			s.pendingAudio = message.frames
+			return s.nextAudioFrame()
+		}
 		return message.messageType, message.payload, nil
 	case <-s.done:
 		return 0, nil, io.EOF
+	}
+}
+
+func (s *httpStreamConnection) nextAudioFrame() (int, []byte, error) {
+	frame := s.pendingAudio[0]
+	s.pendingAudio[0] = nil
+	s.pendingAudio = s.pendingAudio[1:]
+	s.audioMu.Lock()
+	s.queuedAudio -= len(frame)
+	s.audioMu.Unlock()
+	return streamBinaryMessage, frame, nil
+}
+
+func (s *httpStreamConnection) enqueueAudioBatch(sequence int64, frames [][]byte, frameBytes, uploadBytes int) (bool, error) {
+	const maxQueuedAudioBytes = 8 * 1024 * 1024
+	s.audioMu.Lock()
+	defer s.audioMu.Unlock()
+	if sequence > 0 {
+		if sequence <= s.audioBatchSeq {
+			return true, nil
+		}
+		if sequence != s.audioBatchSeq+1 {
+			return false, errAudioBatchOutOfOrder
+		}
+	}
+	if s.queuedAudio+frameBytes > maxQueuedAudioBytes {
+		return false, errStreamInputQueue
+	}
+	if !s.allowBytes(int64(uploadBytes)) {
+		return false, errAudioUploadRate
+	}
+	select {
+	case <-s.done:
+		return false, io.ErrClosedPipe
+	default:
+	}
+	select {
+	case s.in <- streamMessage{messageType: streamBinaryMessage, frames: frames}:
+		if sequence > 0 {
+			s.audioBatchSeq = sequence
+		}
+		s.queuedAudio += frameBytes
+		return false, nil
+	default:
+		return false, errStreamInputQueue
 	}
 }
 
@@ -334,20 +400,25 @@ func (a *App) writeHTTPStreamAudio(c *gin.Context) {
 		writeError(c, http.StatusNotFound, err)
 		return
 	}
+	var sequence int64
+	if value := strings.TrimSpace(c.GetHeader("X-Audio-Batch-Sequence")); value != "" {
+		sequence, err = strconv.ParseInt(value, 10, 64)
+		if err != nil || sequence <= 0 {
+			writeError(c, http.StatusBadRequest, errors.New("X-Audio-Batch-Sequence must be positive"))
+			return
+		}
+	}
 	payload, err := io.ReadAll(io.LimitReader(c.Request.Body, 4*1024*1024))
 	if err != nil || len(payload) == 0 {
 		writeError(c, http.StatusBadRequest, errors.New("audio body is required"))
-		return
-	}
-	if !connection.allowBytes(int64(len(payload))) {
-		a.httpStreamMetrics.rejected.Add(1)
-		writeError(c, http.StatusTooManyRequests, errors.New("audio upload rate exceeded"))
 		return
 	}
 	uploadSize := len(payload)
 	// Binary uploads contain one or more uint32-length-prefixed frames. This
 	// keeps microphone traffic efficient without requiring a long-lived upload.
 	frameCount := 0
+	frames := make([][]byte, 0, 16)
+	frameBytes := 0
 	for len(payload) > 0 {
 		frameCount++
 		if frameCount > 512 {
@@ -364,11 +435,29 @@ func (a *App) writeHTTPStreamAudio(c *gin.Context) {
 			writeError(c, http.StatusBadRequest, errors.New("invalid audio frame length"))
 			return
 		}
-		if err := connection.enqueue(streamBinaryMessage, append([]byte(nil), payload[:length]...)); err != nil {
-			writeError(c, http.StatusGone, err)
-			return
-		}
+		frames = append(frames, append([]byte(nil), payload[:length]...))
+		frameBytes += length
 		payload = payload[length:]
+	}
+	deduplicated, err := connection.enqueueAudioBatch(sequence, frames, frameBytes, uploadSize)
+	if err != nil {
+		switch {
+		case errors.Is(err, io.ErrClosedPipe):
+			writeError(c, http.StatusGone, err)
+		case errors.Is(err, errAudioBatchOutOfOrder):
+			writeError(c, http.StatusConflict, err)
+		case errors.Is(err, errAudioUploadRate):
+			a.httpStreamMetrics.rejected.Add(1)
+			writeError(c, http.StatusTooManyRequests, err)
+		default:
+			writeError(c, http.StatusServiceUnavailable, err)
+		}
+		return
+	}
+	if deduplicated {
+		c.Status(http.StatusNoContent)
+		c.Writer.WriteHeaderNow()
+		return
 	}
 	a.httpStreamMetrics.uploadBytes.Add(int64(uploadSize))
 	a.httpStreamMetrics.audioFrames.Add(int64(frameCount))

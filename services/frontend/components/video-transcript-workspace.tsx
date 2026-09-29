@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+
 import {
   Bookmark,
   Check,
@@ -12,6 +14,7 @@ import {
   FileAudio,
   FileText,
   FileVideo,
+  GitBranch,
   GitMerge,
   LoaderCircle,
   MessageSquarePlus,
@@ -76,6 +79,14 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
+import { workflowInputNames } from "@/lib/agent-workflow-logic"
+import {
+  TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT,
+  transcriptionWorkflowInput,
+  transcriptionWorkflowPrefill,
+  transcriptionWorkflowTranscript,
+  type TranscriptionWorkflowSource,
+} from "@/lib/transcription-workflow"
 import {
   activeTranscriptionMessageId,
   activeTranscriptionSegmentId,
@@ -84,6 +95,8 @@ import {
 } from "@/lib/transcription"
 import { cn } from "@/lib/utils"
 import type {
+  AgentRun,
+  AgentWorkflow,
   TranscriptionAnnotation,
   TranscriptionInsights,
   TranscriptionRecording,
@@ -350,8 +363,8 @@ export function TranscriptWorkspace({
   const [speakerFilter, setSpeakerFilter] = useState("all")
   const [qualityOnly, setQualityOnly] = useState(false)
   const [matchIndex, setMatchIndex] = useState(0)
-  const [editDrafts, setEditDrafts] = useState<Record<string, string>>({})
   const [savingSegmentId, setSavingSegmentId] = useState<string | null>(null)
+  const [paragraphDrafts, setParagraphDrafts] = useState<Record<string, string>>({})
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<string[]>([])
   const [assignmentSpeakerId, setAssignmentSpeakerId] = useState("")
   const [annotationTarget, setAnnotationTarget] =
@@ -384,6 +397,18 @@ export function TranscriptWorkspace({
   const [exportFormat, setExportFormat] = useState("pdf")
   const [includeInsightsInExport, setIncludeInsightsInExport] = useState(true)
   const [actionItemsCopied, setActionItemsCopied] = useState(false)
+  const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false)
+  const [workflowChoices, setWorkflowChoices] = useState<AgentWorkflow[]>([])
+  const [workflowLoading, setWorkflowLoading] = useState(false)
+  const [workflowId, setWorkflowId] = useState("")
+  const [workflowFields, setWorkflowFields] = useState<Record<string, string>>(
+    {}
+  )
+  const [workflowRunning, setWorkflowRunning] = useState(false)
+  const [workflowRunId, setWorkflowRunId] = useState("")
+  const [workflowError, setWorkflowError] = useState("")
+  const [workflowTranscriptTruncated, setWorkflowTranscriptTruncated] =
+    useState(false)
   const [speakerSample, setSpeakerSample] = useState<{
     speakerId: string
     endOffsetMs: number
@@ -473,14 +498,14 @@ export function TranscriptWorkspace({
       snapshot.segments.map((segment) => {
         const verbatim = segment.text.trim() || segment.rawText?.trim() || ""
         const polished = segment.polishedText?.trim() || verbatim
-        const edited = segment.editedText?.trim() || ""
+        const edited = segment.editedText?.trim()
         return {
           ...segment,
           text:
             transcriptMode === "polished"
               ? polished
               : transcriptMode === "edited"
-                ? edited || polished
+                ? edited ?? polished
                 : verbatim,
         }
       }),
@@ -546,6 +571,15 @@ export function TranscriptWorkspace({
       ),
     [displaySegments, qualityOnly, speakerById, speakerFilter, transcriptQuery]
   )
+  const editParagraphs = useMemo(
+    () => groupTranscriptionSegments(snapshot.segments.map((segment) => ({
+      ...segment,
+      text: segment.editedText?.trim() ?? segment.polishedText?.trim() ?? segment.text.trim(),
+    })), 4000, 850, 45_000).filter((message) => message.segmentIds.some((id) =>
+      filteredSegments.some((segment) => segment.id === id)
+    )),
+    [snapshot.segments, filteredSegments]
+  )
   const activeMessageId = useMemo(
     () => activeTranscriptionMessageId(transcript, currentTimeMs),
     [currentTimeMs, transcript]
@@ -577,6 +611,12 @@ export function TranscriptWorkspace({
     actionItems: [],
     updatedAt: "",
   }
+  const selectedWorkflow = workflowChoices.find(
+    (item) => item.id === workflowId
+  )
+  const workflowInputFields = selectedWorkflow
+    ? workflowInputNames(selectedWorkflow.definition)
+    : []
   const validInsightChapters = useMemo(() => {
     const chapters = insights.chapters ?? []
     return chapters.filter(
@@ -745,32 +785,47 @@ export function TranscriptWorkspace({
     ]
   )
 
-  const saveSegmentEdit = async (segment: TranscriptionSegment) => {
-    const value = editDrafts[segment.id] ?? segment.editedText ?? segment.text
-    setSavingSegmentId(segment.id)
+  const saveParagraphEdit = async (message: (typeof editParagraphs)[number]) => {
+    const draft = paragraphDrafts[message.id]
+    if (draft === undefined || draft.trim() === message.text.trim()) return
+    const segments = message.segmentIds
+      .map((id) => snapshot.segments.find((segment) => segment.id === id))
+      .filter((segment): segment is TranscriptionSegment => Boolean(segment))
+    if (!segments.length) return
+    const words = draft.trim().split(/\s+/u).filter(Boolean)
+    const originalCounts = segments.map((segment) =>
+      (segment.editedText?.trim() || segment.polishedText?.trim() || segment.text.trim())
+        .split(/\s+/u).filter(Boolean).length
+    )
+    const total = originalCounts.reduce((sum, count) => sum + count, 0) || segments.length
+    let position = 0
+    const edits = segments.map((segment, index) => {
+      const end = index === segments.length - 1
+        ? words.length
+        : Math.max(position, Math.round(words.length * originalCounts.slice(0, index + 1).reduce((sum, count) => sum + count, 0) / total))
+      const editedText = words.slice(position, end).join(" ")
+      position = end
+      return { id: segment.id, editedText }
+    })
+    setSavingSegmentId(message.id)
     try {
-      const result = await api.patch<{ segment: TranscriptionSegment }>(
-        `/api/v1/transcription/sessions/${snapshot.session.id}/segments/${segment.id}`,
-        { editedText: value }
+      const result = await api.patch<{ segments: TranscriptionSegment[] }>(
+        `/api/v1/transcription/sessions/${snapshot.session.id}/segments/batch`,
+        { edits }
       )
+      const updated = new Map(result.segments.map((segment) => [segment.id, segment]))
       updateSnapshot((current) => ({
         ...current,
-        segments: current.segments.map((item) =>
-          item.id === segment.id ? result.segment : item
-        ),
+        segments: current.segments.map((item) => updated.get(item.id) ?? item),
       }))
-      setEditDrafts((current) => {
+      setParagraphDrafts((current) => {
         const next = { ...current }
-        delete next[segment.id]
+        delete next[message.id]
         return next
       })
       onError("")
     } catch (caught) {
-      onError(
-        caught instanceof Error
-          ? caught.message
-          : "The edit could not be saved."
-      )
+      onError(caught instanceof Error ? caught.message : "The paragraph could not be saved.")
     } finally {
       setSavingSegmentId(null)
     }
@@ -997,6 +1052,80 @@ export function TranscriptWorkspace({
     }
   }
 
+  const workflowSource = (): TranscriptionWorkflowSource => ({
+    session: snapshot.session,
+    segments: snapshot.segments,
+    speakers: snapshot.speakers,
+    insights,
+    url:
+      typeof window === "undefined"
+        ? ""
+        : `${window.location.origin}${window.location.pathname}`,
+  })
+
+  const openWorkflowDialog = async () => {
+    setWorkflowDialogOpen(true)
+    setWorkflowLoading(true)
+    setWorkflowChoices([])
+    setWorkflowError("")
+    setWorkflowRunId("")
+    setWorkflowTranscriptTruncated(
+      transcriptionWorkflowTranscript(workflowSource()).truncated
+    )
+    try {
+      const result = await api.get<{ workflows: AgentWorkflow[] }>(
+        "/api/v1/agent-workflows"
+      )
+      setWorkflowChoices(result.workflows)
+      const selected =
+        result.workflows.find((item) => item.id === workflowId) ??
+        result.workflows.find((item) =>
+          item.name.toLowerCase().includes("meeting")
+        ) ??
+        result.workflows[0]
+      setWorkflowId(selected?.id ?? "")
+      setWorkflowFields(
+        selected ? transcriptionWorkflowPrefill(selected, workflowSource()) : {}
+      )
+    } catch (caught) {
+      setWorkflowError(
+        caught instanceof Error
+          ? caught.message
+          : "Workflows could not be loaded."
+      )
+    } finally {
+      setWorkflowLoading(false)
+    }
+  }
+
+  const runInsightWorkflow = async () => {
+    if (!workflowId || workflowRunning) return
+    const input = transcriptionWorkflowInput(workflowSource(), workflowFields)
+    if (new TextEncoder().encode(JSON.stringify(input)).length > 512 * 1024) {
+      setWorkflowError(
+        "The workflow input is too large. Shorten the transcript field before starting."
+      )
+      return
+    }
+    setWorkflowRunning(true)
+    setWorkflowError("")
+    try {
+      const result = await api.post<{ run: AgentRun }>(
+        `/api/v1/agent-workflows/${workflowId}/runs`,
+        { input }
+      )
+      setWorkflowRunId(result.run.id)
+    } catch (caught) {
+      setWorkflowError(
+        caught instanceof Error
+          ? caught.message
+          : "The workflow could not be started."
+      )
+    } finally {
+      setWorkflowRunning(false)
+    }
+  }
+
   const startChat = async () => {
     if (chatStarting) return
     setChatStarting(true)
@@ -1014,55 +1143,22 @@ export function TranscriptWorkspace({
     }
   }
 
-  const exportInsights = (format: "md" | "json") => {
+  const exportInsights = async (format: "pdf" | "docx" | "md" | "txt" | "json") => {
     if (!insightsReady) return
-    const title = snapshot.session.title || "Transcript insights"
-    const safeName =
-      title
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9äöüß]+/gi, "-")
-        .replace(/^-+|-+$/g, "") || "transcript"
-    const markdown = [
-      `# ${title} — AI insights`,
-      insights.summary ? `## Summary\n\n${insights.summary}` : "",
-      insights.chapters?.length
-        ? `## Chapters\n\n${insights.chapters
-            .map(
-              (chapter) =>
-                `- **${formatVideoTimestamp(chapter.startOffsetMs)} · ${chapter.title}**${chapter.summary ? ` — ${chapter.summary}` : ""}`
-            )
-            .join("\n")}`
-        : "",
-      insights.topics?.length
-        ? `## Topics\n\n${insights.topics.map((topic) => `- ${topic}`).join("\n")}`
-        : "",
-      insights.actionItems?.length
-        ? `## Action items\n\n${insights.actionItems.map((item) => `- ${item}`).join("\n")}`
-        : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-    const blob = new Blob(
-      [
-        format === "json"
-          ? JSON.stringify({ title, insights }, null, 2)
-          : markdown,
-      ],
-      {
-        type:
-          format === "json"
-            ? "application/json;charset=utf-8"
-            : "text/markdown;charset=utf-8",
-      }
-    )
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = `${safeName}-insights.${format}`
-    link.click()
-    URL.revokeObjectURL(url)
-    onError("")
+    try {
+      const blob = await api.getBlob(
+        `/api/v1/transcription/sessions/${snapshot.session.id}/export/${format}?insightsOnly=true`
+      )
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `${snapshot.session.title || "transcript"}-insights.${format}`
+      link.click()
+      URL.revokeObjectURL(url)
+      onError("")
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : "Insights export failed.")
+    }
   }
 
   const exportTranscript = async () => {
@@ -1096,8 +1192,8 @@ export function TranscriptWorkspace({
   )
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+    <div className="min-w-0 space-y-3">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
         <Tabs
           aria-label="Transcript workspace sections"
           className="min-w-0 flex-1"
@@ -1113,7 +1209,7 @@ export function TranscriptWorkspace({
           }}
           value={workspaceView}
         >
-          <TabsList className="w-full justify-start overflow-x-auto">
+          <TabsList className="w-full max-w-full justify-start overflow-x-auto">
             <TabsTrigger value="review">
               Review
               {annotations.length > 0 ? (
@@ -1142,6 +1238,7 @@ export function TranscriptWorkspace({
           </TabsList>
         </Tabs>
         <Button
+          className="self-start sm:self-auto"
           disabled={chatStarting || !snapshot.segments.length}
           onClick={() => void startChat()}
           size="sm"
@@ -1517,118 +1614,42 @@ export function TranscriptWorkspace({
           </CardHeader>
           <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
             {editorOpen ? (
-              filteredSegments.length > 0 ? (
-                <div className="flex flex-col gap-2">
-                  {filteredSegments.map((segment) => {
-                    const issues = qualityIssues(segment)
-                    const baseText =
-                      segment.editedText?.trim() ||
-                      segment.text.trim() ||
-                      segment.rawText?.trim() ||
-                      ""
-                    const draft = editDrafts[segment.id] ?? baseText
-                    const selected = selectedSegmentIds.includes(segment.id)
+              editParagraphs.length > 0 ? (
+                <div className="flex flex-col gap-4">
+                  <p className="text-xs text-muted-foreground">Edit a paragraph at a time. Timestamps and speaker assignments stay with the original audio segments.</p>
+                  {editParagraphs.map((message) => {
+                    const segments = message.segmentIds
+                      .map((id) => snapshot.segments.find((segment) => segment.id === id))
+                      .filter((segment): segment is TranscriptionSegment => Boolean(segment))
+                    const draft = paragraphDrafts[message.id] ?? message.text
+                    const selectedCount = segments.filter((segment) => selectedSegmentIds.includes(segment.id)).length
                     return (
-                      <div
-                        className={cn(
-                          "rounded-xl border p-3",
-                          selected
-                            ? "border-primary/40 bg-primary/5"
-                            : "border-border"
-                        )}
-                        key={segment.id}
-                      >
+                      <div className="rounded-xl bg-muted/30 p-3 sm:p-4" key={message.id}>
                         <div className="flex flex-wrap items-center gap-2">
                           <input
-                            aria-label={`Select line at ${formatVideoTimestamp(segment.startOffsetMs)}`}
-                            checked={selected}
+                            aria-label={`Select paragraph at ${formatVideoTimestamp(message.startOffsetMs)}`}
+                            checked={segments.length > 0 && selectedCount === segments.length}
                             className="size-4 accent-primary"
-                            onChange={(event) =>
-                              setSelectedSegmentIds((current) =>
-                                event.target.checked
-                                  ? [...current, segment.id]
-                                  : current.filter((id) => id !== segment.id)
-                              )
-                            }
+                            onChange={(event) => setSelectedSegmentIds((current) => event.target.checked
+                              ? [...new Set([...current, ...message.segmentIds])]
+                              : current.filter((id) => !message.segmentIds.includes(id)))}
                             type="checkbox"
                           />
-                          <button
-                            className="font-mono text-[11px] text-muted-foreground hover:text-foreground"
-                            disabled={!canSeek}
-                            onClick={() => seekTo(segment.startOffsetMs)}
-                            type="button"
-                          >
-                            {formatVideoTimestamp(segment.startOffsetMs)}
+                          <button className="font-mono text-xs text-primary hover:underline" disabled={!canSeek}
+                            onClick={() => seekTo(message.startOffsetMs)} type="button">
+                            {formatVideoTimestamp(message.startOffsetMs)}
                           </button>
-                          {segment.speakerId ? (
-                            <Badge variant="outline">
-                              {speakerDisplayName(
-                                speakerById.get(segment.speakerId)
-                              )}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline">Unassigned</Badge>
-                          )}
-                          {issues.map((issue) => (
-                            <Badge
-                              className="text-[10px]"
-                              key={issue}
-                              variant="destructive"
-                            >
-                              {issue}
-                            </Badge>
-                          ))}
-                          <Button
-                            className="ml-auto"
-                            disabled={savingSegmentId === segment.id}
-                            onClick={() => void saveSegmentEdit(segment)}
-                            size="sm"
-                            variant="outline"
-                          >
-                            {savingSegmentId === segment.id ? (
-                              <LoaderCircle
-                                className="animate-spin"
-                                data-icon="inline-start"
-                              />
-                            ) : (
-                              <Check data-icon="inline-start" />
-                            )}{" "}
-                            Save
+                          <span className="text-xs text-muted-foreground">{speakerDisplayName(speakerById.get(message.speakerKey))} · {segments.length} segments</span>
+                          <Button className="ml-auto" disabled={savingSegmentId === message.id || draft.trim() === message.text.trim()}
+                            onClick={() => void saveParagraphEdit(message)} size="sm" variant="outline">
+                            {savingSegmentId === message.id ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <Check data-icon="inline-start" />}
+                            Save paragraph
                           </Button>
                         </div>
-                        <Textarea
-                          className="mt-2 min-h-20 resize-y text-sm leading-6"
-                          onChange={(event) =>
-                            setEditDrafts((current) => ({
-                              ...current,
-                              [segment.id]: event.target.value,
-                            }))
-                          }
-                          value={draft}
-                        />
-                        {(segment.text.trim() ||
-                          segment.polishedText?.trim()) && (
-                          <details className="mt-2 text-xs text-muted-foreground">
-                            <summary className="cursor-pointer select-none">
-                              Compare source and polish
-                            </summary>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              <p>
-                                <span className="font-medium text-foreground">
-                                  Verbatim:
-                                </span>{" "}
-                                {segment.text.trim() || segment.rawText?.trim()}
-                              </p>
-                              <p>
-                                <span className="font-medium text-foreground">
-                                  Polished:
-                                </span>{" "}
-                                {segment.polishedText?.trim() ||
-                                  "Not available"}
-                              </p>
-                            </div>
-                          </details>
-                        )}
+                        <Textarea aria-label={`Edit paragraph at ${formatVideoTimestamp(message.startOffsetMs)}`}
+                          className="mt-3 min-h-32 resize-y bg-background text-sm leading-6"
+                          onChange={(event) => setParagraphDrafts((current) => ({ ...current, [message.id]: event.target.value }))}
+                          value={draft} />
                       </div>
                     )
                   })}
@@ -1669,7 +1690,7 @@ export function TranscriptWorkspace({
                   return (
                     <div
                       className={cn(
-                        "group grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2.5 py-3 text-left transition-colors",
+                        "group grid w-full grid-cols-1 gap-1 rounded-lg px-2.5 py-3 text-left transition-colors sm:grid-cols-[4.5rem_minmax(0,1fr)] sm:gap-3",
                         active
                           ? "bg-primary/10 ring-1 ring-primary/30"
                           : "hover:bg-muted/50"
@@ -1921,11 +1942,20 @@ export function TranscriptWorkspace({
             )}
           >
             <CardHeader className="gap-1 px-4 py-4">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Sparkles className="size-4 text-primary" /> AI insights
                 </CardTitle>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {insightsReady ? (
+                    <Button
+                      onClick={() => void openWorkflowDialog()}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <GitBranch data-icon="inline-start" /> Use in workflow
+                    </Button>
+                  ) : null}
                   {insightsReady ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger
@@ -1934,11 +1964,20 @@ export function TranscriptWorkspace({
                         <Download data-icon="inline-start" /> Export insights
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => exportInsights("md")}>
+                        <DropdownMenuItem onClick={() => void exportInsights("pdf")}>
+                          <FileText data-icon="inline-start" /> PDF
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => void exportInsights("docx")}>
+                          <FileText data-icon="inline-start" /> Word (.docx)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => void exportInsights("md")}>
                           <FileText data-icon="inline-start" /> Markdown
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => void exportInsights("txt")}>
+                          <FileText data-icon="inline-start" /> Plain text
+                        </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => exportInsights("json")}
+                          onClick={() => void exportInsights("json")}
                         >
                           <Download data-icon="inline-start" /> JSON
                         </DropdownMenuItem>
@@ -2512,6 +2551,147 @@ export function TranscriptWorkspace({
           </Card>
         </div>
       </div>
+
+      <Dialog open={workflowDialogOpen} onOpenChange={setWorkflowDialogOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Use transcript insights in a workflow</DialogTitle>
+            <DialogDescription>
+              Choose a saved workflow and review its inputs. The run receives
+              this transcript, its summary, topics, chapters, and action items.
+            </DialogDescription>
+          </DialogHeader>
+          {workflowLoading ? (
+            <p className="text-sm text-muted-foreground">Loading workflows…</p>
+          ) : workflowChoices.length === 0 ? (
+            workflowError ? null : (
+              <p className="text-sm text-muted-foreground">
+                No saved workflows are available. Create one in{" "}
+                <Link
+                  className="text-primary underline"
+                  href="/agents?tab=workflows"
+                >
+                  Agent workflows
+                </Link>
+                .
+              </p>
+            )
+          ) : (
+            <div className="space-y-4">
+              <Select
+                items={workflowChoices.map((item) => ({
+                  value: item.id,
+                  label: item.name,
+                }))}
+                onValueChange={(value) => {
+                  const next = workflowChoices.find((item) => item.id === value)
+                  setWorkflowId(value ?? "")
+                  setWorkflowFields(
+                    next
+                      ? transcriptionWorkflowPrefill(next, workflowSource())
+                      : {}
+                  )
+                  setWorkflowRunId("")
+                  setWorkflowError("")
+                }}
+                value={workflowId}
+              >
+                <SelectTrigger aria-label="Workflow" className="w-full">
+                  <SelectValue placeholder="Choose a workflow" />
+                </SelectTrigger>
+                <SelectContent>
+                  {workflowChoices.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedWorkflow?.description ? (
+                <p className="text-xs text-muted-foreground">
+                  {selectedWorkflow.description}
+                </p>
+              ) : null}
+              {workflowInputFields.map((name) => (
+                <label className="block space-y-1.5" key={name}>
+                  <span className="text-xs font-medium">{name}</span>
+                  <Textarea
+                    onChange={(event) =>
+                      setWorkflowFields((current) => ({
+                        ...current,
+                        [name]: event.target.value,
+                      }))
+                    }
+                    rows={name.toLowerCase().includes("transcript") ? 6 : 3}
+                    value={workflowFields[name] ?? ""}
+                  />
+                </label>
+              ))}
+              {workflowInputFields.length === 0 ? (
+                <p className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
+                  This workflow has no named input fields. It receives the
+                  structured transcript context directly.
+                </p>
+              ) : null}
+              {workflowTranscriptTruncated ? (
+                <p className="text-xs text-amber-600 dark:text-amber-300">
+                  The transcript exceeds{" "}
+                  {TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT.toLocaleString()}{" "}
+                  characters. The run includes the opening excerpt and all
+                  generated insights.
+                </p>
+              ) : null}
+              {selectedWorkflow?.visibility === "workspace" ? (
+                <p className="text-xs text-muted-foreground">
+                  Workspace members can inspect this workflow run and its input.
+                </p>
+              ) : null}
+            </div>
+          )}
+          {workflowError ? (
+            <p className="text-sm text-destructive" role="alert">
+              {workflowError}
+            </p>
+          ) : null}
+          {workflowRunId ? (
+            <p className="text-sm" role="status">
+              Workflow started.{" "}
+              <Link
+                className="text-primary underline"
+                href={
+                  "/agents?tab=runs&run=" + encodeURIComponent(workflowRunId)
+                }
+              >
+                Open run
+              </Link>
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button
+              onClick={() => setWorkflowDialogOpen(false)}
+              variant="outline"
+            >
+              {workflowRunId ? "Done" : "Cancel"}
+            </Button>
+            {!workflowRunId && workflowChoices.length > 0 ? (
+              <Button
+                disabled={!workflowId || workflowLoading || workflowRunning}
+                onClick={() => void runInsightWorkflow()}
+              >
+                {workflowRunning ? (
+                  <LoaderCircle
+                    className="motion-safe:animate-spin"
+                    data-icon="inline-start"
+                  />
+                ) : (
+                  <GitBranch data-icon="inline-start" />
+                )}{" "}
+                Start workflow
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(annotationTarget)}

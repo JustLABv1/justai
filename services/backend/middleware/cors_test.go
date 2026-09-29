@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -37,5 +38,8 @@ func TestCORSAllowsOnlyConfiguredCredentialedOrigin(t *testing.T) {
 
 	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example" {
 		t.Fatalf("configured origin was not allowed: %q", got)
+	}
+	if headers := response.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(headers, "X-Audio-Batch-Sequence") {
+		t.Fatalf("audio batch sequence header was not allowed: %q", headers)
 	}
 }

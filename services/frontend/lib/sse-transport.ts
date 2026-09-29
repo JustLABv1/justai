@@ -1,4 +1,4 @@
-import { resolveAPIURL } from "@/lib/api"
+import { resolveAPIURL } from "./api.ts"
 
 type MessageHandler = ((event: MessageEvent<string>) => void) | null
 type EventHandler = ((event: Event) => void) | null
@@ -11,13 +11,14 @@ export type SSEConnectionState = {
 }
 
 export class SSETransportError extends Error {
-  constructor(
-    message: string,
-    readonly status = 0,
-    readonly code = "stream_transport_error"
-  ) {
+  readonly status: number
+  readonly code: string
+
+  constructor(message: string, status = 0, code = "stream_transport_error") {
     super(message)
     this.name = "SSETransportError"
+    this.status = status
+    this.code = code
   }
 }
 
@@ -48,6 +49,7 @@ export class SSETransport {
   private audioUpload: Promise<void> = Promise.resolve()
   private controlUpload: Promise<void> = Promise.resolve()
   private controlSequence = 0
+  private audioBatchSequence = 0
   private queuedAudioBytes = 0
   private droppedAudioFrames = 0
   private resumeToken = ""
@@ -228,6 +230,7 @@ export class SSETransport {
     const frames = this.audioFrames
     this.audioFrames = []
     if (frames.length === 0) return
+    const sequence = ++this.audioBatchSequence
     const frameBytes = frames.reduce(
       (total, frame) => total + frame.byteLength,
       0
@@ -246,14 +249,70 @@ export class SSETransport {
       offset += frame.byteLength
     }
     this.audioUpload = this.audioUpload
-      .then(() => this.post("audio", body, "application/octet-stream"))
-      .catch((caught) => this.reportError(this.toError(caught)))
+      .then(() => this.postAudioWithRetry(body, sequence))
+      .catch((caught) => {
+        if (this.readyState === CLOSED) return
+        this.setConnectionState({ state: "degraded", audioQuality: "dropping" })
+        this.reportError(this.toError(caught))
+        this.close()
+      })
       .finally(() => {
         this.queuedAudioBytes = Math.max(0, this.queuedAudioBytes - frameBytes)
         if (this.queuedAudioBytes === 0 && this.readyState === OPEN) {
           this.setConnectionState({ state: "live", audioQuality: "good" })
         }
       })
+  }
+
+  private async postAudioWithRetry(
+    body: Uint8Array<ArrayBuffer>,
+    sequence: number
+  ) {
+    let attempt = 0
+    while (this.readyState !== CLOSED) {
+      if (this.readyState !== OPEN) {
+        await this.waitForAudioRetry(250)
+        continue
+      }
+      try {
+        await this.post("audio", body, "application/octet-stream", sequence)
+        return
+      } catch (caught) {
+        if (this.audioAbort.signal.aborted) break
+        const error = this.toError(caught)
+        if (
+          error.status !== 0 &&
+          error.status !== 408 &&
+          error.status !== 429 &&
+          error.status < 500
+        ) {
+          throw error
+        }
+        this.setConnectionState({ state: "degraded", audioQuality: "delayed" })
+        attempt += 1
+        const delay = Math.min(5_000, 250 * 2 ** Math.min(attempt, 5))
+        await this.waitForAudioRetry(delay + Math.random() * 250)
+      }
+    }
+    throw new SSETransportError("The audio stream was closed before upload.")
+  }
+
+  private waitForAudioRetry(delayMs: number) {
+    return new Promise<void>((resolve, reject) => {
+      if (this.audioAbort.signal.aborted) {
+        reject(new SSETransportError("The audio stream was closed."))
+        return
+      }
+      const onAbort = () => {
+        clearTimeout(timer)
+        reject(new SSETransportError("The audio stream was closed."))
+      }
+      const timer = setTimeout(() => {
+        this.audioAbort.signal.removeEventListener("abort", onAbort)
+        resolve()
+      }, delayMs)
+      this.audioAbort.signal.addEventListener("abort", onAbort, { once: true })
+    })
   }
 
   private async postWithRetry(
@@ -282,23 +341,41 @@ export class SSETransport {
   private async post(
     kind: "events" | "audio",
     body: BodyInit,
-    contentType: string
+    contentType: string,
+    audioBatchSequence?: number
   ) {
-    const response = await fetch(
-      resolveAPIURL(`/api/v1/streams/${this.streamId}/${kind}`),
-      {
-        method: "POST",
-        credentials: "include",
-        cache: "no-store",
-        headers: {
-          "Content-Type": contentType,
-          "X-Stream-Token": this.uploadToken,
-        },
-        body,
-        keepalive: kind === "events",
-        signal: kind === "audio" ? this.audioAbort.signal : undefined,
-      }
-    )
+    const requestAbort = kind === "audio" ? new AbortController() : null
+    const onClose = () => requestAbort?.abort()
+    const timeout = requestAbort
+      ? setTimeout(() => requestAbort.abort(), 15_000)
+      : null
+    if (requestAbort) {
+      this.audioAbort.signal.addEventListener("abort", onClose, { once: true })
+    }
+    let response: Response
+    try {
+      response = await fetch(
+        resolveAPIURL(`/api/v1/streams/${this.streamId}/${kind}`),
+        {
+          method: "POST",
+          credentials: "include",
+          cache: "no-store",
+          headers: {
+            "Content-Type": contentType,
+            "X-Stream-Token": this.uploadToken,
+            ...(audioBatchSequence === undefined
+              ? {}
+              : { "X-Audio-Batch-Sequence": String(audioBatchSequence) }),
+          },
+          body,
+          keepalive: kind === "events",
+          signal: requestAbort?.signal,
+        }
+      )
+    } finally {
+      if (timeout) clearTimeout(timeout)
+      this.audioAbort.signal.removeEventListener("abort", onClose)
+    }
     if (!response.ok) {
       let message = `Stream upload failed (${response.status}).`
       try {

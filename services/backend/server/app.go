@@ -257,6 +257,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/bot-sources/:id/rotate", a.platformFeature("transcription"), a.rotateTranscriptionBotSourceToken)
 	org.POST("/transcription/bot-sources/:id/stop", a.platformFeature("transcription"), a.stopTranscriptionBotSource)
 	org.POST("/transcription/sessions/:id/segments/assign-speaker", a.platformFeature("transcription"), a.assignTranscriptionSegments)
+	org.PATCH("/transcription/sessions/:id/segments/batch", a.platformFeature("transcription"), a.updateTranscriptionSegmentsBatch)
 	org.PATCH("/transcription/sessions/:id/segments/:segmentId", a.platformFeature("transcription"), a.updateTranscriptionSegment)
 	org.GET("/transcription/sessions/:id/annotations", a.platformFeature("transcription"), a.listTranscriptionAnnotations)
 	org.POST("/transcription/sessions/:id/annotations", a.platformFeature("transcription"), a.createTranscriptionAnnotation)
