@@ -91,7 +91,9 @@ export function joinTranscriptText(left: string, right: string) {
 
 export function groupTranscriptionSegments(
   segments: TranscriptionSegment[],
-  maxGapMs = TRANSCRIPT_GROUP_GAP_MS
+  maxGapMs = TRANSCRIPT_GROUP_GAP_MS,
+  maxGroupChars = Number.POSITIVE_INFINITY,
+  maxGroupDurationMs = Number.POSITIVE_INFINITY
 ) {
   const groups: TranscriptionMessage[] = []
   const ordered = [...segments]
@@ -118,7 +120,9 @@ export function groupTranscriptionSegments(
       previous &&
       previous.speakerKey === speakerKey &&
       advancesTimeline &&
-      gap <= maxGapMs
+      gap <= maxGapMs &&
+      previous.text.length + segment.text.length + 1 <= maxGroupChars &&
+      segment.endOffsetMs - previous.startOffsetMs <= maxGroupDurationMs
     ) {
       previous.segmentIds.push(segment.id)
       previous.text = joinTranscriptText(previous.text, segment.text)

@@ -17,8 +17,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/gobold"
+	"golang.org/x/image/font/opentype"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 
 	"justai-backend/middleware"
 	"justai-backend/models"
@@ -28,6 +32,15 @@ import (
 type transcriptionSegmentUpdateRequest struct {
 	EditedText *string `json:"editedText"`
 	SpeakerID  *string `json:"speakerId"`
+}
+
+type transcriptionSegmentBatchEdit struct {
+	ID         string `json:"id"`
+	EditedText string `json:"editedText"`
+}
+
+type transcriptionSegmentBatchRequest struct {
+	Edits []transcriptionSegmentBatchEdit `json:"edits"`
 }
 
 type transcriptionSegmentAssignmentRequest struct {
@@ -100,6 +113,77 @@ var transcriptionInsightLanguageLabels = map[string]string{
 	"zh": "Chinese",
 }
 
+func (a *App) updateTranscriptionSegmentsBatch(c *gin.Context) {
+	principal, _ := middleware.GetPrincipal(c)
+	organizationID, _ := middleware.GetOrganizationID(c)
+	sessionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid session id"))
+		return
+	}
+	if err := a.authorizeTranscriptionSession(c, sessionID, principal.UserID, organizationID); err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	var request transcriptionSegmentBatchRequest
+	if !decodeJSON(c, &request) {
+		return
+	}
+	if len(request.Edits) == 0 || len(request.Edits) > 100 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("provide 1 to 100 segment edits"))
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(request.Edits))
+	texts := make([]string, 0, len(request.Edits))
+	seen := make(map[uuid.UUID]bool, len(request.Edits))
+	for _, edit := range request.Edits {
+		id, parseErr := uuid.Parse(edit.ID)
+		if parseErr != nil || seen[id] {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid or duplicate segment id"))
+			return
+		}
+		seen[id] = true
+		ids = append(ids, id)
+		texts = append(texts, strings.TrimSpace(edit.EditedText))
+	}
+	transaction, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer transaction.Rollback()
+	var count int
+	if err := transaction.QueryRowContext(c, `SELECT COUNT(*) FROM transcription_segments WHERE session_id = $1 AND id = ANY($2::uuid[])`, sessionID, pq.Array(ids)).Scan(&count); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if count != len(ids) {
+		writeError(c, http.StatusNotFound, fmt.Errorf("one or more transcription segments were not found"))
+		return
+	}
+	if _, err := transaction.ExecContext(c, `UPDATE transcription_segments AS segment SET edited_text = edits.edited_text, updated_at = now() FROM UNNEST($1::uuid[], $2::text[]) AS edits(id, edited_text) WHERE segment.session_id = $3 AND segment.id = edits.id`, pq.Array(ids), pq.Array(texts), sessionID); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if err := transaction.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	allSegments, err := loadTranscriptionSegments(c, a.DB, sessionID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	updated := make([]models.TranscriptionSegment, 0, len(ids))
+	for _, segment := range allSegments {
+		if seen[segment.ID] {
+			updated = append(updated, segment)
+			a.Live.broadcast(sessionID, "transcription.segment.updated", ginData{"segment": segment})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"segments": updated})
+}
+
 func (a *App) updateTranscriptionSegment(c *gin.Context) {
 	principal, _ := middleware.GetPrincipal(c)
 	organizationID, _ := middleware.GetOrganizationID(c)
@@ -143,11 +227,7 @@ func (a *App) updateTranscriptionSegment(c *gin.Context) {
 	}
 	if request.EditedText != nil {
 		editedText := strings.TrimSpace(*request.EditedText)
-		var value any
-		if editedText != "" {
-			value = editedText
-		}
-		if _, err := transaction.ExecContext(c, `UPDATE transcription_segments SET edited_text = $3, updated_at = now() WHERE id = $1 AND session_id = $2`, segmentID, sessionID, value); err != nil {
+		if _, err := transaction.ExecContext(c, `UPDATE transcription_segments SET edited_text = $3, updated_at = now() WHERE id = $1 AND session_id = $2`, segmentID, sessionID, editedText); err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
 		}
@@ -836,6 +916,15 @@ func (a *App) exportTranscription(c *gin.Context) {
 	format := strings.ToLower(strings.TrimSpace(c.Param("format")))
 	rows := transcriptionExportRows(segments, speakers)
 	includeInsights := transcriptionExportIncludesInsights(c, format)
+	insightsOnly := strings.EqualFold(c.Query("insightsOnly"), "true")
+	if insightsOnly {
+		if format != "json" && !transcriptionExportFormatSupportsInsights(format) {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported insights export format %q", format))
+			return
+		}
+		rows = nil
+		includeInsights = true
+	}
 	var exportInsights *models.TranscriptionInsights
 	if format == "json" || includeInsights {
 		loadedInsights, insightErr := loadTranscriptionInsights(c, a.DB, sessionID)
@@ -845,17 +934,28 @@ func (a *App) exportTranscription(c *gin.Context) {
 		}
 		exportInsights = &loadedInsights
 	}
+	if insightsOnly && (exportInsights == nil || exportInsights.Status != "completed") {
+		writeError(c, http.StatusConflict, fmt.Errorf("generate insights before exporting them"))
+		return
+	}
+	language := session.Language
+	if exportInsights != nil && exportInsights.Language != "auto" {
+		language = exportInsights.Language
+	}
+	if exportInsights != nil && exportInsights.Language == "auto" && language != "auto" {
+		exportInsights.Language = language
+	}
 	baseName := safeTranscriptExportName(session.Title)
 	var data []byte
 	contentType := "text/plain; charset=utf-8"
 	extension := "txt"
 	switch format {
 	case "txt", "text":
-		data = []byte(transcriptionPlainText(rows, exportInsights))
+		data = []byte(transcriptionPlainTextLocalized(rows, exportInsights, language))
 	case "md", "markdown":
 		extension = "md"
 		contentType = "text/markdown; charset=utf-8"
-		data = []byte(transcriptionMarkdown(session.Title, rows, exportInsights))
+		data = []byte(transcriptionMarkdownLocalized(session.Title, rows, exportInsights, language))
 	case "srt":
 		extension = "srt"
 		contentType = "application/x-subrip; charset=utf-8"
@@ -872,7 +972,11 @@ func (a *App) exportTranscription(c *gin.Context) {
 			writeError(c, http.StatusInternalServerError, annotationErr)
 			return
 		}
-		data, err = json.MarshalIndent(gin.H{"session": session, "speakers": speakers, "segments": segments, "annotations": annotations, "insights": *exportInsights}, "", "  ")
+		if insightsOnly {
+			data, err = json.MarshalIndent(gin.H{"title": session.Title, "insights": *exportInsights}, "", "  ")
+		} else {
+			data, err = json.MarshalIndent(gin.H{"session": session, "speakers": speakers, "segments": segments, "annotations": annotations, "insights": *exportInsights}, "", "  ")
+		}
 		if err != nil {
 			writeError(c, http.StatusInternalServerError, err)
 			return
@@ -880,11 +984,11 @@ func (a *App) exportTranscription(c *gin.Context) {
 	case "docx":
 		extension = "docx"
 		contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-		data = buildTranscriptDOCX(session.Title, rows, exportInsights)
+		data = buildTranscriptDOCXLocalized(session.Title, rows, exportInsights, language)
 	case "pdf":
 		extension = "pdf"
 		contentType = "application/pdf"
-		data = buildTranscriptPDF(session.Title, rows, exportInsights)
+		data = buildTranscriptPDFLocalized(session.Title, rows, exportInsights, language)
 	default:
 		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported export format %q", format))
 		return
@@ -973,7 +1077,7 @@ func transcriptionExportRows(segments []models.TranscriptionSegment, speakers []
 	rows := make([]transcriptionExportRow, 0, len(segments))
 	for _, segment := range segments {
 		text := strings.TrimSpace(segment.Text)
-		if segment.EditedText != nil && strings.TrimSpace(*segment.EditedText) != "" {
+		if segment.EditedText != nil {
 			text = strings.TrimSpace(*segment.EditedText)
 		} else if segment.PolishedText != nil && strings.TrimSpace(*segment.PolishedText) != "" {
 			text = strings.TrimSpace(*segment.PolishedText)
@@ -990,7 +1094,43 @@ func transcriptionExportRows(segments []models.TranscriptionSegment, speakers []
 	return rows
 }
 
+func transcriptionExportLabel(language, key string) string {
+	labels := map[string]map[string]string{
+		"en": {"transcript": "Transcript", "exported": "Exported from JustAI", "insights": "AI insights", "language": "Language", "summary": "Summary", "chapters": "Chapters", "topics": "Topics", "actions": "Action items", "page": "Page"},
+		"de": {"transcript": "Transkript", "exported": "Exportiert aus JustAI", "insights": "KI-Erkenntnisse", "language": "Sprache", "summary": "Zusammenfassung", "chapters": "Kapitel", "topics": "Themen", "actions": "Aufgaben", "page": "Seite"},
+		"fr": {"transcript": "Transcription", "exported": "Exporté depuis JustAI", "insights": "Analyses IA", "language": "Langue", "summary": "Résumé", "chapters": "Chapitres", "topics": "Sujets", "actions": "Actions", "page": "Page"},
+		"es": {"transcript": "Transcripción", "exported": "Exportado desde JustAI", "insights": "Análisis de IA", "language": "Idioma", "summary": "Resumen", "chapters": "Capítulos", "topics": "Temas", "actions": "Acciones", "page": "Página"},
+		"it": {"transcript": "Trascrizione", "exported": "Esportato da JustAI", "insights": "Analisi IA", "language": "Lingua", "summary": "Riepilogo", "chapters": "Capitoli", "topics": "Argomenti", "actions": "Azioni", "page": "Pagina"},
+		"pt": {"transcript": "Transcrição", "exported": "Exportado do JustAI", "insights": "Análises de IA", "language": "Idioma", "summary": "Resumo", "chapters": "Capítulos", "topics": "Tópicos", "actions": "Ações", "page": "Página"},
+		"nl": {"transcript": "Transcript", "exported": "Geëxporteerd uit JustAI", "insights": "AI-inzichten", "language": "Taal", "summary": "Samenvatting", "chapters": "Hoofdstukken", "topics": "Onderwerpen", "actions": "Actiepunten", "page": "Pagina"},
+		"pl": {"transcript": "Transkrypcja", "exported": "Wyeksportowano z JustAI", "insights": "Wnioski AI", "language": "Język", "summary": "Podsumowanie", "chapters": "Rozdziały", "topics": "Tematy", "actions": "Zadania", "page": "Strona"},
+		"tr": {"transcript": "Döküm", "exported": "JustAI üzerinden dışa aktarıldı", "insights": "YZ analizleri", "language": "Dil", "summary": "Özet", "chapters": "Bölümler", "topics": "Konular", "actions": "Eylemler", "page": "Sayfa"},
+	}
+	code := strings.ToLower(strings.SplitN(language, "-", 2)[0])
+	if translated, ok := labels[code]; ok {
+		return translated[key]
+	}
+	return labels["en"][key]
+}
+
+func transcriptionExportLanguageName(language string) string {
+	names := map[string]string{
+		"ar": "العربية", "de": "Deutsch", "en": "English", "es": "Español",
+		"fr": "Français", "it": "Italiano", "ja": "日本語", "ko": "한국어",
+		"nl": "Nederlands", "pl": "Polski", "pt": "Português", "tr": "Türkçe",
+		"uk": "Українська", "zh": "中文",
+	}
+	if name, ok := names[strings.ToLower(strings.SplitN(language, "-", 2)[0])]; ok {
+		return name
+	}
+	return transcriptionInsightLanguageLabel(language)
+}
+
 func transcriptionPlainText(rows []transcriptionExportRow, insights *models.TranscriptionInsights) string {
+	return transcriptionPlainTextLocalized(rows, insights, "en")
+}
+
+func transcriptionPlainTextLocalized(rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string) string {
 	var output strings.Builder
 	for _, row := range rows {
 		fmt.Fprintf(&output, "[%s]", formatTranscriptTimestamp(row.StartOffsetMs))
@@ -999,16 +1139,20 @@ func transcriptionPlainText(rows []transcriptionExportRow, insights *models.Tran
 		}
 		fmt.Fprintf(&output, " %s\n", row.Text)
 	}
-	appendTranscriptionPlainTextInsights(&output, insights)
+	appendTranscriptionPlainTextInsightsLocalized(&output, insights, language)
 	return output.String()
 }
 
 func appendTranscriptionPlainTextInsights(output *strings.Builder, insights *models.TranscriptionInsights) {
+	appendTranscriptionPlainTextInsightsLocalized(output, insights, "en")
+}
+
+func appendTranscriptionPlainTextInsightsLocalized(output *strings.Builder, insights *models.TranscriptionInsights, language string) {
 	if insights == nil {
 		return
 	}
-	output.WriteString("\nAI INSIGHTS\n")
-	fmt.Fprintf(output, "Language: %s\n", transcriptionInsightLanguageLabel(insights.Language))
+	fmt.Fprintf(output, "\n%s\n", strings.ToUpper(transcriptionExportLabel(language, "insights")))
+	fmt.Fprintf(output, "%s: %s\n", transcriptionExportLabel(language, "language"), transcriptionExportLanguageName(insights.Language))
 	if insights.Status != "completed" {
 		fmt.Fprintf(output, "Status: %s\n", insights.Status)
 		if strings.TrimSpace(insights.Error) != "" {
@@ -1017,10 +1161,10 @@ func appendTranscriptionPlainTextInsights(output *strings.Builder, insights *mod
 		return
 	}
 	if strings.TrimSpace(insights.Summary) != "" {
-		fmt.Fprintf(output, "\nSummary\n%s\n", strings.TrimSpace(insights.Summary))
+		fmt.Fprintf(output, "\n%s\n%s\n", transcriptionExportLabel(language, "summary"), strings.TrimSpace(insights.Summary))
 	}
 	if len(insights.Chapters) > 0 {
-		output.WriteString("\nChapters\n")
+		fmt.Fprintf(output, "\n%s\n", transcriptionExportLabel(language, "chapters"))
 		for _, chapter := range insights.Chapters {
 			fmt.Fprintf(output, "[%s] %s", formatTranscriptTimestamp(chapter.StartOffsetMs), strings.TrimSpace(chapter.Title))
 			if strings.TrimSpace(chapter.Summary) != "" {
@@ -1030,13 +1174,13 @@ func appendTranscriptionPlainTextInsights(output *strings.Builder, insights *mod
 		}
 	}
 	if len(insights.Topics) > 0 {
-		output.WriteString("\nTopics\n")
+		fmt.Fprintf(output, "\n%s\n", transcriptionExportLabel(language, "topics"))
 		for _, topic := range insights.Topics {
 			fmt.Fprintf(output, "- %s\n", strings.TrimSpace(topic))
 		}
 	}
 	if len(insights.ActionItems) > 0 {
-		output.WriteString("\nAction items\n")
+		fmt.Fprintf(output, "\n%s\n", transcriptionExportLabel(language, "actions"))
 		for _, item := range insights.ActionItems {
 			fmt.Fprintf(output, "- %s\n", strings.TrimSpace(item))
 		}
@@ -1044,6 +1188,10 @@ func appendTranscriptionPlainTextInsights(output *strings.Builder, insights *mod
 }
 
 func transcriptionMarkdown(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights) string {
+	return transcriptionMarkdownLocalized(title, rows, insights, "en")
+}
+
+func transcriptionMarkdownLocalized(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string) string {
 	var output strings.Builder
 	fmt.Fprintf(&output, "# %s\n\n", title)
 	for _, row := range rows {
@@ -1053,16 +1201,20 @@ func transcriptionMarkdown(title string, rows []transcriptionExportRow, insights
 		}
 		fmt.Fprintf(&output, " — %s\n", strings.ReplaceAll(row.Text, "\n", " "))
 	}
-	appendTranscriptionMarkdownInsights(&output, insights)
+	appendTranscriptionMarkdownInsightsLocalized(&output, insights, language)
 	return output.String()
 }
 
 func appendTranscriptionMarkdownInsights(output *strings.Builder, insights *models.TranscriptionInsights) {
+	appendTranscriptionMarkdownInsightsLocalized(output, insights, "en")
+}
+
+func appendTranscriptionMarkdownInsightsLocalized(output *strings.Builder, insights *models.TranscriptionInsights, language string) {
 	if insights == nil {
 		return
 	}
-	output.WriteString("\n## AI insights\n\n")
-	fmt.Fprintf(output, "**Language:** %s\n\n", transcriptionInsightLanguageLabel(insights.Language))
+	fmt.Fprintf(output, "\n## %s\n\n", transcriptionExportLabel(language, "insights"))
+	fmt.Fprintf(output, "**%s:** %s\n\n", transcriptionExportLabel(language, "language"), transcriptionExportLanguageName(insights.Language))
 	if insights.Status != "completed" {
 		fmt.Fprintf(output, "_Status: %s_\n", insights.Status)
 		if strings.TrimSpace(insights.Error) != "" {
@@ -1071,10 +1223,10 @@ func appendTranscriptionMarkdownInsights(output *strings.Builder, insights *mode
 		return
 	}
 	if strings.TrimSpace(insights.Summary) != "" {
-		fmt.Fprintf(output, "### Summary\n\n%s\n\n", strings.TrimSpace(insights.Summary))
+		fmt.Fprintf(output, "### %s\n\n%s\n\n", transcriptionExportLabel(language, "summary"), strings.TrimSpace(insights.Summary))
 	}
 	if len(insights.Chapters) > 0 {
-		output.WriteString("### Chapters\n\n")
+		fmt.Fprintf(output, "### %s\n\n", transcriptionExportLabel(language, "chapters"))
 		for _, chapter := range insights.Chapters {
 			fmt.Fprintf(output, "- **%s** · **%s**", formatTranscriptTimestamp(chapter.StartOffsetMs), strings.TrimSpace(chapter.Title))
 			if strings.TrimSpace(chapter.Summary) != "" {
@@ -1085,14 +1237,14 @@ func appendTranscriptionMarkdownInsights(output *strings.Builder, insights *mode
 		output.WriteByte('\n')
 	}
 	if len(insights.Topics) > 0 {
-		output.WriteString("### Topics\n\n")
+		fmt.Fprintf(output, "### %s\n\n", transcriptionExportLabel(language, "topics"))
 		for _, topic := range insights.Topics {
 			fmt.Fprintf(output, "- %s\n", strings.TrimSpace(topic))
 		}
 		output.WriteByte('\n')
 	}
 	if len(insights.ActionItems) > 0 {
-		output.WriteString("### Action items\n\n")
+		fmt.Fprintf(output, "### %s\n\n", transcriptionExportLabel(language, "actions"))
 		for _, item := range insights.ActionItems {
 			fmt.Fprintf(output, "- %s\n", strings.TrimSpace(item))
 		}
@@ -1165,21 +1317,29 @@ func safeTranscriptExportName(value string) string {
 }
 
 func buildTranscriptDOCX(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights) []byte {
+	return buildTranscriptDOCXLocalized(title, rows, insights, "en")
+}
+
+func buildTranscriptDOCXLocalized(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string) []byte {
 	var document strings.Builder
+	documentKind := transcriptionExportLabel(language, "transcript")
+	if len(rows) == 0 && insights != nil {
+		documentKind = transcriptionExportLabel(language, "insights")
+	}
 	document.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>`)
-	document.WriteString(`<w:p><w:pPr><w:shd w:fill="F7EFE8"/><w:spacing w:after="180"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/><w:sz w:val="26"/></w:rPr><w:t>JustAI</w:t></w:r><w:r><w:rPr><w:color w:val="6B4F42"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">  Transcript</w:t></w:r></w:p>`)
-	document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="292321"/><w:sz w:val="30"/></w:rPr><w:t>` + html.EscapeString(title) + `</w:t></w:r></w:p>`)
-	document.WriteString(`<w:p><w:r><w:rPr><w:color w:val="807873"/><w:sz w:val="17"/></w:rPr><w:t>Transcript exported from JustAI</w:t></w:r></w:p>`)
+	document.WriteString(`<w:p><w:pPr><w:shd w:fill="F2F6FF"/><w:spacing w:after="180"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="2161E3"/><w:sz w:val="26"/></w:rPr><w:t>JustAI</w:t></w:r><w:r><w:rPr><w:color w:val="2161E3"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">  ` + html.EscapeString(documentKind) + `</w:t></w:r></w:p>`)
+	document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="1C2433"/><w:sz w:val="30"/></w:rPr><w:t>` + html.EscapeString(title) + `</w:t></w:r></w:p>`)
+	document.WriteString(`<w:p><w:r><w:rPr><w:color w:val="6E788A"/><w:sz w:val="17"/></w:rPr><w:t>` + html.EscapeString(transcriptionExportLabel(language, "exported")) + `</w:t></w:r></w:p>`)
 	for _, row := range rows {
 		text := " " + row.Text
 		if row.Speaker != "" {
 			text = " " + row.Speaker + ":" + text
 		}
-		document.WriteString(`<w:p><w:pPr><w:spacing w:after="100"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>[` + html.EscapeString(formatTranscriptTimestamp(row.StartOffsetMs)) + `]</w:t></w:r><w:r><w:t xml:space="preserve">` + html.EscapeString(text) + `</w:t></w:r></w:p>`)
+		document.WriteString(`<w:p><w:pPr><w:spacing w:after="100"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="2161E3"/></w:rPr><w:t>[` + html.EscapeString(formatTranscriptTimestamp(row.StartOffsetMs)) + `]</w:t></w:r><w:r><w:t xml:space="preserve">` + html.EscapeString(text) + `</w:t></w:r></w:p>`)
 	}
 	if insights != nil {
-		document.WriteString(`<w:p><w:pPr><w:shd w:fill="F7EFE8"/><w:spacing w:before="240" w:after="120"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/><w:sz w:val="22"/></w:rPr><w:t>AI insights</w:t></w:r></w:p>`)
-		document.WriteString(`<w:p><w:r><w:rPr><w:color w:val="807873"/><w:sz w:val="17"/></w:rPr><w:t xml:space="preserve">Language: ` + html.EscapeString(transcriptionInsightLanguageLabel(insights.Language)) + `</w:t></w:r></w:p>`)
+		document.WriteString(`<w:p><w:pPr><w:shd w:fill="F2F6FF"/><w:spacing w:before="240" w:after="120"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="2161E3"/><w:sz w:val="22"/></w:rPr><w:t>` + html.EscapeString(transcriptionExportLabel(language, "insights")) + `</w:t></w:r></w:p>`)
+		document.WriteString(`<w:p><w:r><w:rPr><w:color w:val="6E788A"/><w:sz w:val="17"/></w:rPr><w:t xml:space="preserve">` + html.EscapeString(transcriptionExportLabel(language, "language")) + `: ` + html.EscapeString(transcriptionExportLanguageName(insights.Language)) + `</w:t></w:r></w:p>`)
 		if insights.Status != "completed" {
 			document.WriteString(`<w:p><w:r><w:t xml:space="preserve">Status: ` + html.EscapeString(insights.Status) + `</w:t></w:r></w:p>`)
 			if strings.TrimSpace(insights.Error) != "" {
@@ -1187,11 +1347,11 @@ func buildTranscriptDOCX(title string, rows []transcriptionExportRow, insights *
 			}
 		} else {
 			if strings.TrimSpace(insights.Summary) != "" {
-				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>Summary</w:t></w:r></w:p>`)
+				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="2161E3"/></w:rPr><w:t>` + html.EscapeString(transcriptionExportLabel(language, "summary")) + `</w:t></w:r></w:p>`)
 				document.WriteString(`<w:p><w:r><w:t xml:space="preserve">` + html.EscapeString(strings.TrimSpace(insights.Summary)) + `</w:t></w:r></w:p>`)
 			}
 			if len(insights.Chapters) > 0 {
-				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>Chapters</w:t></w:r></w:p>`)
+				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="2161E3"/></w:rPr><w:t>` + html.EscapeString(transcriptionExportLabel(language, "chapters")) + `</w:t></w:r></w:p>`)
 				for _, chapter := range insights.Chapters {
 					text := fmt.Sprintf("[%s] %s", formatTranscriptTimestamp(chapter.StartOffsetMs), strings.TrimSpace(chapter.Title))
 					if strings.TrimSpace(chapter.Summary) != "" {
@@ -1201,13 +1361,13 @@ func buildTranscriptDOCX(title string, rows []transcriptionExportRow, insights *
 				}
 			}
 			if len(insights.Topics) > 0 {
-				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>Topics</w:t></w:r></w:p>`)
+				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="2161E3"/></w:rPr><w:t>` + html.EscapeString(transcriptionExportLabel(language, "topics")) + `</w:t></w:r></w:p>`)
 				for _, topic := range insights.Topics {
 					document.WriteString(`<w:p><w:r><w:t xml:space="preserve">- ` + html.EscapeString(strings.TrimSpace(topic)) + `</w:t></w:r></w:p>`)
 				}
 			}
 			if len(insights.ActionItems) > 0 {
-				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="6B4F42"/></w:rPr><w:t>Action items</w:t></w:r></w:p>`)
+				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="2161E3"/></w:rPr><w:t>` + html.EscapeString(transcriptionExportLabel(language, "actions")) + `</w:t></w:r></w:p>`)
 				for _, item := range insights.ActionItems {
 					document.WriteString(`<w:p><w:r><w:t xml:space="preserve">- ` + html.EscapeString(strings.TrimSpace(item)) + `</w:t></w:r></w:p>`)
 				}
@@ -1252,41 +1412,89 @@ type transcriptPDFTextLine struct {
 }
 
 type transcriptPDFPage struct {
-	Lines []transcriptPDFTextLine
+	Lines        []transcriptPDFTextLine
+	SectionRuleY float64
 }
 
 const (
-	transcriptPDFPageWidth         = 612.0
-	transcriptPDFPageHeight        = 792.0
-	transcriptPDFLeftMargin        = 54.0
-	transcriptPDFRightMargin       = 558.0
-	transcriptPDFTextX             = 118.0
-	transcriptPDFFirstPageBodyTopY = 630.0
-	transcriptPDFBodyTopY          = 688.0
-	transcriptPDFBodyBottomY       = 54.0
-	transcriptPDFBodyFontSize      = 10.5
-	transcriptPDFBodyLineHeight    = 15.0
-	transcriptPDFParagraphGap      = 9.0
-	transcriptPDFBodyLineCharMax   = 84
-	transcriptPDFBlockCharMax      = 720
-	transcriptPDFBrandColor        = "0.39 0.29 0.24"
-	transcriptPDFBrandDark         = "0.16 0.14 0.13"
-	transcriptPDFBrandMuted        = "0.42 0.40 0.39"
-	transcriptPDFBrandSoft         = "0.97 0.94 0.90"
-	transcriptPDFBrandLine         = "0.84 0.78 0.72"
+	transcriptPDFPageWidth       = 612.0
+	transcriptPDFPageHeight      = 792.0
+	transcriptPDFLeftMargin      = 54.0
+	transcriptPDFRightMargin     = 558.0
+	transcriptPDFTextX           = 118.0
+	transcriptPDFBodyTopY        = 714.0
+	transcriptPDFBodyBottomY     = 54.0
+	transcriptPDFBodyFontSize    = 10.5
+	transcriptPDFBodyLineHeight  = 15.0
+	transcriptPDFParagraphGap    = 9.0
+	transcriptPDFBodyLineCharMax = 76
+	transcriptPDFBlockCharMax    = 720
+	transcriptPDFBrandColor      = "0.13 0.38 0.89"
+	transcriptPDFBrandDark       = "0.11 0.14 0.20"
+	transcriptPDFBrandMuted      = "0.43 0.47 0.54"
+	transcriptPDFBrandLine       = "0.85 0.89 0.94"
 )
 
-func transcriptPDFBodyTopYForPage(pageNumber int) float64 {
-	if pageNumber == 0 {
-		return transcriptPDFFirstPageBodyTopY
+func transcriptPDFTitleLines(title string) []string {
+	title = norm.NFC.String(strings.TrimSpace(title))
+	if title == "" {
+		return []string{"Transcript"}
 	}
-	return transcriptPDFBodyTopY
+	fontFile, err := opentype.Parse(gobold.TTF)
+	if err != nil {
+		return wrapTranscriptPDFLine(title, 38)
+	}
+	face, err := opentype.NewFace(fontFile, &opentype.FaceOptions{Size: 17, DPI: 72, Hinting: font.HintingNone})
+	if err != nil {
+		return wrapTranscriptPDFLine(title, 38)
+	}
+	defer face.Close()
+	measure := func(value string) float64 { return float64(font.MeasureString(face, value).Ceil()) * 1.08 }
+	const maxWidth = 470.0
+	var lines []string
+	current := ""
+	for _, word := range strings.Fields(title) {
+		candidate := word
+		if current != "" {
+			candidate = current + " " + word
+		}
+		if measure(candidate) <= maxWidth {
+			current = candidate
+			continue
+		}
+		if current != "" {
+			lines = append(lines, current)
+			current = ""
+		}
+		for _, char := range word {
+			candidate = current + string(char)
+			if current != "" && measure(candidate) > maxWidth {
+				lines = append(lines, current)
+				current = ""
+			}
+			current += string(char)
+		}
+		current += " "
+		current = strings.TrimSpace(current)
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
+}
+
+func transcriptPDFFirstPageBodyTopY(title string) float64 {
+	return 700 - float64(len(transcriptPDFTitleLines(title)))*23 - 49
 }
 
 func buildTranscriptPDF(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights) []byte {
+	return buildTranscriptPDFLocalized(title, rows, insights, "en")
+}
+
+func buildTranscriptPDFLocalized(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string) []byte {
 	blocks := transcriptionPDFBlocks(rows)
 	pages := []transcriptPDFPage{{Lines: make([]transcriptPDFTextLine, 0)}}
-	currentY := transcriptPDFBodyTopYForPage(0)
+	currentY := transcriptPDFFirstPageBodyTopY(title)
 
 	for _, block := range blocks {
 		wrapped := wrapTranscriptPDFLine(block.Text, transcriptPDFBodyLineCharMax)
@@ -1295,9 +1503,9 @@ func buildTranscriptPDF(title string, rows []transcriptionExportRow, insights *m
 			lineCount++
 		}
 		requiredHeight := float64(lineCount)*transcriptPDFBodyLineHeight + transcriptPDFParagraphGap
-		if currentY-requiredHeight < transcriptPDFBodyBottomY && len(pages[len(pages)-1].Lines) > 0 {
+		if currentY-requiredHeight < transcriptPDFBodyBottomY {
 			pages = append(pages, transcriptPDFPage{Lines: make([]transcriptPDFTextLine, 0)})
-			currentY = transcriptPDFBodyTopYForPage(len(pages) - 1)
+			currentY = transcriptPDFBodyTopY
 		}
 
 		page := &pages[len(pages)-1]
@@ -1322,21 +1530,31 @@ func buildTranscriptPDF(title string, rows []transcriptionExportRow, insights *m
 		}
 		currentY -= transcriptPDFParagraphGap
 	}
-	appendTranscriptPDFInsights(&pages, &currentY, insights)
+	if insights != nil && len(blocks) > 0 {
+		pages = append(pages, transcriptPDFPage{Lines: make([]transcriptPDFTextLine, 0)})
+		currentY = transcriptPDFBodyTopY
+	}
+	appendTranscriptPDFInsightsLocalized(&pages, &currentY, insights, language)
 
-	if len(blocks) == 0 {
-		pages[0].Lines = append(pages[0].Lines, transcriptPDFTextLine{Text: "No transcript text available.", X: transcriptPDFTextX, Y: transcriptPDFFirstPageBodyTopY, Font: "F1", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandMuted})
+	if len(blocks) == 0 && insights == nil {
+		pages[0].Lines = append(pages[0].Lines, transcriptPDFTextLine{Text: "No transcript text available.", X: transcriptPDFTextX, Y: currentY, Font: "F1", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandMuted})
 	}
 
-	return renderTranscriptPDF(title, pages)
+	return renderTranscriptPDFLocalized(title, pages, language, len(rows) == 0 && insights != nil)
 }
 
 func appendTranscriptPDFInsights(pages *[]transcriptPDFPage, currentY *float64, insights *models.TranscriptionInsights) {
+	appendTranscriptPDFInsightsLocalized(pages, currentY, insights, "en")
+}
+
+func appendTranscriptPDFInsightsLocalized(pages *[]transcriptPDFPage, currentY *float64, insights *models.TranscriptionInsights, language string) {
 	if insights == nil {
 		return
 	}
-	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "AI insights", X: transcriptPDFLeftMargin, Font: "F2", Size: 15, Color: transcriptPDFBrandColor}, 21)
-	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Language: " + transcriptionInsightLanguageLabel(insights.Language), X: transcriptPDFLeftMargin, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted}, 16)
+	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "insights"), X: transcriptPDFLeftMargin, Font: "F2", Size: 17, Color: transcriptPDFBrandDark}, 29)
+	appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "language") + ": " + transcriptionExportLanguageName(insights.Language), X: transcriptPDFLeftMargin, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted}, 16)
+	(*pages)[len(*pages)-1].SectionRuleY = *currentY + 6
+	*currentY -= 23
 	if insights.Status != "completed" {
 		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Status: " + insights.Status, X: transcriptPDFLeftMargin, Font: "F1", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandDark}, transcriptPDFBodyLineHeight)
 		if strings.TrimSpace(insights.Error) != "" {
@@ -1345,12 +1563,12 @@ func appendTranscriptPDFInsights(pages *[]transcriptPDFPage, currentY *float64, 
 		return
 	}
 	if strings.TrimSpace(insights.Summary) != "" {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Summary", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "summary"), X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
 		appendTranscriptPDFWrappedFlow(pages, currentY, strings.TrimSpace(insights.Summary), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		*currentY -= 5
 	}
 	if len(insights.Chapters) > 0 {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Chapters", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "chapters"), X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
 		for _, chapter := range insights.Chapters {
 			text := fmt.Sprintf("[%s] %s", formatTranscriptTimestamp(chapter.StartOffsetMs), strings.TrimSpace(chapter.Title))
 			if strings.TrimSpace(chapter.Summary) != "" {
@@ -1361,12 +1579,12 @@ func appendTranscriptPDFInsights(pages *[]transcriptPDFPage, currentY *float64, 
 		*currentY -= 5
 	}
 	if len(insights.Topics) > 0 {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Topics", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "topics"), X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
 		appendTranscriptPDFWrappedFlow(pages, currentY, strings.Join(insights.Topics, ", "), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		*currentY -= 5
 	}
 	if len(insights.ActionItems) > 0 {
-		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: "Action items", X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
+		appendTranscriptPDFFlowLine(pages, currentY, transcriptPDFTextLine{Text: transcriptionExportLabel(language, "actions"), X: transcriptPDFLeftMargin, Font: "F2", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandColor}, 17)
 		for _, item := range insights.ActionItems {
 			appendTranscriptPDFWrappedFlow(pages, currentY, "- "+strings.TrimSpace(item), transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		}
@@ -1380,9 +1598,9 @@ func appendTranscriptPDFWrappedFlow(pages *[]transcriptPDFPage, currentY *float6
 }
 
 func appendTranscriptPDFFlowLine(pages *[]transcriptPDFPage, currentY *float64, line transcriptPDFTextLine, lineHeight float64) {
-	if *currentY-lineHeight < transcriptPDFBodyBottomY && len((*pages)[len(*pages)-1].Lines) > 0 {
+	if *currentY-lineHeight < transcriptPDFBodyBottomY {
 		*pages = append(*pages, transcriptPDFPage{Lines: make([]transcriptPDFTextLine, 0)})
-		*currentY = transcriptPDFBodyTopYForPage(len(*pages) - 1)
+		*currentY = transcriptPDFBodyTopY
 	}
 	line.Y = *currentY
 	page := &(*pages)[len(*pages)-1]
@@ -1436,6 +1654,14 @@ func wrapTranscriptPDFLine(value string, width int) []string {
 }
 
 func renderTranscriptPDF(title string, pages []transcriptPDFPage) []byte {
+	return renderTranscriptPDFLocalized(title, pages, "en", false)
+}
+
+func renderTranscriptPDFLocalized(title string, pages []transcriptPDFPage, language string, insightsOnly bool) []byte {
+	documentKind := transcriptionExportLabel(language, "transcript")
+	if insightsOnly {
+		documentKind = transcriptionExportLabel(language, "insights")
+	}
 	objects := []string{
 		"<< /Type /Catalog /Pages 2 0 R >>",
 		"",
@@ -1445,29 +1671,25 @@ func renderTranscriptPDF(title string, pages []transcriptPDFPage) []byte {
 	pageRefs := make([]int, 0, len(pages))
 	for pageNumber, page := range pages {
 		var content strings.Builder
-		appendTranscriptPDFRectangle(&content, 0, 710, transcriptPDFPageWidth, 82, transcriptPDFBrandSoft)
-		appendTranscriptPDFRectangle(&content, 0, 710, transcriptPDFPageWidth, 3, transcriptPDFBrandColor)
 		if pageNumber == 0 {
-			appendTranscriptPDFBrandMark(&content, transcriptPDFLeftMargin, 738, 22)
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "JustAI", X: 84, Y: 758, Font: "F2", Size: 14, Color: transcriptPDFBrandColor})
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "Transcript workspace", X: 84, Y: 743, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted})
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: title, X: transcriptPDFLeftMargin, Y: 689, Font: "F2", Size: 22, Color: transcriptPDFBrandDark})
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "Transcript exported from JustAI", X: transcriptPDFLeftMargin, Y: 670, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted})
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "TRANSCRIPT", X: transcriptPDFLeftMargin, Y: 649, Font: "F2", Size: 8, Color: transcriptPDFBrandColor})
-			content.WriteString(transcriptPDFBrandColor + " RG\n0.8 w\n54 640 m 558 640 l S\n")
-		} else {
-			appendTranscriptPDFBrandMark(&content, transcriptPDFLeftMargin, 741, 15)
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "JustAI", X: 76, Y: 752, Font: "F2", Size: 10.5, Color: transcriptPDFBrandColor})
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: title, X: 146, Y: 752, Font: "F1", Size: 9, Color: transcriptPDFBrandDark})
-			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "Transcript", X: transcriptPDFRightMargin - 54, Y: 752, Font: "F1", Size: 8.5, Color: transcriptPDFBrandMuted})
-			content.WriteString("0.84 0.78 0.72 RG\n0.6 w\n54 728 m 558 728 l S\n")
+			appendTranscriptPDFBrandMark(&content, transcriptPDFLeftMargin, 736, 18)
+			appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "JustAI", X: 80, Y: 750, Font: "F2", Size: 10, Color: transcriptPDFBrandDark})
+			for index, line := range transcriptPDFTitleLines(title) {
+				appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: line, X: transcriptPDFLeftMargin, Y: 700 - float64(index)*23, Font: "F2", Size: 17, Color: transcriptPDFBrandDark})
+			}
+			if !insightsOnly {
+				sectionY := transcriptPDFFirstPageBodyTopY(title) + 28
+				appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: strings.ToUpper(documentKind), X: transcriptPDFLeftMargin, Y: sectionY, Font: "F2", Size: 8.5, Color: transcriptPDFBrandColor})
+				fmt.Fprintf(&content, "%s RG\n0.6 w\n54 %.2f m 558 %.2f l S\n", transcriptPDFBrandLine, sectionY-12, sectionY-12)
+			}
+		}
+		if page.SectionRuleY > 0 {
+			fmt.Fprintf(&content, "%s RG\n0.7 w\n54 %.2f m 558 %.2f l S\n", transcriptPDFBrandLine, page.SectionRuleY, page.SectionRuleY)
 		}
 		for _, line := range page.Lines {
 			appendTranscriptPDFText(&content, line)
 		}
-		content.WriteString(transcriptPDFBrandLine + " RG\n0.5 w\n54 43 m 558 43 l S\n")
-		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: "JustAI - Transcript", X: transcriptPDFLeftMargin, Y: 28, Font: "F1", Size: 8, Color: transcriptPDFBrandMuted})
-		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: fmt.Sprintf("Page %d of %d", pageNumber+1, len(pages)), X: 486, Y: 28, Font: "F1", Size: 8, Color: transcriptPDFBrandMuted})
+		appendTranscriptPDFText(&content, transcriptPDFTextLine{Text: fmt.Sprintf("%s %d / %d", transcriptionExportLabel(language, "page"), pageNumber+1, len(pages)), X: 495, Y: 30, Font: "F1", Size: 8, Color: transcriptPDFBrandMuted})
 
 		contentObject := fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", len(content.String()), content.String())
 		objects = append(objects, contentObject)
@@ -1522,7 +1744,7 @@ func appendTranscriptPDFText(content *strings.Builder, line transcriptPDFTextLin
 }
 
 func pdfTextLiteral(value string) string {
-	encoded, _, err := transform.String(charmap.Windows1252.NewEncoder(), value)
+	encoded, _, err := transform.String(charmap.Windows1252.NewEncoder(), norm.NFC.String(value))
 	if err != nil {
 		encoded = value
 	}

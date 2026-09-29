@@ -23,12 +23,25 @@ func TestTranscriptWorkspaceExportArtifacts(t *testing.T) {
 		EndOffsetMs:   4250,
 	}}
 
-	pdf := buildTranscriptPDF("Sitzung 03", rows, nil)
+	title := "89. Sitzung vom 09.07.2026. Regierungserkla\u0308rung zur aktuellen politischen Lage"
+	pdf := buildTranscriptPDFLocalized(title, rows, &models.TranscriptionInsights{
+		Language: "de", Status: "completed", Summary: "Die Regierung erklärt ihre Ziele.",
+		Topics: []string{"Politische Lage"},
+	}, "de")
 	if !bytes.HasPrefix(pdf, []byte("%PDF-1.4")) {
 		t.Fatalf("PDF does not start with a PDF header")
 	}
-	if !bytes.Contains(pdf, []byte("JustAI")) || !bytes.Contains(pdf, []byte(transcriptPDFBrandSoft)) {
+	if !bytes.Contains(pdf, []byte("JustAI")) || bytes.Count(pdf, []byte("JustAI")) != 1 {
 		t.Fatalf("PDF is missing JustAI branding: %s", pdf)
+	}
+	if bytes.Count(pdf, []byte("/Type /Page /Parent")) != 2 {
+		t.Fatal("insights should start on a separate PDF page")
+	}
+	if !strings.Contains(pdfTextLiteral(title), "\xe4") || strings.Contains(pdfTextLiteral(title), "\xcc\x88") {
+		t.Fatal("decomposed umlauts should be normalized before PDF encoding")
+	}
+	if !strings.Contains(transcriptionMarkdownLocalized(title, rows, &models.TranscriptionInsights{Language: "de", Status: "completed", Summary: "Zusammenfassung des Inhalts"}, "de"), "## KI-Erkenntnisse") {
+		t.Fatal("German insights headings are missing")
 	}
 	if path := os.Getenv("JUSTAI_TRANSCRIPT_PDF_VERIFY_PATH"); path != "" {
 		if err := os.WriteFile(path, pdf, 0o600); err != nil {
@@ -57,7 +70,7 @@ func TestTranscriptWorkspaceExportArtifacts(t *testing.T) {
 		if !strings.Contains(buffer.String(), "Anna Müller") {
 			t.Fatalf("DOCX document does not contain the transcript speaker")
 		}
-		if !strings.Contains(buffer.String(), "JustAI") || !strings.Contains(buffer.String(), "w:color w:val=\"6B4F42\"") {
+		if !strings.Contains(buffer.String(), "JustAI") || !strings.Contains(buffer.String(), "w:color w:val=\"2161E3\"") {
 			t.Fatalf("DOCX document is missing JustAI branding: %s", buffer.String())
 		}
 	}
@@ -86,6 +99,23 @@ func TestTranscriptPDFGroupsAdjacentSegments(t *testing.T) {
 	}
 }
 
+func TestGermanInsightsOnlyExports(t *testing.T) {
+	insights := &models.TranscriptionInsights{
+		Language: "de", Status: "completed", Summary: "Die Sitzung behandelt Europa.",
+		Topics: []string{"Europa"}, ActionItems: []string{"Bericht erstellen"},
+	}
+	markdown := transcriptionMarkdownLocalized("Sitzung", nil, insights, "de")
+	for _, heading := range []string{"## KI-Erkenntnisse", "### Zusammenfassung", "### Themen", "### Aufgaben"} {
+		if !strings.Contains(markdown, heading) {
+			t.Fatalf("missing localized heading %q", heading)
+		}
+	}
+	pdf := buildTranscriptPDFLocalized("Sitzung", nil, insights, "de")
+	if bytes.Contains(pdf, []byte("No transcript text available")) || !bytes.Contains(pdf, []byte("Die Sitzung behandelt Europa")) {
+		t.Fatal("insights-only PDF should contain the insights without a missing-transcript notice")
+	}
+}
+
 func TestTranscriptPDFPagination(t *testing.T) {
 	rows := make([]transcriptionExportRow, 0, 120)
 	for index := 0; index < 120; index++ {
@@ -96,10 +126,12 @@ func TestTranscriptPDFPagination(t *testing.T) {
 		})
 	}
 
-	pdf := buildTranscriptPDF("Sitzung 02", rows, nil)
+	pdf := buildTranscriptPDFLocalized("Sitzung 02", rows, &models.TranscriptionInsights{
+		Language: "de", Status: "completed", Summary: "Zusammenfassung einer längeren Sitzung.",
+	}, "de")
 	pageCount := bytes.Count(pdf, []byte("/Type /Page /Parent"))
-	if pageCount < 2 {
-		t.Fatalf("expected a long transcript to paginate, got %d page(s)", pageCount)
+	if pageCount < 3 {
+		t.Fatalf("expected a long transcript and a separate insights page, got %d page(s)", pageCount)
 	}
 	if path := os.Getenv("JUSTAI_TRANSCRIPT_PDF_PAGINATION_VERIFY_PATH"); path != "" {
 		if err := os.WriteFile(path, pdf, 0o600); err != nil {
