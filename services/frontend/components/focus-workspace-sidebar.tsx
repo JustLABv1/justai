@@ -631,15 +631,15 @@ export function FocusWorkspaceSidebar({
                 aria-current={activeView === "settings" ? "page" : undefined}
                 aria-label="Workspace settings"
                 className={cn(
-                  "relative h-9 w-14 gap-1 rounded-xl px-0 text-[10px] text-muted-foreground",
+                  "size-9 rounded-xl text-muted-foreground",
                   activeView === "settings" &&
                     "bg-accent text-accent-foreground"
                 )}
                 onClick={() => onNavigate("settings")}
+                size="icon"
                 variant="ghost"
               >
-                <Settings2 className="size-4 shrink-0" />
-                <span>Settings</span>
+                <Settings2 />
               </Button>
             }
           />
@@ -1209,6 +1209,7 @@ function SessionRow({
   const statusDescription = hasProcessingWarning
     ? "Grammar polish failed"
     : session.status
+  const failed = session.status === "failed"
 
   return (
     <div className="group relative">
@@ -1225,13 +1226,15 @@ function SessionRow({
         <span
           className={cn(
             "size-1.5 shrink-0 rounded-full",
-            hasProcessingWarning
-              ? active
-                ? "bg-amber-300"
-                : "bg-amber-500"
-              : session.status === "live" || active
-                ? "bg-primary"
-                : "bg-border"
+            failed
+              ? "bg-destructive"
+              : hasProcessingWarning
+                ? active
+                  ? "bg-amber-300"
+                  : "bg-amber-500"
+                : session.status === "live" || active
+                  ? "bg-primary"
+                  : "bg-border"
           )}
         />
         <span className="min-w-0 flex-1">
@@ -1244,7 +1247,9 @@ function SessionRow({
               active ? "text-accent-foreground/75" : "text-muted-foreground"
             )}
           >
-            <span className="min-w-0 truncate">{statusDescription}</span>
+            <span className={cn("min-w-0 truncate", failed && "text-destructive")}>
+              {statusDescription}
+            </span>
             <span aria-hidden="true" className="shrink-0">
               ·
             </span>

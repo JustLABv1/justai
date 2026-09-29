@@ -58,6 +58,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -65,13 +66,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
+  DropdownMenuGroup,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
   Select,
   SelectContent,
   SelectItem,
+  SelectGroup,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -358,6 +360,8 @@ export function TranscriptWorkspace({
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("review")
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState("")
   const [editorOpen, setEditorOpen] = useState(false)
   const [transcriptQuery, setTranscriptQuery] = useState("")
   const [speakerFilter, setSpeakerFilter] = useState("all")
@@ -1162,6 +1166,9 @@ export function TranscriptWorkspace({
   }
 
   const exportTranscript = async () => {
+    if (exporting) return
+    setExporting(true)
+    setExportError("")
     try {
       const includeInsights =
         exportSupportsInsights && includeInsightsInExport && insightsReady
@@ -1173,92 +1180,176 @@ export function TranscriptWorkspace({
       link.download = `${snapshot.session.title || "transcript"}.${exportFormat === "markdown" ? "md" : exportFormat}`
       link.click()
       URL.revokeObjectURL(url)
+      setExportOpen(false)
       onError("")
     } catch (caught) {
-      onError(
+      setExportError(
         caught instanceof Error
           ? caught.message
           : "The transcript export failed."
       )
+    } finally {
+      setExporting(false)
     }
   }
 
   const workspaceGridClass = cn(
     "grid gap-4",
-    workspaceView === "review" ? "xl:items-stretch" : "xl:items-start",
+    workspaceView === "review" ? "lg:items-stretch" : "lg:items-start",
     workspaceView === "details"
-      ? "xl:grid-cols-1"
-      : "xl:grid-cols-[minmax(0,1.3fr)_minmax(19rem,0.7fr)]"
+      ? "lg:grid-cols-1"
+      : "lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1.6fr)_minmax(19rem,0.7fr)]"
   )
 
   return (
     <div className="min-w-0 space-y-3">
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <Tabs
           aria-label="Transcript workspace sections"
-          className="min-w-0 flex-1"
           onValueChange={(value) => {
-            if (
-              value === "review" ||
-              value === "insights" ||
-              value === "speakers" ||
-              value === "details"
-            ) {
+            if (value === "review" || value === "insights" || value === "speakers")
               setWorkspaceView(value)
-            }
           }}
-          value={workspaceView}
+          value={workspaceView !== "details" ? workspaceView : null}
         >
-          <TabsList className="w-full max-w-full justify-start overflow-x-auto">
-            <TabsTrigger value="review">
-              Review
-              {annotations.length > 0 ? (
-                <span className="text-[10px] text-muted-foreground">
-                  {annotations.length}
-                </span>
-              ) : null}
-            </TabsTrigger>
-            <TabsTrigger value="insights">
-              Insights
-              {insightsReady ? (
-                <Badge className="h-4 px-1.5 text-[9px]" variant="secondary">
-                  Ready
-                </Badge>
-              ) : null}
-            </TabsTrigger>
-            <TabsTrigger value="speakers">
-              Speakers
-              {snapshot.speakers.length > 0 ? (
-                <span className="text-[10px] text-muted-foreground">
-                  {snapshot.speakers.length}
-                </span>
-              ) : null}
-            </TabsTrigger>
-            <TabsTrigger value="details">Details</TabsTrigger>
+          <TabsList>
+            <TabsTrigger value="review">Transcript</TabsTrigger>
+            <TabsTrigger value="insights">Summary</TabsTrigger>
+            <TabsTrigger value="speakers">Speakers</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button
-          className="self-start sm:self-auto"
-          disabled={chatStarting || !snapshot.segments.length}
-          onClick={() => void startChat()}
-          size="sm"
-        >
-          {chatStarting ? (
-            <LoaderCircle
-              className="motion-safe:animate-spin motion-reduce:animate-none"
-              data-icon="inline-start"
-            />
-          ) : (
-            <MessageSquarePlus data-icon="inline-start" />
-          )}
-          {chatStarting ? "Starting chat…" : "Chat with transcript"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            disabled={chatStarting || !snapshot.segments.length}
+            onClick={() => void startChat()}
+            size="sm"
+            variant="ghost"
+          >
+            {chatStarting ? (
+              <LoaderCircle className="animate-spin" data-icon="inline-start" />
+            ) : (
+              <MessageSquarePlus data-icon="inline-start" />
+            )}
+            {chatStarting ? "Starting chat…" : "Chat"}
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
+              <MoreHorizontal data-icon="inline-start" /> More
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => setWorkspaceView("details")}>
+                  <Clock3 data-icon="inline-start" /> Transcript details
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            disabled={!snapshot.segments.length}
+            onClick={() => {
+              setExportError("")
+              setExportOpen(true)
+            }}
+            size="sm"
+          >
+            <Download data-icon="inline-start" /> Export
+          </Button>
+        </div>
       </div>
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Export transcript</DialogTitle>
+            <DialogDescription>
+              Choose a file format for your transcript.
+            </DialogDescription>
+          </DialogHeader>
+          <FieldGroup>
+            <Field>
+              <FieldLabel>File format</FieldLabel>
+              <Select
+                items={[
+                  { value: "pdf", label: "PDF" },
+                  { value: "docx", label: "Word (.docx)" },
+                  { value: "md", label: "Markdown" },
+                  { value: "txt", label: "Plain text" },
+                  { value: "srt", label: "Subtitles (.srt)" },
+                  { value: "vtt", label: "WebVTT (.vtt)" },
+                  { value: "json", label: "JSON" },
+                ]}
+                value={exportFormat}
+                onValueChange={(value) => setExportFormat(value ?? "pdf")}
+              >
+                <SelectTrigger aria-label="Export format" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="pdf">PDF</SelectItem>
+                    <SelectItem value="docx">Word (.docx)</SelectItem>
+                    <SelectItem value="md">Markdown</SelectItem>
+                    <SelectItem value="txt">Plain text</SelectItem>
+                    <SelectItem value="srt">Subtitles (.srt)</SelectItem>
+                    <SelectItem value="vtt">WebVTT (.vtt)</SelectItem>
+                    <SelectItem value="json">JSON</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+            {exportSupportsInsights ? (
+              <Field orientation="horizontal">
+                <Switch
+                  id="export-insights"
+                  checked={includeInsightsInExport}
+                  disabled={!insightsReady}
+                  onCheckedChange={setIncludeInsightsInExport}
+                />
+                <FieldLabel htmlFor="export-insights">
+                  Include AI summary
+                </FieldLabel>
+              </Field>
+            ) : exportFormat === "json" ? (
+              <p className="text-sm text-muted-foreground">
+                Includes AI insights when available.
+              </p>
+            ) : null}
+            {exportSupportsInsights && !insightsReady ? (
+              <p className="text-sm text-muted-foreground">
+                Generate a summary first to include it in your export.
+              </p>
+            ) : null}
+          </FieldGroup>
+          {exportError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {exportError}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setExportOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={exporting}
+              onClick={() => void exportTranscript()}
+            >
+              {exporting ? (
+                <LoaderCircle
+                  className="animate-spin"
+                  data-icon="inline-start"
+                />
+              ) : (
+                <Download data-icon="inline-start" />
+              )}
+              {exporting ? "Preparing…" : "Download"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className={workspaceGridClass}>
         <Card
           className={cn(
-            "flex max-h-[min(calc(100dvh-22rem),56rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none xl:h-full",
+            "flex max-h-[min(calc(100dvh-22rem),56rem)] min-h-[28rem] min-w-0 flex-col overflow-hidden shadow-none lg:h-full",
             workspaceView !== "review" && "hidden"
           )}
         >
@@ -1290,122 +1381,92 @@ export function TranscriptWorkspace({
                 ) : null}
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <Tabs
-                  aria-label="Transcript display mode"
+                <Select
+                  items={[
+                    { value: "verbatim", label: "Original" },
+                    { value: "polished", label: "Polished" },
+                    { value: "edited", label: "Edited" },
+                  ]}
+                  value={transcriptMode}
+                  disabled={editorOpen}
                   onValueChange={(value) => {
                     if (
                       value === "verbatim" ||
                       value === "polished" ||
                       value === "edited"
-                    ) {
+                    )
                       setTranscriptMode(value)
-                    }
                   }}
-                  value={transcriptMode}
                 >
-                  <TabsList>
-                    <TabsTrigger value="verbatim">Verbatim</TabsTrigger>
-                    <TabsTrigger disabled={!polishedAvailable} value="polished">
-                      Polished
-                    </TabsTrigger>
-                    <TabsTrigger disabled={!editedAvailable} value="edited">
-                      Edited
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
-                {editorOpen ? (
-                  <Button
-                    onClick={() => setEditorOpen(false)}
-                    size="sm"
-                    variant="default"
-                  >
+                  <SelectTrigger aria-label="Transcript version" size="sm">
+                    <span className="text-muted-foreground">Version:</span>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="verbatim">Original</SelectItem>
+                      <SelectItem
+                        value="polished"
+                        disabled={!polishedAvailable}
+                      >
+                        Polished
+                      </SelectItem>
+                      <SelectItem value="edited" disabled={!editedAvailable}>
+                        Edited
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <Button
+                  disabled={!snapshot.segments.length}
+                  onClick={() => {
+                    setEditorOpen((current) => !current)
+                    setTranscriptMode(editorOpen && !editedAvailable ? "verbatim" : "edited")
+                  }}
+                  size="sm"
+                  variant={editorOpen ? "default" : "outline"}
+                >
+                  {editorOpen ? (
+                    <Check data-icon="inline-start" />
+                  ) : (
                     <Pencil data-icon="inline-start" />
-                    Done editing
-                  </Button>
-                ) : null}
-                {canPolishTranscript ? (
-                  <Button
-                    disabled={polishProcessing}
-                    onClick={() => void polishTranscript()}
-                    size="sm"
-                    variant={polishedAvailable ? "outline" : "default"}
-                  >
-                    {polishProcessing ? (
-                      <LoaderCircle
-                        className="motion-safe:animate-spin motion-reduce:animate-none"
-                        data-icon="inline-start"
-                      />
-                    ) : (
-                      <Sparkles data-icon="inline-start" />
-                    )}
-                    {polishProcessing
-                      ? "Polishing…"
-                      : polishedAvailable
-                        ? "Re-polish"
-                        : "Polish transcript"}
-                  </Button>
-                ) : null}
+                  )}
+                  {editorOpen ? "Done editing" : "Edit"}
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
                       <Button
                         aria-label="Transcript tools"
                         size="icon-sm"
-                        title="Transcript tools"
-                        variant="outline"
+                        variant="ghost"
                       />
                     }
                   >
                     <MoreHorizontal aria-hidden="true" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setWorkspaceView("review")
-                        setEditorOpen((current) => !current)
-                        setTranscriptMode("edited")
-                      }}
-                    >
-                      <Pencil data-icon="inline-start" />
-                      {editorOpen ? "Close editor" : "Edit transcript"}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setWorkspaceView("review")
-                        setFiltersOpen((current) => !current)
-                      }}
-                    >
-                      <CircleAlert data-icon="inline-start" />
-                      {filtersOpen ? "Hide filters" : "Show filters"}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setWorkspaceView("review")
-                        setExportOpen((current) => !current)
-                      }}
-                    >
-                      <Download data-icon="inline-start" />
-                      {exportOpen ? "Hide export" : "Export transcript"}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onClick={() => setWorkspaceView("insights")}
-                    >
-                      <Sparkles data-icon="inline-start" />
-                      Open AI insights
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => setWorkspaceView("speakers")}
-                    >
-                      <Users data-icon="inline-start" />
-                      Open speaker tools
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => setWorkspaceView("details")}
-                    >
-                      <Clock3 data-icon="inline-start" />
-                      Open details
-                    </DropdownMenuItem>
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem
+                        onClick={() => setFiltersOpen((current) => !current)}
+                      >
+                        <CircleAlert data-icon="inline-start" />{" "}
+                        {filtersOpen ? "Hide filters" : "Show filters"}
+                      </DropdownMenuItem>
+                      {canPolishTranscript ? (
+                        <DropdownMenuItem
+                          disabled={polishProcessing}
+                          onClick={() => void polishTranscript()}
+                        >
+                          <Sparkles data-icon="inline-start" />
+                          {polishProcessing
+                            ? "Polishing…"
+                            : polishedAvailable
+                              ? "Re-polish transcript"
+                              : "Polish transcript"}
+                        </DropdownMenuItem>
+                      ) : null}
+                    </DropdownMenuGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -1504,73 +1565,6 @@ export function TranscriptWorkspace({
                 </div>
               ) : null}
             </div>
-            {exportOpen ? (
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/80 bg-muted/20 p-2">
-                <span className="mr-1 text-xs font-medium text-foreground">
-                  Export transcript
-                </span>
-                <Select
-                  items={[
-                    { value: "pdf", label: "PDF" },
-                    { value: "docx", label: "Word (.docx)" },
-                    { value: "md", label: "Markdown" },
-                    { value: "txt", label: "Plain text" },
-                    { value: "srt", label: "SubRip (.srt)" },
-                    { value: "vtt", label: "WebVTT (.vtt)" },
-                    { value: "json", label: "JSON" },
-                  ]}
-                  onValueChange={(value) => setExportFormat(value ?? "pdf")}
-                  value={exportFormat}
-                >
-                  <SelectTrigger
-                    aria-label="Export format"
-                    className="h-8 w-32 text-xs"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pdf">PDF</SelectItem>
-                    <SelectItem value="docx">Word (.docx)</SelectItem>
-                    <SelectItem value="md">Markdown</SelectItem>
-                    <SelectItem value="txt">Plain text</SelectItem>
-                    <SelectItem value="srt">SubRip (.srt)</SelectItem>
-                    <SelectItem value="vtt">WebVTT (.vtt)</SelectItem>
-                    <SelectItem value="json">JSON</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  aria-label="Export transcript"
-                  onClick={() => void exportTranscript()}
-                  size="sm"
-                  variant="outline"
-                >
-                  <Download data-icon="inline-start" /> Download
-                </Button>
-                {exportSupportsInsights ? (
-                  <label
-                    className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
-                    title={
-                      insightsReady
-                        ? "Include the generated AI insights"
-                        : "Generate AI insights first"
-                    }
-                  >
-                    <Switch
-                      aria-label="Include AI insights in export"
-                      checked={includeInsightsInExport}
-                      disabled={!insightsReady}
-                      onCheckedChange={setIncludeInsightsInExport}
-                      size="sm"
-                    />
-                    AI insights
-                  </label>
-                ) : exportFormat === "json" ? (
-                  <span className="text-[11px] text-muted-foreground">
-                    Includes insights
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
             {editorOpen && selectedSegmentIds.length > 0 ? (
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-2 text-xs">
                 <span className="text-muted-foreground">
@@ -1858,7 +1852,7 @@ export function TranscriptWorkspace({
         <div
           className={cn(
             workspaceView === "review"
-              ? "flex min-h-0 flex-col gap-4 xl:h-full"
+              ? "flex min-h-0 flex-col gap-4 lg:h-full"
               : "contents"
           )}
         >
@@ -2273,7 +2267,7 @@ export function TranscriptWorkspace({
 
           <Card
             className={cn(
-              "shrink-0 shadow-none xl:sticky xl:top-4",
+              "shrink-0 shadow-none lg:sticky lg:top-4",
               workspaceView === "details" && "hidden",
               workspaceView === "review" && "order-first"
             )}

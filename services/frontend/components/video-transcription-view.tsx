@@ -19,7 +19,6 @@ import {
   RefreshCw,
   Search,
   SkipForward,
-  Sparkles,
   Upload,
   Users,
   X,
@@ -1230,35 +1229,6 @@ export function VideoTranscriptionView({
             title={snapshot.session.title}
           />
 
-          {snapshot.videoUpload?.error ? (
-            <Alert className="shrink-0" variant="destructive">
-              <AlertTitle>
-                {snapshot.videoUpload.status === "failed"
-                  ? "Video transcription failed"
-                  : "Video transcription is retrying"}
-              </AlertTitle>
-              <AlertDescription>
-                {snapshot.videoUpload.error}
-                {snapshot.videoUpload.status !== "failed"
-                  ? " JustAI will retry this processing step automatically."
-                  : " Retry the video after resolving the reported issue."}
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
-          {snapshot.videoUpload?.status === "completed" &&
-          snapshot.session.polishStatus === "failed" ? (
-            <Alert className="shrink-0 border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100">
-              <CircleAlert aria-hidden="true" />
-              <AlertTitle>Transcript completed with warnings</AlertTitle>
-              <AlertDescription>
-                The verbatim transcript is complete, but Grammar polish failed.
-                The Polished view is unavailable; open the Grammar polish step
-                below to see the error.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
           {snapshot.videoUpload ? (
             <VideoPipeline
               hasDiarizedSpeakers={snapshot.speakers.some((speaker) =>
@@ -2339,14 +2309,9 @@ function VideoPipeline({
   session: TranscriptionSession
 }) {
   const [now, setNow] = useState(() => Date.now())
-  const pipelineStorageKey = `justai.video-transcription.pipeline.collapsed:${upload.sessionId}`
-  const [open, setOpen] = useState(true)
+  const pipelineStorageKey = `justai.video-transcription.pipeline.details-collapsed:${upload.sessionId}`
+  const [open, setOpen] = useState(false)
   const isActive = ["uploading", "queued", "processing"].includes(upload.status)
-  const hasFailedStoredStep = Boolean(
-    upload.pipeline?.some((step) => step.status === "failed")
-  )
-  const shouldAutoCollapse =
-    ["completed", "cancelled"].includes(upload.status) && !hasFailedStoredStep
 
   useEffect(() => {
     if (!isActive) return
@@ -2355,23 +2320,14 @@ function VideoPipeline({
   }, [isActive])
 
   useEffect(() => {
-    if (shouldAutoCollapse) {
-      queueMicrotask(() => setOpen(false))
-      try {
-        window.localStorage.setItem(pipelineStorageKey, "true")
-      } catch {
-        // The pipeline remains usable when local storage is unavailable.
-      }
-      return
-    }
-    let collapsed = false
+    let expanded = false
     try {
-      collapsed = window.localStorage.getItem(pipelineStorageKey) === "true"
+      expanded = window.localStorage.getItem(pipelineStorageKey) === "false"
     } catch {
       // Local storage can be unavailable in private browsing contexts.
     }
-    queueMicrotask(() => setOpen(!collapsed))
-  }, [pipelineStorageKey, shouldAutoCollapse])
+    queueMicrotask(() => setOpen(expanded))
+  }, [pipelineStorageKey])
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
@@ -2389,17 +2345,11 @@ function VideoPipeline({
   const activeStep = steps.find(
     (step) => step.status === "active" || step.status === "retrying"
   )
-  const hasFailedStep = steps.some((step) => step.status === "failed")
+  const failedStep = steps.find((step) => step.status === "failed")
+  const hasFailedStep = Boolean(failedStep)
   const completedCount = steps.filter((step) =>
     ["completed", "skipped"].includes(step.status)
   ).length
-  const hasStepTiming = steps.some(
-    (step) =>
-      (step.durationMs ?? 0) > 0 ||
-      Boolean(
-        step.startedAt && (step.completedAt || activeStep?.key === step.key)
-      )
-  )
   const runTimeMs = getVideoPipelineRunTime(session, upload, now)
   const workerStatus = upload.workerStatus
   const workerCapacity = workerStatus?.capacity ?? 0
@@ -2443,79 +2393,98 @@ function VideoPipeline({
     >
       <Card
         aria-label="Video processing pipeline"
-        className="flex min-h-0 flex-col overflow-hidden border-border/80 shadow-none"
+        className="flex min-h-0 flex-col gap-0 overflow-hidden py-0 shadow-none"
       >
-        <CardHeader className="gap-3 px-4 py-4 sm:px-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Sparkles aria-hidden="true" className="size-4 text-primary" />
-                Processing pipeline
-              </CardTitle>
-              <CardDescription className="mt-1">
-                {overallLabel}.{" "}
-                {hasStepTiming
-                  ? "Each step shows its recorded or inferred duration."
-                  : "Step timings will appear as processing advances."}
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Badge
-                className="h-5 px-2 text-[10px]"
-                variant={
-                  upload.status === "failed" || hasFailedStep
-                    ? "destructive"
-                    : "secondary"
-                }
-              >
-                {completedCount}/{steps.length} steps
-              </Badge>
-              {parallelProgress ? (
-                <Badge className="h-5 px-2 text-[10px]" variant="outline">
-                  {parallelProgress.workerCount ?? 1} parallel workers
-                </Badge>
-              ) : null}
-              {workerStatus &&
-              (upload.status === "queued" || upload.status === "processing") ? (
-                <Badge className="h-5 px-2 text-[10px]" variant="outline">
-                  {workerStatus.active}/{workerCapacity} video workers
-                </Badge>
-              ) : null}
-              <span className="whitespace-nowrap">
-                Run time · {formatPipelineStepDuration(runTimeMs)}
-              </span>
-              {upload.status === "uploading" ? (
-                <span className="font-medium whitespace-nowrap text-foreground tabular-nums">
-                  {upload.progress}% uploaded
-                </span>
+        <CardHeader className="gap-2 px-4 py-3 sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              {hasFailedStep || upload.status === "failed" ? (
+                <CircleAlert
+                  aria-hidden="true"
+                  className="size-4 text-destructive"
+                />
+              ) : isActive ? (
+                <LoaderCircle
+                  aria-hidden="true"
+                  className="size-4 animate-spin text-primary"
+                />
+              ) : upload.status === "cancelled" ? (
+                <X aria-hidden="true" className="size-4 text-muted-foreground" />
+              ) : (
+                <Check aria-hidden="true" className="size-4 text-primary" />
+              )}
+              {failedStep
+                ? `${videoPipelineStepLabel(failedStep.key)} needs attention`
+                : overallLabel}
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              {failedStep && failedStep.key !== "upload" ? (
+                <Button
+                  disabled={Boolean(retryingStep)}
+                  onClick={() => onRetryFailedStep(failedStep.key)}
+                  size="sm"
+                  variant="outline"
+                >
+                  <RefreshCw data-icon="inline-start" />{" "}
+                  {retryingStep ? "Retrying…" : "Retry step"}
+                </Button>
               ) : null}
               <CollapsibleTrigger
+                render={<Button size="sm" variant="ghost" />}
                 aria-label={
                   open
                     ? "Collapse video processing pipeline"
                     : "Expand video processing pipeline"
                 }
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
-                type="button"
               >
+                {open ? "Hide details" : "Processing details"}
                 <ChevronDown
-                  aria-hidden="true"
+                  data-icon="inline-end"
                   className={cn(
-                    "size-4 transition-transform duration-200 motion-reduce:transition-none",
-                    !open && "-rotate-90"
+                    "transition-transform motion-reduce:transition-none",
+                    open && "rotate-180"
                   )}
                 />
               </CollapsibleTrigger>
             </div>
           </div>
-          <Progress
-            aria-label="Overall video processing progress"
-            className="h-1.5"
-            value={Math.max(0, Math.min(100, upload.progress))}
-          />
+          {isActive ? (
+            <Progress
+              aria-label="Overall video processing progress"
+              className="h-1"
+              value={Math.max(0, Math.min(100, upload.progress))}
+            />
+          ) : null}
         </CardHeader>
         <CollapsibleContent>
           <CardContent className="px-4 pb-4 sm:px-5">
+            <div className="mb-4 flex flex-wrap gap-3 text-xs text-muted-foreground">
+              <span>
+                {completedCount}/{steps.length} steps
+              </span>
+              <span>Run time · {formatPipelineStepDuration(runTimeMs)}</span>
+              {parallelProgress ? (
+                <span>
+                  {parallelProgress.workerCount ?? 1} parallel workers
+                </span>
+              ) : null}
+              {workerStatus && isActive ? (
+                <span>
+                  {workerStatus.active}/{workerCapacity} video workers
+                </span>
+              ) : null}
+            </div>
+            {upload.error && !steps.some((step) => step.status === "failed" && step.error === upload.error) ? (
+              <Alert variant="destructive" className="mb-4">
+                <AlertTitle>
+                  {upload.status === "failed"
+                    ? "Processing needs attention"
+                    : "Processing is retrying"}
+                </AlertTitle>
+                <AlertDescription>{upload.error}</AlertDescription>
+              </Alert>
+            ) : null}
+
             {upload.status === "queued" && workerStatus ? (
               <VideoWorkerQueue status={workerStatus} />
             ) : null}
@@ -2598,7 +2567,7 @@ function VideoPipeline({
                         </span>
                       </div>
                       {step.status === "failed" && step.error ? (
-                        <p className="mt-2 line-clamp-2 text-[11px] text-destructive">
+                        <p className="mt-2 text-[11px] break-words text-destructive">
                           {step.error}
                         </p>
                       ) : null}
