@@ -11,6 +11,7 @@ import {
   FileText,
   Headphones,
   LogOut,
+  Menu,
   MessageSquare,
   MoreHorizontal,
   PanelRightClose,
@@ -29,7 +30,7 @@ import type { LucideIcon } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
-import { ThemeMenu } from "@/components/theme-switcher"
+import { ThemeMenu, ThemeSwitcher } from "@/components/theme-switcher"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -56,12 +57,12 @@ import {
 } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { useIsMobile } from "@/hooks/use-mobile"
 import type {
   Conversation,
   Organization,
@@ -136,6 +137,19 @@ const railNavigation: Array<{
     feature: "mcp",
   },
 ]
+
+function useCompactNavigation() {
+  const [compact, setCompact] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 1024
+  )
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)")
+    const update = () => setCompact(media.matches)
+    media.addEventListener("change", update)
+    return () => media.removeEventListener("change", update)
+  }, [])
+  return compact
+}
 
 type FocusWorkspaceSidebarProps = {
   activeView: ViewId
@@ -226,7 +240,8 @@ export function FocusWorkspaceSidebar({
   const [searchOpen, setSearchOpen] = useState(false)
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
   const [chatHistoryExpanded, setChatHistoryExpanded] = useState(false)
-  const isMobile = useIsMobile()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const isMobile = useCompactNavigation()
   const contextPanelRef = useRef<HTMLDivElement>(null)
   const historyView =
     activeView === "chat" ||
@@ -396,16 +411,94 @@ export function FocusWorkspaceSidebar({
         ? "Show video transcripts"
         : "Show chat history"
   return (
+    <>
+    <div className="flex h-14 w-full shrink-0 items-center gap-2 border-b border-border/60 bg-background px-3 lg:hidden">
+      <Button aria-label="Open navigation menu" aria-expanded={mobileMenuOpen}
+        onClick={() => setMobileMenuOpen(true)} size="icon-sm" variant="ghost">
+        <Menu aria-hidden="true" />
+      </Button>
+      <BrandMark aria-hidden="true" className="size-6 shrink-0" />
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+        {navigation.find((item) => item.id === activeView)?.label ??
+          (activeView === "settings" ? "Settings" : activeView === "profile" ? "Profile" : "JustAI")}
+      </span>
+      {historyView ? (
+        <Button aria-label={`Open ${secondaryHistoryLabel.toLocaleLowerCase()}`}
+          aria-expanded={contextPanelOpen}
+          onClick={() => {
+            onHistoryOpenChange(true)
+            setChatHistoryExpanded(true)
+          }} size="icon-sm" variant="ghost">
+          <PanelRightOpen aria-hidden="true" />
+        </Button>
+      ) : null}
+    </div>
+
+    <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+      <SheetContent aria-label="Workspace menu" className="w-[min(21rem,calc(100vw-2rem))] max-w-none overflow-y-auto p-0" side="left">
+        <SheetHeader className="border-b border-border/60 px-5 py-5">
+          <SheetTitle className="flex items-center gap-2 text-base">
+            <BrandMark aria-hidden="true" className="size-7" /> JustAI
+          </SheetTitle>
+        </SheetHeader>
+        <div className="flex flex-col gap-5 px-3 py-4">
+          <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); setSearchOpen(true) }} variant="secondary">
+            <Search data-icon="inline-start" /> Search workspace
+          </Button>
+          <nav aria-label="Mobile workspace navigation" className="space-y-3">
+            {[...new Set(navigation.map((item) => item.group))].map((group) => (
+              <div key={group}>
+                <p className="px-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{group}</p>
+                {navigation.filter((item) => item.group === group).map((item) => {
+                  const Icon = item.icon
+                  return <Button key={item.id} aria-current={activeView === item.id ? "page" : undefined}
+                    className="w-full justify-start" disabled={Boolean(item.feature && disabledFeatures[item.feature])}
+                    onClick={() => { setMobileMenuOpen(false); navigateFromRail(item.id) }}
+                    size="sm" variant={activeView === item.id ? "secondary" : "ghost"}>
+                    <Icon data-icon="inline-start" /> {item.label}
+                  </Button>
+                })}
+              </div>
+            ))}
+          </nav>
+          <div className="space-y-1 border-t border-border/60 pt-4">
+            <p className="px-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Workspace</p>
+            {organizations.map((organization) => (
+              <Button key={organization.id} className="w-full justify-start truncate" onClick={() => {
+                setMobileMenuOpen(false)
+                onOrganizationSelect(organization.id)
+              }} size="sm" variant={organization.id === activeOrganization?.id ? "secondary" : "ghost"}>
+                <Bot data-icon="inline-start" /> {organization.name}
+              </Button>
+            ))}
+            <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); onNavigate("settings") }} size="sm" variant="ghost">
+              <Settings2 data-icon="inline-start" /> Settings
+            </Button>
+            <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); onNavigate("profile") }} size="sm" variant="ghost">
+              <UserRound data-icon="inline-start" /> Profile
+            </Button>
+            {user.platformAdmin ? <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); onNavigate("admin") }} size="sm" variant="ghost">
+              <ShieldCheck data-icon="inline-start" /> Platform admin
+            </Button> : null}
+            <ThemeSwitcher expanded />
+            <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); onSignOut() }} size="sm" variant="ghost">
+              <LogOut data-icon="inline-start" /> Sign out
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+
     <aside
       className={cn(
-        "relative mx-2 my-2 flex h-[calc(100%-1rem)] min-h-0 w-14 shrink-0 gap-2 overflow-visible transition-[width] duration-200",
+        "contents lg:relative lg:mx-2 lg:my-2 lg:flex lg:h-[calc(100%-1rem)] lg:min-h-0 lg:w-14 lg:shrink-0 lg:gap-2 lg:overflow-visible lg:transition-[width] lg:duration-200",
         isSecondaryHistoryRail &&
-          (secondaryHistoryExpanded ? "md:w-80" : "md:w-28")
+          (secondaryHistoryExpanded ? "lg:w-80" : "lg:w-28")
       )}
       aria-label="Workspace navigation"
       data-history-open={historyVisible}
     >
-      <div className="flex w-14 shrink-0 flex-col items-center gap-2 rounded-[1.75rem] bg-sidebar py-3">
+      <div className="hidden w-14 shrink-0 flex-col items-center gap-2 rounded-[1.75rem] bg-sidebar py-3 lg:flex">
         <BrandMark aria-label="JustAI" className="size-8 shrink-0" />
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -629,10 +722,10 @@ export function FocusWorkspaceSidebar({
       <div
         className={cn(
           isSecondaryHistoryRail
-            ? "relative flex h-full w-0 shrink-0 overflow-visible rounded-[1.5rem] bg-transparent transition-[width] duration-200 md:w-12 md:overflow-hidden md:bg-[var(--sidebar-secondary)]"
+            ? "contents lg:relative lg:flex lg:h-full lg:w-12 lg:shrink-0 lg:overflow-hidden lg:rounded-[1.5rem] lg:bg-[var(--sidebar-secondary)] lg:transition-[width] lg:duration-200"
             : "contents",
           secondaryHistoryExpanded &&
-            "md:w-64 md:shadow-xl"
+            "lg:w-64 lg:shadow-xl"
         )}
         onBlurCapture={(event) => {
           if (
@@ -673,7 +766,7 @@ export function FocusWorkspaceSidebar({
         }}
       >
         {isSecondaryHistoryRail && !secondaryHistoryExpanded && (
-          <div className="hidden h-full w-12 flex-col items-center gap-1 py-3 md:flex">
+          <div className="hidden h-full w-12 flex-col items-center gap-1 py-3 lg:flex">
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -784,7 +877,7 @@ export function FocusWorkspaceSidebar({
         {isMobile && contextPanelOpen && (
           <div
             aria-hidden="true"
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px] md:hidden"
+            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px] lg:hidden"
             onPointerDown={() => {
               setChatHistoryExpanded(false)
             }}
@@ -800,7 +893,7 @@ export function FocusWorkspaceSidebar({
               ? "w-full gap-1 p-3"
               : "absolute inset-y-0 left-16 z-30 w-64 gap-3 p-4 xl:static xl:z-auto xl:shadow-none",
             contextPanelOpen ? "flex" : "hidden",
-            "max-md:fixed max-md:inset-y-2 max-md:left-2 max-md:z-50 max-md:w-[calc(100%-1rem)]"
+            "max-lg:fixed max-lg:inset-y-2 max-lg:left-2 max-lg:z-50 max-lg:w-[min(24rem,calc(100%-1rem))]"
           )}
           role={isMobile ? "dialog" : "region"}
           tabIndex={isMobile ? -1 : undefined}
@@ -876,7 +969,10 @@ export function FocusWorkspaceSidebar({
                 isSecondaryHistoryRail && "px-1"
               )}
               disabled={createAction.disabled}
-              onClick={createAction.onClick}
+              onClick={() => {
+                setChatHistoryExpanded(false)
+                createAction.onClick()
+              }}
             >
               <CreateIcon data-icon="inline-start" />
               {createAction.label}
@@ -905,7 +1001,10 @@ export function FocusWorkspaceSidebar({
               onRename={onRenameConversation}
               onShare={onShareConversation}
               onConversationRefresh={onConversationRefresh}
-              onSelect={(id) => onNavigate("chat", id)}
+              onSelect={(id) => {
+                setChatHistoryExpanded(false)
+                onNavigate("chat", id)
+              }}
             />
           )}
 
@@ -931,7 +1030,8 @@ export function FocusWorkspaceSidebar({
                 archivedOpen={archivedSessionsOpen}
                 onArchive={onArchiveSession}
                 onDelete={onDeleteSession}
-                onSelect={(id) =>
+                onSelect={(id) => {
+                  setChatHistoryExpanded(false)
                   onNavigate(
                     activeView === "video-transcription"
                       ? "video-transcription"
@@ -939,7 +1039,7 @@ export function FocusWorkspaceSidebar({
                     null,
                     id
                   )
-                }
+                }}
                 sessionGroups={sessionGroups}
                 setArchivedOpen={setArchivedSessionsOpen}
                 video={activeView === "video-transcription"}
@@ -949,6 +1049,7 @@ export function FocusWorkspaceSidebar({
         </div>
       </div>
     </aside>
+    </>
   )
 }
 
@@ -1163,7 +1264,7 @@ function SessionRow({
           render={
             <Button
               aria-label={`Actions for ${session.title}`}
-              className="absolute top-1/2 right-1 size-8 -translate-y-1/2 bg-[var(--sidebar-secondary)] opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 max-md:opacity-100"
+              className="absolute top-1/2 right-1 size-8 -translate-y-1/2 bg-[var(--sidebar-secondary)] opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 max-lg:opacity-100"
               size="icon-xs"
               title={`Actions for ${session.title}`}
               variant="ghost"
