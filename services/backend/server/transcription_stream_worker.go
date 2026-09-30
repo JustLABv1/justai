@@ -495,7 +495,7 @@ func (m *TranscriptionManager) finishLiveStream(sessionID, sourceID uuid.UUID, r
 	now := time.Now().UTC()
 	_, _ = m.DB.Exec(`UPDATE transcription_stream_sources SET status = 'stopped', last_error = '', updated_at = $2 WHERE source_id = $1`, sourceID, now)
 	_, _ = m.DB.Exec(`UPDATE transcription_sources SET status = 'stopped', updated_at = $2 WHERE id = $1`, sourceID, now)
-	result, _ := m.DB.Exec(`UPDATE transcription_sessions SET status = 'completed', ended_at = COALESCE(ended_at, $2), join_code_hash = NULL, join_code_expires_at = NULL, updated_at = $2 WHERE id = $1 AND status IN ('waiting', 'live', 'paused') AND EXISTS (SELECT 1 FROM transcription_stream_sources WHERE source_id = $3 AND scheduled_start_at IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM transcription_sources other WHERE other.session_id = $1 AND other.id <> $3 AND other.status <> 'stopped')`, sessionID, now, sourceID)
+	result, _ := m.DB.Exec(`UPDATE transcription_sessions SET status = 'completed', ended_at = COALESCE(ended_at, $2), join_code_hash = NULL, join_code_expires_at = NULL, updated_at = $2 WHERE id = $1 AND status IN ('waiting', 'live', 'paused') AND NOT EXISTS (SELECT 1 FROM transcription_sources other WHERE other.session_id = $1 AND other.id <> $3 AND other.status <> 'stopped')`, sessionID, now, sourceID)
 	m.markSource(sessionID, sourceID, "stopped")
 	m.broadcast(sessionID, "transcription.stream", ginData{"sourceId": sourceID, "status": "stopped", "reason": reason})
 	if result != nil {

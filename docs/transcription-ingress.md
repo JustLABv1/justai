@@ -200,3 +200,26 @@ are not frozen at scheduling time. Resolution uses the existing public-target
 and redirect policy, bounded page sizes and request timeouts. A source that
 cannot be resolved at capture time retries during the reconnect grace period
 and then shows a failed status.
+
+## Processing after live capture
+
+New live sessions can select speaker separation (including Pyannote) and/or
+polish. Selecting speaker separation enables audio recording automatically.
+Before a scheduled capture starts, **Processing settings** can change these
+choices. The backend rejects changes once capture has begun.
+
+A persisted `transcription_live_processing` job waits for session completion,
+stopped stream workers, and finalized recordings. Speaker separation runs
+first, followed by polish; neither stage reruns ASR. Completed steps are retained
+on retry. Failed steps can be retried or skipped in the transcript workspace.
+Manual polish is blocked while this pipeline is active or waiting for a failed
+speaker step. The job has a 35-minute lease and a 30-minute execution deadline;
+expired leases are reclaimed after restarts.
+
+Pyannote receives a signed URL to a temporary WAV assembled from the encrypted
+recordings. This requires configured S3 processing storage even when recordings
+normally use local storage. The temporary object and local plaintext file are
+deleted after processing. A reclaimed attempt removes previous temporary objects
+for the session. Other diarization providers use bounded audio windows. Sources
+are labelled separately to avoid merging unrelated source-local speaker IDs.
+Original transcript text and timestamps are retained.

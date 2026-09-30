@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 
 import type { LiveTranscriptionOrbitProps } from "@/components/live-transcription-orbit"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
@@ -52,6 +52,7 @@ type Props = LiveTranscriptionOrbitProps & {
   mode: "microphone" | LiveTranscriptionCaptureViewMode
   transportStatus: SSEConnectionState
   interruptionAt?: Date | null
+  processingSettings?: ReactNode
 }
 
 type SourcePresentation = {
@@ -94,6 +95,7 @@ const presentation: Record<Props["mode"], SourcePresentation> = {
 }
 
 export function LiveTranscriptionConversationView({
+  processingSettings,
   mode,
   snapshot,
   user,
@@ -170,6 +172,7 @@ export function LiveTranscriptionConversationView({
             <Badge variant="secondary">Scheduled</Badge>
           </div>
           <div className="flex flex-wrap gap-2">
+            {processingSettings}
             <Button onClick={onShare} size="sm" variant="outline">
               <Share2 data-icon="inline-start" /> Share
             </Button>
