@@ -67,7 +67,7 @@ func (a *App) createTranscriptionStreamSource(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("a live stream URL between 1 and 16 KB is required"))
 		return
 	}
-	if err := provider.ValidateMediaSourceURL(streamURL, a.Config.AllowPrivate); err != nil {
+	if _, err := resolveLiveStream(c, streamURL, a.Config.AllowPrivate); err != nil {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}

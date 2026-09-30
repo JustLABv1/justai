@@ -245,7 +245,21 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 			}
 			continue
 		}
-		connected, attemptErr := m.runLiveStreamAttempt(ctx, stream, streamURL, protocol, mode, sessionID, sourceID, &sourceOffset, recordingStreamID, &recordingPart)
+		resolved, resolveErr := resolveLiveStream(ctx, streamURL, m.Config.AllowPrivate)
+		if resolveErr != nil {
+			stream.Close()
+			m.setStreamStatus(sessionID, sourceID, "reconnecting", redactTranscriptionStreamError(resolveErr, streamURL), true)
+			if !time.Now().Before(reconnectDeadline) {
+				m.setStreamStatus(sessionID, sourceID, "failed", "livestream page could not be resolved at capture time", false)
+				return resolveErr
+			}
+			if err := waitTranscriptionStreamReconnect(ctx, m.Config.Transcription.LiveStreamReconnectSeconds); err != nil {
+				return err
+			}
+			continue
+		}
+		mediaURL, _ := url.Parse(resolved.URL)
+		connected, attemptErr := m.runLiveStreamAttempt(ctx, stream, resolved.URL, mediaURL.Scheme, mode, sessionID, sourceID, &sourceOffset, recordingStreamID, &recordingPart)
 		if connected {
 			reconnectDeadline = time.Now().Add(time.Duration(reconnectGraceSeconds) * time.Second)
 		}

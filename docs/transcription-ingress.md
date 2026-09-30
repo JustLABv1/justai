@@ -178,3 +178,25 @@ word error rate, omissions, repetitions, and finalization latency. Include quiet
 speech, music, silence, interruptions, repeated words, and mixed-language speech.
 The default 2.5-second window favors latency; longer windows must be evaluated
 against actual audio and the deployed model rather than assumed to be better.
+
+## Livestream webpage links
+
+The livestream link field checks the source before allowing scheduling. The
+resolver accepts direct network media, public HTML audio/video/source elements,
+Open Graph media, embedded HLS/DASH/audio URLs, and a single embedded player
+(up to two iframe hops). Pages with multiple candidate streams are rejected
+rather than choosing a channel silently. JavaScript-only players, login and DRM
+are not supported by the general resolver.
+
+The Bundestag `/mediathek/live` page uses a dedicated adapter: it follows the
+MP3 source published on the official plenary audio page. This adapter captures
+plenary audio, not arbitrary committee channels.
+
+`POST /api/v1/transcription/stream-sources/resolve` accepts `{ "url": "..." }`
+and returns a source name and kind, without exposing resolved media URLs.
+Creation validates the source again. The original URL remains encrypted at rest
+and is resolved on capture start and each reconnect, so temporary media URLs
+are not frozen at scheduling time. Resolution uses the existing public-target
+and redirect policy, bounded page sizes and request timeouts. A source that
+cannot be resolved at capture time retries during the reconnect grace period
+and then shows a failed status.
