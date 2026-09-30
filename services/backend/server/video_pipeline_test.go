@@ -453,3 +453,25 @@ func TestRetryVideoPipelineStepFromPreservesEarlierCompletedStages(t *testing.T)
 		t.Fatalf("downstream stages were not reset: %+v", steps)
 	}
 }
+
+func TestVideoSpeakerSeparationCanSkip(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, stage, failedStep string
+		want                            bool
+	}{
+		{"running speakers", "processing", "diarizing", "", true},
+		{"skip pending", "processing", videoDiarizationSkipStage, "", true},
+		{"failed speakers", "failed", "failed", "diarization", true},
+		{"failed transcription", "failed", "failed", "transcription", false},
+		{"failed polish", "failed", "failed", "grammar", false},
+		{"running transcription", "processing", "transcribing", "", false},
+		{"completed", "completed", "completed", "diarization", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			steps := []models.TranscriptionVideoPipelineStep{{Key: tc.failedStep, Status: "failed"}}
+			if got := videoSpeakerSeparationCanSkip(tc.status, tc.stage, steps); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
