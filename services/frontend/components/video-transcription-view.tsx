@@ -8,10 +8,8 @@ import {
   ChevronDown,
   Clock3,
   CircleAlert,
-  CircleDashed,
   FileText,
   FileVideo,
-  GitMerge,
   LoaderCircle,
   Pause,
   Pencil,
@@ -22,16 +20,8 @@ import {
   Upload,
   Users,
   X,
-  type LucideIcon,
 } from "lucide-react"
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { TranscriptionCreationFlow } from "@/components/transcription-creation-flow"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -106,6 +96,9 @@ import {
   VideoUploadError,
 } from "@/lib/video-upload"
 import { VideoTranscriptWorkspace } from "@/components/video-transcript-workspace"
+import { VideoProcessingOutput } from "@/components/video-processing-output"
+import { VideoProcessingProgress } from "@/components/video-processing-progress"
+import progressStyles from "./video-processing-progress.module.css"
 import { WorkspaceDetailHeader } from "@/components/workspace-detail-header"
 import type {
   Endpoint,
@@ -115,10 +108,8 @@ import type {
   TranscriptionSpeaker,
   TranscriptionSession,
   TranscriptionVideoPreviewSegment,
-  TranscriptionVideoParallelProgress,
   TranscriptionVideoPipelineStep,
   TranscriptionVideoUpload,
-  TranscriptionVideoWorkerStatus,
   User,
 } from "@/lib/types"
 
@@ -195,6 +186,9 @@ export function VideoTranscriptionView({
   const snapshot = snapshotState as VideoSnapshot & {
     videoUpload: TranscriptionVideoUpload
   }
+  const [partialTranscriptSession, setPartialTranscriptSession] = useState<
+    string | null
+  >(null)
   const [error, setError] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [createStep, setCreateStep] = useState(0)
@@ -812,6 +806,7 @@ export function VideoTranscriptionView({
   const retryVideoPipelineStep = async (step: string) => {
     const uploadID = snapshot?.videoUpload?.id
     if (!uploadID) return
+    setPartialTranscriptSession(null)
     setRetryingVideoStep(step)
     setError("")
     try {
@@ -845,6 +840,7 @@ export function VideoTranscriptionView({
   const skipSpeakerSeparation = async () => {
     const uploadID = snapshot?.videoUpload?.id
     if (!uploadID) return
+    setPartialTranscriptSession(null)
     setSkipSpeakerInFlight(true)
     setError("")
     try {
@@ -925,6 +921,17 @@ export function VideoTranscriptionView({
   const isVideoProcessing = ["uploading", "queued", "processing"].includes(
     snapshot?.videoUpload?.status ?? ""
   )
+  const interrupted = ["failed", "cancelled"].includes(
+    snapshot?.videoUpload?.status ?? ""
+  )
+  const showProcessingView =
+    isVideoProcessing ||
+    (interrupted && partialTranscriptSession !== snapshot?.session.id)
+  const showProcessingDetails =
+    snapshot?.videoUpload &&
+    (snapshot.videoUpload.status !== "completed" ||
+      snapshot.session.polishStatus === "failed" ||
+      snapshot.videoUpload.pipeline?.some((step) => step.status === "failed"))
   const livePreviewSegments = useMemo<
     TranscriptionVideoPreviewSegment[]
   >(() => {
@@ -1179,7 +1186,12 @@ export function VideoTranscriptionView({
                 Processing continues in the background.
               </EmptyDescription>
             </EmptyHeader>
-            <Button onClick={() => { setCreateStep(0); setCreateOpen(true) }}>
+            <Button
+              onClick={() => {
+                setCreateStep(0)
+                setCreateOpen(true)
+              }}
+            >
               <Upload data-icon="inline-start" />
               New video transcription
             </Button>
@@ -1205,7 +1217,10 @@ export function VideoTranscriptionView({
                 ) : null}
                 <Button
                   className="flex-1 sm:flex-none"
-                  onClick={() => { setCreateStep(0); setCreateOpen(true) }}
+                  onClick={() => {
+                    setCreateStep(0)
+                    setCreateOpen(true)
+                  }}
                   size="sm"
                   variant="outline"
                 >
@@ -1229,8 +1244,18 @@ export function VideoTranscriptionView({
             title={snapshot.session.title}
           />
 
-          {snapshot.videoUpload ? (
+          {showProcessingDetails ? (
             <VideoPipeline
+              prominent={showProcessingView}
+              onViewPartialTranscript={
+                showProcessingView &&
+                interrupted &&
+                snapshot.segments.length > 0
+                  ? () => setPartialTranscriptSession(snapshot.session.id)
+                  : undefined
+              }
+              segments={snapshot.segments}
+              speakers={snapshot.speakers}
               hasDiarizedSpeakers={snapshot.speakers.some((speaker) =>
                 /^speaker[_ -]?\d+$/i.test(speaker.label)
               )}
@@ -1775,24 +1800,30 @@ export function VideoTranscriptionView({
               </aside>
             </div>
           ) : null}
-          <VideoTranscriptWorkspace
-            key={snapshot.session.id}
-            currentTimeMs={currentTimeMs}
-            onCurrentTimeChange={setCurrentTimeMs}
-            onError={setError}
-            onRefreshPlayback={refreshVideoPlayback}
-            onRenameSpeaker={openSpeakerRename}
-            onStartChat={onStartChat}
-            onSnapshotChange={(updater) =>
-              setSnapshot((current) => (current ? updater(current) : current))
-            }
-            onVideoDurationChange={setVideoDurationMs}
-            onVideoPlaybackError={setVideoPlaybackError}
-            snapshot={snapshot}
-            videoDurationMs={videoDurationMs}
-            videoPlaybackError={videoPlaybackError}
-            videoRef={videoRef}
-          />
+          {!showProcessingView ? (
+            <div className={progressStyles.result}>
+              <VideoTranscriptWorkspace
+                key={snapshot.session.id}
+                currentTimeMs={currentTimeMs}
+                onCurrentTimeChange={setCurrentTimeMs}
+                onError={setError}
+                onRefreshPlayback={refreshVideoPlayback}
+                onRenameSpeaker={openSpeakerRename}
+                onStartChat={onStartChat}
+                onSnapshotChange={(updater) =>
+                  setSnapshot((current) =>
+                    current ? updater(current) : current
+                  )
+                }
+                onVideoDurationChange={setVideoDurationMs}
+                onVideoPlaybackError={setVideoPlaybackError}
+                snapshot={snapshot}
+                videoDurationMs={videoDurationMs}
+                videoPlaybackError={videoPlaybackError}
+                videoRef={videoRef}
+              />
+            </div>
+          ) : null}
         </>
       ) : null}
 
@@ -1808,252 +1839,355 @@ export function VideoTranscriptionView({
           step={createStep}
           onStepChange={setCreateStep}
           busy={videoStarting}
-          footer={(
+          footer={
             <footer className="flex items-center justify-between gap-3">
-              <Button disabled={videoStarting} variant="outline" onClick={() => {
-                if (createStep > 0) { setCreateStep(createStep - 1); return }
-                setCreateOpen(false)
-                if (!videoUploadInFlightRef.current) setVideoFile(null)
-              }}>
-                {createStep > 0 ? <><ArrowLeft data-icon="inline-start" /> Back</> : "Cancel"}
+              <Button
+                disabled={videoStarting}
+                variant="outline"
+                onClick={() => {
+                  if (createStep > 0) {
+                    setCreateStep(createStep - 1)
+                    return
+                  }
+                  setCreateOpen(false)
+                  if (!videoUploadInFlightRef.current) setVideoFile(null)
+                }}
+              >
+                {createStep > 0 ? (
+                  <>
+                    <ArrowLeft data-icon="inline-start" /> Back
+                  </>
+                ) : (
+                  "Cancel"
+                )}
               </Button>
               {createStep < 2 ? (
-                <Button disabled={createStep === 0 ? !videoFile : !effectiveSelectedEndpoint} onClick={() => setCreateStep(createStep + 1)}>
+                <Button
+                  disabled={
+                    createStep === 0 ? !videoFile : !effectiveSelectedEndpoint
+                  }
+                  onClick={() => setCreateStep(createStep + 1)}
+                >
                   Continue <ArrowRight data-icon="inline-end" />
                 </Button>
               ) : (
-                <Button disabled={videoStarting || !videoFile || !effectiveSelectedEndpoint} onClick={() => void createVideoSession()}>
-                  {videoStarting ? <><LoaderCircle className="animate-spin" data-icon="inline-start" /> Preparing upload…</> : <><Upload data-icon="inline-start" /> Start upload</>}
+                <Button
+                  disabled={
+                    videoStarting || !videoFile || !effectiveSelectedEndpoint
+                  }
+                  onClick={() => void createVideoSession()}
+                >
+                  {videoStarting ? (
+                    <>
+                      <LoaderCircle
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />{" "}
+                      Preparing upload…
+                    </>
+                  ) : (
+                    <>
+                      <Upload data-icon="inline-start" /> Start upload
+                    </>
+                  )}
                 </Button>
               )}
             </footer>
-          )}
+          }
         >
           {createStep === 0 ? (
             <FieldGroup>
-              <div><h2 className="text-lg font-semibold">Choose a recording</h2><p className="mt-1 text-sm text-muted-foreground">Meetings, interviews, lectures — start with your video.</p></div>
+              <div>
+                <h2 className="text-lg font-semibold">Choose a recording</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Meetings, interviews, lectures — start with your video.
+                </p>
+              </div>
 
-            <Field>
-              <FieldLabel htmlFor="video-session-title">
-                Transcript name
-              </FieldLabel>
-              <Input
-                id="video-session-title"
-                onChange={(event) => setTitle(event.target.value)}
-                value={title}
-              />
-            </Field>
+              <Field>
+                <FieldLabel htmlFor="video-session-title">
+                  Transcript name
+                </FieldLabel>
+                <Input
+                  id="video-session-title"
+                  onChange={(event) => setTitle(event.target.value)}
+                  value={title}
+                />
+              </Field>
 
-            <Field>
-              <label htmlFor="video-file" className="group relative flex min-h-52 cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl bg-muted/60 p-6 text-center transition-colors hover:bg-muted focus-within:ring-2 focus-within:ring-ring">
-                <span key={videoFile?.name || "empty"} className="flex flex-col items-center gap-3 animate-in duration-200 fade-in-0 zoom-in-95 motion-reduce:animate-none">
-                  <span className="flex size-14 items-center justify-center rounded-2xl bg-background text-primary"><FileVideo className="size-6" aria-hidden="true" /></span>
-                  <span className="max-w-full break-all text-sm font-medium">{videoFile?.name || "Choose your video"}</span>
-                  <span className="text-xs text-muted-foreground">{videoFile ? `${(videoFile.size / 1024 / 1024).toFixed(1)} MB · Click to replace` : "Select a recording from your device"}</span>
-                </span>
-                <Input accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv" id="video-file" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) setVideoFile(file) }} type="file" />
-              </label>
-              <FieldDescription>Upload begins after you review your settings.</FieldDescription>
-            </Field>
-
+              <Field>
+                <label
+                  htmlFor="video-file"
+                  className="group relative flex min-h-52 cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl bg-muted/60 p-6 text-center transition-colors focus-within:ring-2 focus-within:ring-ring hover:bg-muted"
+                >
+                  <span
+                    key={videoFile?.name || "empty"}
+                    className="flex animate-in flex-col items-center gap-3 duration-200 fade-in-0 zoom-in-95 motion-reduce:animate-none"
+                  >
+                    <span className="flex size-14 items-center justify-center rounded-2xl bg-background text-primary">
+                      <FileVideo className="size-6" aria-hidden="true" />
+                    </span>
+                    <span className="max-w-full text-sm font-medium break-all">
+                      {videoFile?.name || "Choose your video"}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {videoFile
+                        ? `${(videoFile.size / 1024 / 1024).toFixed(1)} MB · Click to replace`
+                        : "Select a recording from your device"}
+                    </span>
+                  </span>
+                  <Input
+                    accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv"
+                    id="video-file"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (file) setVideoFile(file)
+                    }}
+                    type="file"
+                  />
+                </label>
+                <FieldDescription>
+                  Upload begins after you review your settings.
+                </FieldDescription>
+              </Field>
             </FieldGroup>
           ) : createStep === 1 ? (
             <FieldGroup>
-              <div><h2 className="text-lg font-semibold">Shape your transcript</h2><p className="mt-1 text-sm text-muted-foreground">Choose a language and the services to process your recording.</p></div>
-            <Field>
-              <FieldLabel htmlFor="video-language">Language</FieldLabel>
-              <Input
-                id="video-language"
-                onChange={(event) => setLanguage(event.target.value || "auto")}
-                placeholder="auto"
-                value={language}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>Transcription endpoint</FieldLabel>
-              <Select
-                items={transcriptionEndpoints.map((endpoint) => ({
-                  value: endpoint.id,
-                  label: `${endpoint.name} · ${endpoint.providerType} · ${transcriptionModeLabel(endpoint)}`,
-                }))}
-                onValueChange={(value) => setSelectedEndpoint(value ?? "")}
-                value={effectiveSelectedEndpoint}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a transcription endpoint" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Transcription providers</SelectLabel>
-                    {transcriptionEndpoints.map((endpoint) => (
-                      <SelectItem key={endpoint.id} value={endpoint.id}>
-                        {endpoint.name} · {endpoint.providerType} ·{" "}
-                        {transcriptionModeLabel(endpoint)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-            <VideoModelField
-              description="Choose the ASR model used for the timestamped transcript."
-              endpoint={selectedTranscriptionEndpoint}
-              label="Transcription model"
-              loading={
-                Boolean(selectedTranscriptionEndpoint) &&
-                !modelDiscovery[
-                  videoModelKey(
-                    selectedTranscriptionEndpoint?.id ?? "",
-                    "transcription"
-                  )
-                ]
-              }
-              models={modelOptionsFor(
-                selectedTranscriptionEndpoint,
-                "transcription"
-              )}
-              onValueChange={(value) =>
-                setModelValue(
-                  selectedTranscriptionEndpoint,
-                  "transcription",
-                  value
-                )
-              }
-              value={transcriptionModel}
-            />
-            <Field>
-              <FieldLabel>Speaker separation</FieldLabel>
-              <Select
-                disabled={diarizationEndpoints.length === 0}
-                items={[
-                  { value: "none", label: "Keep one transcript stream" },
-                  ...diarizationEndpoints.map((endpoint) => ({
+              <div>
+                <h2 className="text-lg font-semibold">Shape your transcript</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Choose a language and the services to process your recording.
+                </p>
+              </div>
+              <Field>
+                <FieldLabel htmlFor="video-language">Language</FieldLabel>
+                <Input
+                  id="video-language"
+                  onChange={(event) =>
+                    setLanguage(event.target.value || "auto")
+                  }
+                  placeholder="auto"
+                  value={language}
+                />
+              </Field>
+              <Field>
+                <FieldLabel>Transcription endpoint</FieldLabel>
+                <Select
+                  items={transcriptionEndpoints.map((endpoint) => ({
                     value: endpoint.id,
-                    label: `${endpoint.name} · ${endpoint.providerType}`,
-                  })),
-                ]}
-                onValueChange={(value) =>
-                  setSelectedDiarizationEndpoint(value ?? "none")
-                }
-                value={selectedDiarizationEndpoint}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Keep one transcript stream" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Diarization providers</SelectLabel>
-                    <SelectItem value="none">
-                      Keep one transcript stream
-                    </SelectItem>
-                    {diarizationEndpoints.map((endpoint) => (
-                      <SelectItem key={endpoint.id} value={endpoint.id}>
-                        {endpoint.name} · {endpoint.providerType}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                Separate speakers in the transcript when a diarization endpoint
-                is available.
-              </FieldDescription>
-            </Field>
-            {effectiveDiarizationEndpoint ? (
+                    label: `${endpoint.name} · ${endpoint.providerType} · ${transcriptionModeLabel(endpoint)}`,
+                  }))}
+                  onValueChange={(value) => setSelectedEndpoint(value ?? "")}
+                  value={effectiveSelectedEndpoint}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select a transcription endpoint" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>Transcription providers</SelectLabel>
+                      {transcriptionEndpoints.map((endpoint) => (
+                        <SelectItem key={endpoint.id} value={endpoint.id}>
+                          {endpoint.name} · {endpoint.providerType} ·{" "}
+                          {transcriptionModeLabel(endpoint)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
               <VideoModelField
-                description="Choose the diarization model used to identify speakers."
-                endpoint={selectedDiarizationEndpointItem}
-                label="Speaker separation model"
+                description="Choose the ASR model used for the timestamped transcript."
+                endpoint={selectedTranscriptionEndpoint}
+                label="Transcription model"
                 loading={
-                  Boolean(selectedDiarizationEndpointItem) &&
+                  Boolean(selectedTranscriptionEndpoint) &&
                   !modelDiscovery[
                     videoModelKey(
-                      selectedDiarizationEndpointItem?.id ?? "",
-                      "diarization"
+                      selectedTranscriptionEndpoint?.id ?? "",
+                      "transcription"
                     )
                   ]
                 }
                 models={modelOptionsFor(
-                  selectedDiarizationEndpointItem,
-                  "diarization"
+                  selectedTranscriptionEndpoint,
+                  "transcription"
                 )}
                 onValueChange={(value) =>
                   setModelValue(
-                    selectedDiarizationEndpointItem,
-                    "diarization",
+                    selectedTranscriptionEndpoint,
+                    "transcription",
                     value
                   )
                 }
-                value={diarizationModel}
+                value={transcriptionModel}
               />
-            ) : null}
-            <Field>
-              <FieldLabel>Grammar polishing</FieldLabel>
-              <Select
-                items={[
-                  { value: "none", label: "Keep verbatim transcript" },
-                  ...grammarEndpoints.map((endpoint) => ({
-                    value: endpoint.id,
-                    label: `${endpoint.name} · ${endpoint.providerType}`,
-                  })),
-                ]}
-                onValueChange={(value) => setGrammarChoice(value ?? "none")}
-                value={effectiveGrammarEndpoint || "none"}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Keep verbatim transcript" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Chat providers</SelectLabel>
-                    <SelectItem value="none">
-                      Keep verbatim transcript
-                    </SelectItem>
-                    {grammarEndpoints.map((endpoint) => (
-                      <SelectItem key={endpoint.id} value={endpoint.id}>
-                        {endpoint.name} · {endpoint.providerType}
+              <Field>
+                <FieldLabel>Speaker separation</FieldLabel>
+                <Select
+                  disabled={diarizationEndpoints.length === 0}
+                  items={[
+                    { value: "none", label: "Keep one transcript stream" },
+                    ...diarizationEndpoints.map((endpoint) => ({
+                      value: endpoint.id,
+                      label: `${endpoint.name} · ${endpoint.providerType}`,
+                    })),
+                  ]}
+                  onValueChange={(value) =>
+                    setSelectedDiarizationEndpoint(value ?? "none")
+                  }
+                  value={selectedDiarizationEndpoint}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Keep one transcript stream" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>Diarization providers</SelectLabel>
+                      <SelectItem value="none">
+                        Keep one transcript stream
                       </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                The original ASR output stays available under Verbatim.
-              </FieldDescription>
-            </Field>
-            {effectiveGrammarEndpoint ? (
-              <VideoModelField
-                description="Choose the chat model used to polish the transcript."
-                endpoint={selectedGrammarEndpoint}
-                label="Grammar model"
-                loading={
-                  Boolean(selectedGrammarEndpoint) &&
-                  !modelDiscovery[
-                    videoModelKey(selectedGrammarEndpoint?.id ?? "", "chat")
-                  ]
-                }
-                models={modelOptionsFor(selectedGrammarEndpoint, "chat")}
-                onValueChange={(value) =>
-                  setModelValue(selectedGrammarEndpoint, "chat", value)
-                }
-                value={grammarModel}
-              />
-            ) : null}
-
+                      {diarizationEndpoints.map((endpoint) => (
+                        <SelectItem key={endpoint.id} value={endpoint.id}>
+                          {endpoint.name} · {endpoint.providerType}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  Separate speakers in the transcript when a diarization
+                  endpoint is available.
+                </FieldDescription>
+              </Field>
+              {effectiveDiarizationEndpoint ? (
+                <VideoModelField
+                  description="Choose the diarization model used to identify speakers."
+                  endpoint={selectedDiarizationEndpointItem}
+                  label="Speaker separation model"
+                  loading={
+                    Boolean(selectedDiarizationEndpointItem) &&
+                    !modelDiscovery[
+                      videoModelKey(
+                        selectedDiarizationEndpointItem?.id ?? "",
+                        "diarization"
+                      )
+                    ]
+                  }
+                  models={modelOptionsFor(
+                    selectedDiarizationEndpointItem,
+                    "diarization"
+                  )}
+                  onValueChange={(value) =>
+                    setModelValue(
+                      selectedDiarizationEndpointItem,
+                      "diarization",
+                      value
+                    )
+                  }
+                  value={diarizationModel}
+                />
+              ) : null}
+              <Field>
+                <FieldLabel>Grammar polishing</FieldLabel>
+                <Select
+                  items={[
+                    { value: "none", label: "Keep verbatim transcript" },
+                    ...grammarEndpoints.map((endpoint) => ({
+                      value: endpoint.id,
+                      label: `${endpoint.name} · ${endpoint.providerType}`,
+                    })),
+                  ]}
+                  onValueChange={(value) => setGrammarChoice(value ?? "none")}
+                  value={effectiveGrammarEndpoint || "none"}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Keep verbatim transcript" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>Chat providers</SelectLabel>
+                      <SelectItem value="none">
+                        Keep verbatim transcript
+                      </SelectItem>
+                      {grammarEndpoints.map((endpoint) => (
+                        <SelectItem key={endpoint.id} value={endpoint.id}>
+                          {endpoint.name} · {endpoint.providerType}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  The original ASR output stays available under Verbatim.
+                </FieldDescription>
+              </Field>
+              {effectiveGrammarEndpoint ? (
+                <VideoModelField
+                  description="Choose the chat model used to polish the transcript."
+                  endpoint={selectedGrammarEndpoint}
+                  label="Grammar model"
+                  loading={
+                    Boolean(selectedGrammarEndpoint) &&
+                    !modelDiscovery[
+                      videoModelKey(selectedGrammarEndpoint?.id ?? "", "chat")
+                    ]
+                  }
+                  models={modelOptionsFor(selectedGrammarEndpoint, "chat")}
+                  onValueChange={(value) =>
+                    setModelValue(selectedGrammarEndpoint, "chat", value)
+                  }
+                  value={grammarModel}
+                />
+              ) : null}
             </FieldGroup>
           ) : (
             <div className="flex flex-col gap-6">
-              <div><h2 className="text-lg font-semibold">Ready when you are</h2><p className="mt-1 text-sm text-muted-foreground">Your video will upload first. Transcription then continues in the background.</p></div>
+              <div>
+                <h2 className="text-lg font-semibold">Ready when you are</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Your video will upload first. Transcription then continues in
+                  the background.
+                </p>
+              </div>
               <div className="flex items-center gap-4 rounded-2xl bg-muted/60 p-4">
-                <FileVideo className="size-8 shrink-0 text-primary" aria-hidden="true" />
-                <div className="min-w-0"><p className="truncate text-sm font-medium">{videoFile?.name}</p><p className="text-xs text-muted-foreground">{((videoFile?.size || 0) / 1024 / 1024).toFixed(1)} MB</p></div>
+                <FileVideo
+                  className="size-8 shrink-0 text-primary"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {videoFile?.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {((videoFile?.size || 0) / 1024 / 1024).toFixed(1)} MB
+                  </p>
+                </div>
               </div>
               <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-4 text-sm">
-                <dt className="text-muted-foreground">Name</dt><dd className="break-words">{title.trim() || "Video transcript"}</dd>
-                <dt className="text-muted-foreground">Language</dt><dd>{language === "auto" ? "Detect automatically" : language}</dd>
-                <dt className="text-muted-foreground">Transcription</dt><dd className="break-words">{selectedTranscriptionEndpoint?.name || "No endpoint selected"}</dd>
-                <dt className="text-muted-foreground">Speakers</dt><dd className="break-words">{selectedDiarizationEndpointItem?.name || "Keep one transcript stream"}</dd>
-                <dt className="text-muted-foreground">Grammar</dt><dd className="break-words">{selectedGrammarEndpoint?.name || "Keep verbatim transcript"}</dd>
+                <dt className="text-muted-foreground">Name</dt>
+                <dd className="break-words">
+                  {title.trim() || "Video transcript"}
+                </dd>
+                <dt className="text-muted-foreground">Language</dt>
+                <dd>
+                  {language === "auto" ? "Detect automatically" : language}
+                </dd>
+                <dt className="text-muted-foreground">Transcription</dt>
+                <dd className="break-words">
+                  {selectedTranscriptionEndpoint?.name ||
+                    "No endpoint selected"}
+                </dd>
+                <dt className="text-muted-foreground">Speakers</dt>
+                <dd className="break-words">
+                  {selectedDiarizationEndpointItem?.name ||
+                    "Keep one transcript stream"}
+                </dd>
+                <dt className="text-muted-foreground">Grammar</dt>
+                <dd className="break-words">
+                  {selectedGrammarEndpoint?.name || "Keep verbatim transcript"}
+                </dd>
               </dl>
             </div>
           )}
@@ -2292,6 +2426,10 @@ function videoModelLabel(model: DiscoveredVideoModel) {
 }
 
 function VideoPipeline({
+  prominent,
+  onViewPartialTranscript,
+  segments,
+  speakers,
   hasDiarizedSpeakers,
   onRetryFailedStep,
   onRequestSkipSpeakerSeparation,
@@ -2300,6 +2438,10 @@ function VideoPipeline({
   upload,
   session,
 }: {
+  prominent: boolean
+  onViewPartialTranscript?: () => void
+  segments: TranscriptionSegment[]
+  speakers: TranscriptionSpeaker[]
   hasDiarizedSpeakers: boolean
   onRetryFailedStep: (step: string) => void
   onRequestSkipSpeakerSeparation: () => void
@@ -2347,16 +2489,12 @@ function VideoPipeline({
   )
   const failedStep = steps.find((step) => step.status === "failed")
   const hasFailedStep = Boolean(failedStep)
-  const completedCount = steps.filter((step) =>
-    ["completed", "skipped"].includes(step.status)
-  ).length
-  const runTimeMs = getVideoPipelineRunTime(session, upload, now)
   const workerStatus = upload.workerStatus
-  const workerCapacity = workerStatus?.capacity ?? 0
   const skipSpeakerRequested = upload.stage === "skipping_diarization"
   const showSpeakerSkipAction =
-    upload.status === "processing" &&
-    (upload.stage === "diarizing" || skipSpeakerRequested)
+    (upload.status === "processing" &&
+      (upload.stage === "diarizing" || skipSpeakerRequested)) ||
+    (upload.status === "failed" && failedStep?.key === "diarization")
   const workersSaturated = Boolean(
     workerStatus && workerStatus.active >= workerStatus.capacity
   )
@@ -2373,62 +2511,90 @@ function VideoPipeline({
             ? skipSpeakerRequested
               ? "Skipping speaker separation"
               : parallelProgress?.phase === "preparing"
-                ? "Preparing audio slices"
+                ? "Preparing audio"
                 : parallelProgress?.phase === "fusing"
-                  ? "Fusing transcript in progress"
+                  ? "Combining transcript blocks"
                   : parallelProgress?.phase === "transcribing"
-                    ? "Transcribing slices in parallel"
+                    ? "Transcribing your recording"
                     : `${videoPipelineStepLabel(activeStep.key)} in progress`
             : upload.status === "queued"
               ? workersSaturated
-                ? "Waiting for an available worker"
+                ? "Waiting to start"
                 : "Queued for transcription"
               : "Preparing video"
 
-  return (
-    <Collapsible
-      className="shrink-0"
-      onOpenChange={handleOpenChange}
-      open={open}
-    >
-      <Card
-        aria-label="Video processing pipeline"
-        className="flex min-h-0 flex-col gap-0 overflow-hidden py-0 shadow-none"
+  const statusHeader =
+    !prominent ||
+    (failedStep && failedStep.key !== "upload") ||
+    showSpeakerSkipAction ||
+    onViewPartialTranscript ? (
+      <CardHeader
+        className={cn("gap-2 px-4 py-3 sm:px-5", !prominent && "order-first")}
       >
-        <CardHeader className="gap-2 px-4 py-3 sm:px-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              {hasFailedStep || upload.status === "failed" ? (
-                <CircleAlert
-                  aria-hidden="true"
-                  className="size-4 text-destructive"
-                />
-              ) : isActive ? (
-                <LoaderCircle
-                  aria-hidden="true"
-                  className="size-4 animate-spin text-primary"
-                />
-              ) : upload.status === "cancelled" ? (
-                <X aria-hidden="true" className="size-4 text-muted-foreground" />
-              ) : (
-                <Check aria-hidden="true" className="size-4 text-primary" />
-              )}
-              {failedStep
-                ? `${videoPipelineStepLabel(failedStep.key)} needs attention`
-                : overallLabel}
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              {failedStep && failedStep.key !== "upload" ? (
-                <Button
-                  disabled={Boolean(retryingStep)}
-                  onClick={() => onRetryFailedStep(failedStep.key)}
-                  size="sm"
-                  variant="outline"
-                >
-                  <RefreshCw data-icon="inline-start" />{" "}
-                  {retryingStep ? "Retrying…" : "Retry step"}
-                </Button>
-              ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle
+            className={cn(
+              "flex items-center gap-2 text-sm",
+              prominent && "sr-only"
+            )}
+          >
+            {hasFailedStep || upload.status === "failed" ? (
+              <CircleAlert
+                aria-hidden="true"
+                className="size-4 text-destructive"
+              />
+            ) : isActive ? (
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-4 animate-spin text-primary"
+              />
+            ) : upload.status === "cancelled" ? (
+              <X aria-hidden="true" className="size-4 text-muted-foreground" />
+            ) : (
+              <Check aria-hidden="true" className="size-4 text-primary" />
+            )}
+            {failedStep
+              ? `${videoPipelineStepLabel(failedStep.key)} needs attention`
+              : overallLabel}
+          </CardTitle>
+          <div
+            className={cn(
+              "flex flex-wrap items-center gap-2",
+              prominent && "w-full justify-center pb-3"
+            )}
+          >
+            {failedStep && failedStep.key !== "upload" ? (
+              <Button
+                disabled={Boolean(retryingStep)}
+                onClick={() => onRetryFailedStep(failedStep.key)}
+                size="sm"
+                variant="outline"
+              >
+                <RefreshCw data-icon="inline-start" />{" "}
+                {retryingStep ? "Retrying…" : "Retry step"}
+              </Button>
+            ) : null}
+            {showSpeakerSkipAction ? (
+              <Button
+                disabled={skipSpeakerInFlight || skipSpeakerRequested}
+                onClick={onRequestSkipSpeakerSeparation}
+                size="sm"
+                variant="ghost"
+              >
+                <SkipForward data-icon="inline-start" />{" "}
+                {skipSpeakerRequested ? "Skipping…" : "Skip speaker separation"}
+              </Button>
+            ) : null}
+            {onViewPartialTranscript ? (
+              <Button
+                onClick={onViewPartialTranscript}
+                size="sm"
+                variant="ghost"
+              >
+                <FileText data-icon="inline-start" /> View partial transcript
+              </Button>
+            ) : null}
+            {!prominent ? (
               <CollapsibleTrigger
                 render={<Button size="sm" variant="ghost" />}
                 aria-label={
@@ -2437,7 +2603,7 @@ function VideoPipeline({
                     : "Expand video processing pipeline"
                 }
               >
-                {open ? "Hide details" : "Processing details"}
+                {open ? "Hide output" : "Step output"}
                 <ChevronDown
                   data-icon="inline-end"
                   className={cn(
@@ -2446,566 +2612,79 @@ function VideoPipeline({
                   )}
                 />
               </CollapsibleTrigger>
-            </div>
+            ) : null}
           </div>
-          {isActive ? (
-            <Progress
-              aria-label="Overall video processing progress"
-              className="h-1"
-              value={Math.max(0, Math.min(100, upload.progress))}
-            />
-          ) : null}
-        </CardHeader>
-        <CollapsibleContent>
-          <CardContent className="px-4 pb-4 sm:px-5">
-            <div className="mb-4 flex flex-wrap gap-3 text-xs text-muted-foreground">
-              <span>
-                {completedCount}/{steps.length} steps
-              </span>
-              <span>Run time · {formatPipelineStepDuration(runTimeMs)}</span>
-              {parallelProgress ? (
-                <span>
-                  {parallelProgress.workerCount ?? 1} parallel workers
-                </span>
-              ) : null}
-              {workerStatus && isActive ? (
-                <span>
-                  {workerStatus.active}/{workerCapacity} video workers
-                </span>
-              ) : null}
-            </div>
-            {upload.error && !steps.some((step) => step.status === "failed" && step.error === upload.error) ? (
-              <Alert variant="destructive" className="mb-4">
-                <AlertTitle>
-                  {upload.status === "failed"
-                    ? "Processing needs attention"
-                    : "Processing is retrying"}
-                </AlertTitle>
-                <AlertDescription>{upload.error}</AlertDescription>
-              </Alert>
-            ) : null}
+        </div>
+        {isActive && !prominent ? (
+          <Progress
+            aria-label="Overall video processing progress"
+            className="h-1"
+            value={Math.max(0, Math.min(100, upload.progress))}
+          />
+        ) : null}
+      </CardHeader>
+    ) : null
 
-            {upload.status === "queued" && workerStatus ? (
-              <VideoWorkerQueue status={workerStatus} />
-            ) : null}
-            {parallelProgress ? (
-              <ParallelTranscriptionFlow
-                key={
-                  upload.status === "completed" ||
-                  parallelProgress.phase === "complete"
-                    ? "complete"
-                    : "active"
+  return (
+    <Collapsible
+      className={cn(
+        "shrink-0",
+        prominent && "mx-auto w-full max-w-3xl py-6 sm:py-10"
+      )}
+      onOpenChange={handleOpenChange}
+      open={prominent || open}
+    >
+      <Card
+        aria-label="Video processing pipeline"
+        className="flex min-h-0 flex-col gap-0 overflow-hidden py-0 shadow-none"
+      >
+        {prominent ? (
+          <VideoProcessingProgress
+            steps={steps}
+            status={upload.status}
+            statusLabel={
+              failedStep
+                ? `${videoPipelineStepLabel(failedStep.key)} failed`
+                : overallLabel
+            }
+            elapsed={
+              isActive && activeStep
+                ? formatPipelineStepDuration(
+                    getVideoPipelineStepDuration(
+                      activeStep,
+                      now,
+                      steps,
+                      steps.indexOf(activeStep)
+                    )
+                  )
+                : undefined
+            }
+            uploadProgress={Math.max(0, Math.min(100, upload.progress))}
+          />
+        ) : null}
+        {!prominent ? statusHeader : null}
+        <CollapsibleContent>
+          <CardContent
+            className={cn("px-4 pb-4 sm:px-5", prominent && "sm:px-8")}
+          >
+            <div className={cn(!prominent && "max-w-3xl")}>
+              <VideoProcessingOutput
+                key={activeStep?.key ?? failedStep?.key ?? upload.stage}
+                step={
+                  activeStep?.key ??
+                  failedStep?.key ??
+                  (upload.status === "uploading" ? "upload" : "finalization")
                 }
-                progress={parallelProgress}
                 upload={upload}
+                segments={segments}
+                speakers={speakers}
+                error={failedStep?.error || upload.error}
               />
-            ) : null}
-            <div
-              className="flex min-w-0 flex-row items-stretch gap-0 overflow-x-auto pb-2 md:overflow-visible md:pb-0"
-              role="list"
-            >
-              {steps.map((step, index) => {
-                const active =
-                  step.status === "active" || step.status === "retrying"
-                const Icon = videoPipelineStepIcon(step.status)
-                return (
-                  <Fragment key={step.key}>
-                    <div
-                      className={cn(
-                        "w-[13rem] min-w-0 flex-none rounded-xl border p-3 transition-[transform,opacity,background-color,border-color] duration-200 ease-out motion-reduce:transition-none md:w-auto md:flex-1",
-                        videoPipelineStepClass(step.status),
-                        active && "md:-translate-y-0.5"
-                      )}
-                      role="listitem"
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <span
-                          className={cn(
-                            "flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground",
-                            active &&
-                              "video-pipeline-orb border-primary/50 bg-primary/10 text-primary",
-                            step.status === "completed" &&
-                              "border-primary/30 bg-primary/10 text-primary",
-                            step.status === "failed" &&
-                              "border-destructive/40 bg-destructive/10 text-destructive",
-                            step.status === "cancelled" &&
-                              "border-destructive/30 bg-destructive/5 text-destructive"
-                          )}
-                        >
-                          <Icon
-                            aria-hidden="true"
-                            className={cn(
-                              "size-4",
-                              active &&
-                                "motion-safe:animate-spin motion-reduce:animate-none"
-                            )}
-                          />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-medium">
-                            {videoPipelineStepLabel(step.key)}
-                          </p>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">
-                            {videoPipelineStepDescription(step.key)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-2 text-[11px]">
-                        <span className="text-muted-foreground">
-                          {videoPipelineStatusLabel(step.status)}
-                        </span>
-                        <span className="font-medium text-foreground tabular-nums">
-                          {step.durationEstimated ? "~" : ""}
-                          {formatPipelineStepDuration(
-                            getVideoPipelineStepDuration(
-                              step,
-                              now,
-                              steps,
-                              index
-                            )
-                          )}
-                        </span>
-                      </div>
-                      {step.status === "failed" && step.error ? (
-                        <p className="mt-2 text-[11px] break-words text-destructive">
-                          {step.error}
-                        </p>
-                      ) : null}
-                      {step.status === "failed" && step.key !== "upload" ? (
-                        <Button
-                          className="mt-2 w-full justify-center"
-                          disabled={Boolean(retryingStep)}
-                          onClick={() => onRetryFailedStep(step.key)}
-                          size="xs"
-                          type="button"
-                          variant="outline"
-                        >
-                          {retryingStep === step.key ? (
-                            <LoaderCircle
-                              className="animate-spin"
-                              data-icon="inline-start"
-                            />
-                          ) : (
-                            <RefreshCw data-icon="inline-start" />
-                          )}
-                          {retryingStep === step.key
-                            ? "Retrying…"
-                            : "Retry this step"}
-                        </Button>
-                      ) : null}
-                      {step.key === "diarization" && showSpeakerSkipAction ? (
-                        <Button
-                          className="mt-2 w-full justify-center"
-                          disabled={skipSpeakerInFlight || skipSpeakerRequested}
-                          onClick={onRequestSkipSpeakerSeparation}
-                          size="xs"
-                          type="button"
-                          variant="outline"
-                        >
-                          {skipSpeakerInFlight || skipSpeakerRequested ? (
-                            <LoaderCircle
-                              className="animate-spin"
-                              data-icon="inline-start"
-                            />
-                          ) : (
-                            <SkipForward data-icon="inline-start" />
-                          )}
-                          {skipSpeakerRequested
-                            ? "Skipping…"
-                            : "Skip speaker separation"}
-                        </Button>
-                      ) : null}
-                    </div>
-                    {index < steps.length - 1 ? (
-                      <div
-                        aria-hidden="true"
-                        className={cn(
-                          "mx-2 my-auto h-px w-5 shrink-0 bg-border",
-                          ["completed", "skipped"].includes(step.status) &&
-                            "bg-primary/40"
-                        )}
-                      />
-                    ) : null}
-                  </Fragment>
-                )
-              })}
             </div>
           </CardContent>
         </CollapsibleContent>
+        {prominent ? statusHeader : null}
       </Card>
-    </Collapsible>
-  )
-}
-
-function VideoWorkerQueue({
-  status,
-}: {
-  status: TranscriptionVideoWorkerStatus
-}) {
-  const capacity = Math.max(1, status.capacity)
-  const active = Math.min(capacity, Math.max(0, status.active))
-  const queued = Math.max(1, status.queued)
-  const position = Math.max(1, status.queuePosition ?? 1)
-  const saturated = active >= capacity
-  const visibleSlots = Math.min(capacity, 6)
-  const queuedBehind = Math.max(0, queued - position)
-  const visibleQueueItems = Math.min(queued, 5)
-  const yourQueueIndex = Math.min(position - 1, visibleQueueItems - 1)
-  const hiddenAhead = Math.max(0, position - visibleQueueItems)
-
-  return (
-    <div
-      aria-live="polite"
-      className="video-worker-queue mb-4 rounded-xl border border-primary/20 bg-primary/[0.035] p-3 sm:p-4"
-      role="status"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span className="video-worker-queue-icon flex size-9 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
-            <Clock3 aria-hidden="true" className="size-4" />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-foreground">
-              {saturated
-                ? "All transcription workers are busy"
-                : position === 1
-                  ? "Your transcription is next in line"
-                  : "Your transcription is queued"}
-            </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {saturated
-                ? "Your video is safely queued and will start automatically as soon as a worker is free."
-                : position === 1
-                  ? "The worker pool is opening a slot for your video now."
-                  : "The videos ahead of you will be processed in order."}
-            </p>
-          </div>
-        </div>
-        <Badge className="shrink-0 text-[10px]" variant="secondary">
-          Queue position {position}
-        </Badge>
-      </div>
-
-      <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="video-worker-queue-lane rounded-lg border border-border/70 bg-background/65 p-2.5">
-          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-            <span>Worker pool</span>
-            <span className="tabular-nums">
-              {active} of {capacity} busy
-            </span>
-          </div>
-          <div
-            className="mt-2 grid gap-1.5"
-            style={{
-              gridTemplateColumns: `repeat(${visibleSlots}, minmax(0, 1fr))`,
-            }}
-          >
-            {Array.from({ length: visibleSlots }, (_, index) => {
-              const busy = index < active
-              return (
-                <div
-                  className={cn(
-                    "flex min-w-0 items-center justify-center gap-1 rounded-md border px-1.5 py-2 text-[9px] text-muted-foreground",
-                    busy
-                      ? "video-worker-queue-worker border-primary/25 bg-primary/10 text-primary"
-                      : "border-border/60 bg-muted/20"
-                  )}
-                  key={index}
-                  title={
-                    busy
-                      ? "Worker is processing another video"
-                      : "Available worker"
-                  }
-                >
-                  <span className="size-1.5 shrink-0 rounded-full bg-current" />
-                  <span className="truncate">
-                    W{String(index + 1).padStart(2, "0")}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          {capacity > visibleSlots ? (
-            <p className="mt-1.5 text-[10px] text-muted-foreground">
-              +{capacity - visibleSlots} more configured worker
-              {capacity - visibleSlots === 1 ? "" : "s"}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="video-worker-queue-lane rounded-lg border border-border/70 bg-background/65 p-2.5">
-          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-            <span>Queue flow</span>
-            <span className="tabular-nums">{queuedBehind} behind you</span>
-          </div>
-          <div className="relative mt-2 flex min-h-11 items-center gap-1.5 overflow-hidden rounded-md border border-border/60 bg-muted/20 px-2">
-            <span aria-hidden="true" className="video-worker-queue-flow" />
-            {Array.from({ length: visibleQueueItems }, (_, index) => {
-              const isYou = index === yourQueueIndex
-              return (
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "video-worker-queue-token relative z-1 flex size-6 shrink-0 items-center justify-center rounded-full border text-[9px] font-medium",
-                    isYou
-                      ? "border-primary/35 bg-primary/15 text-primary"
-                      : "border-border/70 bg-background text-muted-foreground"
-                  )}
-                  key={index}
-                >
-                  {isYou ? "You" : "•"}
-                </span>
-              )
-            })}
-            {hiddenAhead > 0 ? (
-              <span className="relative z-1 text-[10px] text-muted-foreground">
-                +{hiddenAhead} ahead
-              </span>
-            ) : queued > visibleQueueItems ? (
-              <span className="relative z-1 text-[10px] text-muted-foreground">
-                +{queued - visibleQueueItems}
-              </span>
-            ) : null}
-            <span className="relative z-1 ml-auto flex size-6 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary">
-              <LoaderCircle
-                aria-hidden="true"
-                className="size-3 motion-safe:animate-spin motion-reduce:animate-none"
-              />
-            </span>
-          </div>
-          <p className="mt-1.5 text-[10px] text-muted-foreground">
-            No work is lost while you wait.
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ParallelTranscriptionFlow({
-  progress,
-  upload,
-}: {
-  progress: TranscriptionVideoParallelProgress
-  upload: TranscriptionVideoUpload
-}) {
-  const phase =
-    upload.status === "completed" ? "complete" : progress.phase || "preparing"
-  const [open, setOpen] = useState(() => phase !== "complete")
-  const phaseOrder: Record<string, number> = {
-    preparing: 0,
-    transcribing: 1,
-    fusing: 2,
-    complete: 3,
-  }
-  const currentPhase = phaseOrder[phase] ?? 0
-  const interrupted =
-    upload.status === "failed" || upload.status === "cancelled"
-  const sliceCount = Math.max(0, progress.sliceCount ?? 0)
-  const completedSlices = Math.min(
-    sliceCount,
-    Math.max(0, progress.completedSlices ?? 0)
-  )
-  const workerCount = Math.max(1, Math.min(progress.workerCount ?? 1, 8))
-  const sliceProgress =
-    phase === "preparing"
-      ? 0
-      : phase === "fusing" || phase === "complete"
-        ? 100
-        : sliceCount > 0
-          ? Math.round((completedSlices / sliceCount) * 100)
-          : 0
-  const stages = [
-    {
-      key: "preparing",
-      label: "Prepare audio",
-      description: "Extract and cut overlapping slices",
-      icon: FileVideo,
-    },
-    {
-      key: "transcribing",
-      label: "Transcribe slices",
-      description: "Run multiple workers at once",
-      icon: AudioLines,
-    },
-    {
-      key: "fusing",
-      label: "Fuse transcript",
-      description: "Sort timestamps and remove overlap",
-      icon: GitMerge,
-    },
-  ]
-
-  return (
-    <Collapsible className="mb-4" onOpenChange={setOpen} open={open}>
-      <div
-        aria-label="Parallel transcription details"
-        className="rounded-xl border border-primary/15 bg-primary/[0.025] p-3 sm:p-4"
-      >
-        <CollapsibleTrigger
-          aria-label={
-            open
-              ? "Collapse parallel transcription details"
-              : "Expand parallel transcription details"
-          }
-          className="flex w-full items-start justify-between gap-3 text-left"
-          type="button"
-        >
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs font-medium text-foreground">
-              <AudioLines
-                aria-hidden="true"
-                className="size-3.5 text-primary"
-              />
-              Parallel transcription
-            </div>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              The source is split into overlapping audio slices so long videos
-              do not wait on one continuous transcription stream.
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Badge className="text-[10px]" variant="outline">
-              {progress.workerCount ?? 1} workers
-            </Badge>
-            <ChevronDown
-              aria-hidden="true"
-              className={cn(
-                "size-4 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
-                !open && "-rotate-90"
-              )}
-            />
-          </div>
-        </CollapsibleTrigger>
-
-        <CollapsibleContent>
-          <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
-            {stages.map((stage, index) => {
-              const stageIndex = phaseOrder[stage.key] ?? index
-              const complete = phase === "complete" || stageIndex < currentPhase
-              const active = !complete && stageIndex === currentPhase
-              const failed = interrupted && active
-              const Icon = failed
-                ? CircleAlert
-                : complete
-                  ? Check
-                  : active
-                    ? LoaderCircle
-                    : stage.icon
-              return (
-                <Fragment key={stage.key}>
-                  <div
-                    className={cn(
-                      "flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 transition-[background-color,border-color,transform] duration-200 ease-out motion-reduce:transition-none",
-                      complete && "border-primary/20 bg-primary/[0.04]",
-                      active &&
-                        !failed &&
-                        "-translate-y-0.5 border-primary/35 bg-primary/10",
-                      failed &&
-                        "border-destructive/30 bg-destructive/10 text-destructive",
-                      !complete &&
-                        !active &&
-                        "border-border/70 bg-background/50"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground",
-                        complete &&
-                          "border-primary/25 bg-primary/10 text-primary",
-                        active && !failed && "border-primary/40 text-primary",
-                        failed &&
-                          "border-destructive/30 bg-destructive/10 text-destructive"
-                      )}
-                    >
-                      <Icon
-                        aria-hidden="true"
-                        className={cn(
-                          "size-3.5",
-                          active &&
-                            !failed &&
-                            "motion-safe:animate-spin motion-reduce:animate-none"
-                        )}
-                      />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-[11px] font-medium">
-                        {stage.label}
-                      </span>
-                      <span className="block truncate text-[10px] text-muted-foreground">
-                        {failed
-                          ? upload.status === "cancelled"
-                            ? "Cancelled"
-                            : "Stopped"
-                          : stage.description}
-                      </span>
-                    </span>
-                  </div>
-                  {index < stages.length - 1 ? (
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        "hidden h-px bg-border md:block",
-                        stageIndex < currentPhase && "bg-primary/40"
-                      )}
-                    />
-                  ) : null}
-                </Fragment>
-              )
-            })}
-          </div>
-
-          <div className="mt-3 rounded-lg border border-border/70 bg-background/70 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <span className="font-medium text-foreground">
-                {sliceCount > 0
-                  ? `${completedSlices} of ${sliceCount} slices complete`
-                  : "Building the slice map…"}
-              </span>
-              <span className="text-muted-foreground">
-                {formatVideoDuration(progress.chunkDurationMs ?? 0)} windows ·{" "}
-                {formatVideoDuration(progress.overlapMs ?? 0)} overlap
-              </span>
-            </div>
-            <Progress
-              aria-label="Parallel slice transcription progress"
-              className="mt-2 h-1.5"
-              value={sliceProgress}
-            />
-            <div className="mt-3 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
-              {Array.from({ length: workerCount }, (_, index) => {
-                const workerActive = phase === "transcribing" && !interrupted
-                return (
-                  <div
-                    className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"
-                    key={index}
-                  >
-                    <span
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full bg-muted-foreground/40",
-                        workerActive &&
-                          "bg-primary motion-safe:animate-pulse motion-reduce:animate-none",
-                        (phase === "fusing" || phase === "complete") &&
-                          "bg-primary/70"
-                      )}
-                    />
-                    <span>Worker {String(index + 1).padStart(2, "0")}</span>
-                    <span className="ml-auto">
-                      {workerActive
-                        ? "processing"
-                        : phase === "preparing"
-                          ? "ready"
-                          : interrupted
-                            ? "stopped"
-                            : "joined"}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </CollapsibleContent>
-      </div>
     </Collapsible>
   )
 }
@@ -3512,83 +3191,6 @@ function videoPipelineStepLabel(key: string) {
   }
 }
 
-function videoPipelineStepDescription(key: string) {
-  switch (key) {
-    case "upload":
-      return "Store the source video"
-    case "transcription":
-      return "Create timestamped text"
-    case "diarization":
-      return "Match words to speakers"
-    case "grammar":
-      return "Correct grammar and punctuation"
-    case "finalization":
-      return "Publish the transcript"
-    default:
-      return ""
-  }
-}
-
-function videoPipelineStatusLabel(
-  status: TranscriptionVideoPipelineStep["status"]
-) {
-  switch (status) {
-    case "active":
-      return "In progress"
-    case "retrying":
-      return "Retrying"
-    case "completed":
-      return "Complete"
-    case "skipped":
-      return "Skipped"
-    case "failed":
-      return "Failed"
-    case "cancelled":
-      return "Cancelled"
-    default:
-      return "Pending"
-  }
-}
-
-function videoPipelineStepIcon(
-  status: TranscriptionVideoPipelineStep["status"]
-): LucideIcon {
-  switch (status) {
-    case "active":
-      return LoaderCircle
-    case "retrying":
-      return RefreshCw
-    case "completed":
-      return Check
-    case "failed":
-      return CircleAlert
-    case "cancelled":
-      return X
-    default:
-      return CircleDashed
-  }
-}
-
-function videoPipelineStepClass(
-  status: TranscriptionVideoPipelineStep["status"]
-) {
-  switch (status) {
-    case "active":
-    case "retrying":
-      return "border-primary/40 bg-primary/5"
-    case "completed":
-      return "border-primary/20 bg-primary/[0.03]"
-    case "failed":
-      return "border-destructive/30 bg-destructive/5"
-    case "cancelled":
-      return "border-destructive/20 bg-destructive/[0.03]"
-    case "skipped":
-      return "border-dashed bg-muted/30 opacity-75"
-    default:
-      return "bg-muted/20"
-  }
-}
-
 function getVideoPipelineStepDuration(
   step: TranscriptionVideoPipelineStep,
   now: number,
@@ -3635,21 +3237,6 @@ function getVideoPipelinePreviousBoundary(
     }
   }
   return null
-}
-
-function getVideoPipelineRunTime(
-  session: TranscriptionSession,
-  upload: TranscriptionVideoUpload,
-  now: number
-) {
-  const startedAt = Date.parse(session.startedAt || upload.createdAt)
-  if (!Number.isFinite(startedAt)) return 0
-  const terminal = ["completed", "failed", "cancelled"].includes(upload.status)
-  const endedAt = terminal
-    ? Date.parse(session.endedAt || upload.completedAt || upload.updatedAt)
-    : now
-  if (!Number.isFinite(endedAt)) return 0
-  return Math.max(0, endedAt - startedAt)
 }
 
 function formatPipelineStepDuration(durationMs: number) {

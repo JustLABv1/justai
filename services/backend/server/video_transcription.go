@@ -612,6 +612,20 @@ func (m *TranscriptionManager) cancelVideoJob(ctx context.Context, uploadID uuid
 	return nil
 }
 
+func videoSpeakerSeparationCanSkip(status, stage string, steps []models.TranscriptionVideoPipelineStep) bool {
+	if status == "processing" {
+		return videoDiarizationStageIsActive(stage)
+	}
+	if status == "failed" {
+		for _, step := range steps {
+			if step.Status == "failed" {
+				return step.Key == videoRetryStepDiarization
+			}
+		}
+	}
+	return false
+}
+
 func (m *TranscriptionManager) skipVideoDiarization(ctx context.Context, uploadID uuid.UUID) (models.TranscriptionVideoUpload, error) {
 	transaction, err := m.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -621,23 +635,32 @@ func (m *TranscriptionManager) skipVideoDiarization(ctx context.Context, uploadI
 
 	var sessionID uuid.UUID
 	var status, stage string
+	var rawPipeline []byte
 	if err := transaction.QueryRowContext(ctx, `
-		SELECT session_id, status, stage
+		SELECT session_id, status, stage, pipeline_steps
 		FROM transcription_video_uploads
 		WHERE id = $1
-		FOR UPDATE`, uploadID).Scan(&sessionID, &status, &stage); err != nil {
+		FOR UPDATE`, uploadID).Scan(&sessionID, &status, &stage, &rawPipeline); err != nil {
 		return models.TranscriptionVideoUpload{}, err
 	}
-	if status != "processing" {
-		return models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation can only be skipped while processing (video is %s)", status)
+	if status != "processing" && status != "failed" {
+		return models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation can only be skipped while processing or after failure (video is %s)", status)
 	}
-	if !videoDiarizationStageIsActive(stage) {
-		return models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation is not currently running")
+	if !videoSpeakerSeparationCanSkip(status, stage, decodeVideoPipeline(rawPipeline)) {
+		return models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation is not currently running or failed")
 	}
-	if stage == "diarizing" {
-		if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET stage = $2, updated_at = now() WHERE id = $1`, uploadID, videoDiarizationSkipStage); err != nil {
+	if status == "failed" {
+		// Preserve the skip marker when the worker resumes, without rerunning ASR.
+		payload, _ := json.Marshal(videoJobPayload{UploadID: uploadID.String(), RetryFrom: videoRetryStepDiarization})
+		if _, err := transaction.ExecContext(ctx, `INSERT INTO transcription_jobs (id, session_id, job_type, payload) VALUES ($1, $2, $3, $4)`, uuid.New(), sessionID, videoTranscriptionJobType, payload); err != nil {
 			return models.TranscriptionVideoUpload{}, err
 		}
+		if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'processing', ended_at = NULL, polish_status = CASE WHEN grammar_endpoint_id IS NULL THEN polish_status ELSE 'queued' END, updated_at = now() WHERE id = $1`, sessionID); err != nil {
+			return models.TranscriptionVideoUpload{}, err
+		}
+	}
+	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_video_uploads SET status = CASE WHEN status = 'failed' THEN 'queued' ELSE status END, stage = $2, progress = 86, completed_at = NULL, error_message = NULL, updated_at = now() WHERE id = $1`, uploadID, videoDiarizationSkipStage); err != nil {
+		return models.TranscriptionVideoUpload{}, err
 	}
 	if err := transaction.Commit(); err != nil {
 		return models.TranscriptionVideoUpload{}, err
@@ -647,7 +670,11 @@ func (m *TranscriptionManager) skipVideoDiarization(ctx context.Context, uploadI
 	// skipping does not have to wait for the provider's own timeout.
 	m.cancelVideoDiarization(uploadID)
 	m.broadcast(sessionID, "transcription.diarization", ginData{"status": "skipping"})
-	m.broadcastVideoProgress(uploadID, "processing", 86, videoDiarizationSkipStage, "")
+	broadcastStatus := "processing"
+	if status == "failed" {
+		broadcastStatus = "queued"
+	}
+	m.broadcastVideoProgress(uploadID, broadcastStatus, 86, videoDiarizationSkipStage, "")
 	return loadVideoUpload(ctx, m.DB, uploadID)
 }
 
