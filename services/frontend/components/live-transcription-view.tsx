@@ -22,6 +22,8 @@ import {
 import type { LucideIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { LiveProcessingSettings } from "@/components/live-processing-settings"
+import { LiveTranscriptProcessingPanel } from "@/components/live-transcript-processing-panel"
 import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
 import { LiveTranscriptionConversationView } from "@/components/live-transcription-conversation-view"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
@@ -449,6 +451,39 @@ export function LiveTranscriptionView({
   onCreateSessionRequestHandled?: () => void
 }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
+  const processingSessionId = snapshot?.session.id
+  const processingSessionStatus = snapshot?.session.status
+  const processingStatus = snapshot?.liveProcessing?.status
+  useEffect(() => {
+    if (!processingSessionId || processingSessionStatus !== "completed") return
+    const id = processingSessionId
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout>
+    const refresh = async () => {
+      try {
+        const next = await api.get<Snapshot>(
+          `/api/v1/transcription/sessions/${id}`
+        )
+        if (stopped) return
+        setSnapshot((current) => (current?.session.id === id ? next : current))
+        if (
+          !next.liveProcessing ||
+          next.liveProcessing.status === "completed" ||
+          next.liveProcessing.status === "failed"
+        )
+          return
+      } catch {
+        /* Retry transient snapshot errors without hiding the transcript. */
+      }
+      if (!stopped) timer = setTimeout(() => void refresh(), 3000)
+    }
+    void refresh()
+    return () => {
+      stopped = true
+      clearTimeout(timer)
+    }
+  }, [processingSessionId, processingSessionStatus, processingStatus])
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [transportStatus, setTransportStatus] =
@@ -592,7 +627,7 @@ export function LiveTranscriptionView({
     () =>
       endpoints.filter(
         (endpoint) =>
-          endpoint.providerType !== "pyannote" &&
+          endpoint.enabled &&
           endpointSupportsCapability(endpoint, "diarization")
       ),
     [endpoints]
@@ -1599,7 +1634,7 @@ export function LiveTranscriptionView({
         kind: "live",
         title,
         language,
-        recordAudio,
+        recordAudio: recordAudio || Boolean(selectedDiarizationEndpoint),
         transcriptionEndpointId: effectiveSelectedEndpoint,
         diarizationEndpointId: selectedDiarizationEndpoint || undefined,
         grammarEndpointId: effectiveGrammarEndpoint || undefined,
@@ -2180,6 +2215,13 @@ export function LiveTranscriptionView({
         </>
       ) : snapshot && !createOpen && snapshot.session.status === "completed" ? (
         <>
+          {snapshot.liveProcessing ? (
+            <LiveTranscriptProcessingPanel
+              snapshot={snapshot}
+              onChange={(next) => setSnapshot(next)}
+              onError={setError}
+            />
+          ) : null}
           <TranscriptWorkspace
             key={snapshot.session.id}
             currentTimeMs={workspaceTimeMs}
@@ -2205,6 +2247,15 @@ export function LiveTranscriptionView({
       ) : snapshot && !createOpen ? (
         <>
           <LiveTranscriptionConversationView
+            processingSettings={
+              <LiveProcessingSettings
+                key={snapshot.session.id}
+                snapshot={snapshot}
+                diarizationEndpoints={diarizationEndpoints}
+                grammarEndpoints={grammarEndpoints}
+                onChange={(next) => setSnapshot(next)}
+              />
+            }
             capturing={capturing}
             canStartCapture
             joinRequests={joinRequests}
@@ -2664,7 +2715,7 @@ export function LiveTranscriptionView({
                   </Field>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field>
-                      <FieldLabel>Diarization endpoint</FieldLabel>
+                      <FieldLabel>Speaker separation after capture</FieldLabel>
                       <Select
                         items={[
                           { value: "none", label: "No speaker separation" },
@@ -2697,6 +2748,10 @@ export function LiveTranscriptionView({
                           </SelectGroup>
                         </SelectContent>
                       </Select>
+                      <FieldDescription>
+                        Runs after capture ends. Audio recording is required and
+                        enabled automatically.
+                      </FieldDescription>
                     </Field>
                     <Field>
                       <FieldLabel>Grammar polish</FieldLabel>
@@ -2732,6 +2787,10 @@ export function LiveTranscriptionView({
                           </SelectGroup>
                         </SelectContent>
                       </Select>
+                      <FieldDescription>
+                        Runs automatically after speaker separation, when
+                        capture ends.
+                      </FieldDescription>
                     </Field>
                   </div>
                 </div>
@@ -2745,7 +2804,10 @@ export function LiveTranscriptionView({
                   </div>
                   <Switch
                     aria-label="Record source audio"
-                    checked={recordAudio}
+                    checked={
+                      recordAudio || Boolean(selectedDiarizationEndpoint)
+                    }
+                    disabled={Boolean(selectedDiarizationEndpoint)}
                     onCheckedChange={setRecordAudio}
                   />
                 </div>
@@ -2809,8 +2871,16 @@ export function LiveTranscriptionView({
                       {title.trim() || "Room session"}
                     </p>
                     <div className="mt-1">
-                      <Badge variant={recordAudio ? "secondary" : "outline"}>
-                        {recordAudio ? "Recording enabled" : "Recording off"}
+                      <Badge
+                        variant={
+                          recordAudio || selectedDiarizationEndpoint
+                            ? "secondary"
+                            : "outline"
+                        }
+                      >
+                        {recordAudio || selectedDiarizationEndpoint
+                          ? "Recording enabled"
+                          : "Recording off"}
                       </Badge>
                     </div>
                   </div>

@@ -54,7 +54,17 @@ import { api } from "@/lib/api"
 import { groupTranscriptionSegments } from "@/lib/transcription"
 import { cn } from "@/lib/utils"
 
+export type LiveTranscriptProcessing = {
+  status: "queued" | "processing" | "completed" | "failed"
+  stage: "recording" | "diarization" | "grammar" | "completed"
+  diarizationStatus:
+    "queued" | "processing" | "completed" | "failed" | "skipped"
+  polishStatus: "queued" | "processing" | "completed" | "failed" | "skipped"
+  error?: string
+}
+
 export type LiveTranscriptionSnapshot = {
+  liveProcessing?: LiveTranscriptProcessing | null
   session: TranscriptionSession
   sources: TranscriptionSource[]
   speakers: TranscriptionSpeaker[]

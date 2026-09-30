@@ -102,6 +102,7 @@ func (m *TranscriptionManager) Start(ctx context.Context) {
 	go m.cleanupLoop(ctx)
 	m.startVideoWorker(ctx)
 	go m.streamSourceSchedulerLoop(ctx)
+	go m.liveProcessingLoop(ctx)
 }
 
 func (m *TranscriptionManager) cleanupLoop(ctx context.Context) {

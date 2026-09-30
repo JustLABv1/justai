@@ -251,6 +251,8 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/video-uploads/:id/cancel", a.platformFeature("transcription"), a.cancelVideoTranscription)
 	org.GET("/transcription/video-uploads/:id/playback", a.platformFeature("transcription"), a.getVideoTranscriptionPlayback)
 	org.POST("/transcription/sessions/:id/sources", a.platformFeature("transcription"), a.createTranscriptionSource)
+	org.PUT("/transcription/sessions/:id/processing", a.platformFeature("transcription"), a.configureLiveProcessing)
+	org.POST("/transcription/sessions/:id/processing", a.platformFeature("transcription"), a.controlLiveProcessing)
 	org.POST("/transcription/stream-sources/resolve", a.platformFeature("transcription"), a.resolveTranscriptionStream)
 	org.POST("/transcription/sessions/:id/stream-sources", a.platformFeature("transcription"), a.createTranscriptionStreamSource)
 	org.POST("/transcription/sessions/:id/bot-sources", a.platformFeature("transcription"), a.createTranscriptionBotSource)

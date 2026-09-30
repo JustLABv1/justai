@@ -113,12 +113,22 @@ func (a *App) polishTranscriptionSession(c *gin.Context) {
 		writeError(c, 400, fmt.Errorf("polish the transcript after the live session is complete"))
 		return
 	}
+	processing, err := loadLiveProcessing(c, a.DB, sessionID)
+	if err != nil {
+		writeError(c, 500, err)
+		return
+	}
+	if processing != nil && (processing.Status == "queued" || processing.Status == "processing" || (processing.Status == "failed" && processing.Stage == "diarization")) {
+		writeError(c, 409, fmt.Errorf("use the processing pipeline to retry or skip the current step before polishing"))
+		return
+	}
 	polishContext, cancel := context.WithTimeout(c.Request.Context(), liveTranscriptionPolishTimeout)
 	defer cancel()
 	if err := a.Live.polishTranscriptionSession(polishContext, sessionID); err != nil {
 		writeError(c, 502, err)
 		return
 	}
+	_, _ = a.DB.ExecContext(c, `UPDATE transcription_live_processing SET status='completed',stage='completed',polish_status='completed',error_message='',updated_at=now() WHERE session_id=$1 AND stage='grammar' AND status='failed'`, sessionID)
 	snapshot, err := a.transcriptionSnapshot(c, sessionID)
 	if err != nil {
 		writeError(c, 500, err)

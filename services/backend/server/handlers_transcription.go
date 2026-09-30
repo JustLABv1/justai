@@ -134,16 +134,20 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 			return
 		}
 		if !strings.EqualFold(strings.TrimSpace(request.Kind), "video") {
-			endpoint, endpointErr := a.getEndpoint(c, diarizationEndpoint)
-			if endpointErr != nil {
-				writeError(c, http.StatusBadRequest, fmt.Errorf("diarization endpoint not found"))
+			request.RecordAudio = true
+			endpoint, err := a.getEndpoint(c, diarizationEndpoint)
+			if err != nil {
+				writeError(c, http.StatusBadRequest, err)
 				return
 			}
 			if endpoint.ProviderType == "pyannote" {
-				writeError(c, http.StatusBadRequest, fmt.Errorf("pyannote diarization is available for completed video transcription, not live sessions"))
-				return
+				if _, err := newS3Storage(a.Config); err != nil {
+					writeError(c, http.StatusBadRequest, fmt.Errorf("whole-recording speaker separation requires configured S3 processing storage"))
+					return
+				}
 			}
 		}
+
 	}
 	grammarEndpoint := uuid.Nil
 	if request.GrammarEndpoint != "" {
@@ -204,7 +208,13 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 	var transcriptionEndpointID, diarizationEndpointID, grammarEndpointID uuid.NullUUID
 	var transcriptionModel, diarizationModel, grammarModel string
 	var polishStatus string
-	err = a.DB.QueryRowContext(c, `
+	transaction, err := a.DB.BeginTx(c, nil)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer transaction.Rollback()
+	err = transaction.QueryRowContext(c, `
 		INSERT INTO transcription_sessions (user_id, organization_id, title, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, transcription_model, diarization_model, grammar_model, language, record_audio, polish_status, join_code_hash, join_code_expires_at)
 		VALUES ($1, $2, $3, $4, NULLIF($5, '00000000-0000-0000-0000-000000000000'::uuid), NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), $10, $11, CASE WHEN NULLIF($6, '00000000-0000-0000-0000-000000000000'::uuid) IS NULL THEN 'not_requested' ELSE 'queued' END, $12, $13)
 		RETURNING id, user_id, organization_id, title, status, transcription_endpoint_id, diarization_endpoint_id, grammar_endpoint_id, COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(grammar_model, ''), language, record_audio, polish_status, started_at, ended_at, created_at, updated_at`, principal.UserID, organizationID, request.Title, transcriptionEndpoint, diarizationEndpoint, grammarEndpoint, request.TranscriptionModel, request.DiarizationModel, request.GrammarModel, request.Language, request.RecordAudio, codeHash, expiresAt).Scan(&item.ID, &item.UserID, &item.OrganizationID, &item.Title, &item.Status, &transcriptionEndpointID, &diarizationEndpointID, &grammarEndpointID, &transcriptionModel, &diarizationModel, &grammarModel, &item.Language, &item.RecordAudio, &polishStatus, &item.StartedAt, &item.EndedAt, &item.CreatedAt, &item.UpdatedAt)
@@ -224,6 +234,17 @@ func (a *App) createTranscriptionSession(c *gin.Context) {
 	item.TranscriptionModel = transcriptionModel
 	item.DiarizationModel = diarizationModel
 	item.GrammarModel = grammarModel
+	if !strings.EqualFold(strings.TrimSpace(request.Kind), "video") && (diarizationEndpoint != uuid.Nil || grammarEndpoint != uuid.Nil) {
+		_, err = transaction.ExecContext(c, `INSERT INTO transcription_live_processing (session_id, diarization_status, polish_status) VALUES ($1, CASE WHEN $2 THEN 'queued' ELSE 'skipped' END, CASE WHEN $3 THEN 'queued' ELSE 'skipped' END)`, item.ID, diarizationEndpoint != uuid.Nil, grammarEndpoint != uuid.Nil)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if err = transaction.Commit(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 	item.PolishStatus = polishStatus
 	item.Kind = "live"
 	item.JoinCode = code
@@ -350,11 +371,12 @@ func (a *App) stopTranscriptionSession(c *gin.Context) {
 	}
 	a.Live.flushPCMForSession(id)
 	now := time.Now().UTC()
-	_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET status = 'completed', ended_at = COALESCE(ended_at, $2), updated_at = $2, join_code_hash = NULL, join_code_expires_at = NULL WHERE id = $1`, id, now)
+	_, err = a.DB.ExecContext(c, `UPDATE transcription_sessions SET status = 'completed', ended_at = COALESCE(ended_at, $2), polish_status=CASE WHEN started_at IS NULL THEN 'not_requested' ELSE polish_status END, updated_at = $2, join_code_hash = NULL, join_code_expires_at = NULL WHERE id = $1`, id, now)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	_, _ = a.DB.ExecContext(c, `UPDATE transcription_live_processing SET status='completed',stage='completed',diarization_status='skipped',polish_status='skipped',updated_at=now() WHERE session_id=$1 AND EXISTS (SELECT 1 FROM transcription_sessions WHERE id=$1 AND started_at IS NULL)`, id)
 	a.Live.broadcast(id, "transcription.session", ginData{"status": "completed", "endedAt": now})
 	a.Live.closeSession(id)
 	c.JSON(http.StatusOK, gin.H{"session": mustTranscriptionSession(c, a, id)})
@@ -1233,6 +1255,11 @@ func (a *App) processDiarizationWindow(sessionID, sourceID uuid.UUID, startOffse
 	if err != nil || !endpointSupports(endpoint, "diarization") {
 		return
 	}
+	var postProcess bool
+	_ = a.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM transcription_live_processing WHERE session_id = $1)`, sessionID).Scan(&postProcess)
+	if postProcess {
+		return
+	}
 	segments, err := provider.Diarize(ctx, endpoint, pcm, language)
 	if err != nil {
 		a.Live.broadcast(sessionID, "transcription.diarization-error", ginData{"message": err.Error()})
@@ -1518,7 +1545,11 @@ func (a *App) transcriptionSnapshot(ctx context.Context, sessionID uuid.UUID) (g
 		return nil, err
 	}
 	a.attachVideoPlaybackURL(ctx, videoUpload)
-	return gin.H{"session": session, "sources": sources, "speakers": speakers, "segments": segments, "recordings": recordings, "annotations": annotations, "insights": insights, "videoUpload": videoUpload}, nil
+	processing, err := loadLiveProcessing(ctx, a.DB, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{"liveProcessing": processing, "session": session, "sources": sources, "speakers": speakers, "segments": segments, "recordings": recordings, "annotations": annotations, "insights": insights, "videoUpload": videoUpload}, nil
 }
 
 func (a *App) listTranscriptionRecordings(c *gin.Context) {
