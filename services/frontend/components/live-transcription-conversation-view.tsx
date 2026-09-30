@@ -4,6 +4,7 @@ import {
   Activity,
   AudioLines,
   Bot,
+  CalendarClock,
   Check,
   LoaderCircle,
   Mic2,
@@ -146,6 +147,106 @@ export function LiveTranscriptionConversationView({
       setUpdatingRequestId(null)
     }
   }
+
+  const scheduledSources = snapshot.sources.filter(
+    (source) =>
+      source.transportStatus === "scheduled" && source.scheduledStartAt
+  )
+  const scheduled =
+    snapshot.session.status === "waiting" &&
+    scheduledSources.length > 0 &&
+    !snapshot.sources.some((source) => source.status === "connected")
+  const scheduleTime = (value: string) =>
+    new Intl.DateTimeFormat(undefined, {
+      dateStyle: "full",
+      timeStyle: "short",
+    }).format(new Date(value))
+  if (scheduled)
+    return (
+      <div className="mx-auto w-full max-w-7xl rounded-2xl bg-card">
+        <header className="flex flex-wrap items-center justify-between gap-4 px-6 py-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-lg font-semibold">{snapshot.session.title}</h1>
+            <Badge variant="secondary">Scheduled</Badge>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={onShare} size="sm" variant="outline">
+              <Share2 data-icon="inline-start" /> Share
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger
+                render={<Button size="sm" variant="outline" />}
+              >
+                <X data-icon="inline-start" /> Cancel scheduled capture
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Cancel scheduled capture?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    The stream will no longer start automatically at the
+                    scheduled time.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Keep scheduled</AlertDialogCancel>
+                  <AlertDialogAction
+                    variant="destructive"
+                    onClick={() => void onStopSession()}
+                  >
+                    Cancel capture
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </header>
+        <section
+          aria-label="Scheduled capture"
+          className="flex flex-col items-center gap-5 px-6 py-12 text-center"
+        >
+          <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <CalendarClock className="size-7" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <h2 className="text-xl font-semibold">
+              Your transcription is scheduled
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              JustAI will capture the stream automatically. You can close your
+              browser.
+            </p>
+          </div>
+          <dl className="flex w-full max-w-lg flex-col gap-4 rounded-xl bg-muted/40 p-5 text-left text-sm">
+            {scheduledSources.map((source) => (
+              <div key={source.id} className="flex flex-col gap-2">
+                <dt className="font-medium">{source.name || "Livestream"}</dt>
+                <dd>
+                  <span className="text-muted-foreground">Starts · </span>
+                  {scheduleTime(source.scheduledStartAt!)}
+                </dd>
+                {source.scheduledEndAt ? (
+                  <dd>
+                    <span className="text-muted-foreground">Ends · </span>
+                    {scheduleTime(source.scheduledEndAt)}
+                  </dd>
+                ) : (
+                  <dd className="text-muted-foreground">
+                    Stops when the stream ends.
+                  </dd>
+                )}
+              </div>
+            ))}
+            <div className="text-xs text-muted-foreground">
+              Times shown in {Intl.DateTimeFormat().resolvedOptions().timeZone}.
+              The JustAI server must remain running.
+            </div>
+          </dl>
+          <p className="text-xs text-muted-foreground">
+            The transcript will appear here when capture starts.
+          </p>
+        </section>
+      </div>
+    )
 
   return (
     <div className="mx-auto w-full max-w-7xl rounded-2xl border bg-card shadow-sm">
