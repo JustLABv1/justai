@@ -399,8 +399,8 @@ const liveSessionSourceOptions: Array<{
   {
     key: "stream",
     icon: Tv,
-    label: "Live stream URL",
-    description: "Connect an HLS, HTTP(S), or RTMP(S) source.",
+    label: "Livestream link",
+    description: "Paste a livestream webpage or direct stream link.",
   },
   {
     key: "meeting-bot",
@@ -487,6 +487,59 @@ export function LiveTranscriptionView({
   const [streamScheduledStart, setStreamScheduledStart] = useState("")
   const [streamScheduledEnd, setStreamScheduledEnd] = useState("")
   const [streamStarting, setStreamStarting] = useState(false)
+  const [streamCheck, setStreamCheck] = useState<{
+    url: string
+    name?: string
+    error?: string
+  } | null>(null)
+  const checkedStreamReady =
+    streamCheck?.url === streamURL.trim() && Boolean(streamCheck.name)
+  useEffect(() => {
+    let cancelled = false
+    const url = streamURL.trim()
+    if (!url) return
+    const timer = window.setTimeout(() => {
+      void api
+        .post<{ name: string; kind: string }>(
+          "/api/v1/transcription/stream-sources/resolve",
+          { url }
+        )
+        .then((result) => {
+          if (!cancelled) setStreamCheck({ url, name: result.name })
+        })
+        .catch((caught) => {
+          if (!cancelled)
+            setStreamCheck({
+              url,
+              error:
+                caught instanceof Error
+                  ? caught.message
+                  : "This stream could not be checked.",
+            })
+        })
+    }, 600)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [streamURL])
+  const streamCheckFeedback = streamURL.trim() ? (
+    <FieldDescription
+      role="status"
+      aria-live="polite"
+      className={
+        streamCheck?.url === streamURL.trim() && streamCheck.error
+          ? "text-destructive"
+          : undefined
+      }
+    >
+      {streamCheck?.url !== streamURL.trim()
+        ? "Checking livestream link…"
+        : streamCheck.error ||
+          `${streamCheck.name} · Stream found. JustAI captures it on the server; your browser can be closed.`}
+    </FieldDescription>
+  ) : null
+
   const [botDialogOpen, setBotDialogOpen] = useState(false)
   const [botName, setBotName] = useState("Meeting bot")
   const [botPlatform, setBotPlatform] = useState("generic")
@@ -1529,6 +1582,12 @@ export function LiveTranscriptionView({
       setCreateStep(1)
       return
     }
+    if (
+      captureMode === "external" &&
+      externalSourceType === "stream" &&
+      !checkedStreamReady
+    )
+      return
     setStarting(true)
     setError("")
     try {
@@ -1900,7 +1959,7 @@ export function LiveTranscriptionView({
   }
 
   const addStreamSource = async () => {
-    if (!snapshot || !streamURL.trim() || streamStarting) return
+    if (!snapshot || !checkedStreamReady || streamStarting) return
     if (isYouTubePageURL(streamURL)) {
       setError(youtubeCaptureGuidance)
       return
@@ -2044,7 +2103,7 @@ export function LiveTranscriptionView({
   const sourceSetupReady =
     captureMode !== "external" ||
     externalSourceType === "meeting-bot" ||
-    (streamURL.trim().length > 0 &&
+    (checkedStreamReady &&
       (!streamScheduled ||
         (Boolean(streamScheduledStart) &&
           (!streamScheduledEnd ||
@@ -2184,50 +2243,56 @@ export function LiveTranscriptionView({
           step={createStep}
           onStepChange={(step) => setCreateStep(step as SessionWizardStep)}
           busy={starting}
-          footer={(
-          <footer className="flex flex-wrap items-center justify-end gap-4 pt-4">
-            <div className="flex items-center justify-end gap-2">
-              {createStep > 0 ? (
-                <Button disabled={starting} onClick={goToPreviousWizardStep} variant="outline">
-                  <ArrowLeft data-icon="inline-start" /> Back
-                </Button>
-              ) : (
-                <Button onClick={() => setCreateOpen(false)} variant="outline">
-                  Cancel
-                </Button>
-              )}
-              {createStep < 3 ? (
-                <Button
-                  disabled={!canContinueWizard}
-                  onClick={goToNextWizardStep}
-                >
-                  Continue <ArrowRight data-icon="inline-end" />
-                </Button>
-              ) : (
-                <Button
-                  disabled={starting || !effectiveSelectedEndpoint}
-                  onClick={() => void createSession()}
-                >
-                  {starting ? (
-                    <>
-                      <LoaderCircle
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />
-                      Starting…
-                    </>
-                  ) : (
-                    <>
-                      <Play data-icon="inline-start" /> Start session
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
-          </footer>
-          )}
+          footer={
+            <footer className="flex flex-wrap items-center justify-end gap-4 pt-4">
+              <div className="flex items-center justify-end gap-2">
+                {createStep > 0 ? (
+                  <Button
+                    disabled={starting}
+                    onClick={goToPreviousWizardStep}
+                    variant="outline"
+                  >
+                    <ArrowLeft data-icon="inline-start" /> Back
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => setCreateOpen(false)}
+                    variant="outline"
+                  >
+                    Cancel
+                  </Button>
+                )}
+                {createStep < 3 ? (
+                  <Button
+                    disabled={!canContinueWizard}
+                    onClick={goToNextWizardStep}
+                  >
+                    Continue <ArrowRight data-icon="inline-end" />
+                  </Button>
+                ) : (
+                  <Button
+                    disabled={starting || !effectiveSelectedEndpoint}
+                    onClick={() => void createSession()}
+                  >
+                    {starting ? (
+                      <>
+                        <LoaderCircle
+                          className="animate-spin"
+                          data-icon="inline-start"
+                        />
+                        Starting…
+                      </>
+                    ) : (
+                      <>
+                        <Play data-icon="inline-start" /> Start session
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+            </footer>
+          }
         >
-
           {error ? (
             <div className="flex flex-col gap-3">
               <DialogError message={error} />
@@ -2248,10 +2313,7 @@ export function LiveTranscriptionView({
           ) : null}
 
           {createStep === 0 ? (
-            <div
-              className="flex flex-col gap-5"
-              key="source-step"
-            >
+            <div className="flex flex-col gap-5" key="source-step">
               <div>
                 <p className="text-sm font-medium">
                   What do you want to capture?
@@ -2318,10 +2380,7 @@ export function LiveTranscriptionView({
               </Alert>
             </div>
           ) : createStep === 1 ? (
-            <div
-              className="flex flex-col gap-5"
-              key="setup-step"
-            >
+            <div className="flex flex-col gap-5" key="setup-step">
               <div className="flex items-start gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   {selectedWizardSource === "microphone" ? (
@@ -2344,7 +2403,7 @@ export function LiveTranscriptionView({
                       : selectedWizardSource === "system-audio"
                         ? "Choose a tab, window, or screen in the browser picker."
                         : selectedWizardSource === "stream"
-                          ? "Point JustAI at an authorized live media feed."
+                          ? "Paste a livestream link. JustAI checks the source before you schedule it."
                           : "Prepare a platform adapter or desktop companion to send meeting audio."}
                   </p>
                 </div>
@@ -2437,21 +2496,21 @@ export function LiveTranscriptionView({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="session-stream-url">
-                      Stream URL
+                      Livestream link
                     </FieldLabel>
                     <Input
                       id="session-stream-url"
                       onChange={(event) => setStreamURL(event.target.value)}
-                      placeholder="https://example.com/live/playlist.m3u8"
+                      placeholder="https://www.bundestag.de/mediathek/live"
                       type="url"
                       value={streamURL}
                     />
                     <FieldDescription>
-                      Use an authorized HLS, direct HTTP(S), RTMP(S), or audio
-                      feed URL. YouTube watch-page URLs are not direct media
-                      URLs.
+                      Paste a livestream webpage or a direct audio/video link.
+                      JustAI checks whether automatic capture is supported.
                     </FieldDescription>
                   </Field>
+                  {streamCheckFeedback}
                   <StreamScheduleFields
                     end={streamScheduledEnd}
                     idPrefix="session-stream"
@@ -2530,10 +2589,7 @@ export function LiveTranscriptionView({
               )}
             </div>
           ) : createStep === 2 ? (
-            <div
-              className="flex flex-col gap-5"
-              key="options-step"
-            >
+            <div className="flex flex-col gap-5" key="options-step">
               <div className="flex items-start gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   <Settings2 aria-hidden="true" />
@@ -2696,10 +2752,7 @@ export function LiveTranscriptionView({
               </FieldGroup>
             </div>
           ) : (
-            <div
-              className="flex flex-col gap-5"
-              key="review-step"
-            >
+            <div className="flex flex-col gap-5" key="review-step">
               <div className="flex items-start gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   <Sparkles aria-hidden="true" />
@@ -2795,7 +2848,6 @@ export function LiveTranscriptionView({
               </Alert>
             </div>
           )}
-
         </TranscriptionCreationFlow>
       ) : null}
 
@@ -2810,9 +2862,8 @@ export function LiveTranscriptionView({
           <DialogHeader>
             <DialogTitle>Capture a live stream</DialogTitle>
             <DialogDescription>
-              Paste a stream URL that JustAI is authorized to access. HLS
-              playlists and direct HTTP(S)/RTMP(S) audio feeds are supported; a
-              YouTube watch-page URL is not a media stream URL.
+              Paste a public livestream link. JustAI finds supported streams and
+              captures them automatically, without an open browser.
             </DialogDescription>
           </DialogHeader>
           {error ? <DialogError message={error} /> : null}
@@ -2826,19 +2877,22 @@ export function LiveTranscriptionView({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="stream-source-url">Stream URL</FieldLabel>
+              <FieldLabel htmlFor="stream-source-url">
+                Livestream link
+              </FieldLabel>
               <Input
                 id="stream-source-url"
                 onChange={(event) => setStreamURL(event.target.value)}
-                placeholder="https://example.com/live/playlist.m3u8"
+                placeholder="https://www.bundestag.de/mediathek/live"
                 type="url"
                 value={streamURL}
               />
               <FieldDescription>
-                The backend keeps this URL encrypted and does not expose it in
-                snapshots or source lists.
+                Paste a livestream webpage or direct stream link. The link is
+                stored encrypted and checked again when capture starts.
               </FieldDescription>
             </Field>
+            {streamCheckFeedback}
             <StreamScheduleFields
               end={streamScheduledEnd}
               idPrefix="stream-source"
@@ -2869,7 +2923,7 @@ export function LiveTranscriptionView({
             <Button
               disabled={
                 streamStarting ||
-                !streamURL.trim() ||
+                !checkedStreamReady ||
                 (streamScheduled &&
                   (!streamScheduledStart ||
                     Boolean(
