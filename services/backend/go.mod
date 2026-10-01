@@ -14,7 +14,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/lmittmann/tint v1.2.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/richardlehane/mscfb v1.0.8
+	github.com/richardlehane/mscfb v1.0.9
 	github.com/signintech/gopdf v0.38.1
 	golang.org/x/crypto v0.57.0
 	golang.org/x/image v0.46.0
