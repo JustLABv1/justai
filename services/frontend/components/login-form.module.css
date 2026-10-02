@@ -10,10 +10,12 @@
   display: grid;
   min-height: 0;
   flex: 1;
-  grid-template-columns: minmax(0, 1.15fr) minmax(28rem, 0.85fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .authFormPane {
+  position: relative;
+  isolation: isolate;
   display: flex;
   min-width: 0;
   align-items: center;
@@ -26,6 +28,12 @@
 .authFormInner {
   width: min(100%, 31rem);
   margin: auto;
+  padding: clamp(1.5rem, 3vw, 2.25rem);
+  border-radius: 1.75rem;
+  background: color-mix(in oklch, var(--background) 74%, transparent);
+  box-shadow: 0 24px 60px -24px rgb(0 0 0 / 0.45);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
 }
 
 .authBrandRow {
@@ -34,43 +42,27 @@
   gap: 0.75rem;
 }
 
-.authBrandName,
-.authBrandMeta {
+.authBrandName {
   margin: 0;
 }
 
 .authBrandName {
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
-.authBrandMeta {
-  margin-top: 0.12rem;
-  color: var(--muted-foreground);
-  font-size: 0.68rem;
-}
-
 .authIntro {
-  margin-top: 2.5rem;
-}
-
-.authEyebrow {
-  margin: 0;
-  color: var(--primary);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
+  margin-top: 2rem;
 }
 
 .authTitle {
   max-width: 26rem;
   margin: 0.8rem 0 0;
-  font-size: clamp(1.8rem, 3vw, 2.45rem);
+  font-size: clamp(1.5rem, 2.4vw, 1.85rem);
   font-weight: 650;
-  letter-spacing: -0.055em;
-  line-height: 1.04;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
 }
 
 .authDescription {
@@ -131,9 +123,17 @@
   gap: 0.5rem;
 }
 
+/* The card is translucent, so inputs need their own solid surface plus a faint
+   edge to stay visible. The edge is skipped on focus to keep the focus ring. */
 .authForm :global([data-slot="input"]) {
+  height: 2.5rem;
   border-radius: 0.8rem;
-  background: color-mix(in oklch, var(--input) 42%, var(--background));
+  background: var(--card);
+}
+
+.authForm :global([data-slot="input"]):not(:focus-visible) {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--foreground) 14%, transparent);
 }
 
 .authSubmitField {
@@ -154,38 +154,18 @@
   border-radius: 0.8rem;
   border: 1px solid
     color-mix(in oklch, var(--border) 78%, var(--foreground) 22%);
-  background: var(--secondary);
-  color: var(--secondary-foreground);
+  background: var(--card);
+  color: var(--card-foreground);
   box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 8%, transparent);
 }
 
 .authSso:hover {
   border-color: color-mix(in oklch, var(--border) 58%, var(--foreground) 42%);
-  background: color-mix(in oklch, var(--secondary), var(--foreground) 5%);
+  background: color-mix(in oklch, var(--card), var(--foreground) 6%);
 }
 
 .authModeDescription {
   text-align: center;
-}
-
-.authPolicy {
-  margin: 1.5rem 0 0;
-  padding-inline: 1rem;
-  text-align: center;
-  color: var(--muted-foreground);
-  font-size: 0.68rem;
-  line-height: 1.5;
-}
-
-@media (max-width: 1279px) {
-  .authLayout {
-    grid-template-columns: 1fr;
-  }
-
-  .authFormPane {
-    min-height: auto;
-    border-top: 0;
-  }
 }
 
 @media (max-width: 640px) {
@@ -196,4 +176,24 @@
   .authIntro {
     margin-top: 2rem;
   }
+}
+
+/* The label masks the separator line; on the glass card it becomes a small
+   pill so it reads as intentional instead of a mismatched patch. */
+.authSeparator :global([data-slot="field-separator-content"]) {
+  padding: 0.15rem 0.7rem;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.authSsoPrimary {
+  height: 2.5rem;
+  border-color: transparent;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.authSsoPrimary:hover {
+  border-color: transparent;
+  background: color-mix(in oklch, var(--primary) 85%, black);
 }

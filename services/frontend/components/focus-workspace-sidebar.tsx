@@ -645,7 +645,7 @@ export function FocusWorkspaceSidebar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Tooltip>
+        <Tooltip disabled={navExpanded}>
           <TooltipTrigger
             render={
               <Button
@@ -671,9 +671,7 @@ export function FocusWorkspaceSidebar({
               </Button>
             }
           />
-          {!navExpanded && (
-            <TooltipContent side="right">Search workspace · ⌘K</TooltipContent>
-          )}
+          <TooltipContent side="right">Search workspace · ⌘K</TooltipContent>
         </Tooltip>
 
         <Separator className={cn("my-1", navExpanded && "mx-auto w-[calc(100%-1rem)]")} />
@@ -707,7 +705,7 @@ export function FocusWorkspaceSidebar({
                   ) : (
                     index > 0 && <Separator className="my-1 w-5" />
                   ))}
-                <Tooltip>
+                <Tooltip disabled={navExpanded && !disabled}>
                   <TooltipTrigger
                     render={
                       <Button
@@ -734,13 +732,11 @@ export function FocusWorkspaceSidebar({
                       </Button>
                     }
                   />
-                  {(!navExpanded || disabled) && (
-                    <TooltipContent side="right">
+                  <TooltipContent side="right">
                       {disabled
                         ? "Disabled by platform administrator"
                         : item.label}
                     </TooltipContent>
-                  )}
                 </Tooltip>
               </Fragment>
             )
@@ -748,7 +744,7 @@ export function FocusWorkspaceSidebar({
         </nav>
 
         {!historyVisible && historyView && (
-          <Tooltip>
+          <Tooltip disabled={navExpanded}>
             <TooltipTrigger
               render={
                 <Button
@@ -770,13 +766,11 @@ export function FocusWorkspaceSidebar({
                 </Button>
               }
             />
-            {!navExpanded && (
-              <TooltipContent side="right">{showContextLabel}</TooltipContent>
-            )}
+            <TooltipContent side="right">{showContextLabel}</TooltipContent>
           </Tooltip>
         )}
         <Separator className={cn("my-1", navExpanded ? "mx-auto w-[calc(100%-1rem)]" : "w-5")} />
-        <Tooltip>
+        <Tooltip disabled={navExpanded}>
           <TooltipTrigger
             render={
               <Button
@@ -801,11 +795,9 @@ export function FocusWorkspaceSidebar({
               </Button>
             }
           />
-          {!navExpanded && (
-            <TooltipContent side="right">Workspace settings</TooltipContent>
-          )}
+          <TooltipContent side="right">Workspace settings</TooltipContent>
         </Tooltip>
-        <Tooltip>
+        <Tooltip disabled={navExpanded}>
           <TooltipTrigger
             render={
               <Button
@@ -828,9 +820,7 @@ export function FocusWorkspaceSidebar({
               </Button>
             }
           />
-          {!navExpanded && (
-            <TooltipContent side="right">Expand navigation</TooltipContent>
-          )}
+          <TooltipContent side="right">Expand navigation</TooltipContent>
         </Tooltip>
         <DropdownMenu>
           <DropdownMenuTrigger
