@@ -4,7 +4,7 @@ import { useState } from "react"
 import { ArrowRight, KeyRound, ShieldCheck } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { AuthLiveCaption } from "@/components/auth-live-caption"
+import { AuroraBackdrop } from "@/components/aurora-backdrop"
 import { BrandMark } from "@/components/brand-mark"
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
@@ -130,33 +130,22 @@ export function LoginForm({
   return (
     <div className={cn(styles.authExperience, className)} {...props}>
       <div className={styles.authLayout}>
-        <AuthLiveCaption />
-
         <section className={styles.authFormPane}>
+          <AuroraBackdrop className="absolute inset-x-0 top-0 -z-10 h-[90%]" />
           <div className={styles.authFormInner}>
             <div className={styles.authBrandRow}>
               <BrandMark className="size-10 rounded-xl" />
-              <div>
-                <p className={styles.authBrandName}>JustAI</p>
-                <p className={styles.authBrandMeta}>
-                  Your intelligent workspace
-                </p>
-              </div>
+              <p className={styles.authBrandName}>JustAI</p>
             </div>
 
             <div className={styles.authIntro}>
-              <p className={styles.authEyebrow}>
-                {isRegister ? "Start a new workspace" : "Welcome back"}
-              </p>
               <h1 className={styles.authTitle}>
-                {isRegister
-                  ? "Make the next conversation count."
-                  : "Your context is waiting."}
+                {isRegister ? "Create your account" : "Sign in to JustAI"}
               </h1>
               <p className={styles.authDescription}>
                 {isRegister
-                  ? "Bring every conversation, transcript, and next step into one clear place."
-                  : "Sign in to pick up where your workspace left off."}
+                  ? "Set up an account to start working in your workspace."
+                  : "Continue to your workspace."}
               </p>
             </div>
 
@@ -336,18 +325,25 @@ export function LoginForm({
 
                 {oidcAvailable && (!isRegister || signupEnabled) && (
                   <>
-                    <FieldSeparator className={styles.authSeparator}>
-                      {localCredentialsVisible
-                        ? "Or continue with"
-                        : "Continue with"}
-                    </FieldSeparator>
+                    {localCredentialsVisible && (
+                      <FieldSeparator className={styles.authSeparator}>
+                        Or continue with
+                      </FieldSeparator>
+                    )}
 
                     {oidcProviders.map((provider) => (
                       <Field key={provider.id || provider.slug}>
                         <a
                           className={buttonVariants({
-                            variant: "outline",
-                            className: styles.authSso,
+                            // SSO is the primary action when it is the only
+                            // way in; next to a password form it stays secondary.
+                            variant: localCredentialsVisible
+                              ? "outline"
+                              : "default",
+                            className: cn(
+                              styles.authSso,
+                              !localCredentialsVisible && styles.authSsoPrimary
+                            ),
                           })}
                           href={`${API_URL}${oidcLoginPath(
                             provider.slug,
@@ -365,7 +361,7 @@ export function LoginForm({
                             data-icon="inline-start"
                             aria-hidden="true"
                           />
-                          {provider.displayName || "Continue with OIDC"}
+                          {ssoLabel(provider.displayName)}
                         </a>
                       </Field>
                     ))}
@@ -375,12 +371,13 @@ export function LoginForm({
                 {adminFallbackAvailable && !adminFallbackActive && (
                   <Field>
                     <Button
-                      className="w-full"
+                      className="w-full text-xs font-normal text-muted-foreground"
+                      size="sm"
                       type="button"
                       variant="ghost"
                       onClick={enableAdminFallback}
                     >
-                      Platform administrator? Use password fallback
+                      Platform administrator? Sign in with a password
                     </Button>
                   </Field>
                 )}
@@ -402,15 +399,17 @@ export function LoginForm({
               </FieldGroup>
             </form>
 
-            <FieldDescription className={styles.authPolicy}>
-              By continuing, you agree to use JustAI within your workspace
-              policies.
-            </FieldDescription>
           </div>
         </section>
       </div>
     </div>
   )
+}
+
+function ssoLabel(displayName?: string) {
+  const name = displayName?.trim()
+  if (!name) return "Continue with SSO"
+  return /^(continue|sign|log)/i.test(name) ? name : `Continue with ${name}`
 }
 
 function safeNext(search: string) {

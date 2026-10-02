@@ -118,6 +118,7 @@ import type {
   SavedAssistant,
   ViewId,
 } from "@/lib/types"
+import { AuroraBackdrop } from "@/components/aurora-backdrop"
 import { cn } from "@/lib/utils"
 import { chatContextLabel } from "@/lib/chat-context"
 
@@ -1441,27 +1442,9 @@ function ChatBackdrop() {
     () => document.getElementById("workspace-shell"),
     () => null
   )
-  const fade = "linear-gradient(to bottom, black 0%, black 30%, transparent 85%)"
   if (!shell) return null
   return createPortal(
-    <div
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[75%] overflow-hidden motion-safe:animate-in motion-safe:duration-700 motion-safe:fade-in-0"
-      style={{ maskImage: fade, WebkitMaskImage: fade }}
-    >
-      <div
-        className="absolute inset-0 bg-cover bg-top opacity-90 dark:opacity-50"
-        style={{ backgroundImage: "url(/images/chat-backdrop.svg)" }}
-      />
-      <div
-        className="absolute inset-0 opacity-25 mix-blend-multiply dark:opacity-30 dark:mix-blend-normal"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle, rgb(0 0 0 / 0.55) 0.7px, transparent 0.9px)",
-          backgroundSize: "4px 4px",
-        }}
-      />
-    </div>,
+    <AuroraBackdrop className="absolute inset-x-0 top-0 -z-10 h-[75%]" />,
     shell
   )
 }
