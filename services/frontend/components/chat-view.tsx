@@ -6,8 +6,10 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react"
+import { createPortal } from "react-dom"
 import {
   IconBrandOpenai,
   IconBrandGoogle,
@@ -1425,6 +1427,42 @@ function ChatAmbient() {
       <span className="chat-ambient__orb chat-ambient__orb--two" />
       <span className="chat-ambient__orb chat-ambient__orb--three" />
     </div>
+  )
+}
+
+const subscribeNever = () => () => {}
+
+function ChatBackdrop() {
+  // Rendered into the workspace shell so the image spans the whole window
+  // and sits behind the floating sidebars instead of being clipped to the
+  // chat column.
+  const shell = useSyncExternalStore(
+    subscribeNever,
+    () => document.getElementById("workspace-shell"),
+    () => null
+  )
+  const fade = "linear-gradient(to bottom, black 0%, black 30%, transparent 85%)"
+  if (!shell) return null
+  return createPortal(
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[75%] overflow-hidden motion-safe:animate-in motion-safe:duration-700 motion-safe:fade-in-0"
+      style={{ maskImage: fade, WebkitMaskImage: fade }}
+    >
+      <div
+        className="absolute inset-0 bg-cover bg-top opacity-90 dark:opacity-50"
+        style={{ backgroundImage: "url(/images/chat-backdrop.svg)" }}
+      />
+      <div
+        className="absolute inset-0 opacity-25 mix-blend-multiply dark:opacity-30 dark:mix-blend-normal"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle, rgb(0 0 0 / 0.55) 0.7px, transparent 0.9px)",
+          backgroundSize: "4px 4px",
+        }}
+      />
+    </div>,
+    shell
   )
 }
 
@@ -3151,7 +3189,10 @@ function AssistantThreadLayout({
 
   return (
     <MCPApprovalProvider>
-      <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <ThreadPrimitive.Root className={cn("relative flex min-h-0 flex-1 flex-col overflow-hidden",
+          !isEmpty && "bg-background"
+        )}>
+        {isEmpty && <ChatBackdrop />}
         <SelectionToolbarPrimitive.Root className="z-50 flex items-center gap-1 rounded-lg border bg-background/95 p-1 text-xs text-foreground shadow-lg backdrop-blur">
           <SelectionToolbarPrimitive.Quote className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
             <Quote className="size-3.5" aria-hidden="true" />
