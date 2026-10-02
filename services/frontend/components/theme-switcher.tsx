@@ -42,8 +42,9 @@ function ThemeSwitcher({ expanded = false }: { expanded?: boolean }) {
           <Button
             aria-label="Choose color theme"
             className={cn(
-              "rounded-xl text-muted-foreground",
-              expanded ? "h-9 w-full justify-start gap-3 px-3" : "size-9"
+              expanded
+                ? "h-10 w-full justify-start gap-2.5 px-3"
+                : "size-9 rounded-xl text-muted-foreground"
             )}
             title="Choose color theme"
             size={expanded ? "default" : "icon"}

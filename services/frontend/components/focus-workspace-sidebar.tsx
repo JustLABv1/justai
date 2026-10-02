@@ -1,11 +1,20 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import {
   Archive,
   Bot,
+  Check,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   FileVideo,
   FolderKanban,
   FileText,
@@ -14,6 +23,8 @@ import {
   Menu,
   MessageSquare,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Plus,
@@ -138,6 +149,21 @@ const railNavigation: Array<{
   },
 ]
 
+const NAV_EXPANDED_STORAGE_KEY = "justai.sidebar.expanded"
+
+function subscribeNavExpanded(callback: () => void) {
+  window.addEventListener("storage", callback)
+  window.addEventListener(NAV_EXPANDED_STORAGE_KEY, callback)
+  return () => {
+    window.removeEventListener("storage", callback)
+    window.removeEventListener(NAV_EXPANDED_STORAGE_KEY, callback)
+  }
+}
+
+function readNavExpanded() {
+  return window.localStorage.getItem(NAV_EXPANDED_STORAGE_KEY) !== "false"
+}
+
 function useCompactNavigation() {
   const [compact, setCompact] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 1024
@@ -241,8 +267,18 @@ export function FocusWorkspaceSidebar({
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
   const [chatHistoryExpanded, setChatHistoryExpanded] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const navExpanded = useSyncExternalStore(
+    subscribeNavExpanded,
+    readNavExpanded,
+    () => true
+  )
   const isMobile = useCompactNavigation()
   const contextPanelRef = useRef<HTMLDivElement>(null)
+
+  function setNavExpanded(expanded: boolean) {
+    window.localStorage.setItem(NAV_EXPANDED_STORAGE_KEY, String(expanded))
+    window.dispatchEvent(new Event(NAV_EXPANDED_STORAGE_KEY))
+  }
   const historyView =
     activeView === "chat" ||
     activeView === "transcription" ||
@@ -441,47 +477,75 @@ export function FocusWorkspaceSidebar({
             <BrandMark aria-hidden="true" className="size-7" /> JustAI
           </SheetTitle>
         </SheetHeader>
-        <div className="flex flex-col gap-5 px-3 py-4">
-          <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); setSearchOpen(true) }} variant="secondary">
+        <div className="flex flex-col gap-4 px-3 py-4">
+          <Button
+            className="h-10 w-full justify-start gap-2.5 px-3 font-normal"
+            onClick={() => { setMobileMenuOpen(false); setSearchOpen(true) }}
+            variant="secondary"
+          >
             <Search data-icon="inline-start" /> Search workspace
           </Button>
-          <nav aria-label="Mobile workspace navigation" className="space-y-3">
+          <nav aria-label="Mobile workspace navigation" className="flex flex-col gap-4">
             {[...new Set(navigation.map((item) => item.group))].map((group) => (
-              <div key={group}>
+              <div className="flex flex-col gap-0.5" key={group}>
                 <p className="px-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{group}</p>
                 {navigation.filter((item) => item.group === group).map((item) => {
                   const Icon = item.icon
                   return <Button key={item.id} aria-current={activeView === item.id ? "page" : undefined}
-                    className="w-full justify-start" disabled={Boolean(item.feature && disabledFeatures[item.feature])}
+                    className="h-10 w-full justify-start gap-2.5 px-3" disabled={Boolean(item.feature && disabledFeatures[item.feature])}
                     onClick={() => { setMobileMenuOpen(false); navigateFromRail(item.id) }}
-                    size="sm" variant={activeView === item.id ? "secondary" : "ghost"}>
+                    variant={activeView === item.id ? "secondary" : "ghost"}>
                     <Icon data-icon="inline-start" /> {item.label}
                   </Button>
                 })}
               </div>
             ))}
           </nav>
-          <div className="space-y-1 border-t border-border/60 pt-4">
-            <p className="px-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Workspace</p>
-            {organizations.map((organization) => (
-              <Button key={organization.id} className="w-full justify-start truncate" onClick={() => {
-                setMobileMenuOpen(false)
-                onOrganizationSelect(organization.id)
-              }} size="sm" variant={organization.id === activeOrganization?.id ? "secondary" : "ghost"}>
-                <Bot data-icon="inline-start" /> {organization.name}
-              </Button>
-            ))}
-            <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); onNavigate("settings") }} size="sm" variant="ghost">
-              <Settings2 data-icon="inline-start" /> Settings
-            </Button>
-            <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); onNavigate("profile") }} size="sm" variant="ghost">
+          {organizations.length > 1 && (
+            <div className="flex flex-col gap-0.5 border-t border-border/60 pt-4">
+              <p className="px-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Workspace</p>
+              {organizations.map((organization) => (
+                <Button key={organization.id} className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => {
+                  setMobileMenuOpen(false)
+                  onOrganizationSelect(organization.id)
+                }} variant={organization.id === activeOrganization?.id ? "secondary" : "ghost"}>
+                  <Bot data-icon="inline-start" />
+                  <span className="min-w-0 flex-1 truncate text-left">{organization.name}</span>
+                  {organization.id === activeOrganization?.id && <Check data-icon="inline-end" />}
+                </Button>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-col gap-0.5 border-t border-border/60 pt-4">
+            <div className="flex items-center gap-3 px-3 pb-2">
+              <Avatar>
+                {user.avatarUrl && (
+                  <AvatarImage
+                    alt={`${user.displayName}'s profile picture`}
+                    src={resolveAPIURL(
+                      versionedAvatarURL(user.avatarUrl, user.avatarVersion) ??
+                        user.avatarUrl
+                    )}
+                  />
+                )}
+                <AvatarFallback className={avatarToneFor(user.id)}>{userInitials}</AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{user.displayName}</p>
+                <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+              </div>
+            </div>
+            <Button className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => { setMobileMenuOpen(false); onNavigate("profile") }} variant={activeView === "profile" ? "secondary" : "ghost"}>
               <UserRound data-icon="inline-start" /> Profile
             </Button>
-            {user.platformAdmin ? <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); onNavigate("admin") }} size="sm" variant="ghost">
+            <Button className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => { setMobileMenuOpen(false); onNavigate("settings") }} variant={activeView === "settings" ? "secondary" : "ghost"}>
+              <Settings2 data-icon="inline-start" /> Workspace settings
+            </Button>
+            {user.platformAdmin ? <Button className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => { setMobileMenuOpen(false); onNavigate("admin") }} variant={activeView === "admin" ? "secondary" : "ghost"}>
               <ShieldCheck data-icon="inline-start" /> Platform admin
             </Button> : null}
             <ThemeSwitcher expanded />
-            <Button className="w-full justify-start" onClick={() => { setMobileMenuOpen(false); onSignOut() }} size="sm" variant="ghost">
+            <Button className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => { setMobileMenuOpen(false); onSignOut() }} variant="ghost">
               <LogOut data-icon="inline-start" /> Sign out
             </Button>
           </div>
@@ -491,21 +555,50 @@ export function FocusWorkspaceSidebar({
 
     <aside
       className={cn(
-        "contents lg:relative lg:mx-2 lg:my-2 lg:flex lg:h-[calc(100%-1rem)] lg:min-h-0 lg:w-14 lg:shrink-0 lg:gap-2 lg:overflow-visible lg:transition-[width] lg:duration-200",
+        "contents lg:relative lg:mx-2 lg:my-2 lg:flex lg:h-[calc(100%-1rem)] lg:min-h-0 lg:shrink-0 lg:gap-2 lg:overflow-visible lg:transition-[width] lg:duration-200",
+        navExpanded ? "lg:w-52" : "lg:w-14",
         isSecondaryHistoryRail &&
-          (secondaryHistoryExpanded ? "lg:w-80" : "lg:w-28")
+          (secondaryHistoryExpanded
+            ? navExpanded
+              ? "lg:w-[29.5rem]"
+              : "lg:w-80"
+            : navExpanded
+              ? "lg:w-[16.5rem]"
+              : "lg:w-28")
       )}
       aria-label="Workspace navigation"
       data-history-open={historyVisible}
     >
-      <div className="hidden w-14 shrink-0 flex-col items-center gap-2 rounded-[1.75rem] bg-sidebar py-3 lg:flex">
-        <BrandMark aria-label="JustAI" className="size-8 shrink-0" />
+      <div
+        className={cn(
+          "hidden shrink-0 flex-col gap-2 rounded-[1.75rem] bg-sidebar py-3 transition-[width] duration-200 lg:flex",
+          navExpanded ? "w-52 items-stretch px-2" : "w-14 items-center"
+        )}
+        data-expanded={navExpanded}
+      >
+        <div
+          className={cn(
+            "flex shrink-0 items-center gap-2",
+            navExpanded ? "px-1.5" : "justify-center"
+          )}
+        >
+          <BrandMark aria-label="JustAI" className="size-8 shrink-0" />
+          {navExpanded && (
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">
+              JustAI
+            </span>
+          )}
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button
                 aria-label={`Select workspace (${activeOrganization?.name ?? "Workspace"})`}
-                className="size-9 rounded-xl"
+                className={
+                  navExpanded
+                    ? "h-10 w-full justify-start gap-2 rounded-xl px-1.5"
+                    : "size-9 rounded-xl"
+                }
                 variant="ghost"
               />
             }
@@ -513,6 +606,17 @@ export function FocusWorkspaceSidebar({
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
               <Bot aria-hidden="true" />
             </span>
+            {navExpanded && (
+              <>
+                <span className="min-w-0 flex-1 truncate text-left text-sm">
+                  {activeOrganization?.name ?? "Workspace"}
+                </span>
+                <ChevronsUpDown
+                  aria-hidden="true"
+                  className="text-muted-foreground"
+                />
+              </>
+            )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64" side="right">
             <DropdownMenuGroup>
@@ -547,22 +651,38 @@ export function FocusWorkspaceSidebar({
               <Button
                 aria-keyshortcuts="Meta+K Control+K"
                 aria-label="Search workspace"
-                className="size-9 rounded-xl bg-muted/50 text-muted-foreground hover:bg-muted/45"
+                className={cn(
+                  "rounded-xl text-muted-foreground",
+                  navExpanded
+                    ? "h-9 w-full justify-start gap-2.5 bg-secondary px-2.5 hover:bg-accent"
+                    : "size-9 bg-muted/50 hover:bg-muted/45"
+                )}
                 onClick={() => setSearchOpen(true)}
-                size="icon"
+                size={navExpanded ? "default" : "icon"}
                 variant="ghost"
               >
                 <Search />
+                {navExpanded && (
+                  <>
+                    <span className="flex-1 text-left font-normal">Search</span>
+                    <kbd className="text-[11px] font-normal">⌘K</kbd>
+                  </>
+                )}
               </Button>
             }
           />
-          <TooltipContent side="right">Search workspace · ⌘K</TooltipContent>
+          {!navExpanded && (
+            <TooltipContent side="right">Search workspace · ⌘K</TooltipContent>
+          )}
         </Tooltip>
 
-        <Separator className="my-1" />
+        <Separator className={cn("my-1", navExpanded && "mx-auto w-[calc(100%-1rem)]")} />
         <nav
           aria-label="Workspace navigation"
-          className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto overscroll-contain"
+          className={cn(
+            "flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain",
+            navExpanded ? "items-stretch" : "items-center"
+          )}
         >
           {navigation.map((item, index) => {
             const Icon = item.icon
@@ -574,7 +694,19 @@ export function FocusWorkspaceSidebar({
               index === 0 || navigation[index - 1]?.group !== item.group
             return (
               <Fragment key={item.id}>
-                {beginsGroup && index > 0 && <Separator className="my-1 w-5" />}
+                {beginsGroup &&
+                  (navExpanded ? (
+                    <p
+                      className={cn(
+                        "px-2.5 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase",
+                        index > 0 && "pt-3"
+                      )}
+                    >
+                      {item.group}
+                    </p>
+                  ) : (
+                    index > 0 && <Separator className="my-1 w-5" />
+                  ))}
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -582,23 +714,33 @@ export function FocusWorkspaceSidebar({
                         aria-current={active ? "page" : undefined}
                         aria-label={item.label}
                         className={cn(
-                          "relative size-9 rounded-xl text-muted-foreground",
+                          "relative rounded-xl text-muted-foreground",
+                          navExpanded
+                            ? "h-9 w-full justify-start gap-2.5 px-2.5"
+                            : "size-9",
                           active && "bg-accent text-accent-foreground"
                         )}
                         disabled={disabled}
                         onClick={() => navigateFromRail(item.id)}
-                        size="icon"
+                        size={navExpanded ? "default" : "icon"}
                         variant="ghost"
                       >
                         <Icon />
+                        {navExpanded && (
+                          <span className="min-w-0 flex-1 truncate text-left">
+                            {item.label}
+                          </span>
+                        )}
                       </Button>
                     }
                   />
-                  <TooltipContent side="right">
-                    {disabled
-                      ? "Disabled by platform administrator"
-                      : item.label}
-                  </TooltipContent>
+                  {(!navExpanded || disabled) && (
+                    <TooltipContent side="right">
+                      {disabled
+                        ? "Disabled by platform administrator"
+                        : item.label}
+                    </TooltipContent>
+                  )}
                 </Tooltip>
               </Fragment>
             )
@@ -611,19 +753,29 @@ export function FocusWorkspaceSidebar({
               render={
                 <Button
                   aria-label={showContextLabel}
-                  className="size-9 rounded-xl text-muted-foreground"
+                  className={cn(
+                    "rounded-xl text-muted-foreground",
+                    navExpanded ? "h-9 w-full justify-start gap-2.5 px-2.5" : "size-9"
+                  )}
                   onClick={() => onHistoryOpenChange(true)}
-                  size="icon"
+                  size={navExpanded ? "default" : "icon"}
                   variant="ghost"
                 >
                   <PanelRightOpen />
+                  {navExpanded && (
+                    <span className="min-w-0 flex-1 truncate text-left">
+                      {showContextLabel}
+                    </span>
+                  )}
                 </Button>
               }
             />
-            <TooltipContent side="right">{showContextLabel}</TooltipContent>
+            {!navExpanded && (
+              <TooltipContent side="right">{showContextLabel}</TooltipContent>
+            )}
           </Tooltip>
         )}
-        <Separator className="my-1 w-5" />
+        <Separator className={cn("my-1", navExpanded ? "mx-auto w-[calc(100%-1rem)]" : "w-5")} />
         <Tooltip>
           <TooltipTrigger
             render={
@@ -631,26 +783,65 @@ export function FocusWorkspaceSidebar({
                 aria-current={activeView === "settings" ? "page" : undefined}
                 aria-label="Workspace settings"
                 className={cn(
-                  "size-9 rounded-xl text-muted-foreground",
+                  "rounded-xl text-muted-foreground",
+                  navExpanded ? "h-9 w-full justify-start gap-2.5 px-2.5" : "size-9",
                   activeView === "settings" &&
                     "bg-accent text-accent-foreground"
                 )}
                 onClick={() => onNavigate("settings")}
-                size="icon"
+                size={navExpanded ? "default" : "icon"}
                 variant="ghost"
               >
                 <Settings2 />
+                {navExpanded && (
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    Settings
+                  </span>
+                )}
               </Button>
             }
           />
-          <TooltipContent side="right">Workspace settings</TooltipContent>
+          {!navExpanded && (
+            <TooltipContent side="right">Workspace settings</TooltipContent>
+          )}
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                aria-expanded={navExpanded}
+                aria-label={navExpanded ? "Collapse navigation" : "Expand navigation"}
+                className={cn(
+                  "rounded-xl text-muted-foreground",
+                  navExpanded ? "h-9 w-full justify-start gap-2.5 px-2.5" : "size-9"
+                )}
+                onClick={() => setNavExpanded(!navExpanded)}
+                size={navExpanded ? "default" : "icon"}
+                variant="ghost"
+              >
+                {navExpanded ? <PanelLeftClose /> : <PanelLeftOpen />}
+                {navExpanded && (
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    Collapse
+                  </span>
+                )}
+              </Button>
+            }
+          />
+          {!navExpanded && (
+            <TooltipContent side="right">Expand navigation</TooltipContent>
+          )}
         </Tooltip>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button
                 aria-label={`${user.displayName} account menu`}
-                className="size-8 rounded-full p-0"
+                className={
+                  navExpanded
+                    ? "h-11 w-full justify-start gap-2 rounded-xl px-1.5"
+                    : "size-8 rounded-full p-0"
+                }
                 variant="ghost"
               />
             }
@@ -669,6 +860,16 @@ export function FocusWorkspaceSidebar({
                 {userInitials}
               </AvatarFallback>
             </Avatar>
+            {navExpanded && (
+              <span className="min-w-0 flex-1 text-left">
+                <span className="block truncate text-xs font-medium">
+                  {user.displayName}
+                </span>
+                <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                  {user.email}
+                </span>
+              </span>
+            )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56" side="right">
             <DropdownMenuGroup>
