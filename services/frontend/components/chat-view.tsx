@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react"
 import { createPortal } from "react-dom"
-import { LexicalComposerInput } from "@assistant-ui/react-lexical"
+import { AnimatedComposerInput } from "@/components/assistant-ui/animated-composer-input"
 import { ComposerMention } from "@/components/assistant-ui/composer-mention"
 import {
   IconBrandOpenai,
@@ -66,6 +66,7 @@ import {
   type PendingAttachment,
   type SpeechSynthesisAdapter,
   useAui,
+  useAuiEvent,
   useThreadViewport,
   useAuiState,
   useVoiceState,
@@ -1287,7 +1288,7 @@ function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
           const isAttached = item.metadata?.attached === true
           return (
             <ComposerPrimitive.Unstable_TriggerPopoverItem
-              className="group/trigger flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left hover:bg-muted data-[highlighted]:bg-muted"
+              className="group/trigger flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left hover:bg-foreground/5 data-[highlighted]:bg-foreground/10"
               index={index}
               item={item}
               key={item.id}
@@ -2606,6 +2607,31 @@ function Composer({
     (state) => state.thread.messages.length > 0
   )
   const composerAttachments = useAuiState((state) => state.composer.attachments)
+  const composerText = useAuiState((state) => state.composer.text)
+  // MCPs mentioned in the draft are already visible inline; only list the
+  // attached ones that aren't, so the rail doesn't repeat the mention.
+  const mentionedMcpIds = useMemo(
+    () =>
+      new Set(
+        unstable_defaultDirectiveFormatter
+          .parse(composerText)
+          .flatMap((segment) =>
+            segment.kind !== "text" && segment.type === "mcp"
+              ? [segment.id.replace(/^mcp:/, "")]
+              : []
+          )
+      ),
+    [composerText]
+  )
+  const railContext = useMemo(() => {
+    if (!mentionedMcpIds.size) return conversationContext
+    return {
+      ...conversationContext,
+      mcpServers: conversationContext.mcpServers.filter(
+        (server) => !mentionedMcpIds.has(server.id)
+      ),
+    }
+  }, [mentionedMcpIds, conversationContext])
   const [storageQuery, setStorageQuery] = useState<string | null>(null)
   const [storageFiles, setStorageFiles] = useState<KnowledgeItem[]>([])
   const [storageLoading, setStorageLoading] = useState(false)
@@ -2827,6 +2853,10 @@ function Composer({
 
   const [attachingMcpIds, setAttachingMcpIds] = useState<Set<string>>(new Set())
   const pendingMcpIds = useRef(new Set<string>())
+  // MCPs attached by mentioning them in the unsent draft. Deleting the mention
+  // before sending detaches them again; sending makes the attachment permanent.
+  const draftMcpIds = useRef(new Set<string>())
+  const mentionedDraftMcpIds = useRef(new Set<string>())
   const attachingMcpId = attachingMcpIds.values().next().value
   const [mcpAttachError, setMcpAttachError] = useState<string | null>(null)
   const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null)
@@ -2846,6 +2876,7 @@ function Composer({
         return
       }
       setMcpAttachError(null)
+      draftMcpIds.current.add(resourceId)
       pendingMcpIds.current.add(resourceId)
       setAttachingMcpIds(new Set(pendingMcpIds.current))
       void onAttachMCP(resourceId)
@@ -2863,6 +2894,34 @@ function Composer({
     },
     [onAttachMCP]
   )
+  useAuiEvent("composer.send", () => {
+    draftMcpIds.current.clear()
+    mentionedDraftMcpIds.current.clear()
+  })
+  useEffect(() => {
+    for (const id of mentionedMcpIds) {
+      if (draftMcpIds.current.has(id)) mentionedDraftMcpIds.current.add(id)
+    }
+    const removed = [...mentionedDraftMcpIds.current].filter(
+      (id) => !mentionedMcpIds.has(id)
+    )
+    if (!removed.length || !onRemoveMCP) return
+    // Sending clears the draft too; defer so the send event can win that race.
+    const timer = setTimeout(() => {
+      for (const id of removed) {
+        if (!mentionedDraftMcpIds.current.delete(id)) continue
+        draftMcpIds.current.delete(id)
+        onRemoveMCP(id).catch((error: unknown) => {
+          setMcpAttachError(
+            error instanceof APIError || error instanceof Error
+              ? error.message
+              : "The MCP server could not be removed from this chat."
+          )
+        })
+      }
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [mentionedMcpIds, onRemoveMCP])
   const attachingNoteName =
     noteItems.find((item) => item.metadata?.resourceId === attachingNoteId)
       ?.label ?? "note"
@@ -2943,7 +3002,7 @@ function Composer({
                 categories.map((category) => (
                   <ComposerPrimitive.Unstable_TriggerPopoverCategoryItem
                     categoryId={category.id}
-                    className="rounded-xl px-2.5 py-1.5 text-left text-xs hover:bg-muted data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
+                    className="rounded-xl px-2.5 py-1.5 text-left text-xs hover:bg-foreground/5 data-[highlighted]:bg-foreground/10 data-[highlighted]:text-foreground"
                     key={category.id}
                   >
                     {category.label}
@@ -2956,7 +3015,7 @@ function Composer({
           </ComposerSuggestions>
           <div className="mx-auto w-[calc(100%-2rem)]" ref={composerAnchor}>
             <ContextDisplay
-              context={conversationContext}
+              context={railContext}
               onRemoveMCP={onRemoveMCP}
               onRemoveNote={onRemoveNote}
               onRemoveRepository={onRemoveRepository}
@@ -3070,7 +3129,7 @@ function Composer({
                     {noteAttachError}
                   </div>
                 )}
-                <LexicalComposerInput
+                <AnimatedComposerInput
                   aria-label="Message"
                   directiveChip={ComposerMention}
                   directivePluginProps={{
@@ -3080,7 +3139,6 @@ function Composer({
                     "max-h-40 min-h-16 w-full resize-none border-0 bg-transparent px-1.5 py-3 text-left text-sm leading-6 outline-none placeholder:text-muted-foreground/65 dark:placeholder:text-[#555555]",
                     compact && "order-1 min-h-16 min-w-0 flex-none basis-full"
                   )}
-                  placeholder="Hi, what do you need today?"
                   submitMode={
                     attachingMcpIds.size || attachingNoteId ? "none" : "enter"
                   }
