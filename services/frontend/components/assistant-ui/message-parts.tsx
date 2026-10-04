@@ -1,5 +1,6 @@
 "use client"
 
+import { TranscriptionCard } from "./transcription-card"
 import Image from "next/image"
 import Link from "next/link"
 import { Children, useMemo, useState } from "react"
@@ -78,7 +79,7 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
     <div
       className={cn(
         "my-2 inline-flex max-w-full items-center gap-2 rounded-full border border-transparent bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground",
-        status === "failed" && "border-destructive/30 text-destructive",
+        status === "failed" && "border-destructive/30 text-destructive"
       )}
       title={value.query ? `Query: ${value.query}` : undefined}
     >
@@ -448,12 +449,17 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
     [indices, messageParts, threadIsRunning]
   )
 
+  const waitingApprovals = useMemo(
+    () => toolCalls.filter((call) => call.status === "waiting"),
+    [toolCalls]
+  )
+
   if (toolCalls.length === 0) return null
 
   return (
     <>
       <RegisterMCPApprovals
-        approvals={toolCalls.filter((call) => call.status === "waiting")}
+        approvals={waitingApprovals}
         messageId={messageId}
       />
       <ToolCallsSection
@@ -468,6 +474,20 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
           )
         }
       />
+      {indices
+        .map((index) => messageParts[index])
+        .filter(
+          (part) =>
+            part?.type === "tool-call" &&
+            part.toolName === "start_video_transcription" &&
+            part.result !== undefined &&
+            !part.isError
+        )
+        .map((part) =>
+          part?.type === "tool-call" ? (
+            <TranscriptionCard key={part.toolCallId} value={part.result} />
+          ) : null
+        )}
       {generatedImages.map((image) => (
         <GeneratedImageCard
           isGenerating={image.isGenerating}
@@ -618,9 +638,8 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
           <AgentRunPart data={part.data} />
         ) : part.name === "retrieval-status" ? (
           <RetrievalStatusPart data={part.data} />
-        ) : part.name === "context-selection" ? (
-          null
-        ) : part.name === "justai-error" ? (
+        ) : part.name === "context-selection" ? null : part.name ===
+          "justai-error" ? (
           <AssistantErrorPart data={part.data} />
         ) : null)
       )

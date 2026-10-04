@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -31,13 +32,22 @@ export function MCPApprovalProvider({ children }: { children: ReactNode }) {
   const approvalsByMessage = useRef(new Map<string, ToolCallEntry[]>())
   const [approvals, setApprovals] = useState<ToolCallEntry[]>([])
 
-  const setMessageApprovals = (messageId: string, next: ToolCallEntry[]) => {
-    if (next.length) approvalsByMessage.current.set(messageId, next)
-    else approvalsByMessage.current.delete(messageId)
-    setApprovals(Array.from(approvalsByMessage.current.values()).flat())
-  }
+  const setMessageApprovals = useCallback(
+    (messageId: string, next: ToolCallEntry[]) => {
+      const previous = approvalsByMessage.current.get(messageId) ?? []
+      if (
+        previous.length === next.length &&
+        previous.every((entry, index) => entry === next[index])
+      )
+        return
+      if (next.length) approvalsByMessage.current.set(messageId, next)
+      else approvalsByMessage.current.delete(messageId)
+      setApprovals(Array.from(approvalsByMessage.current.values()).flat())
+    },
+    []
+  )
 
-  const value = useMemo(() => ({ setMessageApprovals }), [])
+  const value = useMemo(() => ({ setMessageApprovals }), [setMessageApprovals])
 
   return (
     <ApprovalContext.Provider value={value}>
@@ -147,7 +157,9 @@ export function RegisterMCPApprovals({
   const queue = useMCPApprovalQueue()
   useEffect(() => {
     queue?.setMessageApprovals(messageId, approvals)
-    return () => queue?.setMessageApprovals(messageId, [])
   }, [approvals, messageId, queue])
+  useEffect(() => {
+    return () => queue?.setMessageApprovals(messageId, [])
+  }, [messageId, queue])
   return null
 }
