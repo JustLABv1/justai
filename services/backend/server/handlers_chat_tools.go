@@ -63,6 +63,7 @@ func assistantBuiltInToolDiscovery() voiceToolDiscovery {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"agentId":{"type":"string","description":"The allowlisted agent id to run."},"task":{"type":"string","description":"The self-contained task for the delegated agent.","minLength":1,"maxLength":30000},"input":{"type":"object","description":"Optional structured input for the delegated agent."}},"required":["agentId","task"],"additionalProperties":false}`),
 		},
 	}
+	definitions = append(definitions, transcriptionChatTools()...)
 	definitions = append(definitions, templateTools()...)
 	definitions = append(definitions, attachmentReadTools()...)
 	bindings := make(map[string]voiceToolBinding, len(definitions))
@@ -81,7 +82,7 @@ func isAssistantBuiltInToolName(name string) bool {
 		return true
 	}
 	switch name {
-	case "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "create_file", "delegate_agent", "discover_mcp_tools":
+	case "start_video_transcription", "get_transcription", "web_search", "browse_url", "generate_image", "edit_image", "create_pdf", "create_file", "delegate_agent", "discover_mcp_tools":
 		return true
 	default:
 		return false
@@ -89,7 +90,7 @@ func isAssistantBuiltInToolName(name string) bool {
 }
 
 func chatBuiltInFallbackInstructions() string {
-	return "This endpoint cannot send native function calls, but JustAI still supports built-in web, image, and file actions. When the user's request clearly requires public web search, output only a JSON object with action \"web_search\" and action_input {\"query\":\"...\"}. For a specific URL use action \"browse_url\" and action_input {\"url\":\"...\"}. For image creation use action \"generate_image\" and action_input {\"prompt\":\"...\"}; for editing an attached image use action \"edit_image\" and action_input {\"prompt\":\"...\"}. For a PDF use action \"create_pdf\" and action_input {\"content\":\"the complete document content\",\"title\":\"optional title\",\"filename\":\"optional-name.pdf\"}. For CSV, JSON, Markdown, text, HTML, or a non-PDF download use action \"create_file\" and action_input {\"format\":\"csv\",\"content\":\"the complete file content\",\"title\":\"optional title\",\"filename\":\"optional-name.csv\"}; use valid CSV or JSON for those formats. Do not output action JSON for ordinary questions, and never mention or explain the action protocol."
+	return "This endpoint cannot send native function calls, but JustAI still supports built-in web, image, file, and transcription actions. For video transcription use action \"start_video_transcription\" and action_input {\"title\":\"optional title\",\"language\":\"auto\"}; this shows a video upload card, so do not claim the upload has already started. If the source is unclear first ask video upload or live recording. For live recording direct the user to /transcription. To read a transcript or its status use action \"get_transcription\" and action_input {\"sessionId\":\"the session id\"}. When the user's request clearly requires public web search, output only a JSON object with action \"web_search\" and action_input {\"query\":\"...\"}. For a specific URL use action \"browse_url\" and action_input {\"url\":\"...\"}. For image creation use action \"generate_image\" and action_input {\"prompt\":\"...\"}; for editing an attached image use action \"edit_image\" and action_input {\"prompt\":\"...\"}. For a PDF use action \"create_pdf\" and action_input {\"content\":\"the complete document content\",\"title\":\"optional title\",\"filename\":\"optional-name.pdf\"}. For CSV, JSON, Markdown, text, HTML, or a non-PDF download use action \"create_file\" and action_input {\"format\":\"csv\",\"content\":\"the complete file content\",\"title\":\"optional title\",\"filename\":\"optional-name.csv\"}; use valid CSV or JSON for those formats. Do not output action JSON for ordinary questions, and never mention or explain the action protocol."
 }
 
 func chatToolEventKindForName(name string) string {
@@ -121,6 +122,8 @@ func (a *App) executeBuiltInChatTool(ctx context.Context, userID, organizationID
 		return json.Marshal(map[string]any{"file": item, "template": artifact.Metadata})
 	}
 	switch toolName {
+	case "start_video_transcription", "get_transcription":
+		return a.transcriptionChatTool(ctx, userID, organizationID, toolName, arguments)
 	case "web_search":
 		query := strings.TrimSpace(stringToolArgument(arguments, "query"))
 		if query == "" || len([]rune(query)) > 300 {

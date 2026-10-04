@@ -415,7 +415,7 @@ func TestAssistantUIApprovalArgumentsMatchTreatsEmptyObjectsAsEqual(t *testing.T
 
 func TestAssistantBuiltinToolDiscoveryIncludesChatCapabilities(t *testing.T) {
 	discovery := assistantBuiltInToolDiscovery()
-	for _, name := range []string{"web_search", "browse_url", "generate_image", "edit_image"} {
+	for _, name := range []string{"web_search", "browse_url", "generate_image", "edit_image", "start_video_transcription", "get_transcription"} {
 		binding, ok := discovery.Bindings[name]
 		if !ok || !binding.Builtin {
 			t.Fatalf("expected built-in binding for %q: %+v", name, binding)
