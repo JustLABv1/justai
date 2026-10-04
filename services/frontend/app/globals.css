@@ -653,3 +653,24 @@
   --muted-foreground: #777777;
   --border: #414141;
 }
+
+/* Rich composer keeps mention tokens inline while preserving textarea spacing. */
+.aui-lexical-editor {
+  position: relative;
+}
+.aui-lexical-input {
+  min-height: 40px;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.aui-lexical-input p {
+  margin: 0;
+}
+.aui-lexical-placeholder {
+  position: absolute;
+  top: 12px;
+  left: 6px;
+  pointer-events: none;
+  color: var(--muted-foreground);
+}

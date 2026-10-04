@@ -1,6 +1,7 @@
 "use client"
 
 import { TranscriptionCard } from "./transcription-card"
+import { MentionMessageText } from "./composer-mention"
 import Image from "next/image"
 import Link from "next/link"
 import { Children, useMemo, useState } from "react"
@@ -709,12 +710,15 @@ export function UserMessageParts() {
   return (
     <MessagePrimitive.Parts>
       {({ part }) =>
-        part.type === "file"
-          ? null
-          : renderPart(
-              part,
-              "text-accent-foreground dark:text-primary-foreground"
-            )
+        part.type === "file" ? null : part.type === "text" &&
+          /:(?:mcp|knowledge|transcription|note)\[/.test(part.text) ? (
+          <MentionMessageText text={part.text} />
+        ) : (
+          renderPart(
+            part,
+            "text-accent-foreground dark:text-primary-foreground"
+          )
+        )
       }
     </MessagePrimitive.Parts>
   )

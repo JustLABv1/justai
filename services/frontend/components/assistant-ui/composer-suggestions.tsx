@@ -1,10 +1,22 @@
 "use client"
 
-import { useLayoutEffect, useState, type ComponentProps, type CSSProperties, type RefObject } from "react"
+import {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ComponentProps,
+  type CSSProperties,
+  type RefObject,
+} from "react"
 import { createPortal } from "react-dom"
-import { ComposerPrimitive, unstable_useTriggerPopoverScopeContext } from "@assistant-ui/react"
+import {
+  ComposerPrimitive,
+  unstable_useTriggerPopoverScopeContext,
+} from "@assistant-ui/react"
 
-type Props = ComponentProps<typeof ComposerPrimitive.Unstable_TriggerPopover> & {
+type Props = ComponentProps<
+  typeof ComposerPrimitive.Unstable_TriggerPopover
+> & {
   anchor: RefObject<HTMLDivElement | null>
 }
 
@@ -16,10 +28,9 @@ export function ComposerSuggestions({ anchor, children, ...props }: Props) {
     top: 0,
     left: 0,
     width: 1,
-    height: 1,
     visibility: "hidden",
   })
-  useLayoutEffect(() => {
+  useEffect(() => {
     const element = anchor.current
     if (!element) return
     const update = () => {
@@ -29,23 +40,34 @@ export function ComposerSuggestions({ anchor, children, ...props }: Props) {
       const viewLeft = viewport?.offsetLeft ?? 0
       const viewHeight = viewport?.height ?? window.innerHeight
       const viewWidth = viewport?.width ?? window.innerWidth
-      const banner = document.querySelector('[aria-label="Platform announcement"]')?.getBoundingClientRect()
+      const banner = document
+        .querySelector('[aria-label="Platform announcement"]')
+        ?.getBoundingClientRect()
       const topEdge = Math.max(viewTop + 12, (banner?.bottom ?? 0) + 8)
       const above = Math.max(0, rect.top - topEdge - 8)
       const below = Math.max(0, viewTop + viewHeight - rect.bottom - 20)
       const side = above >= 180 || above >= below ? "top" : "bottom"
-      const width = Math.min(384, viewWidth - 24)
-      const height = Math.max(0, Math.min(360, side === "top" ? above : below))
+      const width = Math.min(360, viewWidth - 24)
+      const maxHeight = Math.max(
+        0,
+        Math.min(320, side === "top" ? above : below)
+      )
       const next: CSSProperties = {
         position: "fixed",
         width,
-        left: Math.max(viewLeft + 12, Math.min(rect.left, viewLeft + viewWidth - width - 12)),
-        height,
-        maxHeight: height,
+        left: Math.max(
+          viewLeft + 12,
+          Math.min(rect.left, viewLeft + viewWidth - width - 12)
+        ),
+        maxHeight,
         visibility: "visible",
-        ...(side === "top" ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }),
+        ...(side === "top"
+          ? { bottom: window.innerHeight - rect.top + 8 }
+          : { top: rect.bottom + 8 }),
       }
-      setStyle((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+      setStyle((current) =>
+        JSON.stringify(current) === JSON.stringify(next) ? current : next
+      )
     }
     update()
     const observer = new ResizeObserver(update)
@@ -65,7 +87,7 @@ export function ComposerSuggestions({ anchor, children, ...props }: Props) {
   return createPortal(
     <ComposerPrimitive.Unstable_TriggerPopover
       {...props}
-      className="z-50 flex flex-col overflow-hidden rounded-xl bg-popover p-2 text-popover-foreground shadow-xl"
+      className="z-50 flex flex-col gap-0.5 overflow-hidden rounded-2xl bg-popover p-1.5 text-popover-foreground shadow-xl ring-1 ring-foreground/5"
       style={style}
     >
       <KeepSuggestionVisible />
@@ -85,7 +107,8 @@ function KeepSuggestionVisible() {
     const top = item.offsetTop
     const bottom = top + item.offsetHeight
     if (top < list.scrollTop) list.scrollTop = top
-    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight
+    else if (bottom > list.scrollTop + list.clientHeight)
+      list.scrollTop = bottom - list.clientHeight
   }, [open, highlightedItemId])
   return null
 }
