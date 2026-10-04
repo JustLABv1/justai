@@ -10,6 +10,8 @@ import {
   type ReactNode,
 } from "react"
 import { createPortal } from "react-dom"
+import { AnimatedComposerInput } from "@/components/assistant-ui/animated-composer-input"
+import { ComposerMention } from "@/components/assistant-ui/composer-mention"
 import {
   IconBrandOpenai,
   IconBrandGoogle,
@@ -33,7 +35,6 @@ import {
   Plug,
   RefreshCw,
   RotateCcw,
-  Sparkles,
   Star,
   Quote,
   ThumbsDown,
@@ -65,6 +66,7 @@ import {
   type PendingAttachment,
   type SpeechSynthesisAdapter,
   useAui,
+  useAuiEvent,
   useThreadViewport,
   useAuiState,
   useVoiceState,
@@ -1240,20 +1242,35 @@ function ContextDisplay({
   )
 }
 
-function StorageReferenceSearch({ onQuery, loading, error }: {
+function StorageReferenceSearch({
+  onQuery,
+  loading,
+  error,
+}: {
   onQuery: (query: string | null) => void
   loading: boolean
   error: string | null
 }) {
   const scope = unstable_useTriggerPopoverScopeContext()
-  useEffect(() => { onQuery(scope.open ? scope.query : null) }, [onQuery, scope.open, scope.query])
+  useEffect(() => {
+    onQuery(scope.open ? scope.query : null)
+  }, [onQuery, scope.open, scope.query])
   if (!scope.open) return null
-  if (error) return <p role="alert" className="px-2.5 py-2 text-xs text-destructive">{error}</p>
-  if (loading) return <p role="status" className="px-2.5 py-2 text-xs text-muted-foreground">Searching Storage…</p>
+  if (error)
+    return (
+      <p role="alert" className="px-2.5 py-2 text-xs text-destructive">
+        {error}
+      </p>
+    )
+  if (loading)
+    return (
+      <p role="status" className="px-2.5 py-2 text-xs text-muted-foreground">
+        Searching Storage…
+      </p>
+    )
   return (
-    <p className="px-2.5 py-2 text-xs text-muted-foreground">
-      Open Storage files or type a name to search, then choose a file for this
-      message.
+    <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+      Choose a category or type to search Storage.
     </p>
   )
 }
@@ -1262,7 +1279,7 @@ function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
   return (
     <ComposerPrimitive.Unstable_TriggerPopoverItems
       aria-label={ariaLabel}
-      className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain [&>button]:shrink-0"
+      className="flex min-h-0 flex-col gap-0.5 overflow-y-auto overscroll-contain [&>button]:shrink-0"
     >
       {(items) =>
         items.map((item, index) => {
@@ -1271,7 +1288,7 @@ function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
           const isAttached = item.metadata?.attached === true
           return (
             <ComposerPrimitive.Unstable_TriggerPopoverItem
-              className="group/trigger flex items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-muted data-[highlighted]:bg-muted"
+              className="group/trigger flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left hover:bg-foreground/5 data-[highlighted]:bg-foreground/10"
               index={index}
               item={item}
               key={item.id}
@@ -1319,23 +1336,21 @@ function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
 }
 
 function McpTriggerPopoverHeader() {
-  const { open } = unstable_useTriggerPopoverScopeContext()
+  const { open, items, query } = unstable_useTriggerPopoverScopeContext()
   if (!open) return null
 
   return (
-    <div className="flex items-center gap-2 px-2.5 py-2">
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        <Plug className="size-3.5" aria-hidden="true" />
-      </span>
-      <div className="min-w-0">
-        <p className="text-xs font-medium">Add an MCP server</p>
-        <p className="text-[11px] text-muted-foreground">
-          Choose a server to attach to this chat
+    <div className="px-2.5 pt-1.5 pb-1">
+      <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        MCP servers
+      </p>
+      {!items.length && (
+        <p className="py-2 text-xs text-muted-foreground">
+          {query
+            ? "No configured MCP matches your search."
+            : "No enabled MCP servers. Configure one to mention it here."}
         </p>
-      </div>
-      <span className="ml-auto hidden shrink-0 text-[10px] whitespace-nowrap text-muted-foreground sm:inline">
-        ↑↓ · Enter
-      </span>
+      )}
     </div>
   )
 }
@@ -1345,8 +1360,10 @@ function TriggerPopoverKeyboardHint() {
   if (!open) return null
 
   return (
-    <p className="mt-1 border-t px-2.5 pt-2 text-[10px] text-muted-foreground">
-      Use ↑/↓ to navigate · Enter to select · Esc to close
+    <p className="mt-0.5 flex items-center gap-3 px-2.5 pt-1.5 pb-1 text-[10px] text-muted-foreground/80">
+      <span>↑↓ navigate</span>
+      <span>↵ select</span>
+      <span>esc close</span>
     </p>
   )
 }
@@ -1490,7 +1507,11 @@ function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
       if (["generate_image", "edit_image"].includes(toolCall.toolName)) {
         return "Creating image"
       }
-      if (["create_pdf", "create_file", "fill_template"].includes(toolCall.toolName)) {
+      if (
+        ["create_pdf", "create_file", "fill_template"].includes(
+          toolCall.toolName
+        )
+      ) {
         return "Creating file"
       }
       return `Using ${toolCall.toolName.replaceAll("_", " ")}`
@@ -2586,6 +2607,31 @@ function Composer({
     (state) => state.thread.messages.length > 0
   )
   const composerAttachments = useAuiState((state) => state.composer.attachments)
+  const composerText = useAuiState((state) => state.composer.text)
+  // MCPs mentioned in the draft are already visible inline; only list the
+  // attached ones that aren't, so the rail doesn't repeat the mention.
+  const mentionedMcpIds = useMemo(
+    () =>
+      new Set(
+        unstable_defaultDirectiveFormatter
+          .parse(composerText)
+          .flatMap((segment) =>
+            segment.kind !== "text" && segment.type === "mcp"
+              ? [segment.id.replace(/^mcp:/, "")]
+              : []
+          )
+      ),
+    [composerText]
+  )
+  const railContext = useMemo(() => {
+    if (!mentionedMcpIds.size) return conversationContext
+    return {
+      ...conversationContext,
+      mcpServers: conversationContext.mcpServers.filter(
+        (server) => !mentionedMcpIds.has(server.id)
+      ),
+    }
+  }, [mentionedMcpIds, conversationContext])
   const [storageQuery, setStorageQuery] = useState<string | null>(null)
   const [storageFiles, setStorageFiles] = useState<KnowledgeItem[]>([])
   const [storageLoading, setStorageLoading] = useState(false)
@@ -2596,13 +2642,34 @@ function Composer({
     const timer = window.setTimeout(() => {
       setStorageLoading(true)
       setStorageError(null)
-      const params = new URLSearchParams({ type: "source", limit: "100", q: storageQuery })
-      void api.get<{ items: KnowledgeItem[] }>(`/api/v1/knowledge/items?${params}`, { signal: controller.signal })
-        .then(({ items }) => { if (!controller.signal.aborted) setStorageFiles(items) })
-        .catch(() => { if (!controller.signal.aborted) { setStorageFiles([]); setStorageError("Storage files could not be loaded. Close and reopen @ to retry.") } })
-        .finally(() => { if (!controller.signal.aborted) setStorageLoading(false) })
+      const params = new URLSearchParams({
+        type: "source",
+        limit: "100",
+        q: storageQuery,
+      })
+      void api
+        .get<{ items: KnowledgeItem[] }>(`/api/v1/knowledge/items?${params}`, {
+          signal: controller.signal,
+        })
+        .then(({ items }) => {
+          if (!controller.signal.aborted) setStorageFiles(items)
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setStorageFiles([])
+            setStorageError(
+              "Storage files could not be loaded. Close and reopen / to retry."
+            )
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setStorageLoading(false)
+        })
     }, 150)
-    return () => { window.clearTimeout(timer); controller.abort() }
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
   }, [storageQuery])
   const assistantSelectionLocked = assistantLocked || hasThreadMessages
   const hasAttachments = composerAttachments.length > 0
@@ -2640,7 +2707,13 @@ function Composer({
     }
 
     return Array.from(serversById.values())
-      .filter((server) => server.enabled || attachedServerIds.has(server.id))
+      .filter(
+        (server) =>
+          server.enabled &&
+          (server.authType === "none" ||
+            server.credentialConfigured ||
+            attachedServerIds.has(server.id))
+      )
       .sort((left, right) => left.name.localeCompare(right.name))
       .map((server) => {
         const attached = attachedServerIds.has(server.id)
@@ -2691,8 +2764,21 @@ function Composer({
   }, [conversationContext.notes, notes])
 
   const contextTriggerAdapter = useMemo(() => {
-    const files = new Map<string, { id: string; title: string; status: string }>(conversationContext.knowledgeSources.map((source) => [source.id, { id: source.id, title: source.title, status: source.status }]))
-    for (const file of storageFiles) files.set(file.resourceId, { id: file.resourceId, title: file.title, status: file.status })
+    const files = new Map<
+      string,
+      { id: string; title: string; status: string }
+    >(
+      conversationContext.knowledgeSources.map((source) => [
+        source.id,
+        { id: source.id, title: source.title, status: source.status },
+      ])
+    )
+    for (const file of storageFiles)
+      files.set(file.resourceId, {
+        id: file.resourceId,
+        title: file.title,
+        status: file.status,
+      })
     const groups = [
       {
         id: "knowledge",
@@ -2711,11 +2797,6 @@ function Composer({
         items: noteItems,
       },
       {
-        id: "mcp",
-        label: "MCP servers",
-        items: mcpItems,
-      },
-      {
         id: "transcription",
         label: "Transcription rooms",
         items: conversationContext.transcriptionSessions.map((session) => ({
@@ -2731,9 +2812,7 @@ function Composer({
     return {
       categories: () =>
         groups
-          .filter(
-            (group) => group.id === "knowledge" || group.items.length > 0
-          )
+          .filter((group) => group.id === "knowledge" || group.items.length > 0)
           .map(({ id, label }) => ({ id, label })),
       categoryItems: (categoryId: string) =>
         groups.find((group) => group.id === categoryId)?.items ?? [],
@@ -2746,7 +2825,7 @@ function Composer({
         )
       },
     }
-  }, [conversationContext, mcpItems, noteItems, storageFiles])
+  }, [conversationContext, noteItems, storageFiles])
 
   const mcpTriggerAdapter = useMemo(
     () => ({
@@ -2766,16 +2845,19 @@ function Composer({
 
   const contextDirectiveFormatter = useMemo<Unstable_DirectiveFormatter>(
     () => ({
-      serialize: (item) =>
-        item.type === "mcp" || item.type === "note"
-          ? ""
-          : unstable_defaultDirectiveFormatter.serialize(item),
+      serialize: unstable_defaultDirectiveFormatter.serialize,
       parse: unstable_defaultDirectiveFormatter.parse,
     }),
     []
   )
 
-  const [attachingMcpId, setAttachingMcpId] = useState<string | null>(null)
+  const [attachingMcpIds, setAttachingMcpIds] = useState<Set<string>>(new Set())
+  const pendingMcpIds = useRef(new Set<string>())
+  // MCPs attached by mentioning them in the unsent draft. Deleting the mention
+  // before sending detaches them again; sending makes the attachment permanent.
+  const draftMcpIds = useRef(new Set<string>())
+  const mentionedDraftMcpIds = useRef(new Set<string>())
+  const attachingMcpId = attachingMcpIds.values().next().value
   const [mcpAttachError, setMcpAttachError] = useState<string | null>(null)
   const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null)
   const [noteAttachError, setNoteAttachError] = useState<string | null>(null)
@@ -2786,11 +2868,17 @@ function Composer({
     (item: Unstable_TriggerItem) => {
       if (item.type !== "mcp") return
       const resourceId = item.metadata?.resourceId
-      if (typeof resourceId !== "string" || item.metadata?.attached === true) {
+      if (
+        typeof resourceId !== "string" ||
+        item.metadata?.attached === true ||
+        pendingMcpIds.current.has(resourceId)
+      ) {
         return
       }
       setMcpAttachError(null)
-      setAttachingMcpId(resourceId)
+      draftMcpIds.current.add(resourceId)
+      pendingMcpIds.current.add(resourceId)
+      setAttachingMcpIds(new Set(pendingMcpIds.current))
       void onAttachMCP(resourceId)
         .catch((error: unknown) => {
           const message =
@@ -2800,13 +2888,40 @@ function Composer({
           setMcpAttachError(message)
         })
         .finally(() => {
-          setAttachingMcpId((current) =>
-            current === resourceId ? null : current
-          )
+          pendingMcpIds.current.delete(resourceId)
+          setAttachingMcpIds(new Set(pendingMcpIds.current))
         })
     },
     [onAttachMCP]
   )
+  useAuiEvent("composer.send", () => {
+    draftMcpIds.current.clear()
+    mentionedDraftMcpIds.current.clear()
+  })
+  useEffect(() => {
+    for (const id of mentionedMcpIds) {
+      if (draftMcpIds.current.has(id)) mentionedDraftMcpIds.current.add(id)
+    }
+    const removed = [...mentionedDraftMcpIds.current].filter(
+      (id) => !mentionedMcpIds.has(id)
+    )
+    if (!removed.length || !onRemoveMCP) return
+    // Sending clears the draft too; defer so the send event can win that race.
+    const timer = setTimeout(() => {
+      for (const id of removed) {
+        if (!mentionedDraftMcpIds.current.delete(id)) continue
+        draftMcpIds.current.delete(id)
+        onRemoveMCP(id).catch((error: unknown) => {
+          setMcpAttachError(
+            error instanceof APIError || error instanceof Error
+              ? error.message
+              : "The MCP server could not be removed from this chat."
+          )
+        })
+      }
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [mentionedMcpIds, onRemoveMCP])
   const attachingNoteName =
     noteItems.find((item) => item.metadata?.resourceId === attachingNoteId)
       ?.label ?? "note"
@@ -2854,23 +2969,40 @@ function Composer({
       )}
     >
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
-        <div className="relative" ref={composerAnchor}>
+        <div className="relative">
+          <ComposerSuggestions
+            anchor={composerAnchor}
+            adapter={mcpTriggerAdapter}
+            char="@"
+          >
+            <ComposerPrimitive.Unstable_TriggerPopover.Directive
+              formatter={unstable_defaultDirectiveFormatter}
+              onInserted={attachMcpFromTrigger}
+            />
+            <McpTriggerPopoverHeader />
+            <ContextTriggerItems ariaLabel="MCP servers" />
+            <TriggerPopoverKeyboardHint />
+          </ComposerSuggestions>
           <ComposerSuggestions
             anchor={composerAnchor}
             adapter={contextTriggerAdapter}
-            char="@"
+            char="/"
           >
             <ComposerPrimitive.Unstable_TriggerPopover.Directive
               formatter={contextDirectiveFormatter}
               onInserted={attachContextFromTrigger}
             />
-            <StorageReferenceSearch onQuery={setStorageQuery} loading={storageLoading} error={storageError} />
+            <StorageReferenceSearch
+              onQuery={setStorageQuery}
+              loading={storageLoading}
+              error={storageError}
+            />
             <ComposerPrimitive.Unstable_TriggerPopoverCategories className="flex flex-col gap-1">
               {(categories) =>
                 categories.map((category) => (
                   <ComposerPrimitive.Unstable_TriggerPopoverCategoryItem
                     categoryId={category.id}
-                    className="rounded-lg px-2.5 py-2 text-left text-xs hover:bg-muted data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
+                    className="rounded-xl px-2.5 py-1.5 text-left text-xs hover:bg-foreground/5 data-[highlighted]:bg-foreground/10 data-[highlighted]:text-foreground"
                     key={category.id}
                   >
                     {category.label}
@@ -2881,35 +3013,9 @@ function Composer({
             <ContextTriggerItems ariaLabel="Context resources" />
             <TriggerPopoverKeyboardHint />
           </ComposerSuggestions>
-          <ComposerSuggestions
-            anchor={composerAnchor}
-            adapter={mcpTriggerAdapter}
-            char="/"
-          >
-            <ComposerPrimitive.Unstable_TriggerPopover.Action
-              onExecute={attachMcpFromTrigger}
-              removeOnExecute
-            />
-            <McpTriggerPopoverHeader />
-            <ContextTriggerItems ariaLabel="MCP servers" />
-            <TriggerPopoverKeyboardHint />
-          </ComposerSuggestions>
-          <ComposerSuggestions
-            anchor={composerAnchor}
-            adapter={mcpTriggerAdapter}
-            char="$"
-          >
-            <ComposerPrimitive.Unstable_TriggerPopover.Action
-              onExecute={attachMcpFromTrigger}
-              removeOnExecute
-            />
-            <McpTriggerPopoverHeader />
-            <ContextTriggerItems ariaLabel="MCP servers" />
-            <TriggerPopoverKeyboardHint />
-          </ComposerSuggestions>
-          <div className="mx-auto w-[calc(100%-2rem)]">
+          <div className="mx-auto w-[calc(100%-2rem)]" ref={composerAnchor}>
             <ContextDisplay
-              context={conversationContext}
+              context={railContext}
               onRemoveMCP={onRemoveMCP}
               onRemoveNote={onRemoveNote}
               onRemoveRepository={onRemoveRepository}
@@ -3023,13 +3129,19 @@ function Composer({
                     {noteAttachError}
                   </div>
                 )}
-                <ComposerPrimitive.Input
+                <AnimatedComposerInput
+                  aria-label="Message"
+                  directiveChip={ComposerMention}
+                  directivePluginProps={{
+                    onDirectiveSelect: attachContextFromTrigger,
+                  }}
                   className={cn(
-                    "max-h-40 min-h-16 w-full resize-none border-0 bg-transparent px-1.5 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground/65 dark:placeholder:text-[#555555]",
+                    "max-h-40 min-h-16 w-full resize-none border-0 bg-transparent px-1.5 py-3 text-left text-sm leading-6 outline-none placeholder:text-muted-foreground/65 dark:placeholder:text-[#555555]",
                     compact && "order-1 min-h-16 min-w-0 flex-none basis-full"
                   )}
-                  placeholder="Hi, what do you need today?"
-                  submitMode="enter"
+                  submitMode={
+                    attachingMcpIds.size || attachingNoteId ? "none" : "enter"
+                  }
                 />
                 <div
                   className={cn(
@@ -3106,7 +3218,11 @@ function Composer({
                       <ComposerPrimitive.Send
                         aria-label="Send message"
                         className="flex size-8 items-center justify-center rounded-full bg-[var(--composer-accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                        disabled={hasUnreadyAttachments}
+                        disabled={
+                          hasUnreadyAttachments ||
+                          attachingMcpIds.size > 0 ||
+                          !!attachingNoteId
+                        }
                       >
                         <ArrowUp className="size-4" />
                       </ComposerPrimitive.Send>
@@ -3124,8 +3240,9 @@ function Composer({
           compact ? "mt-1 text-[10px]" : "mt-2 text-[11px]"
         )}
       >
-        Type <kbd className="rounded border px-1 font-mono">@</kbd> to search
-        Storage and attach a file as context.
+        Type <kbd className="rounded border px-1 font-mono">@</kbd> to mention
+        MCPs, or <kbd className="rounded border px-1 font-mono">/</kbd> for
+        Storage and context.
       </p>
     </div>
   )
@@ -3172,9 +3289,12 @@ function AssistantThreadLayout({
 
   return (
     <MCPApprovalProvider>
-      <ThreadPrimitive.Root className={cn("relative flex min-h-0 flex-1 flex-col overflow-hidden",
+      <ThreadPrimitive.Root
+        className={cn(
+          "relative flex min-h-0 flex-1 flex-col overflow-hidden",
           !isEmpty && "bg-background"
-        )}>
+        )}
+      >
         {isEmpty && <ChatBackdrop />}
         <SelectionToolbarPrimitive.Root className="z-50 flex items-center gap-1 rounded-lg border bg-background/95 p-1 text-xs text-foreground shadow-lg backdrop-blur">
           <SelectionToolbarPrimitive.Quote className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
@@ -3461,10 +3581,9 @@ function AssistantChatSurface({
       }),
     [cacheScope, conversationId]
   )
-  const contextPolicy =
-    chatContextLabel(conversationContext, false, "")
-      ? "selected-only"
-      : "automatic"
+  const contextPolicy = chatContextLabel(conversationContext, false, "")
+    ? "selected-only"
+    : "automatic"
   const transport = useMemo(
     () =>
       new AssistantChatTransport<UIMessage>({

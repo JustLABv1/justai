@@ -54,3 +54,18 @@ func TestSelectChatContextFallsBackToAutomaticStorage(t *testing.T) {
 		t.Fatalf("expected automatic storage context, got %#v", selection)
 	}
 }
+
+func TestMCPMentionSkipsAutomaticAndPersistentStorage(t *testing.T) {
+	selection := selectChatContext(&assistantUserMessage{Text: ":mcp[Scanner]{name=mcp:" + uuid.NewString() + "} List failed scans"}, []uuid.UUID{uuid.New()}, []uuid.UUID{uuid.New()})
+	if !selection.SkipAutomatic || selection.SelectedOnly || len(selection.SourceIDs) != 0 || len(selection.TranscriptIDs) != 0 {
+		t.Fatalf("MCP mention must bypass unrelated Storage without disabling tools: %#v", selection)
+	}
+}
+
+func TestExplicitFileWithMCPKeepsSelectedFileContext(t *testing.T) {
+	id := uuid.New()
+	selection := selectChatContext(&assistantUserMessage{Text: ":mcp[Scanner]{name=mcp:" + uuid.NewString() + "} :knowledge[Report]{name=knowledge:" + id.String() + "}"}, nil, nil)
+	if selection.SkipAutomatic || !selection.SelectedOnly || len(selection.SourceIDs) != 1 || selection.SourceIDs[0] != id {
+		t.Fatalf("explicit file must remain selected: %#v", selection)
+	}
+}

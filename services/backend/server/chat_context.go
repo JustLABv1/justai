@@ -29,7 +29,10 @@ func storageReferenceIDs(text string) []uuid.UUID {
 	return ids
 }
 
+var mcpReferencePattern = regexp.MustCompile(`:mcp\[[^\r\n]*?\]\{name="?mcp:([0-9a-fA-F-]{36})"?\}`)
+
 type chatContextSelection struct {
+	SkipAutomatic bool
 	SourceIDs     []uuid.UUID
 	TranscriptIDs []uuid.UUID
 	SelectedOnly  bool
@@ -43,6 +46,9 @@ func selectChatContext(user *assistantUserMessage, sources, transcripts []uuid.U
 		}
 		if refs := storageReferenceIDs(user.Text); len(refs) > 0 {
 			return chatContextSelection{SourceIDs: refs, SelectedOnly: true, Label: "Referenced Storage files"}
+		}
+		if mcpReferencePattern.MatchString(user.Text) {
+			return chatContextSelection{SkipAutomatic: true, Label: "Mentioned MCP servers"}
 		}
 	}
 	if len(sources)+len(transcripts) > 0 {

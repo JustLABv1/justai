@@ -653,3 +653,53 @@
   --muted-foreground: #777777;
   --border: #414141;
 }
+
+/* Rich composer keeps mention tokens inline while preserving textarea spacing. */
+.aui-lexical-editor {
+  position: relative;
+}
+.aui-lexical-input {
+  min-height: 40px;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.aui-lexical-input p {
+  margin: 0;
+}
+.aui-lexical-placeholder {
+  position: absolute;
+  top: 12px;
+  left: 6px;
+  pointer-events: none;
+  color: var(--muted-foreground);
+}
+
+.composer-prompt {
+  right: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.composer-prompt-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.composer-prompt-text[data-exiting="true"] {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.composer-prompt-text[data-animate="true"] {
+  animation: composer-prompt-enter 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+@keyframes composer-prompt-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-prompt-text {
+    animation: none;
+    transition: none;
+  }
+}

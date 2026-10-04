@@ -438,6 +438,10 @@ func (a *App) assistantUIChat(c *gin.Context) {
 			if selectedOnlyContext {
 				knowledgeAttached = true
 				knowledgeStatusRequested = true
+			} else if selection.SkipAutomatic || approval != nil {
+				// Explicit MCP turns and approval continuations must not trigger
+				// a new automatic Storage search.
+				knowledgeStatusRequested = false
 			} else if len(request.IncludeSpaceIDs) == 0 && len(request.ExcludeSpaceIDs) == 0 && assistantUIRequestsImageGeneration(latestUser) {
 				// Image generation is a self-contained built-in action. Do not
 				// turn a word in the image prompt (for example, "Katze") into

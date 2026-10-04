@@ -1,6 +1,8 @@
 "use client"
 
 import { TranscriptionCard } from "./transcription-card"
+import { MentionMessageText } from "./composer-mention"
+import { MCPActionCard } from "./mcp-action-card"
 import Image from "next/image"
 import Link from "next/link"
 import { Children, useMemo, useState } from "react"
@@ -462,18 +464,29 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
         approvals={waitingApprovals}
         messageId={messageId}
       />
-      <ToolCallsSection
-        approvalActions={false}
-        className="mb-2 w-full max-w-2xl"
-        toolCalls={toolCalls}
-        renderContent={(content, call, kind) =>
-          kind === "output" ? (
-            <ToolResultContent toolName={call.tool_name} value={content} />
-          ) : (
-            <CompactMarkdown content={content} />
-          )
-        }
-      />
+      {toolCalls.map((call) =>
+        call.integration_name ||
+        call.approval ||
+        call.tool_name.startsWith("mcp_") ? (
+          <MCPActionCard key={call.tool_call_id} call={call}>
+            <ToolResultContent toolName={call.tool_name} value={call.output} />
+          </MCPActionCard>
+        ) : (
+          <ToolCallsSection
+            key={call.tool_call_id}
+            approvalActions={false}
+            className="mb-2 w-full max-w-2xl"
+            toolCalls={[call]}
+            renderContent={(content, entry, kind) =>
+              kind === "output" ? (
+                <ToolResultContent toolName={entry.tool_name} value={content} />
+              ) : (
+                <CompactMarkdown content={content} />
+              )
+            }
+          />
+        )
+      )}
       {indices
         .map((index) => messageParts[index])
         .filter(
@@ -524,15 +537,26 @@ function GeneratedFiles() {
 
 type SourcePart = Extract<PartState, { type: "source" }>
 
-function SourceGroup({ indices }: { indices: readonly number[] }) {
+function SourceGroup({
+  indices,
+  suppressAutomatic = false,
+}: {
+  indices: readonly number[]
+  suppressAutomatic?: boolean
+}) {
   const messageParts = useAuiState((state) => state.message.parts)
   const sourceParts = useMemo(
     () =>
       indices.flatMap((index): SourcePart[] => {
         const part = messageParts[index]
-        return part?.type === "source" ? [part] : []
+        if (part?.type !== "source") return []
+        const metadata = part.providerMetadata?.justai as
+          { contextOrigin?: string } | undefined
+        if (suppressAutomatic && metadata?.contextOrigin === "automatic")
+          return []
+        return [part]
       }),
-    [indices, messageParts]
+    [indices, messageParts, suppressAutomatic]
   )
 
   if (sourceParts.length === 0) return null
@@ -658,6 +682,33 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
 }
 
 export function AssistantMessageParts() {
+  const parts = useAuiState((state) => state.message.parts)
+  const suppressAutomatic = useAuiState((state) => {
+    let mcpOnly = false
+    for (const message of state.thread.messages) {
+      if (message.id === state.message.id) break
+      if (message.role !== "user") continue
+      const text = message.parts
+        .filter((part) => part.type === "text")
+        .map((part) => (part.type === "text" ? part.text : ""))
+        .join("\n")
+      mcpOnly =
+        /:mcp\[/.test(text) &&
+        !/:(?:knowledge|transcription)\[/.test(text) &&
+        !message.parts.some(
+          (part) => part.type === "file" || part.type === "image"
+        )
+    }
+    return mcpOnly
+  })
+  const sourceIndices = useMemo(() => {
+    const seen = new Set<string>()
+    return parts.flatMap((part, index) => {
+      if (part.type !== "source" || seen.has(part.id)) return []
+      seen.add(part.id)
+      return [index]
+    })
+  }, [parts])
   return (
     <>
       <MessagePrimitive.GroupedParts
@@ -684,7 +735,7 @@ export function AssistantMessageParts() {
             return statuses[statuses.length - 1] ?? null
           }
           if (part.type === "group-sources") {
-            return <SourceGroup indices={part.indices} />
+            return null
           }
           if (part.type === "indicator") {
             return (
@@ -700,6 +751,10 @@ export function AssistantMessageParts() {
           return renderPart(part as EnrichedPartState)
         }}
       </MessagePrimitive.GroupedParts>
+      <SourceGroup
+        indices={sourceIndices}
+        suppressAutomatic={suppressAutomatic}
+      />
       <GeneratedFiles />
     </>
   )
@@ -709,12 +764,15 @@ export function UserMessageParts() {
   return (
     <MessagePrimitive.Parts>
       {({ part }) =>
-        part.type === "file"
-          ? null
-          : renderPart(
-              part,
-              "text-accent-foreground dark:text-primary-foreground"
-            )
+        part.type === "file" ? null : part.type === "text" &&
+          /:(?:mcp|knowledge|transcription|note)\[/.test(part.text) ? (
+          <MentionMessageText text={part.text} />
+        ) : (
+          renderPart(
+            part,
+            "text-accent-foreground dark:text-primary-foreground"
+          )
+        )
       }
     </MessagePrimitive.Parts>
   )
