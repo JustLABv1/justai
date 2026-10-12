@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 
 ARG FFMPEG_VERSION=9.0.1
-ARG OPENSSL_VERSION=3.5.7
+ARG OPENSSL_VERSION=3.5.9
 
 FROM alpine:3.24 AS openssl-builder
 
 ARG OPENSSL_VERSION
-ARG OPENSSL_SHA256=a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8
+ARG OPENSSL_SHA256=603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
 
 # OpenSSL changes independently from FFmpeg, so keep it in its own cacheable
 # stage. Only its static libraries and headers are passed to the FFmpeg build.

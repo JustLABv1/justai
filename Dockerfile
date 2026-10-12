@@ -30,8 +30,8 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o justai-backend
 # remains as a verified fallback for ordinary local Docker builds.
 FROM alpine:3.24 AS ffmpeg-builder
 ARG FFMPEG_VERSION=9.0.1
-ARG OPENSSL_VERSION=3.5.7
-ARG OPENSSL_SHA256=a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8
+ARG OPENSSL_VERSION=3.5.9
+ARG OPENSSL_SHA256=603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
 RUN apk add --no-cache \
       build-base \
       curl \
@@ -124,8 +124,8 @@ RUN apk add --upgrade --no-cache \
     py3-pip \
     tzdata \
     wget \
-    libcrypto3 \
-    libssl3 \
+    'libcrypto3>=3.5.9-r0' \
+    'libssl3>=3.5.9-r0' \
     && python3 -m venv /opt/templates-venv \
     && /opt/templates-venv/bin/pip install --no-cache-dir pypdf==6.19.0 \
     && /opt/templates-venv/bin/python -c 'import pathlib, shutil, sysconfig; root = pathlib.Path(sysconfig.get_path("purelib")); [shutil.rmtree(path, ignore_errors=True) for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack") for path in (root / name, *root.glob(name + "-*.dist-info"), *root.glob(name + "-*.egg-info"))]; (root / "distutils-precedence.pth").unlink(missing_ok=True); [path.unlink(missing_ok=True) for path in pathlib.Path("/opt/templates-venv/bin").glob("pip*")]' \

@@ -11,7 +11,7 @@ on:
 env:
   IMAGE: ghcr.io/justlabv1/justai
   FFMPEG_IMAGE: ghcr.io/justlabv1/justai-ffmpeg
-  FFMPEG_TAG: 9.0.1-openssl-3.5.7
+  FFMPEG_TAG: 9.0.1-openssl-3.5.9
 
 jobs:
   build:
