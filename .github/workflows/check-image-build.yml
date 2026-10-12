@@ -10,7 +10,7 @@ permissions:
 
 env:
   FFMPEG_IMAGE: ghcr.io/justlabv1/justai-ffmpeg
-  FFMPEG_TAG: 9.0.1-openssl-3.5.7
+  FFMPEG_TAG: 9.0.1-openssl-3.5.9
 
 jobs:
   changes:
@@ -116,8 +116,14 @@ jobs:
           context: services/frontend
           file: services/frontend/Dockerfile
           push: false
+          load: true
+          tags: justai-frontend:ci
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
+
+      - name: Verify patched OpenSSL runtime
+        run: |
+          docker run --rm --entrypoint node justai-frontend:ci -e 'const fs = require("node:fs"); const assert = require("node:assert/strict"); const packages = fs.readFileSync("/lib/apk/db/installed", "utf8").split("\n\n"); for (const name of ["libssl3", "libcrypto3"]) { const record = packages.find(record => record.split("\n").includes("P:" + name)); assert(record, name + " missing"); const version = record.match(/^V:(.+)$/m)[1]; assert(version.localeCompare("3.5.9-r0", undefined, { numeric: true }) >= 0, name + ": " + version); } assert(process.versions.openssl.localeCompare("3.5.9", undefined, { numeric: true }) >= 0, process.versions.openssl); console.log("OpenSSL", process.versions.openssl); assert(!fs.existsSync("/sbin/apk"));'
 
   resolve-ffmpeg-artifact:
     name: Resolve Shared FFmpeg Artifact
@@ -163,9 +169,16 @@ jobs:
           context: services/backend
           file: services/backend/Dockerfile
           push: false
+          load: true
+          tags: justai-backend:ci
           build-contexts: ${{ needs.resolve-ffmpeg-artifact.outputs.context }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
+
+      - name: Verify patched Expat runtime
+        run: |
+          docker run --rm --entrypoint /opt/templates-venv/bin/python justai-backend:ci -c 'import pyexpat; print(pyexpat.EXPAT_VERSION); assert pyexpat.version_info >= (2, 9, 0); parser = pyexpat.ParserCreate(); parser.Parse("<root>ok</root>", True)'
+          docker run --rm --entrypoint pdftotext justai-backend:ci -v
 
   combined-image-build:
     name: Combined — Docker Build Check

@@ -3,8 +3,8 @@
 FROM alpine:3.24 AS ffmpeg-builder
 
 ARG FFMPEG_VERSION=9.0.1
-ARG OPENSSL_VERSION=3.5.7
-ARG OPENSSL_SHA256=a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8
+ARG OPENSSL_VERSION=3.5.9
+ARG OPENSSL_SHA256=603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
 
 # Use an upstream-verified static FFmpeg build. Alpine 3.24 packages FFmpeg
 # 8.1.2, which is affected by CVE-2026-64830 and CVE-2026-64831.
@@ -88,12 +88,17 @@ WORKDIR /app
 
 LABEL org.opencontainers.image.version=$APP_VERSION
 
+# Alpine 3.24 still ships Expat 2.8.5. Limit the edge repository to the patched
+# library for CVE-2026-77214; all other runtime packages remain on stable.
+RUN printf '%s\n' '@security https://dl-cdn.alpinelinux.org/alpine/edge/main' >> /etc/apk/repositories
+
 # pip is only needed while installing pypdf. Remove packaging tools in the same
 # layer so neither the final image nor its layer history keeps setuptools.
 RUN apk add --upgrade --no-cache \
     ca-certificates \
     libcrypto3 \
     libssl3 \
+    'libexpat@security>=2.9.0-r0' \
     poppler-utils \
     python3 \
     py3-pip \
