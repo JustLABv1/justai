@@ -383,7 +383,12 @@ async function setupVoiceSession(
               const reason = response.reason
               sendJSON({
                 type: approved ? "tool.approve" : "tool.reject",
-                data: { approvalId, approved, reason, text: response.text },
+                data: {
+                  approvalId,
+                  approved,
+                  reason,
+                  text: "text" in response ? response.text : undefined,
+                },
               })
               if (!approved) options.onToolApproval?.(null)
             },
