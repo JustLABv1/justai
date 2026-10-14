@@ -469,7 +469,7 @@ func (s Server) ValidateURL(allowPrivate bool) error {
 	if allowPrivate || s.AllowPrivate {
 		return nil
 	}
-	return validateHost(parsed.Hostname())
+	return outbound.ValidatePublicTarget(parsed, validateHost)
 }
 
 // OAuthMetadata is the small subset of RFC 8414 / protected-resource

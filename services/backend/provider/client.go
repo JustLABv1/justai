@@ -654,7 +654,7 @@ func ValidateMediaSourceURL(rawURL string, allowPrivate bool) error {
 	if allowPrivate {
 		return nil
 	}
-	return validatePublicHost(parsed.Hostname())
+	return outbound.ValidatePublicTarget(parsed, validatePublicHost)
 }
 
 // SafeHTTPClient returns the same redirect and connection-time egress policy
@@ -727,7 +727,7 @@ func validateURL(rawURL string, allowPrivate, rejectQuery bool) error {
 	if allowPrivate {
 		return nil
 	}
-	return validatePublicHost(parsed.Hostname())
+	return outbound.ValidatePublicTarget(parsed, validatePublicHost)
 }
 
 func sameOrigin(left, right *url.URL) bool {

@@ -13,6 +13,47 @@ import (
 	"golang.org/x/net/http/httpproxy"
 )
 
+// ValidatePublicTarget delegates hostname resolution to an operator-configured
+// proxy. Local DNS cannot validate the address the proxy will actually use and
+// may not be available in proxy-only networks. Literal IPs and recognizable
+// local hostnames are still rejected; the proxy enforces resolved-address ACLs.
+// Direct requests (including NO_PROXY and non-HTTP protocols) retain DNS checks.
+func ValidatePublicTarget(target *url.URL, validateDirectHost func(string) error) error {
+	proxy, err := httpproxy.FromEnvironment().ProxyFunc()(target)
+	if err != nil {
+		return fmt.Errorf("backend proxy configuration is invalid")
+	}
+	host := strings.TrimSuffix(strings.ToLower(target.Hostname()), ".")
+	if proxy == nil || net.ParseIP(host) != nil {
+		return validateDirectHost(host)
+	}
+	if !strings.Contains(host, ".") || strings.ContainsAny(host, ":%") || numericHost(host) {
+		return fmt.Errorf("proxy target must be a public hostname or IP address")
+	}
+	for _, suffix := range []string{"localhost", "local", "localdomain", "internal", "svc", "cluster.local", "home.arpa"} {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return fmt.Errorf("proxy target must not be a local hostname")
+		}
+	}
+	return nil
+}
+
+// Proxies can interpret abbreviated, octal, or hexadecimal IPv4 spellings.
+// Require standard IP literals so the caller's address checks cannot be skipped.
+func numericHost(host string) bool {
+	for _, label := range strings.Split(host, ".") {
+		digits := "0123456789"
+		if strings.HasPrefix(label, "0x") {
+			label = strings.TrimPrefix(label, "0x")
+			digits += "abcdef"
+		}
+		if label == "" || strings.Trim(label, digits) != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // WithEnvironmentProxy preserves the client's guarded direct dialer. Proxied
 // requests validate their destination before handing it to the trusted proxy;
 // only the proxy connection uses an unrestricted dialer. The proxy must enforce

@@ -3,8 +3,37 @@ package mcp
 import (
 	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
+
+func TestMCPProxyOnlyDNS(t *testing.T) {
+	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "REQUEST_METHOD"} {
+		t.Setenv(key, "")
+	}
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("metadata")) }))
+	defer proxy.Close()
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	const endpoint = "http://mcp.proxy-only.invalid/mcp"
+	client, err := SafeHTTPClient(endpoint, false)
+	if err != nil {
+		t.Fatalf("MCP validation required local DNS: %v", err)
+	}
+	defer client.CloseIdleConnections()
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		t.Fatalf("MCP request required local DNS: %v", err)
+	}
+	resp.Body.Close()
+	if err := (Server{EndpointURL: "http://api.internal/mcp"}).ValidateURL(false); err == nil {
+		t.Fatal("local MCP hostname accepted through proxy")
+	}
+	t.Setenv("NO_PROXY", ".proxy-only.invalid")
+	if _, err := SafeHTTPClient(endpoint, false); err == nil {
+		t.Fatal("MCP NO_PROXY bypass should retain DNS validation")
+	}
+}
 
 func TestParseToolAppMetadataSupportsKnownNamespaces(t *testing.T) {
 	cases := []struct {
