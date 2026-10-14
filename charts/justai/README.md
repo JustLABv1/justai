@@ -105,13 +105,24 @@ and Vault support `secrets.data.backendHttpProxy`, `backendHttpsProxy`, and
 `backend.env`/`envFrom` or `monolith.env`/`envFrom`, or set directly outside Helm.
 Restart the backend after changing its environment.
 
-Private-target and redirect checks remain active on guarded HTTP clients.
-An operator-configured proxy may itself be private; it is trusted to resolve
-and connect to destinations, so configure its egress policy to block private
-destinations unless deliberately allowed. `NO_PROXY` requests retain the direct
-connection DNS checks. Internal provider endpoints still require the existing
-private-target permission. Configure Pyannote's proxy separately, and include
-internal services in `NO_PROXY` as appropriate.
+With a proxy selected, guarded HTTP clients let the proxy resolve destination
+hostnames; the backend does not need external DNS access. URL, redirect, private
+IP literal, and recognizable local-hostname checks remain active. The proxy
+must enforce resolved-address access rules, including blocking public names
+that resolve to private addresses. An operator-configured proxy may itself be
+private. Direct requests, including `NO_PROXY` matches and RTMP sources, retain
+local DNS and connection-time address checks. Internal provider endpoints still
+require the existing private-target permission. Configure Pyannote's proxy
+separately, and include internal services in `NO_PROXY` as appropriate.
+
+The chart sets uppercase proxy environment variables, which the backend reads.
+Tools such as `wget` may require lowercase variables. To check HTTPS access
+without writing into the container's read-only application directory:
+
+```sh
+https_proxy="$HTTPS_PROXY" http_proxy="$HTTP_PROXY" no_proxy="$NO_PROXY" \
+  wget -O /dev/null https://www.bundestag.de/mediathek/live
+```
 
 ## Custom CA for backend connections
 

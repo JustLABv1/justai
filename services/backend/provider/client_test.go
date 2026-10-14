@@ -142,6 +142,51 @@ func TestSafeHTTPClientProxyPreservesTargetPolicy(t *testing.T) {
 	}
 }
 
+func TestProxyOnlyProviderAndMediaValidation(t *testing.T) {
+	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "REQUEST_METHOD"} {
+		t.Setenv(key, "")
+	}
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/redirect":
+			http.Redirect(w, r, "http://second.proxy-only.invalid/audio", http.StatusFound)
+		case "/private":
+			http.Redirect(w, r, "http://api.internal/audio", http.StatusFound)
+		default:
+			w.Write([]byte("audio"))
+		}
+	}))
+	defer proxy.Close()
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("HTTPS_PROXY", proxy.URL)
+	for _, raw := range []string{"http://first.proxy-only.invalid", "https://first.proxy-only.invalid"} {
+		if err := ValidateEndpointURL(raw, false); err != nil {
+			t.Fatalf("provider required local DNS: %v", err)
+		}
+		if err := ValidateMediaSourceURL(raw+"/audio", false); err != nil {
+			t.Fatalf("media required local DNS: %v", err)
+		}
+	}
+	client := SafeHTTPClient(time.Second, false)
+	defer client.CloseIdleConnections()
+	resp, err := client.Get("http://first.proxy-only.invalid/redirect")
+	if err != nil {
+		t.Fatalf("proxied redirect required local DNS: %v", err)
+	}
+	resp.Body.Close()
+	if resp.Request.URL.Hostname() != "second.proxy-only.invalid" {
+		t.Fatal("redirect was not followed")
+	}
+	if resp, err := client.Get("http://first.proxy-only.invalid/private"); err == nil {
+		resp.Body.Close()
+		t.Fatal("redirect to local hostname accepted")
+	}
+	t.Setenv("NO_PROXY", ".proxy-only.invalid")
+	if err := ValidateMediaSourceURL("https://first.proxy-only.invalid/audio", false); err == nil {
+		t.Fatal("bypassed proxy should require local DNS")
+	}
+}
+
 func TestOpenAIMessageContentIncludesImageParts(t *testing.T) {
 	content := openAIMessageContent(Message{
 		Content: "What is this?",

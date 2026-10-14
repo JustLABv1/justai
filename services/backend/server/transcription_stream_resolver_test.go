@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -97,7 +100,7 @@ func TestLivestreamResolverAndCaptureThroughProxy(t *testing.T) {
 			w.WriteHeader(http.StatusProxyAuthRequired)
 			return
 		}
-		if r.URL.Hostname() != "8.8.8.8" {
+		if r.URL.Hostname() != "livestream.proxy-only.invalid" {
 			t.Errorf("unexpected proxy target: %s", r.URL)
 		}
 		if r.URL.Path == "/page" {
@@ -111,8 +114,8 @@ func TestLivestreamResolverAndCaptureThroughProxy(t *testing.T) {
 	proxyURL, _ := url.Parse(proxy.URL)
 	proxyURL.User = url.UserPassword("user", "secret")
 	t.Setenv("HTTP_PROXY", proxyURL.String())
-	resolved, err := resolveLiveStream(context.Background(), "http://8.8.8.8/page", false)
-	if err != nil || resolved.URL != "http://8.8.8.8/audio.wav" {
+	resolved, err := resolveLiveStream(context.Background(), "http://livestream.proxy-only.invalid/page", false)
+	if err != nil || resolved.URL != "http://livestream.proxy-only.invalid/audio.wav" {
 		t.Fatalf("resolution failed: %+v, %v", resolved, err)
 	}
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -131,5 +134,28 @@ func TestLivestreamResolverAndCaptureThroughProxy(t *testing.T) {
 	}
 	if len(pcm) != 3200 {
 		t.Fatalf("decoded %d bytes, want 3200", len(pcm))
+	}
+}
+
+func TestLivestreamConnectionErrorsHaveSafeDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{&net.DNSError{Err: "lookup failed", Name: "private.proxy"}, "hostname resolution failed"},
+		{x509.UnknownAuthorityError{}, "TLS certificate verification failed"},
+		{x509.CertificateInvalidError{}, "TLS certificate verification failed"},
+		{x509.HostnameError{}, "TLS certificate verification failed"},
+		{context.DeadlineExceeded, "connection timed out"},
+		{errors.New("connection refused; proxy password=secret"), "connection failed"},
+	} {
+		wrapped := &url.Error{Op: "Get", URL: "https://source.example/audio?token=secret", Err: tc.err}
+		message := livestreamConnectionError(wrapped).Error()
+		if !strings.Contains(message, tc.want) {
+			t.Fatalf("wanted %q, got %q", tc.want, message)
+		}
+		if strings.Contains(message, "secret") || strings.Contains(message, "private.proxy") || strings.Contains(message, "source.example") {
+			t.Fatalf("connection error leaked details: %s", message)
+		}
 	}
 }

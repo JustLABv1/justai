@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -59,7 +62,7 @@ func resolveLiveStreamWithClient(ctx context.Context, raw string, allowPrivate b
 	req.Header.Set("User-Agent", "JustAI livestream resolver")
 	resp, err := client.Do(req)
 	if err != nil {
-		return resolvedLiveStream{}, fmt.Errorf("livestream source could not be reached")
+		return resolvedLiveStream{}, livestreamConnectionError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -98,6 +101,26 @@ func resolveLiveStreamWithClient(ctx context.Context, raw string, allowPrivate b
 		return resolveLiveStreamWithClient(ctx, frames[0], allowPrivate, client, depth+1)
 	}
 	return resolvedLiveStream{}, fmt.Errorf("no supported public stream was found on this page; use a direct audio/HLS link or browser audio capture")
+}
+
+// Report useful connection diagnostics without exposing signed source URLs or
+// proxy credentials from http.Client's URL-wrapped errors.
+func livestreamConnectionError(err error) error {
+	var dnsErr *net.DNSError
+	var unknownCA x509.UnknownAuthorityError
+	var certificateErr x509.CertificateInvalidError
+	var hostnameErr x509.HostnameError
+	var networkErr net.Error
+	switch {
+	case errors.As(err, &dnsErr):
+		return fmt.Errorf("livestream source could not be reached: hostname resolution failed; check the backend proxy and DNS settings")
+	case errors.As(err, &unknownCA), errors.As(err, &certificateErr), errors.As(err, &hostnameErr):
+		return fmt.Errorf("livestream source could not be reached: TLS certificate verification failed; check the backend trusted CA")
+	case errors.As(err, &networkErr) && networkErr.Timeout():
+		return fmt.Errorf("livestream source could not be reached: connection timed out")
+	default:
+		return fmt.Errorf("livestream source could not be reached: connection failed; check the backend proxy and network settings")
+	}
 }
 
 var embeddedMediaURL = regexp.MustCompile(`(?i)(?:https?:)?//[^\s"'<>\\]+\.(?:m3u8|mpd|mp3|aac|ogg)(?:\?[^\s"'<>\\]*)?`)

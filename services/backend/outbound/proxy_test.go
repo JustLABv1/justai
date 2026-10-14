@@ -3,6 +3,7 @@ package outbound
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -100,15 +101,17 @@ func TestHTTPSProxyConnect(t *testing.T) {
 	defer proxy.Close()
 	t.Setenv("HTTPS_PROXY", proxy.URL)
 	direct := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // Test server certificate.
-	client := &http.Client{Timeout: 3 * time.Second, Transport: WithEnvironmentProxy(direct, func(*url.URL) error { return nil })}
+	client := &http.Client{Timeout: 3 * time.Second, Transport: WithEnvironmentProxy(direct, func(target *url.URL) error {
+		return ValidatePublicTarget(target, func(string) error { t.Error("proxied HTTPS attempted local DNS validation"); return nil })
+	})}
 	defer client.CloseIdleConnections()
-	resp, err := client.Get("https://8.8.8.8/audio")
+	resp, err := client.Get("https://livestream.proxy-only.invalid/audio")
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if string(body) != "tunneled" || <-connects != "8.8.8.8:443" {
+	if string(body) != "tunneled" || <-connects != "livestream.proxy-only.invalid:443" {
 		t.Fatal("HTTPS was not tunneled through proxy")
 	}
 }
@@ -143,5 +146,45 @@ func TestMediaProxyEnv(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "https://proxy:8443")
 	if _, err := MediaProxyEnv("https://1.1.1.1/audio"); err == nil {
 		t.Fatal("unsupported media proxy accepted")
+	}
+}
+
+func TestValidatePublicTargetProxyDNSAndBypass(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv("HTTP_PROXY", "http://proxy.example:8080")
+	t.Setenv("HTTPS_PROXY", "http://proxy.example:8080")
+	dnsFailure := errors.New("local DNS unavailable")
+	lookups := 0
+	validateDirect := func(string) error { lookups++; return dnsFailure }
+	for _, raw := range []string{"http://livestream.proxy-only.invalid/audio", "https://livestream.proxy-only.invalid/audio"} {
+		u, _ := url.Parse(raw)
+		if err := ValidatePublicTarget(u, validateDirect); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if lookups != 0 {
+		t.Fatal("proxied hostname required local DNS")
+	}
+	for _, host := range []string{"localhost", "localhost.", "localhost.localdomain", "service.svc", "service.svc.cluster.local", "api.internal", "router.home.arpa", "printer.local", "127.1", "2130706433", "0x7f000001", "0177.0.0.1"} {
+		u, _ := url.Parse("https://" + host + "/audio")
+		if err := ValidatePublicTarget(u, validateDirect); err == nil {
+			t.Errorf("local or ambiguous target accepted: %s", host)
+		}
+	}
+	for _, raw := range []string{"https://10.0.0.1/audio", "https://[::1]/audio"} {
+		u, _ := url.Parse(raw)
+		if err := ValidatePublicTarget(u, validateDirect); !errors.Is(err, dnsFailure) {
+			t.Fatalf("literal IP did not retain address validation: %v", err)
+		}
+	}
+	t.Setenv("NO_PROXY", ".proxy-only.invalid")
+	u, _ := url.Parse("https://livestream.proxy-only.invalid/audio")
+	if err := ValidatePublicTarget(u, validateDirect); !errors.Is(err, dnsFailure) {
+		t.Fatalf("NO_PROXY did not retain DNS validation: %v", err)
+	}
+	t.Setenv("NO_PROXY", "")
+	u, _ = url.Parse("rtmps://livestream.proxy-only.invalid/audio")
+	if err := ValidatePublicTarget(u, validateDirect); !errors.Is(err, dnsFailure) {
+		t.Fatalf("RTMP did not retain DNS validation: %v", err)
 	}
 }
