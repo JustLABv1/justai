@@ -78,16 +78,41 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "justai.validateSecretRefs" -}}
 {{- $root := . -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $_ := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- end }}
+{{- end }}
+
+{{/* Backend egress settings are independent of optional Pyannote settings. */}}
+{{- define "justai.backendProxyEnv" -}}
+{{- $root := . -}}
+{{- range $entry := list (dict "value" .Values.backend.proxy.http "ref" "backendHttpProxy" "env" "HTTP_PROXY") (dict "value" .Values.backend.proxy.https "ref" "backendHttpsProxy" "env" "HTTPS_PROXY") (dict "value" .Values.backend.proxy.noProxy "ref" "backendNoProxy" "env" "NO_PROXY") -}}
+{{- $value := $entry.value -}}
+{{- if kindIs "slice" $value }}{{- $value = join "," $value -}}{{- end -}}
+{{- $data := index $root.Values.secrets.data $entry.ref -}}
+{{- $ref := index $root.Values.secrets.refs $entry.ref -}}
+{{- $managed := or $root.Values.secrets.create $root.Values.secrets.vault.enabled $root.Values.secrets.existingSecret -}}
+{{- if and $data (not $managed) (not $ref.name) -}}
+{{- fail (printf "secrets.data.%s requires secrets.create=true, secrets.vault.enabled=true, or secrets.refs.%s.name" $entry.ref $entry.ref) -}}
+{{- end -}}
+{{- if $value }}
+- name: {{ $entry.env }}
+  value: {{ $value | quote }}
+{{- else if or $data $ref.name }}
+- name: {{ $entry.env }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "justai.secretRefName" (dict "root" $root "ref" $entry.ref) | quote }}
+      key: {{ include "justai.secretRefKey" (dict "root" $root "ref" $entry.ref) | quote }}
+{{- end -}}
+{{- end -}}
 {{- end }}
 
 {{- define "justai.validateManagedSecretRefs" -}}
 {{- $root := . -}}
 {{- $generatedName := printf "%s-secrets" (include "justai.fullname" $root) -}}
 {{- $seen := dict -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $name := include "justai.secretRefName" (dict "root" $root "ref" $refName) -}}
 {{- $key := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- if eq $name $generatedName }}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"justai-backend/outbound"
 )
 
 type Server struct {
@@ -1107,9 +1108,11 @@ func (s *Server) ensureOAuthToken(ctx context.Context) error {
 }
 
 func (s Server) httpClient() *http.Client {
-	baseTransport := &http.Transport{
+	baseTransport := outbound.WithEnvironmentProxy(&http.Transport{
 		DialContext: safeDialContext(s.AllowPrivate),
-	}
+	}, func(target *url.URL) error {
+		return (Server{EndpointURL: target.String(), AllowPrivate: s.AllowPrivate}).ValidateURL(s.AllowPrivate)
+	})
 	return &http.Client{
 		Timeout: 45 * time.Second,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
@@ -1147,7 +1150,9 @@ func SafeHTTPClient(rawURL string, allowPrivate bool) (*http.Client, error) {
 			}
 			return (Server{EndpointURL: request.URL.String(), AllowPrivate: allowPrivate}).ValidateURL(allowPrivate)
 		},
-		Transport: &http.Transport{DialContext: safeDialContext(allowPrivate)},
+		Transport: outbound.WithEnvironmentProxy(&http.Transport{DialContext: safeDialContext(allowPrivate)}, func(target *url.URL) error {
+			return (Server{EndpointURL: target.String(), AllowPrivate: allowPrivate}).ValidateURL(allowPrivate)
+		}),
 	}, nil
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"justai-backend/models"
+	"justai-backend/outbound"
 	"justai-backend/provider"
 )
 
@@ -51,6 +52,10 @@ func (m *TranscriptionManager) diarizeVideoAudio(ctx context.Context, uploadID, 
 	}
 	videoURL := storage.presignURL(http.MethodGet, storageKey, nil, videoProcessingURLLifetime)
 	command := exec.CommandContext(ctx, "ffmpeg", ffmpegVideoAudioArgs(videoURL)...)
+	command.Env, err = outbound.MediaProxyEnv(videoURL)
+	if err != nil {
+		return err
+	}
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	stdout, err := command.StdoutPipe()
