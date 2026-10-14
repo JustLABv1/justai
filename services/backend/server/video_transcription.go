@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 
 	"justai-backend/models"
+	"justai-backend/outbound"
 	"justai-backend/provider"
 )
 
@@ -947,6 +948,10 @@ func (m *TranscriptionManager) transcribeVideoAudioSequential(ctx context.Contex
 	}()
 
 	ffmpeg := exec.CommandContext(processCtx, "ffmpeg", ffmpegVideoAudioArgs(videoURL)...)
+	ffmpeg.Env, err = outbound.MediaProxyEnv(videoURL)
+	if err != nil {
+		return err
+	}
 	var stderr bytes.Buffer
 	ffmpeg.Stderr = &stderr
 	stdout, err := ffmpeg.StdoutPipe()
@@ -1232,6 +1237,10 @@ func extractVideoAudioPCM(ctx context.Context, videoURL string) (*os.File, int64
 	}()
 
 	command := exec.CommandContext(ctx, "ffmpeg", ffmpegVideoAudioArgs(videoURL)...)
+	command.Env, err = outbound.MediaProxyEnv(videoURL)
+	if err != nil {
+		return nil, 0, err
+	}
 	var stderr bytes.Buffer
 	command.Stdout = audioFile
 	command.Stderr = &stderr
@@ -1688,6 +1697,11 @@ func (m *TranscriptionManager) renewVideoJobLease(ctx context.Context, jobID uui
 
 func probeVideoDuration(ctx context.Context, videoURL string) (float64, error) {
 	command := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", "-i", videoURL)
+	proxyEnv, proxyErr := outbound.MediaProxyEnv(videoURL)
+	if proxyErr != nil {
+		return 0, proxyErr
+	}
+	command.Env = proxyEnv
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()

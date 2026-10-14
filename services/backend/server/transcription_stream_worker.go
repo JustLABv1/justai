@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"justai-backend/outbound"
 	"justai-backend/provider"
 )
 
@@ -344,6 +345,13 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 	}()
 
 	ffmpeg := exec.CommandContext(attemptCtx, "ffmpeg", ffmpegLiveAudioArgs(streamURL, protocol)...)
+	proxyEnv, proxyErr := outbound.MediaProxyEnv(streamURL)
+	if proxyErr != nil {
+		stream.Close()
+		<-eventsDone
+		return connected, proxyErr
+	}
+	ffmpeg.Env = proxyEnv
 	var stderr strings.Builder
 	ffmpeg.Stderr = &stderr
 	stdout, err := ffmpeg.StdoutPipe()

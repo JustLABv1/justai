@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -90,6 +91,54 @@ func TestSafeHTTPClientStripsSecretsAndRefererAcrossOrigins(t *testing.T) {
 		if value := next.Header.Get(name); value != "" {
 			t.Fatalf("cross-origin redirect retained %s: %q", name, value)
 		}
+	}
+}
+
+func TestSafeHTTPClientProxyPreservesTargetPolicy(t *testing.T) {
+	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "REQUEST_METHOD"} {
+		t.Setenv(key, "")
+	}
+	calls := 0
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path == "/redirect" {
+			http.Redirect(w, r, "http://127.0.0.1/private", http.StatusFound)
+			return
+		}
+		w.Write([]byte("audio"))
+	}))
+	defer proxy.Close()
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	client := SafeHTTPClient(time.Second, false)
+	defer client.CloseIdleConnections()
+	resp, err := client.Get("http://8.8.8.8/audio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	for _, raw := range []string{"http://127.0.0.1/private", "http://10.0.0.1/private", "http://8.8.8.8/redirect"} {
+		if resp, err := client.Get(raw); err == nil {
+			resp.Body.Close()
+			t.Fatalf("unsafe URL accepted: %s", raw)
+		}
+	}
+	// Private permission remains limited to the configured provider origin.
+	scoped := SafeHTTPClientForOrigin(time.Second, true, "http://8.8.8.8")
+	defer scoped.CloseIdleConnections()
+	if resp, err := scoped.Get("http://10.0.0.1/private"); err == nil {
+		resp.Body.Close()
+		t.Fatal("private-origin scope bypassed through proxy")
+	}
+	if calls != 2 {
+		t.Fatalf("private request reached proxy; calls=%d", calls)
+	}
+	// NO_PROXY uses the original guarded dialer, not the trusted proxy dialer.
+	t.Setenv("NO_PROXY", "*")
+	direct := SafeHTTPClient(time.Second, false)
+	defer direct.CloseIdleConnections()
+	if resp, err := direct.Get("http://127.0.0.1/private"); err == nil {
+		resp.Body.Close()
+		t.Fatal("bypass disabled direct target protection")
 	}
 }
 

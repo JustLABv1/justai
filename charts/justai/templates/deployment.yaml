@@ -121,6 +121,7 @@ spec:
                   name: {{ $s3SecretKeyName | quote }}
                   key: {{ $s3SecretKeyKey | quote }}
             {{- end }}
+            {{- include "justai.backendProxyEnv" . | nindent 12 }}
             {{- with .Values.monolith.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -278,6 +279,7 @@ spec:
                   name: {{ $s3SecretKeyName | quote }}
                   key: {{ $s3SecretKeyKey | quote }}
             {{- end }}
+            {{- include "justai.backendProxyEnv" . | nindent 12 }}
             {{- with .Values.backend.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

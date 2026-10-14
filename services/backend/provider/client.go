@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"justai-backend/outbound"
 )
 
 type Endpoint struct {
@@ -677,8 +679,11 @@ func SafeHTTPClientForOrigin(timeout time.Duration, allowPrivate bool, privateOr
 		}
 	}
 	return &http.Client{
-		Timeout:   timeout,
-		Transport: &http.Transport{DialContext: safeDialContextForOrigin(allowPrivate, origin)},
+		Timeout: timeout,
+		Transport: outbound.WithEnvironmentProxy(&http.Transport{DialContext: safeDialContextForOrigin(allowPrivate, origin)}, func(target *url.URL) error {
+			targetAllowPrivate := allowPrivate && (origin == nil || sameOrigin(origin, target))
+			return validateRequestURL(target.String(), targetAllowPrivate)
+		}),
 		CheckRedirect: func(next *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("provider redirect limit exceeded")

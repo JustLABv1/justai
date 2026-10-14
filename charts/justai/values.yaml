@@ -99,6 +99,11 @@ monolith:
 
 backend:
   replicaCount: 1
+  # Also applied to the backend process in monolith mode.
+  proxy:
+    http: ""
+    https: ""
+    noProxy: []
   image:
     repository: ghcr.io/justlabv1/justai
     pullPolicy: IfNotPresent
@@ -313,6 +318,9 @@ secrets:
     encryptionKey: ""
     pyannoteHfToken: ""
     pyannoteServiceToken: ""
+    backendHttpProxy: ""
+    backendHttpsProxy: ""
+    backendNoProxy: ""
     pyannoteHttpProxy: ""
     pyannoteHttpsProxy: ""
     pyannoteNoProxy: ""
@@ -349,6 +357,15 @@ secrets:
     pyannoteServiceToken:
       name: ""
       key: service-token
+    backendHttpProxy:
+      name: ""
+      key: backend-http-proxy
+    backendHttpsProxy:
+      name: ""
+      key: backend-https-proxy
+    backendNoProxy:
+      name: ""
+      key: backend-no-proxy
     pyannoteHttpProxy:
       name: ""
       key: http-proxy

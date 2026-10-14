@@ -2,11 +2,17 @@ package server
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
+
+	"justai-backend/outbound"
 )
 
 func TestResolveLivestreamPages(t *testing.T) {
@@ -74,3 +80,56 @@ func TestResolveBundestagUsesOfficialAudio(t *testing.T) {
 type resolverTestTransport func(*http.Request) (*http.Response, error)
 
 func (f resolverTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestLivestreamResolverAndCaptureThroughProxy(t *testing.T) {
+	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "REQUEST_METHOD"} {
+		t.Setenv(key, "")
+	}
+	wav := append(liveStreamWAVHeader(), make([]byte, 3200)...)
+	binary.LittleEndian.PutUint32(wav[4:8], uint32(len(wav)-8))
+	binary.LittleEndian.PutUint32(wav[40:44], 3200)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if username, password, ok := r.BasicAuth(); ok || username != "" || password != "" {
+			t.Error("proxy credentials sent as destination authorization")
+		}
+		if r.Header.Get("Proxy-Authorization") != "Basic dXNlcjpzZWNyZXQ=" {
+			w.Header().Set("Proxy-Authenticate", `Basic realm="egress"`)
+			w.WriteHeader(http.StatusProxyAuthRequired)
+			return
+		}
+		if r.URL.Hostname() != "8.8.8.8" {
+			t.Errorf("unexpected proxy target: %s", r.URL)
+		}
+		if r.URL.Path == "/page" {
+			w.Write([]byte(`<audio src="/audio.wav"></audio>`))
+			return
+		}
+		w.Header().Set("Content-Type", "audio/wav")
+		w.Write(wav)
+	}))
+	defer proxy.Close()
+	proxyURL, _ := url.Parse(proxy.URL)
+	proxyURL.User = url.UserPassword("user", "secret")
+	t.Setenv("HTTP_PROXY", proxyURL.String())
+	resolved, err := resolveLiveStream(context.Background(), "http://8.8.8.8/page", false)
+	if err != nil || resolved.URL != "http://8.8.8.8/audio.wav" {
+		t.Fatalf("resolution failed: %+v, %v", resolved, err)
+	}
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg is required for capture test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ffmpeg", ffmpegLiveAudioArgs(resolved.URL, "http")...)
+	cmd.Env, err = outbound.MediaProxyEnv(resolved.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pcm, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("proxy capture failed: %v", err)
+	}
+	if len(pcm) != 3200 {
+		t.Fatalf("decoded %d bytes, want 3200", len(pcm))
+	}
+}

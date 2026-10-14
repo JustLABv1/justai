@@ -58,6 +58,61 @@ https://justai.example.com/api/v1/auth/oidc/callback
 Override `config.oidc.redirectUrl` for the deployment-wide fallback, or set a
 different redirect URL on each provider in the platform admin UI.
 
+## Backend egress proxy
+
+Configure the backend independently of `pyannote.proxy`. These settings also
+apply to the backend process in monolith mode:
+
+```yaml
+backend:
+  proxy:
+    http: http://proxy.example:8080
+    https: http://proxy.example:8080
+    noProxy:
+      - localhost
+      - .svc
+      - .cluster.local
+      - s3.example.internal
+```
+
+They set `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` for backend HTTP clients,
+including the livestream resolver, provider APIs, MCP/OAuth, and S3. Livestream
+and video FFmpeg jobs select the proxy for the source URL's scheme and map it
+to FFmpeg's `http_proxy`. Media capture requires an `http://` proxy URL, also
+for HTTPS sources (which use CONNECT). RTMP sources are not HTTP-proxied.
+
+For authenticated proxies, reference an existing Secret instead of putting
+credentials in values:
+
+```yaml
+secrets:
+  refs:
+    backendHttpProxy:
+      name: egress-proxy
+      key: http-proxy
+    backendHttpsProxy:
+      name: egress-proxy
+      key: https-proxy
+    backendNoProxy:
+      name: egress-proxy
+      key: no-proxy
+```
+
+The same Secret used by Pyannote can be referenced here. Inline
+`backend.proxy.*` values take precedence over these references. Managed Secrets
+and Vault support `secrets.data.backendHttpProxy`, `backendHttpsProxy`, and
+`backendNoProxy`. Standard environment variables can also be supplied through
+`backend.env`/`envFrom` or `monolith.env`/`envFrom`, or set directly outside Helm.
+Restart the backend after changing its environment.
+
+Private-target and redirect checks remain active on guarded HTTP clients.
+An operator-configured proxy may itself be private; it is trusted to resolve
+and connect to destinations, so configure its egress policy to block private
+destinations unless deliberately allowed. `NO_PROXY` requests retain the direct
+connection DNS checks. Internal provider endpoints still require the existing
+private-target permission. Configure Pyannote's proxy separately, and include
+internal services in `NO_PROXY` as appropriate.
+
 ## Custom CA for backend connections
 
 When S3, a proxy, or another backend dependency presents a certificate signed
