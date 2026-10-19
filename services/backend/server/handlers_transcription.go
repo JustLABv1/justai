@@ -711,7 +711,7 @@ func (a *App) renameTranscriptionSpeaker(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("display name is required"))
 		return
 	}
-	result, err := a.DB.ExecContext(c, `UPDATE transcription_speakers SET display_name = $3, updated_at = now() WHERE id = $1 AND session_id = $2`, speakerID, sessionID, displayName)
+	result, err := a.DB.ExecContext(c, `UPDATE transcription_speakers SET display_name = $3, name_source = 'manual', suggested_name = '', suggestion_confidence = 0, suggestion_evidence = '', updated_at = now() WHERE id = $1 AND session_id = $2`, speakerID, sessionID, displayName)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -1924,7 +1924,7 @@ func loadTranscriptionSources(ctx context.Context, db *sql.DB, sessionID uuid.UU
 }
 
 func loadTranscriptionSpeakers(ctx context.Context, db *sql.DB, sessionID uuid.UUID) ([]models.TranscriptionSpeaker, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, session_id, label, display_name, color FROM transcription_speakers WHERE session_id = $1 AND merged_into IS NULL ORDER BY created_at`, sessionID)
+	rows, err := db.QueryContext(ctx, `SELECT id, session_id, label, display_name, color, name_source, suggested_name, suggestion_confidence, suggestion_evidence FROM transcription_speakers WHERE session_id = $1 AND merged_into IS NULL ORDER BY created_at`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1932,7 +1932,7 @@ func loadTranscriptionSpeakers(ctx context.Context, db *sql.DB, sessionID uuid.U
 	result := make([]models.TranscriptionSpeaker, 0)
 	for rows.Next() {
 		var item models.TranscriptionSpeaker
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.Label, &item.DisplayName, &item.Color); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.Label, &item.DisplayName, &item.Color, &item.NameSource, &item.SuggestedName, &item.SuggestionConfidence, &item.SuggestionEvidence); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

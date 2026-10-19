@@ -382,6 +382,9 @@ export function TranscriptWorkspace({
   const [mergeSourceId, setMergeSourceId] = useState("")
   const [mergeTargetId, setMergeTargetId] = useState("")
   const [mergeSaving, setMergeSaving] = useState(false)
+  const [identifyOpen, setIdentifyOpen] = useState(false)
+  const [identifyParticipants, setIdentifyParticipants] = useState("")
+  const [identifyRunning, setIdentifyRunning] = useState(false)
   const [mediaPlaying, setMediaPlaying] = useState(false)
   const [audioSource, setAudioSource] = useState<{
     recordingId: string
@@ -926,6 +929,73 @@ export function TranscriptWorkspace({
       onError("")
     } catch {
       onError("The timestamp link could not be copied.")
+    }
+  }
+
+  const identifySpeakers = async () => {
+    setIdentifyRunning(true)
+    try {
+      const participants = identifyParticipants
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [name, ...role] = line.split(/[,;]/)
+          return { name: name.trim(), role: role.join(",").trim() }
+        })
+      const result = await api.post<{ speakers: TranscriptionSpeaker[] }>(
+        `/api/v1/transcription/sessions/${snapshot.session.id}/speakers/identify`,
+        { participants }
+      )
+      updateSnapshot((current) => ({ ...current, speakers: result.speakers }))
+      setIdentifyOpen(false)
+      onError("")
+    } catch (caught) {
+      onError(
+        caught instanceof Error
+          ? caught.message
+          : "The speakers could not be identified."
+      )
+    } finally {
+      setIdentifyRunning(false)
+    }
+  }
+
+  const resolveSpeakerSuggestion = async (
+    speaker: TranscriptionSpeaker,
+    accept: boolean
+  ) => {
+    const base = `/api/v1/transcription/sessions/${snapshot.session.id}/speakers/${speaker.id}`
+    const name = speaker.suggestedName?.trim()
+    try {
+      if (accept && name) {
+        await api.patch(base, { displayName: name })
+      } else {
+        await api.delete(`${base}/suggestion`)
+      }
+      updateSnapshot((current) => ({
+        ...current,
+        speakers: current.speakers.map((item) =>
+          item.id === speaker.id
+            ? {
+                ...item,
+                ...(accept && name
+                  ? { displayName: name, nameSource: "manual" as const }
+                  : {}),
+                suggestedName: "",
+                suggestionConfidence: 0,
+                suggestionEvidence: "",
+              }
+            : item
+        ),
+      }))
+      onError("")
+    } catch (caught) {
+      onError(
+        caught instanceof Error
+          ? caught.message
+          : "The suggestion could not be saved."
+      )
     }
   }
 
@@ -2147,18 +2217,33 @@ export function TranscriptWorkspace({
                   <CardTitle className="flex items-center gap-2 text-sm">
                     <Users className="size-4 text-primary" /> Speaker summary
                   </CardTitle>
-                  <Button
-                    onClick={() => {
-                      setMergeSourceId("")
-                      setMergeTargetId("")
-                      setMergeOpen(true)
-                    }}
-                    size="icon-sm"
-                    title="Merge speakers"
-                    variant="outline"
-                  >
-                    <GitMerge />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      disabled={!snapshot.session.grammarEndpointId}
+                      onClick={() => setIdentifyOpen(true)}
+                      size="icon-sm"
+                      title={
+                        snapshot.session.grammarEndpointId
+                          ? "Identify speaker names with AI"
+                          : "Configure a grammar/chat endpoint to identify speakers"
+                      }
+                      variant="outline"
+                    >
+                      <Sparkles />
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setMergeSourceId("")
+                        setMergeTargetId("")
+                        setMergeOpen(true)
+                      }}
+                      size="icon-sm"
+                      title="Merge speakers"
+                      variant="outline"
+                    >
+                      <GitMerge />
+                    </Button>
+                  </div>
                 </div>
                 <CardDescription>
                   {speakerSummaries.length === 1
@@ -2198,7 +2283,67 @@ export function TranscriptWorkspace({
                               >
                                 {summary.speaker.label}
                               </Badge>
+                              {summary.speaker.nameSource === "ai" ? (
+                                <Badge
+                                  className="shrink-0 text-[9px]"
+                                  title={
+                                    summary.speaker.suggestionEvidence ||
+                                    "Named by AI"
+                                  }
+                                  variant="secondary"
+                                >
+                                  <Sparkles className="size-2.5" /> AI
+                                </Badge>
+                              ) : null}
                             </div>
+                            {summary.speaker.suggestedName ? (
+                              <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2">
+                                <div className="min-w-0 flex-1 text-[11px]">
+                                  <p className="truncate font-medium">
+                                    Maybe {summary.speaker.suggestedName}{" "}
+                                    <span className="font-normal text-muted-foreground">
+                                      (
+                                      {Math.round(
+                                        (summary.speaker
+                                          .suggestionConfidence ?? 0) * 100
+                                      )}
+                                      %)
+                                    </span>
+                                  </p>
+                                  {summary.speaker.suggestionEvidence ? (
+                                    <p className="line-clamp-2 text-muted-foreground">
+                                      {summary.speaker.suggestionEvidence}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <Button
+                                  aria-label={`Accept name ${summary.speaker.suggestedName}`}
+                                  onClick={() =>
+                                    void resolveSpeakerSuggestion(
+                                      summary.speaker,
+                                      true
+                                    )
+                                  }
+                                  size="icon-sm"
+                                  variant="default"
+                                >
+                                  <Check />
+                                </Button>
+                                <Button
+                                  aria-label="Dismiss suggestion"
+                                  onClick={() =>
+                                    void resolveSpeakerSuggestion(
+                                      summary.speaker,
+                                      false
+                                    )
+                                  }
+                                  size="icon-sm"
+                                  variant="ghost"
+                                >
+                                  <Trash2 />
+                                </Button>
+                              </div>
+                            ) : null}
                             <p className="mt-1 text-[11px] text-muted-foreground">
                               {summary.segmentCount}{" "}
                               {summary.segmentCount === 1
@@ -2762,6 +2907,60 @@ export function TranscriptWorkspace({
                 <Bookmark data-icon="inline-start" />
               )}{" "}
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={identifyOpen}
+        onOpenChange={(open) => {
+          if (!open && !identifyRunning) setIdentifyOpen(false)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Identify speaker names</DialogTitle>
+            <DialogDescription>
+              The AI looks for introductions and direct address in the
+              transcript. Confident names are applied, uncertain ones are shown
+              as suggestions. Names you set yourself are never changed.
+            </DialogDescription>
+          </DialogHeader>
+          <Field>
+            <FieldLabel>Participants (optional)</FieldLabel>
+            <Textarea
+              onChange={(event) => setIdentifyParticipants(event.target.value)}
+              placeholder={"Anna Schmidt, Project lead\nBen Weber, Developer"}
+              rows={5}
+              value={identifyParticipants}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              One person per line, optionally followed by a comma and a role.
+              Without a list only names spoken in the transcript are used.
+            </p>
+          </Field>
+          <DialogFooter>
+            <Button
+              disabled={identifyRunning}
+              onClick={() => setIdentifyOpen(false)}
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={identifyRunning}
+              onClick={() => void identifySpeakers()}
+            >
+              {identifyRunning ? (
+                <LoaderCircle
+                  className="animate-spin"
+                  data-icon="inline-start"
+                />
+              ) : (
+                <Sparkles data-icon="inline-start" />
+              )}{" "}
+              Identify
             </Button>
           </DialogFooter>
         </DialogContent>

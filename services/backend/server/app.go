@@ -275,6 +275,8 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/join-requests/:id/deny", a.platformFeature("transcription"), a.denyTranscriptionJoinRequest)
 	org.PATCH("/transcription/sessions/:id/speakers/:speakerId", a.platformFeature("transcription"), a.renameTranscriptionSpeaker)
 	org.POST("/transcription/sessions/:id/speakers/merge", a.platformFeature("transcription"), a.mergeTranscriptionSpeakers)
+	org.POST("/transcription/sessions/:id/speakers/identify", a.platformFeature("transcription"), a.identifyTranscriptionSpeakers)
+	org.DELETE("/transcription/sessions/:id/speakers/:speakerId/suggestion", a.platformFeature("transcription"), a.dismissTranscriptionSpeakerSuggestion)
 	org.GET("/transcription/sessions/:id/recordings", a.platformFeature("transcription"), a.listTranscriptionRecordings)
 	org.GET("/transcription/recordings/:id", a.platformFeature("transcription"), a.streamTranscriptionRecording)
 	org.DELETE("/transcription/recordings/:id", a.platformFeature("transcription"), a.deleteTranscriptionRecording)
