@@ -893,6 +893,10 @@ export type TranscriptionSpeaker = {
   label: string
   displayName?: string
   color: string
+  nameSource?: "manual" | "ai"
+  suggestedName?: string
+  suggestionConfidence?: number
+  suggestionEvidence?: string
 }
 
 export type TranscriptionSegment = {

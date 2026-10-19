@@ -493,6 +493,12 @@ type TranscriptionSpeaker struct {
 	Label       string    `json:"label"`
 	DisplayName string    `json:"displayName,omitempty"`
 	Color       string    `json:"color"`
+	// NameSource is "manual" or "ai" once DisplayName was set; empty for
+	// speakers that were never named.
+	NameSource           string  `json:"nameSource,omitempty"`
+	SuggestedName        string  `json:"suggestedName,omitempty"`
+	SuggestionConfidence float64 `json:"suggestionConfidence,omitempty"`
+	SuggestionEvidence   string  `json:"suggestionEvidence,omitempty"`
 }
 
 type TranscriptionSegment struct {
