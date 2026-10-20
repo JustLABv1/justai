@@ -307,3 +307,178 @@ func TestRouterRegistersTranscriptionWorkspaceRoutes(t *testing.T) {
 		t.Fatal("expected a router")
 	}
 }
+
+func TestTranscriptionInsightSummaryStyleAcrossGenerationStages(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"single":        transcriptionInsightSystemPrompt("de", "de"),
+		"window":        transcriptionInsightChunkSystemPrompt("de", "de", 1, 3),
+		"consolidation": transcriptionInsightReduceSystemPrompt("de", "de"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, instruction := range []string{
+				"one clearly separated prose paragraph per substantive speaker contribution",
+				"Begin each paragraph with the available speaker name or label",
+				`\n\n inside the JSON summary string`,
+				"Do not include transcript timestamps, time ranges",
+				"never infer a person's identity from their opinions",
+				"Attribute opinions and disputed claims to the speaker",
+			} {
+				if !strings.Contains(prompt, instruction) {
+					t.Errorf("missing summary instruction %q", instruction)
+				}
+			}
+		})
+	}
+}
+
+func TestTranscriptionInsightInputIncludesKnownSpeakerNames(t *testing.T) {
+	speakerID := uuid.New()
+	segments := []models.TranscriptionSegment{
+		{ID: uuid.New(), SpeakerID: &speakerID, Text: "Wir brauchen Reformen.", StartOffsetMs: 1250, EndOffsetMs: 4000},
+		{ID: uuid.New(), Text: "Eine nicht zugeordnete Aussage.", StartOffsetMs: 4000, EndOffsetMs: 6000},
+	}
+	speakers := []models.TranscriptionSpeaker{{ID: speakerID, Label: "SPEAKER_00", DisplayName: "Anna Müller"}}
+	chunks := splitTranscriptionInsightRows(transcriptionExportRows(segments, speakers))
+	input := buildTranscriptionInsightChunkInput("Debatte", "de", chunks[0], 1, 1, 6000)
+	if !strings.Contains(input, "[00:00:01] Anna Müller: Wir brauchen Reformen.") {
+		t.Fatalf("known speaker is missing from insight input: %s", input)
+	}
+	if !strings.Contains(input, "[00:00:04] Eine nicht zugeordnete Aussage.") {
+		t.Fatalf("unassigned text was lost or given an invented speaker: %s", input)
+	}
+}
+
+func TestFallbackTranscriptionInsightSummaryHasParagraphsWithoutTimePrefixes(t *testing.T) {
+	analyses := []transcriptionInsightChunkAnalysis{
+		{Chunk: transcriptionInsightChunk{StartOffsetMs: 0, EndOffsetMs: 900000}, Response: transcriptionInsightResponse{Summary: "Anna fordert Reformen.\n\nBen kritisiert den Vorschlag."}},
+		{Chunk: transcriptionInsightChunk{StartOffsetMs: 900000, EndOffsetMs: 1800000}, Response: transcriptionInsightResponse{Summary: "Clara erklärt den nächsten Schritt."}},
+		{Chunk: transcriptionInsightChunk{StartOffsetMs: 1800000, EndOffsetMs: 2700000}, Response: transcriptionInsightResponse{}},
+	}
+	want := "Anna fordert Reformen.\n\nBen kritisiert den Vorschlag.\n\nClara erklärt den nächsten Schritt."
+	if got := fallbackTranscriptionInsightSummary(analyses); got != want {
+		t.Fatalf("fallback should preserve separate contributions without time prefixes or placeholder prose: %q", got)
+	}
+}
+
+func TestFallbackTranscriptionInsightSummaryUsesAvailableChapterText(t *testing.T) {
+	got := fallbackTranscriptionInsightSummary([]transcriptionInsightChunkAnalysis{{Response: transcriptionInsightResponse{Chapters: []models.TranscriptionInsightChapter{
+		{Title: "Debatte", Summary: "Anna erläutert den Vorschlag.", StartOffsetMs: 900000},
+	}}}})
+	if got != "Anna erläutert den Vorschlag." {
+		t.Fatalf("fallback should use available source text without chapter timestamps: %q", got)
+	}
+}
+
+func TestTranscriptionSummaryParagraphExports(t *testing.T) {
+	first, second := "Anna fordert Reformen.", "Ben kritisiert den Vorschlag."
+	insights := &models.TranscriptionInsights{Language: "de", Status: "completed", Summary: first + "\r\n \r\n" + second}
+	paragraphs := transcriptionSummaryParagraphs(insights.Summary)
+	if len(paragraphs) != 2 || paragraphs[0] != first || paragraphs[1] != second {
+		t.Fatalf("summary paragraphs were not preserved: %#v", paragraphs)
+	}
+
+	pages := []transcriptPDFPage{{}}
+	y := transcriptPDFBodyTopY
+	appendTranscriptPDFInsightsLocalized(&pages, &y, insights, "de")
+	var firstY, secondY float64
+	for _, page := range pages {
+		for _, line := range page.Lines {
+			if line.Text == first {
+				firstY = line.Y
+			}
+			if line.Text == second {
+				secondY = line.Y
+			}
+		}
+	}
+	if firstY == 0 || secondY == 0 || firstY-secondY <= transcriptPDFBodyLineHeight {
+		t.Fatalf("PDF summary paragraphs need visible spacing: first=%v second=%v", firstY, secondY)
+	}
+
+	docx := buildTranscriptDOCXLocalized("Debatte", nil, insights, "de")
+	archive, err := zip.NewReader(bytes.NewReader(docx), int64(len(docx)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range archive.File {
+		if file.Name != "word/document.xml" {
+			continue
+		}
+		reader, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var content bytes.Buffer
+		_, err = content.ReadFrom(reader)
+		_ = reader.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, text := range []string{first, second} {
+			if !strings.Contains(content.String(), `<w:spacing w:after="160"/></w:pPr><w:r><w:t xml:space="preserve">`+text+`</w:t></w:r></w:p>`) {
+				t.Fatalf("DOCX summary contribution lacks a separate spaced paragraph: %s", text)
+			}
+		}
+		return
+	}
+	t.Fatal("DOCX document.xml missing")
+}
+
+func TestDecodeTranscriptionInsightOutputPreservesSummaryParagraphs(t *testing.T) {
+	decoded, err := decodeTranscriptionInsightOutput(`{"summary":"Anna fordert Reformen.\n\nBen kritisiert den Vorschlag.","chapters":[],"topics":[],"actionItems":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Summary != "Anna fordert Reformen.\n\nBen kritisiert den Vorschlag." {
+		t.Fatalf("JSON summary paragraph breaks were lost: %q", decoded.Summary)
+	}
+}
+
+func TestTranscriptPDFCompactInsightsHeader(t *testing.T) {
+	for _, title := range []string{
+		"Video transcript",
+		"89. Sitzung vom 09.07.2026. Regierungserklärung zur aktuellen politischen Lage und zur europäischen Zusammenarbeit",
+	} {
+		t.Run(title, func(t *testing.T) {
+			bodyTop := transcriptPDFFirstPageBodyTopY(title, true)
+			lastTitleY := transcriptPDFTitleTopY - float64(len(transcriptPDFTitleLines(title))-1)*transcriptPDFTitleLineHeight
+			if gap := lastTitleY - bodyTop; gap < 24 || gap > 36 {
+				t.Fatalf("insight header should closely follow the last title line without overlap, got gap %.1f", gap)
+			}
+			pages := []transcriptPDFPage{{}}
+			y := bodyTop
+			appendTranscriptPDFInsightsLocalized(&pages, &y, &models.TranscriptionInsights{
+				Language: "de", Status: "completed", Summary: "Anna erläutert den Reformvorschlag.",
+			}, "de")
+			if len(pages) != 1 {
+				t.Fatalf("short summary should fit on its first page, got %d pages", len(pages))
+			}
+			var heading, language, content transcriptPDFTextLine
+			for _, line := range pages[0].Lines {
+				switch line.Text {
+				case "KI-Erkenntnisse":
+					heading = line
+				case "Sprache: Deutsch":
+					language = line
+				case "Anna erläutert den Reformvorschlag.":
+					content = line
+				}
+			}
+			if heading.Size == 0 || heading.Size > 12 || language.Y < heading.Y-2 || language.Y > heading.Y+2 || language.X <= heading.X+200 {
+				t.Fatalf("section and language should share a compact row: heading=%+v language=%+v", heading, language)
+			}
+			if content.Y == 0 || heading.Y-content.Y > 44 || content.Y >= pages[0].SectionRuleY {
+				t.Fatalf("summary should start just below the compact section header: heading=%+v content=%+v", heading, content)
+			}
+		})
+	}
+	insights := &models.TranscriptionInsights{
+		Language: "de", Status: "completed",
+		Summary: "Anna Müller erläutert die Reformvorschläge und spricht sich für eine schrittweise Umsetzung aus. Sie betont, dass die Maßnahmen verständlich erklärt werden müssten.\n\nBen Schneider kritisiert den vorgesehenen Zeitplan. Er fordert, die Auswirkungen auf die betroffenen Menschen vor einer Entscheidung genauer zu prüfen.\n\nClara Weber unterstreicht die Bedeutung einer verlässlichen Finanzierung. Aus ihrer Sicht müssten die verfügbaren Mittel gezielt eingesetzt und die Ergebnisse regelmäßig überprüft werden.",
+	}
+	if path := os.Getenv("JUSTAI_TRANSCRIPT_PDF_COMPACT_VERIFY_PATH"); path != "" {
+		if err := os.WriteFile(path, buildTranscriptPDFLocalized("Video transcript", nil, insights, "de"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

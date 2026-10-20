@@ -2115,7 +2115,7 @@ export function TranscriptWorkspace({
                 <p className="text-destructive">{insights.error}</p>
               ) : null}
               {insights.summary ? (
-                <p className="leading-5 text-muted-foreground">
+                <p className="text-sm leading-6 whitespace-pre-line text-muted-foreground">
                   {insights.summary}
                 </p>
               ) : null}
