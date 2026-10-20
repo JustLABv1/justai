@@ -369,7 +369,9 @@ export function TranscriptWorkspace({
   const [qualityOnly, setQualityOnly] = useState(false)
   const [matchIndex, setMatchIndex] = useState(0)
   const [savingSegmentId, setSavingSegmentId] = useState<string | null>(null)
-  const [paragraphDrafts, setParagraphDrafts] = useState<Record<string, string>>({})
+  const [paragraphDrafts, setParagraphDrafts] = useState<
+    Record<string, string>
+  >({})
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<string[]>([])
   const [assignmentSpeakerId, setAssignmentSpeakerId] = useState("")
   const [annotationTarget, setAnnotationTarget] =
@@ -398,6 +400,7 @@ export function TranscriptWorkspace({
   )
   const [polishGenerating, setPolishGenerating] = useState(false)
   const [insightsGenerating, setInsightsGenerating] = useState(false)
+  const insightsPollingRef = useRef(false)
   const [chatStarting, setChatStarting] = useState(false)
   const [insightLanguage, setInsightLanguage] = useState(
     () => snapshot.insights?.language ?? "auto"
@@ -513,7 +516,7 @@ export function TranscriptWorkspace({
             transcriptMode === "polished"
               ? polished
               : transcriptMode === "edited"
-                ? edited ?? polished
+                ? (edited ?? polished)
                 : verbatim,
         }
       }),
@@ -580,12 +583,23 @@ export function TranscriptWorkspace({
     [displaySegments, qualityOnly, speakerById, speakerFilter, transcriptQuery]
   )
   const editParagraphs = useMemo(
-    () => groupTranscriptionSegments(snapshot.segments.map((segment) => ({
-      ...segment,
-      text: segment.editedText?.trim() ?? segment.polishedText?.trim() ?? segment.text.trim(),
-    })), 4000, 850, 45_000).filter((message) => message.segmentIds.some((id) =>
-      filteredSegments.some((segment) => segment.id === id)
-    )),
+    () =>
+      groupTranscriptionSegments(
+        snapshot.segments.map((segment) => ({
+          ...segment,
+          text:
+            segment.editedText?.trim() ??
+            segment.polishedText?.trim() ??
+            segment.text.trim(),
+        })),
+        4000,
+        850,
+        45_000
+      ).filter((message) =>
+        message.segmentIds.some((id) =>
+          filteredSegments.some((segment) => segment.id === id)
+        )
+      ),
     [snapshot.segments, filteredSegments]
   )
   const activeMessageId = useMemo(
@@ -793,7 +807,9 @@ export function TranscriptWorkspace({
     ]
   )
 
-  const saveParagraphEdit = async (message: (typeof editParagraphs)[number]) => {
+  const saveParagraphEdit = async (
+    message: (typeof editParagraphs)[number]
+  ) => {
     const draft = paragraphDrafts[message.id]
     if (draft === undefined || draft.trim() === message.text.trim()) return
     const segments = message.segmentIds
@@ -801,16 +817,33 @@ export function TranscriptWorkspace({
       .filter((segment): segment is TranscriptionSegment => Boolean(segment))
     if (!segments.length) return
     const words = draft.trim().split(/\s+/u).filter(Boolean)
-    const originalCounts = segments.map((segment) =>
-      (segment.editedText?.trim() || segment.polishedText?.trim() || segment.text.trim())
-        .split(/\s+/u).filter(Boolean).length
+    const originalCounts = segments.map(
+      (segment) =>
+        (
+          segment.editedText?.trim() ||
+          segment.polishedText?.trim() ||
+          segment.text.trim()
+        )
+          .split(/\s+/u)
+          .filter(Boolean).length
     )
-    const total = originalCounts.reduce((sum, count) => sum + count, 0) || segments.length
+    const total =
+      originalCounts.reduce((sum, count) => sum + count, 0) || segments.length
     let position = 0
     const edits = segments.map((segment, index) => {
-      const end = index === segments.length - 1
-        ? words.length
-        : Math.max(position, Math.round(words.length * originalCounts.slice(0, index + 1).reduce((sum, count) => sum + count, 0) / total))
+      const end =
+        index === segments.length - 1
+          ? words.length
+          : Math.max(
+              position,
+              Math.round(
+                (words.length *
+                  originalCounts
+                    .slice(0, index + 1)
+                    .reduce((sum, count) => sum + count, 0)) /
+                  total
+              )
+            )
       const editedText = words.slice(position, end).join(" ")
       position = end
       return { id: segment.id, editedText }
@@ -821,7 +854,9 @@ export function TranscriptWorkspace({
         `/api/v1/transcription/sessions/${snapshot.session.id}/segments/batch`,
         { edits }
       )
-      const updated = new Map(result.segments.map((segment) => [segment.id, segment]))
+      const updated = new Map(
+        result.segments.map((segment) => [segment.id, segment])
+      )
       updateSnapshot((current) => ({
         ...current,
         segments: current.segments.map((item) => updated.get(item.id) ?? item),
@@ -833,7 +868,11 @@ export function TranscriptWorkspace({
       })
       onError("")
     } catch (caught) {
-      onError(caught instanceof Error ? caught.message : "The paragraph could not be saved.")
+      onError(
+        caught instanceof Error
+          ? caught.message
+          : "The paragraph could not be saved."
+      )
     } finally {
       setSavingSegmentId(null)
     }
@@ -1066,7 +1105,65 @@ export function TranscriptWorkspace({
     }
   }
 
+  const waitForInsights = async (initial: TranscriptionInsights) => {
+    const insightsUrl = `/api/v1/transcription/sessions/${snapshot.session.id}/insights`
+    const deadline = Date.now() + 35 * 60 * 1000
+    let insights = initial
+    while (insights.status === "processing") {
+      if (Date.now() > deadline) {
+        throw new Error("AI insights generation timed out.")
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+      insights = (
+        await api.get<{ insights: TranscriptionInsights }>(insightsUrl)
+      ).insights
+    }
+    if (insights.status === "failed") {
+      throw new Error(insights.error || "AI insights could not be generated.")
+    }
+    return insights
+  }
+
+  // Resume polling after a reload while the backend is still generating.
+  const insightsProcessingRemote = snapshot.insights?.status === "processing"
+  useEffect(() => {
+    if (!insightsProcessingRemote || !snapshot.insights) return
+    if (insightsPollingRef.current) return
+    insightsPollingRef.current = true
+    let cancelled = false
+    waitForInsights(snapshot.insights)
+      .then((finished) => {
+        if (!cancelled)
+          updateSnapshot((current) => ({ ...current, insights: finished }))
+      })
+      .catch((caught) => {
+        if (cancelled) return
+        onError(
+          caught instanceof Error
+            ? caught.message
+            : "AI insights could not be generated."
+        )
+        updateSnapshot((current) => ({
+          ...current,
+          insights: current.insights && {
+            ...current.insights,
+            status: "failed",
+          },
+        }))
+      })
+      .finally(() => {
+        insightsPollingRef.current = false
+      })
+    return () => {
+      cancelled = true
+      insightsPollingRef.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [insightsProcessingRemote, snapshot.session.id])
+
   const generateInsights = async () => {
+    if (insightsPollingRef.current) return
+    insightsPollingRef.current = true
     setActionItemsCopied(false)
     setInsightsGenerating(true)
     updateSnapshot((current) => ({
@@ -1083,12 +1180,14 @@ export function TranscriptWorkspace({
       },
     }))
     try {
+      // The backend generates in the background; poll so no single request
+      // outlives the gateway timeout.
       const result = await api.post<{ insights: TranscriptionInsights }>(
         `/api/v1/transcription/sessions/${snapshot.session.id}/insights`,
-        { language: insightLanguage },
-        { timeoutMs: 15 * 60 * 1000 }
+        { language: insightLanguage }
       )
-      updateSnapshot((current) => ({ ...current, insights: result.insights }))
+      const finished = await waitForInsights(result.insights)
+      updateSnapshot((current) => ({ ...current, insights: finished }))
       onError("")
     } catch (caught) {
       onError(
@@ -1109,6 +1208,7 @@ export function TranscriptWorkspace({
         },
       }))
     } finally {
+      insightsPollingRef.current = false
       setInsightsGenerating(false)
     }
   }
@@ -1218,7 +1318,9 @@ export function TranscriptWorkspace({
     }
   }
 
-  const exportInsights = async (format: "pdf" | "docx" | "md" | "txt" | "json") => {
+  const exportInsights = async (
+    format: "pdf" | "docx" | "md" | "txt" | "json"
+  ) => {
     if (!insightsReady) return
     try {
       const blob = await api.getBlob(
@@ -1232,7 +1334,9 @@ export function TranscriptWorkspace({
       URL.revokeObjectURL(url)
       onError("")
     } catch (caught) {
-      onError(caught instanceof Error ? caught.message : "Insights export failed.")
+      onError(
+        caught instanceof Error ? caught.message : "Insights export failed."
+      )
     }
   }
 
@@ -1278,7 +1382,11 @@ export function TranscriptWorkspace({
         <Tabs
           aria-label="Transcript workspace sections"
           onValueChange={(value) => {
-            if (value === "review" || value === "insights" || value === "speakers")
+            if (
+              value === "review" ||
+              value === "insights" ||
+              value === "speakers"
+            )
               setWorkspaceView(value)
           }}
           value={workspaceView !== "details" ? workspaceView : null}
@@ -1492,7 +1600,9 @@ export function TranscriptWorkspace({
                   disabled={!snapshot.segments.length}
                   onClick={() => {
                     setEditorOpen((current) => !current)
-                    setTranscriptMode(editorOpen && !editedAvailable ? "verbatim" : "edited")
+                    setTranscriptMode(
+                      editorOpen && !editedAvailable ? "verbatim" : "edited"
+                    )
                   }}
                   size="sm"
                   variant={editorOpen ? "default" : "outline"}
@@ -1681,40 +1791,97 @@ export function TranscriptWorkspace({
             {editorOpen ? (
               editParagraphs.length > 0 ? (
                 <div className="flex flex-col gap-4">
-                  <p className="text-xs text-muted-foreground">Edit a paragraph at a time. Timestamps and speaker assignments stay with the original audio segments.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Edit a paragraph at a time. Timestamps and speaker
+                    assignments stay with the original audio segments.
+                  </p>
                   {editParagraphs.map((message) => {
                     const segments = message.segmentIds
-                      .map((id) => snapshot.segments.find((segment) => segment.id === id))
-                      .filter((segment): segment is TranscriptionSegment => Boolean(segment))
+                      .map((id) =>
+                        snapshot.segments.find((segment) => segment.id === id)
+                      )
+                      .filter((segment): segment is TranscriptionSegment =>
+                        Boolean(segment)
+                      )
                     const draft = paragraphDrafts[message.id] ?? message.text
-                    const selectedCount = segments.filter((segment) => selectedSegmentIds.includes(segment.id)).length
+                    const selectedCount = segments.filter((segment) =>
+                      selectedSegmentIds.includes(segment.id)
+                    ).length
                     return (
-                      <div className="rounded-xl bg-muted/30 p-3 sm:p-4" key={message.id}>
+                      <div
+                        className="rounded-xl bg-muted/30 p-3 sm:p-4"
+                        key={message.id}
+                      >
                         <div className="flex flex-wrap items-center gap-2">
                           <input
                             aria-label={`Select paragraph at ${formatVideoTimestamp(message.startOffsetMs)}`}
-                            checked={segments.length > 0 && selectedCount === segments.length}
+                            checked={
+                              segments.length > 0 &&
+                              selectedCount === segments.length
+                            }
                             className="size-4 accent-primary"
-                            onChange={(event) => setSelectedSegmentIds((current) => event.target.checked
-                              ? [...new Set([...current, ...message.segmentIds])]
-                              : current.filter((id) => !message.segmentIds.includes(id)))}
+                            onChange={(event) =>
+                              setSelectedSegmentIds((current) =>
+                                event.target.checked
+                                  ? [
+                                      ...new Set([
+                                        ...current,
+                                        ...message.segmentIds,
+                                      ]),
+                                    ]
+                                  : current.filter(
+                                      (id) => !message.segmentIds.includes(id)
+                                    )
+                              )
+                            }
                             type="checkbox"
                           />
-                          <button className="font-mono text-xs text-primary hover:underline" disabled={!canSeek}
-                            onClick={() => seekTo(message.startOffsetMs)} type="button">
+                          <button
+                            className="font-mono text-xs text-primary hover:underline"
+                            disabled={!canSeek}
+                            onClick={() => seekTo(message.startOffsetMs)}
+                            type="button"
+                          >
                             {formatVideoTimestamp(message.startOffsetMs)}
                           </button>
-                          <span className="text-xs text-muted-foreground">{speakerDisplayName(speakerById.get(message.speakerKey))} · {segments.length} segments</span>
-                          <Button className="ml-auto" disabled={savingSegmentId === message.id || draft.trim() === message.text.trim()}
-                            onClick={() => void saveParagraphEdit(message)} size="sm" variant="outline">
-                            {savingSegmentId === message.id ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <Check data-icon="inline-start" />}
+                          <span className="text-xs text-muted-foreground">
+                            {speakerDisplayName(
+                              speakerById.get(message.speakerKey)
+                            )}{" "}
+                            · {segments.length} segments
+                          </span>
+                          <Button
+                            className="ml-auto"
+                            disabled={
+                              savingSegmentId === message.id ||
+                              draft.trim() === message.text.trim()
+                            }
+                            onClick={() => void saveParagraphEdit(message)}
+                            size="sm"
+                            variant="outline"
+                          >
+                            {savingSegmentId === message.id ? (
+                              <LoaderCircle
+                                className="animate-spin"
+                                data-icon="inline-start"
+                              />
+                            ) : (
+                              <Check data-icon="inline-start" />
+                            )}
                             Save paragraph
                           </Button>
                         </div>
-                        <Textarea aria-label={`Edit paragraph at ${formatVideoTimestamp(message.startOffsetMs)}`}
+                        <Textarea
+                          aria-label={`Edit paragraph at ${formatVideoTimestamp(message.startOffsetMs)}`}
                           className="mt-3 min-h-32 resize-y bg-background text-sm leading-6"
-                          onChange={(event) => setParagraphDrafts((current) => ({ ...current, [message.id]: event.target.value }))}
-                          value={draft} />
+                          onChange={(event) =>
+                            setParagraphDrafts((current) => ({
+                              ...current,
+                              [message.id]: event.target.value,
+                            }))
+                          }
+                          value={draft}
+                        />
                       </div>
                     )
                   })}
@@ -2029,16 +2196,24 @@ export function TranscriptWorkspace({
                         <Download data-icon="inline-start" /> Export insights
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => void exportInsights("pdf")}>
+                        <DropdownMenuItem
+                          onClick={() => void exportInsights("pdf")}
+                        >
                           <FileText data-icon="inline-start" /> PDF
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => void exportInsights("docx")}>
+                        <DropdownMenuItem
+                          onClick={() => void exportInsights("docx")}
+                        >
                           <FileText data-icon="inline-start" /> Word (.docx)
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => void exportInsights("md")}>
+                        <DropdownMenuItem
+                          onClick={() => void exportInsights("md")}
+                        >
                           <FileText data-icon="inline-start" /> Markdown
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => void exportInsights("txt")}>
+                        <DropdownMenuItem
+                          onClick={() => void exportInsights("txt")}
+                        >
                           <FileText data-icon="inline-start" /> Plain text
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -2259,9 +2434,14 @@ export function TranscriptWorkspace({
                   <SpeakerVideoCaptions
                     key={snapshot.session.id}
                     sessionId={snapshot.session.id}
-                    available={snapshot.videoUpload?.status === "completed" && !!snapshot.videoUpload?.playbackUrl}
+                    available={
+                      snapshot.videoUpload?.status === "completed" &&
+                      !!snapshot.videoUpload?.playbackUrl
+                    }
                     speakers={snapshot.speakers}
-                    onSpeakersChange={(speakers) => updateSnapshot((current) => ({ ...current, speakers }))}
+                    onSpeakersChange={(speakers) =>
+                      updateSnapshot((current) => ({ ...current, speakers }))
+                    }
                     onSeek={(offsetMs) => seekTo(offsetMs, false)}
                   />
                 ) : null}
@@ -2315,8 +2495,8 @@ export function TranscriptWorkspace({
                                     <span className="font-normal text-muted-foreground">
                                       (
                                       {Math.round(
-                                        (summary.speaker
-                                          .suggestionConfidence ?? 0) * 100
+                                        (summary.speaker.suggestionConfidence ??
+                                          0) * 100
                                       )}
                                       %)
                                     </span>
