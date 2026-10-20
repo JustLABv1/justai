@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Info } from "lucide-react"
+import { Home, Info } from "lucide-react"
 import { ChatView } from "@/components/chat-view"
 import { BrandMark } from "@/components/brand-mark"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
@@ -27,7 +27,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
+import { PAGE_ACTIONS_SLOT_ID } from "@/components/ui/page"
+import { Separator } from "@/components/ui/separator"
 import { APIError, api } from "@/lib/api"
 import type {
   Conversation,
@@ -48,7 +57,11 @@ import type {
 } from "@/lib/types"
 import { parseWorkspaceRoute, workspacePath } from "@/lib/workspace-routes"
 import { cn } from "@/lib/utils"
-import { FocusWorkspaceSidebar } from "@/components/focus-workspace-sidebar"
+import {
+  FocusWorkspaceSidebar,
+  railNavigation,
+} from "@/components/focus-workspace-sidebar"
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { initialsFor } from "@/lib/identity"
 
 type WorkspaceStatus = "loading" | "ready" | "error"
@@ -1100,9 +1113,9 @@ export function Workspace() {
 
   return (
     <>
-      <div
+      <SidebarProvider
         id="workspace-shell"
-        className="relative isolate flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background lg:flex-row"
+        className="isolate h-full min-h-0 flex-1 overflow-hidden"
       >
         <FocusWorkspaceSidebar
           activeConversationId={activeConversationId}
@@ -1150,7 +1163,8 @@ export function Workspace() {
           user={user}
           userInitials={initials}
         />
-        <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden lg:w-0">
+        <SidebarInset className="isolate min-w-0" id="workspace-inset">
+          <WorkspaceHeader activeView={activeView} />
           {Object.keys(featureErrors).length > 0 && (
             <Alert className="m-4 mb-0 shrink-0" variant="destructive">
               <AlertTitle>Some workspace features need attention</AlertTitle>
@@ -1400,8 +1414,8 @@ export function Workspace() {
               />
             )}
           </div>
-        </main>
-      </div>
+        </SidebarInset>
+      </SidebarProvider>
       <AlertDialog
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null)
@@ -1465,5 +1479,46 @@ function FeatureDisabledPanel({ label }: { label: string }) {
         </AlertDescription>
       </Alert>
     </div>
+  )
+}
+
+
+function WorkspaceHeader({ activeView }: { activeView: ViewId }) {
+  const item = railNavigation.find((entry) => entry.id === activeView)
+  const label =
+    item?.label ??
+    (activeView === "settings"
+      ? "Settings"
+      : activeView === "profile"
+        ? "Profile"
+        : activeView === "admin"
+          ? "Platform admin"
+          : "JustAI")
+  return (
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
+      <SidebarTrigger className="-ml-1" />
+      <Separator className="mr-1 h-4" orientation="vertical" />
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <Home aria-label="Home" className="size-3.5" />
+          </BreadcrumbItem>
+          {item?.group && (
+            <>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem className="text-muted-foreground">{item.group}</BreadcrumbItem>
+            </>
+          )}
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{label}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+      <div
+        className="ml-auto flex min-w-0 items-center gap-2"
+        id={PAGE_ACTIONS_SLOT_ID}
+      />
+    </header>
   )
 }

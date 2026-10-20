@@ -2,16 +2,12 @@
 
 import {
   Fragment,
-  useEffect,
   useMemo,
-  useRef,
   useState,
-  useSyncExternalStore,
 } from "react"
 import {
   Archive,
   Bot,
-  Check,
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
@@ -20,13 +16,8 @@ import {
   FileText,
   Headphones,
   LogOut,
-  Menu,
   MessageSquare,
   MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Plus,
   Plug,
   RotateCcw,
@@ -41,7 +32,7 @@ import type { LucideIcon } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
-import { ThemeMenu, ThemeSwitcher } from "@/components/theme-switcher"
+import { ThemeMenu } from "@/components/theme-switcher"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -66,14 +57,26 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarRail,
+  useSidebar,
+} from "@/components/ui/sidebar"
 import type {
   Conversation,
   Organization,
@@ -87,7 +90,7 @@ import { cn } from "@/lib/utils"
 import { resolveAPIURL } from "@/lib/api"
 import { avatarToneFor, versionedAvatarURL } from "@/lib/identity"
 
-const railNavigation: Array<{
+export const railNavigation: Array<{
   id: ViewId
   label: string
   hint: string
@@ -148,34 +151,6 @@ const railNavigation: Array<{
     feature: "mcp",
   },
 ]
-
-const NAV_EXPANDED_STORAGE_KEY = "justai.sidebar.expanded"
-
-function subscribeNavExpanded(callback: () => void) {
-  window.addEventListener("storage", callback)
-  window.addEventListener(NAV_EXPANDED_STORAGE_KEY, callback)
-  return () => {
-    window.removeEventListener("storage", callback)
-    window.removeEventListener(NAV_EXPANDED_STORAGE_KEY, callback)
-  }
-}
-
-function readNavExpanded() {
-  return window.localStorage.getItem(NAV_EXPANDED_STORAGE_KEY) !== "false"
-}
-
-function useCompactNavigation() {
-  const [compact, setCompact] = useState(
-    () => typeof window !== "undefined" && window.innerWidth < 1024
-  )
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 1023px)")
-    const update = () => setCompact(media.matches)
-    media.addEventListener("change", update)
-    return () => media.removeEventListener("change", update)
-  }, [])
-  return compact
-}
 
 type FocusWorkspaceSidebarProps = {
   activeView: ViewId
@@ -265,50 +240,18 @@ export function FocusWorkspaceSidebar({
   const [sessionQuery, setSessionQuery] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
-  const [chatHistoryExpanded, setChatHistoryExpanded] = useState(false)
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const navExpanded = useSyncExternalStore(
-    subscribeNavExpanded,
-    readNavExpanded,
-    () => true
-  )
-  const isMobile = useCompactNavigation()
-  const contextPanelRef = useRef<HTMLDivElement>(null)
-
-  function setNavExpanded(expanded: boolean) {
-    window.localStorage.setItem(NAV_EXPANDED_STORAGE_KEY, String(expanded))
-    window.dispatchEvent(new Event(NAV_EXPANDED_STORAGE_KEY))
+  const { setOpenMobile } = useSidebar()
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
+  const closeOverlays = () => {
+    setOpenMobile(false)
+    setHistoryDialogOpen(false)
   }
+
   const historyView =
     activeView === "chat" ||
     activeView === "transcription" ||
     activeView === "video-transcription"
   const navigation = railNavigation
-  const historyVisible = historyView && historyOpen
-  const isSecondaryHistoryRail = historyVisible
-  const secondaryHistoryExpanded = isSecondaryHistoryRail && chatHistoryExpanded
-  const contextPanelOpen =
-    historyVisible && (!isSecondaryHistoryRail || chatHistoryExpanded)
-
-  useEffect(() => {
-    if (!isMobile || !contextPanelOpen) return
-    const previousFocus =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null
-    const frame = window.requestAnimationFrame(() => {
-      const firstFocusable =
-        contextPanelRef.current?.querySelector<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
-        )
-      const focusTarget = firstFocusable ?? contextPanelRef.current
-      focusTarget?.focus()
-    })
-    return () => {
-      window.cancelAnimationFrame(frame)
-      if (previousFocus?.isConnected) previousFocus.focus()
-    }
-  }, [contextPanelOpen, isMobile])
 
   const createAction: CreateAction | null =
     activeView === "chat"
@@ -383,43 +326,12 @@ export function FocusWorkspaceSidebar({
     () => groupByRecency(filteredSessions),
     [filteredSessions]
   )
-  const recentChats = useMemo(
-    () =>
-      [...conversations]
-        .sort(
-          (left, right) =>
-            new Date(right.updatedAt).getTime() -
-            new Date(left.updatedAt).getTime()
-        )
-        .slice(0, 4),
-    [conversations]
-  )
-  const recentSessions = useMemo(
-    () =>
-      [...visibleSessions]
-        .sort(
-          (left, right) =>
-            new Date(right.updatedAt).getTime() -
-            new Date(left.updatedAt).getTime()
-        )
-        .slice(0, 4),
-    [visibleSessions]
-  )
   const archivedSessionGroups = useMemo(
     () => groupByRecency(filteredArchivedSessions),
     [filteredArchivedSessions]
   )
-  const recentHistoryItems =
-    activeView === "chat" ? recentChats : recentSessions
-  const secondaryHistoryLabel =
-    activeView === "chat"
-      ? "Chat history"
-      : activeView === "video-transcription"
-        ? "Video transcripts"
-        : "Live sessions"
 
   function navigateFromRail(view: ViewId) {
-    setChatHistoryExpanded(false)
     const railItem = navigation.find((item) => item.id === view)
     if (railItem?.feature && disabledFeatures[railItem.feature]) return
 
@@ -434,473 +346,378 @@ export function FocusWorkspaceSidebar({
     onNavigate(view)
   }
 
-  const contextTitle =
-    activeView === "transcription"
-      ? "Live sessions"
+  const recentItems = useMemo(() => {
+    if (activeView === "chat") {
+      return [...conversations]
+        .sort((l, r) => new Date(r.updatedAt).getTime() - new Date(l.updatedAt).getTime())
+        .slice(0, 6)
+        .map((item) => ({ id: item.id, title: item.title, status: "" }))
+    }
+    return [...visibleSessions]
+      .sort((l, r) => new Date(r.updatedAt).getTime() - new Date(l.updatedAt).getTime())
+      .slice(0, 6)
+      .map((item) => ({ id: item.id, title: item.title, status: item.status }))
+  }, [activeView, conversations, visibleSessions])
+  const historyMode = activeView === "chat" ? "chat" : "sessions"
+  const historyTitle =
+    activeView === "chat"
+      ? "Chat history"
       : activeView === "video-transcription"
         ? "Video transcripts"
-        : "Chat history"
-  const showContextLabel =
-    activeView === "transcription"
-      ? "Show live sessions"
-      : activeView === "video-transcription"
-        ? "Show video transcripts"
-        : "Show chat history"
+        : "Live sessions"
+  const historyPanel = historyView ? (
+    <div
+      aria-label={
+        activeView === "chat"
+          ? "Chat history"
+          : activeView === "video-transcription"
+            ? "Video transcripts"
+            : "Live sessions"
+      }
+      className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden pt-1 pb-1"
+      role="region"
+    >
+      {createAction && (
+        <Button
+          aria-label={createAction.label}
+          className="h-8 w-full shrink-0 justify-start gap-2 rounded-xl"
+          disabled={createAction.disabled}
+          onClick={() => {
+            closeOverlays()
+            createAction.onClick()
+          }}
+          size="sm"
+        >
+          <CreateIcon data-icon="inline-start" />
+          {createAction.label}
+        </Button>
+      )}
+
+      {actionError && (
+        <Alert className="shrink-0" variant="destructive">
+          <AlertDescription className="text-xs">{actionError}</AlertDescription>
+        </Alert>
+      )}
+
+      {historyMode === "chat" ? (
+        <AssistantThreadList
+          activeConversationId={activeConversationId}
+          archivedConversations={archivedConversations}
+          conversations={conversations}
+          historyQuery={historyQuery}
+          organizationId={activeOrganization?.id ?? null}
+          onArchive={onArchiveConversation}
+          onConversationRefresh={onConversationRefresh}
+          onDelete={onDeleteConversation}
+          onHistoryQueryChange={setHistoryQuery}
+          onRename={onRenameConversation}
+          onSelect={(id) => {
+            closeOverlays()
+            onNavigate("chat", id)
+          }}
+          onShare={onShareConversation}
+        />
+      ) : (
+        <>
+          <Input
+            aria-label="Search sessions"
+            className="h-8 shrink-0"
+            onChange={(event) => setSessionQuery(event.target.value)}
+            placeholder={
+              activeView === "video-transcription"
+                ? "Search videos"
+                : "Search sessions"
+            }
+            type="search"
+            value={sessionQuery}
+          />
+          <TranscriptionHistoryPanel
+            activeSessionId={activeSessionId}
+            archivedOpen={archivedSessionsOpen}
+            archivedSessionGroups={archivedSessionGroups}
+            archivedSessions={filteredArchivedSessions}
+            onArchive={onArchiveSession}
+            onDelete={onDeleteSession}
+            onSelect={(id) => {
+              closeOverlays()
+              onNavigate(
+                activeView === "video-transcription"
+                  ? "video-transcription"
+                  : "transcription",
+                null,
+                id
+              )
+            }}
+            sessionGroups={sessionGroups}
+            setArchivedOpen={setArchivedSessionsOpen}
+            video={activeView === "video-transcription"}
+          />
+        </>
+      )}
+    </div>
+  ) : null
+
   return (
     <>
-    <div className="flex h-14 w-full shrink-0 items-center gap-2 border-b border-border/60 bg-background px-3 lg:hidden">
-      <Button aria-label="Open navigation menu" aria-expanded={mobileMenuOpen}
-        onClick={() => setMobileMenuOpen(true)} size="icon-sm" variant="ghost">
-        <Menu aria-hidden="true" />
-      </Button>
-      <BrandMark aria-hidden="true" className="size-6 shrink-0" />
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">
-        {navigation.find((item) => item.id === activeView)?.label ??
-          (activeView === "settings" ? "Settings" : activeView === "profile" ? "Profile" : "JustAI")}
-      </span>
-      {historyView ? (
-        <Button aria-label={`Open ${secondaryHistoryLabel.toLocaleLowerCase()}`}
-          aria-expanded={contextPanelOpen}
-          onClick={() => {
-            onHistoryOpenChange(true)
-            setChatHistoryExpanded(true)
-          }} size="icon-sm" variant="ghost">
-          <PanelRightOpen aria-hidden="true" />
-        </Button>
-      ) : null}
-    </div>
-
-    <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-      <SheetContent aria-label="Workspace menu" className="w-[min(21rem,calc(100vw-2rem))] max-w-none overflow-y-auto p-0" side="left">
-        <SheetHeader className="border-b border-border/60 px-5 py-5">
-          <SheetTitle className="flex items-center gap-2 text-base">
-            <BrandMark aria-hidden="true" className="size-7" /> JustAI
-          </SheetTitle>
-        </SheetHeader>
-        <div className="flex flex-col gap-4 px-3 py-4">
-          <Button
-            className="h-10 w-full justify-start gap-2.5 px-3 font-normal"
-            onClick={() => { setMobileMenuOpen(false); setSearchOpen(true) }}
-            variant="secondary"
-          >
-            <Search data-icon="inline-start" /> Search workspace
-          </Button>
-          <nav aria-label="Mobile workspace navigation" className="flex flex-col gap-4">
-            {[...new Set(navigation.map((item) => item.group))].map((group) => (
-              <div className="flex flex-col gap-0.5" key={group}>
-                <p className="px-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{group}</p>
-                {navigation.filter((item) => item.group === group).map((item) => {
-                  const Icon = item.icon
-                  return <Button key={item.id} aria-current={activeView === item.id ? "page" : undefined}
-                    className="h-10 w-full justify-start gap-2.5 px-3" disabled={Boolean(item.feature && disabledFeatures[item.feature])}
-                    onClick={() => { setMobileMenuOpen(false); navigateFromRail(item.id) }}
-                    variant={activeView === item.id ? "secondary" : "ghost"}>
-                    <Icon data-icon="inline-start" /> {item.label}
-                  </Button>
-                })}
-              </div>
-            ))}
-          </nav>
-          {organizations.length > 1 && (
-            <div className="flex flex-col gap-0.5 border-t border-border/60 pt-4">
-              <p className="px-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Workspace</p>
-              {organizations.map((organization) => (
-                <Button key={organization.id} className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => {
-                  setMobileMenuOpen(false)
-                  onOrganizationSelect(organization.id)
-                }} variant={organization.id === activeOrganization?.id ? "secondary" : "ghost"}>
-                  <Bot data-icon="inline-start" />
-                  <span className="min-w-0 flex-1 truncate text-left">{organization.name}</span>
-                  {organization.id === activeOrganization?.id && <Check data-icon="inline-end" />}
-                </Button>
-              ))}
-            </div>
-          )}
-          <div className="flex flex-col gap-0.5 border-t border-border/60 pt-4">
-            <div className="flex items-center gap-3 px-3 pb-2">
-              <Avatar>
-                {user.avatarUrl && (
-                  <AvatarImage
-                    alt={`${user.displayName}'s profile picture`}
-                    src={resolveAPIURL(
-                      versionedAvatarURL(user.avatarUrl, user.avatarVersion) ??
-                        user.avatarUrl
-                    )}
-                  />
-                )}
-                <AvatarFallback className={avatarToneFor(user.id)}>{userInitials}</AvatarFallback>
-              </Avatar>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{user.displayName}</p>
-                <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-              </div>
-            </div>
-            <Button className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => { setMobileMenuOpen(false); onNavigate("profile") }} variant={activeView === "profile" ? "secondary" : "ghost"}>
-              <UserRound data-icon="inline-start" /> Profile
-            </Button>
-            <Button className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => { setMobileMenuOpen(false); onNavigate("settings") }} variant={activeView === "settings" ? "secondary" : "ghost"}>
-              <Settings2 data-icon="inline-start" /> Workspace settings
-            </Button>
-            {user.platformAdmin ? <Button className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => { setMobileMenuOpen(false); onNavigate("admin") }} variant={activeView === "admin" ? "secondary" : "ghost"}>
-              <ShieldCheck data-icon="inline-start" /> Platform admin
-            </Button> : null}
-            <ThemeSwitcher expanded />
-            <Button className="h-10 w-full justify-start gap-2.5 px-3" onClick={() => { setMobileMenuOpen(false); onSignOut() }} variant="ghost">
-              <LogOut data-icon="inline-start" /> Sign out
-            </Button>
-          </div>
-        </div>
-      </SheetContent>
-    </Sheet>
-
-    <aside
-      className={cn(
-        "contents lg:relative lg:mx-2 lg:my-2 lg:flex lg:h-[calc(100%-1rem)] lg:min-h-0 lg:shrink-0 lg:gap-2 lg:overflow-visible lg:transition-[width] lg:duration-200",
-        navExpanded ? "lg:w-52" : "lg:w-14",
-        isSecondaryHistoryRail &&
-          (secondaryHistoryExpanded
-            ? navExpanded
-              ? "lg:w-[29.5rem]"
-              : "lg:w-80"
-            : navExpanded
-              ? "lg:w-[16.5rem]"
-              : "lg:w-28")
-      )}
-      aria-label="Workspace navigation"
-      data-history-open={historyVisible}
-    >
-      <div
-        className={cn(
-          "hidden shrink-0 flex-col gap-2 rounded-[1.75rem] bg-sidebar py-3 transition-[width] duration-200 lg:flex",
-          navExpanded ? "w-52 items-stretch px-2" : "w-14 items-center"
-        )}
-        data-expanded={navExpanded}
-      >
-        <div
-          className={cn(
-            "flex shrink-0 items-center gap-2",
-            navExpanded ? "px-1.5" : "justify-center"
-          )}
-        >
-          <BrandMark aria-label="JustAI" className="size-8 shrink-0" />
-          {navExpanded && (
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">
-              JustAI
-            </span>
-          )}
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                aria-label={`Select workspace (${activeOrganization?.name ?? "Workspace"})`}
-                className={
-                  navExpanded
-                    ? "h-10 w-full justify-start gap-2 rounded-xl px-1.5"
-                    : "size-9 rounded-xl"
-                }
-                variant="ghost"
-              />
-            }
-          >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-              <Bot aria-hidden="true" />
-            </span>
-            {navExpanded && (
-              <>
-                <span className="min-w-0 flex-1 truncate text-left text-sm">
-                  {activeOrganization?.name ?? "Workspace"}
-                </span>
-                <ChevronsUpDown
-                  aria-hidden="true"
-                  className="text-muted-foreground"
-                />
-              </>
-            )}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-64" side="right">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
-              {organizations.map((organization) => (
-                <DropdownMenuItem
-                  key={organization.id}
-                  onClick={() => onOrganizationSelect(organization.id)}
+      <Sidebar collapsible="icon" variant="inset">
+        <SidebarHeader className="gap-2">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <SidebarMenuButton
+                      aria-label={`Select workspace (${activeOrganization?.name ?? "Workspace"})`}
+                      className="h-10 gap-2.5 text-sm font-medium"
+                      size="lg"
+                    />
+                  }
                 >
-                  <Bot data-icon="inline-start" />
+                  <BrandMark aria-hidden="true" className="size-7 shrink-0" />
                   <span className="min-w-0 flex-1 truncate">
-                    {organization.name}
+                    {activeOrganization?.name ?? "JustAI"}
                   </span>
-                  {organization.id === activeOrganization?.id && (
-                    <span className="text-xs text-muted-foreground">
-                      Current
-                    </span>
-                  )}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onNavigate("settings")}>
-              <Settings2 data-icon="inline-start" />
-              Manage workspaces
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Tooltip disabled={navExpanded}>
-          <TooltipTrigger
-            render={
-              <Button
+                  <ChevronsUpDown aria-hidden="true" className="text-muted-foreground" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-64" side="bottom">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+                    {organizations.map((organization) => (
+                      <DropdownMenuItem
+                        key={organization.id}
+                        onClick={() => onOrganizationSelect(organization.id)}
+                      >
+                        <Bot data-icon="inline-start" />
+                        <span className="min-w-0 flex-1 truncate">{organization.name}</span>
+                        {organization.id === activeOrganization?.id && (
+                          <span className="text-xs text-muted-foreground">Current</span>
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onNavigate("settings")}>
+                    <Settings2 data-icon="inline-start" />
+                    Manage workspaces
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
                 aria-keyshortcuts="Meta+K Control+K"
                 aria-label="Search workspace"
-                className={cn(
-                  "rounded-xl text-muted-foreground",
-                  navExpanded
-                    ? "h-9 w-full justify-start gap-2.5 bg-secondary px-2.5 hover:bg-accent"
-                    : "size-9 bg-muted/50 hover:bg-muted/45"
-                )}
+                className="h-9 bg-sidebar-accent/60 text-sm text-muted-foreground"
                 onClick={() => setSearchOpen(true)}
-                size={navExpanded ? "default" : "icon"}
-                variant="ghost"
+                tooltip="Search workspace · ⌘K"
               >
                 <Search />
-                {navExpanded && (
-                  <>
-                    <span className="flex-1 text-left font-normal">Search</span>
-                    <kbd className="text-[11px] font-normal">⌘K</kbd>
-                  </>
-                )}
-              </Button>
-            }
-          />
-          <TooltipContent side="right">Search workspace · ⌘K</TooltipContent>
-        </Tooltip>
+                <span className="flex-1 text-left font-normal">Search…</span>
+                <kbd className="rounded bg-background/60 px-1.5 py-0.5 text-[10px] font-medium">⌘K</kbd>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
 
-        <Separator className={cn("my-1", navExpanded && "mx-auto w-[calc(100%-1rem)]")} />
-        <nav
-          aria-label="Workspace navigation"
-          className={cn(
-            "flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain",
-            navExpanded ? "items-stretch" : "items-center"
-          )}
-        >
-          {navigation.map((item, index) => {
-            const Icon = item.icon
-            const active = activeView === item.id
-            const disabled = Boolean(
-              item.feature && disabledFeatures[item.feature]
-            )
-            const beginsGroup =
-              index === 0 || navigation[index - 1]?.group !== item.group
-            return (
-              <Fragment key={item.id}>
-                {beginsGroup &&
-                  (navExpanded ? (
-                    <p
-                      className={cn(
-                        "px-2.5 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase",
-                        index > 0 && "pt-3"
-                      )}
-                    >
-                      {item.group}
-                    </p>
-                  ) : (
-                    index > 0 && <Separator className="my-1 w-5" />
-                  ))}
-                <Tooltip disabled={navExpanded && !disabled}>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        aria-current={active ? "page" : undefined}
-                        aria-label={item.label}
-                        className={cn(
-                          "relative rounded-xl text-muted-foreground",
-                          navExpanded
-                            ? "h-9 w-full justify-start gap-2.5 px-2.5"
-                            : "size-9",
-                          active && "bg-accent text-accent-foreground"
-                        )}
-                        disabled={disabled}
-                        onClick={() => navigateFromRail(item.id)}
-                        size={navExpanded ? "default" : "icon"}
-                        variant="ghost"
-                      >
-                        <Icon />
-                        {navExpanded && (
-                          <span className="min-w-0 flex-1 truncate text-left">
-                            {item.label}
-                          </span>
-                        )}
-                      </Button>
-                    }
-                  />
-                  <TooltipContent side="right">
-                      {disabled
-                        ? "Disabled by platform administrator"
-                        : item.label}
-                    </TooltipContent>
-                </Tooltip>
-              </Fragment>
-            )
-          })}
-        </nav>
+        <SidebarContent>
+          {[...new Set(navigation.map((item) => item.group))].map((group) => (
+            <SidebarGroup key={group}>
+              <SidebarGroupLabel>{group}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {navigation
+                    .filter((item) => item.group === group)
+                    .map((item) => {
+                      const Icon = item.icon
+                      const active = activeView === item.id
+                      const disabled = Boolean(
+                        item.feature && disabledFeatures[item.feature]
+                      )
+                      const hasHistory =
+                        item.id === "chat" ||
+                        item.id === "transcription" ||
+                        item.id === "video-transcription"
+                      const button = (
+                        <SidebarMenuButton
+                          aria-current={active ? "page" : undefined}
+                          className="text-sm"
+                          disabled={disabled}
+                          isActive={active}
+                          onClick={() => navigateFromRail(item.id)}
+                          tooltip={
+                            disabled ? "Disabled by platform administrator" : item.label
+                          }
+                        >
+                          <Icon />
+                          <span>{item.label}</span>
+                        </SidebarMenuButton>
+                      )
+                      if (!hasHistory || !active) {
+                        return <SidebarMenuItem key={item.id}>{button}</SidebarMenuItem>
+                      }
+                      return (
+                        <Collapsible
+                          key={item.id}
+                          onOpenChange={onHistoryOpenChange}
+                          open={historyOpen}
+                          render={<SidebarMenuItem />}
+                        >
+                          {button}
+                          {createAction && (
+                            <SidebarMenuAction
+                              aria-label={createAction.label}
+                              disabled={createAction.disabled}
+                              onClick={() => {
+                                setOpenMobile(false)
+                                createAction.onClick()
+                              }}
+                              title={createAction.label}
+                            >
+                              <Plus />
+                            </SidebarMenuAction>
+                          )}
+                          <CollapsibleTrigger
+                            render={<SidebarMenuAction className="right-7" aria-label={historyOpen ? `Hide ${historyTitle.toLocaleLowerCase()}` : `Show ${historyTitle.toLocaleLowerCase()}`} />}
+                          >
+                            <ChevronRight className="transition-transform group-data-[open]/menu-item:rotate-90 in-data-[open]:rotate-90" />
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <SidebarMenuSub>
+                              {recentItems.map((entry) => {
+                                const entryActive =
+                                  activeView === "chat"
+                                    ? activeConversationId === entry.id
+                                    : activeSessionId === entry.id
+                                return (
+                                  <SidebarMenuSubItem key={entry.id}>
+                                    <SidebarMenuSubButton
+                                      isActive={entryActive}
+                                      render={<button type="button" />}
+                                      onClick={() => {
+                                        setOpenMobile(false)
+                                        if (activeView === "chat") onNavigate("chat", entry.id)
+                                        else onNavigate(activeView, null, entry.id)
+                                      }}
+                                      title={entry.title}
+                                    >
+                                      <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+                                      {entry.status === "failed" ? (
+                                        <span aria-label="Failed" className="size-1.5 shrink-0 rounded-full bg-destructive" />
+                                      ) : entry.status === "live" ? (
+                                        <span aria-label="Live" className="size-1.5 shrink-0 rounded-full bg-primary" />
+                                      ) : null}
+                                    </SidebarMenuSubButton>
+                                  </SidebarMenuSubItem>
+                                )
+                              })}
+                              <SidebarMenuSubItem>
+                                <SidebarMenuSubButton
+                                  render={<button type="button" />}
+                                  onClick={() => setHistoryDialogOpen(true)}
+                                  className="text-muted-foreground hover:text-sidebar-accent-foreground"
+                                >
+                                  <span>View all…</span>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            </SidebarMenuSub>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      )
+                    })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ))}
+        </SidebarContent>
 
-        {!historyVisible && historyView && (
-          <Tooltip disabled={navExpanded}>
-            <TooltipTrigger
-              render={
-                <Button
-                  aria-label={showContextLabel}
-                  className={cn(
-                    "rounded-xl text-muted-foreground",
-                    navExpanded ? "h-9 w-full justify-start gap-2.5 px-2.5" : "size-9"
-                  )}
-                  onClick={() => onHistoryOpenChange(true)}
-                  size={navExpanded ? "default" : "icon"}
-                  variant="ghost"
-                >
-                  <PanelRightOpen />
-                  {navExpanded && (
-                    <span className="min-w-0 flex-1 truncate text-left">
-                      {showContextLabel}
-                    </span>
-                  )}
-                </Button>
-              }
-            />
-            <TooltipContent side="right">{showContextLabel}</TooltipContent>
-          </Tooltip>
-        )}
-        <Separator className={cn("my-1", navExpanded ? "mx-auto w-[calc(100%-1rem)]" : "w-5")} />
-        <Tooltip disabled={navExpanded}>
-          <TooltipTrigger
-            render={
-              <Button
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
                 aria-current={activeView === "settings" ? "page" : undefined}
-                aria-label="Workspace settings"
-                className={cn(
-                  "rounded-xl text-muted-foreground",
-                  navExpanded ? "h-9 w-full justify-start gap-2.5 px-2.5" : "size-9",
-                  activeView === "settings" &&
-                    "bg-accent text-accent-foreground"
-                )}
+                className="text-sm"
+                isActive={activeView === "settings"}
                 onClick={() => onNavigate("settings")}
-                size={navExpanded ? "default" : "icon"}
-                variant="ghost"
+                tooltip="Workspace settings"
               >
                 <Settings2 />
-                {navExpanded && (
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    Settings
-                  </span>
-                )}
-              </Button>
-            }
-          />
-          <TooltipContent side="right">Workspace settings</TooltipContent>
-        </Tooltip>
-        <Tooltip disabled={navExpanded}>
-          <TooltipTrigger
-            render={
-              <Button
-                aria-expanded={navExpanded}
-                aria-label={navExpanded ? "Collapse navigation" : "Expand navigation"}
-                className={cn(
-                  "rounded-xl text-muted-foreground",
-                  navExpanded ? "h-9 w-full justify-start gap-2.5 px-2.5" : "size-9"
-                )}
-                onClick={() => setNavExpanded(!navExpanded)}
-                size={navExpanded ? "default" : "icon"}
-                variant="ghost"
-              >
-                {navExpanded ? <PanelLeftClose /> : <PanelLeftOpen />}
-                {navExpanded && (
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    Collapse
-                  </span>
-                )}
-              </Button>
-            }
-          />
-          <TooltipContent side="right">Expand navigation</TooltipContent>
-        </Tooltip>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                aria-label={`${user.displayName} account menu`}
-                className={
-                  navExpanded
-                    ? "h-11 w-full justify-start gap-2 rounded-xl px-1.5"
-                    : "size-8 rounded-full p-0"
-                }
-                variant="ghost"
-              />
-            }
-          >
-            <Avatar size="sm">
-              {user.avatarUrl && (
-                  <AvatarImage
-                    alt={`${user.displayName}'s profile picture`}
-                    src={resolveAPIURL(
-                      versionedAvatarURL(user.avatarUrl, user.avatarVersion) ??
-                        user.avatarUrl
+                <span>Settings</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <SidebarMenuButton
+                      aria-label={`${user.displayName} account menu`}
+                      size="lg"
+                    />
+                  }
+                >
+                  <Avatar size="sm">
+                    {user.avatarUrl && (
+                      <AvatarImage
+                        alt={`${user.displayName}'s profile picture`}
+                        src={resolveAPIURL(
+                          versionedAvatarURL(user.avatarUrl, user.avatarVersion) ?? user.avatarUrl
+                        )}
+                      />
                     )}
-                  />
-                )}
-              <AvatarFallback className={avatarToneFor(user.id)}>
-                {userInitials}
-              </AvatarFallback>
-            </Avatar>
-            {navExpanded && (
-              <span className="min-w-0 flex-1 text-left">
-                <span className="block truncate text-xs font-medium">
-                  {user.displayName}
-                </span>
-                <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                  {user.email}
-                </span>
-              </span>
-            )}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56" side="right">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>
-                <span className="block truncate text-xs font-medium">
-                  {user.displayName}
-                </span>
-                <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                  {user.email}
-                </span>
-                {activeOrganization?.role && (
-                  <span className="mt-1 block truncate text-[11px] font-normal text-muted-foreground">
-                    {activeOrganization.name} · {activeOrganization.role}
+                    <AvatarFallback className={avatarToneFor(user.id)}>{userInitials}</AvatarFallback>
+                  </Avatar>
+                  <span className="min-w-0 flex-1 text-left">
+                    <span className="block truncate text-xs font-medium">{user.displayName}</span>
+                    <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                      {activeOrganization?.name ?? user.email}
+                    </span>
                   </span>
-                )}
-              </DropdownMenuLabel>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <ThemeMenu />
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onNavigate("profile")}>
-              <UserRound data-icon="inline-start" />
-              Profile
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onNavigate("settings")}>
-              <Settings2 data-icon="inline-start" />
-              Workspace settings
-            </DropdownMenuItem>
-            {user.platformAdmin && (
-              <DropdownMenuItem onClick={() => onNavigate("admin")}>
-                <ShieldCheck data-icon="inline-start" />
-                Platform admin
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem onClick={onSignOut}>
-              <LogOut data-icon="inline-start" />
-              Sign out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+                  <MoreHorizontal aria-hidden="true" className="text-muted-foreground" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56" side="top">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>
+                      <span className="block truncate text-xs font-medium">{user.displayName}</span>
+                      <span className="block truncate text-[11px] font-normal text-muted-foreground">{user.email}</span>
+                      {activeOrganization?.role && (
+                        <span className="mt-1 block truncate text-[11px] font-normal text-muted-foreground">
+                          {activeOrganization.name} · {activeOrganization.role}
+                        </span>
+                      )}
+                    </DropdownMenuLabel>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <ThemeMenu />
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onNavigate("profile")}>
+                    <UserRound data-icon="inline-start" />
+                    Profile
+                  </DropdownMenuItem>
+                  {user.platformAdmin && (
+                    <DropdownMenuItem onClick={() => onNavigate("admin")}>
+                      <ShieldCheck data-icon="inline-start" />
+                      Platform admin
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={onSignOut}>
+                    <LogOut data-icon="inline-start" />
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+        <SidebarRail />
+      </Sidebar>
+
+      <Dialog onOpenChange={setHistoryDialogOpen} open={historyDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{historyTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="flex h-[60vh] min-h-0 flex-col">{historyPanel}</div>
+        </DialogContent>
+      </Dialog>
 
       <GlobalSearchDialog
         disabledFeatures={disabledFeatures}
@@ -909,337 +726,6 @@ export function FocusWorkspaceSidebar({
         open={searchOpen}
         platformAdmin={user.platformAdmin}
       />
-
-      <div
-        className={cn(
-          isSecondaryHistoryRail
-            ? "contents lg:relative lg:flex lg:h-full lg:w-12 lg:shrink-0 lg:overflow-hidden lg:rounded-[1.5rem] lg:bg-[var(--sidebar-secondary)] lg:transition-[width] lg:duration-200"
-            : "contents",
-          secondaryHistoryExpanded &&
-            "lg:w-64 lg:shadow-xl"
-        )}
-        onBlurCapture={(event) => {
-          if (
-            isSecondaryHistoryRail && !event.currentTarget.contains(event.relatedTarget)
-          ) {
-            setChatHistoryExpanded(false)
-          }
-        }}
-        onKeyDown={(event) => {
-          if (
-            event.key === "Escape" &&
-            isSecondaryHistoryRail
-          ) {
-            event.preventDefault()
-            setChatHistoryExpanded(false)
-            return
-          }
-          if (!isMobile || event.key !== "Tab") return
-          const focusable = Array.from(
-            event.currentTarget.querySelectorAll<HTMLElement>(
-              'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
-            )
-          )
-          if (focusable.length === 0) {
-            event.preventDefault()
-            contextPanelRef.current?.focus()
-            return
-          }
-          const first = focusable[0]
-          const last = focusable[focusable.length - 1]
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault()
-            last.focus()
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault()
-            first.focus()
-          }
-        }}
-      >
-        {isSecondaryHistoryRail && !secondaryHistoryExpanded && (
-          <div className="hidden h-full w-12 flex-col items-center gap-1 py-3 lg:flex">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    aria-expanded={secondaryHistoryExpanded}
-                    aria-label={`Open ${secondaryHistoryLabel.toLocaleLowerCase()}`}
-                    className="size-9 rounded-xl bg-accent text-accent-foreground"
-                  onClick={() => setChatHistoryExpanded(true)}
-                  size="icon"
-                  variant="ghost"
-                >
-                    <PanelRightClose />
-                  </Button>
-                }
-              />
-              <TooltipContent side="right">
-                Open {secondaryHistoryLabel.toLocaleLowerCase()}
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    aria-label={`Search ${secondaryHistoryLabel.toLocaleLowerCase()}`}
-                    className="size-9 rounded-xl text-muted-foreground"
-                    onClick={() => setChatHistoryExpanded(true)}
-                    size="icon"
-                    variant="ghost"
-                  >
-                    <Search />
-                  </Button>
-                }
-              />
-              <TooltipContent side="right">
-                Search {secondaryHistoryLabel.toLocaleLowerCase()}
-              </TooltipContent>
-            </Tooltip>
-            {createAction && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      aria-label={createAction.label}
-                      className="size-9 rounded-xl text-muted-foreground"
-                      disabled={createAction.disabled}
-                      onClick={createAction.onClick}
-                      size="icon"
-                      variant="ghost"
-                    >
-                      <CreateIcon />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="right">
-                  {createAction.label}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            {recentHistoryItems.length > 0 && (
-              <Separator className="my-1 w-5" />
-            )}
-            <div className="flex flex-col items-center gap-2">
-              {recentHistoryItems.map((item) => {
-                const label = item.title.trim().slice(0, 1).toUpperCase() || "C"
-                const active =
-                  activeView === "chat"
-                    ? activeConversationId === item.id
-                    : activeSessionId === item.id
-                return (
-                  <Tooltip key={item.id}>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          aria-current={active ? "page" : undefined}
-                          aria-label={`Open ${item.title}`}
-                          className={cn(
-                            "size-8 rounded-full text-[11px] font-semibold text-muted-foreground",
-                            active && "bg-accent text-accent-foreground"
-                          )}
-                          onClick={() => {
-                            setChatHistoryExpanded(false)
-                            onNavigate(
-                              activeView === "video-transcription"
-                                ? "video-transcription"
-                                : activeView === "transcription"
-                                  ? "transcription"
-                                  : "chat",
-                              activeView === "chat" ? item.id : null,
-                              activeView === "chat" ? null : item.id
-                            )
-                          }}
-                          size="icon"
-                          variant="ghost"
-                        >
-                          {label}
-                        </Button>
-                      }
-                    />
-                    <TooltipContent side="right">
-                      <span className="max-w-52 truncate">{item.title}</span>
-                    </TooltipContent>
-                  </Tooltip>
-                )
-              })}
-            </div>
-          </div>
-        )}
-        {isMobile && contextPanelOpen && (
-          <div
-            aria-hidden="true"
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px] lg:hidden"
-            onPointerDown={() => {
-              setChatHistoryExpanded(false)
-            }}
-          />
-        )}
-        <div
-          ref={contextPanelRef}
-          aria-label={contextTitle}
-          aria-modal={isMobile ? true : undefined}
-          className={cn(
-            "min-w-0 flex-col overflow-hidden rounded-[1.5rem] bg-[var(--sidebar-secondary)] shadow-xl motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in-0 motion-safe:slide-in-from-left-2",
-            isSecondaryHistoryRail
-              ? "w-full gap-1 p-3"
-              : "absolute inset-y-0 left-16 z-30 w-64 gap-3 p-4 xl:static xl:z-auto xl:shadow-none",
-            contextPanelOpen ? "flex" : "hidden",
-            "max-lg:fixed max-lg:inset-y-2 max-lg:left-2 max-lg:z-50 max-lg:w-[min(24rem,calc(100%-1rem))]"
-          )}
-          role={isMobile ? "dialog" : "region"}
-          tabIndex={isMobile ? -1 : undefined}
-        >
-          <div
-            className={cn(
-              "flex items-center justify-between gap-3",
-              isSecondaryHistoryRail && "h-9 px-1"
-            )}
-          >
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold tracking-tight">
-                {contextTitle}
-              </h2>
-            </div>
-            <div className="flex items-center gap-1">
-              {isSecondaryHistoryRail && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        aria-label={`Close ${secondaryHistoryLabel.toLocaleLowerCase()}`}
-                        className="size-7 rounded-lg text-muted-foreground"
-                        onClick={() => setChatHistoryExpanded(false)}
-                        size="icon"
-                        variant="ghost"
-                      >
-                        <PanelRightOpen />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>
-                    Close {secondaryHistoryLabel.toLocaleLowerCase()}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          </div>
-
-          {isSecondaryHistoryRail && activeView === "chat" && (
-            <Input
-              aria-label="Search chat history"
-              className="h-9 shrink-0"
-              onChange={(event) => setHistoryQuery(event.target.value)}
-              placeholder="Search chats"
-              type="search"
-              value={historyQuery}
-            />
-          )}
-
-          {isSecondaryHistoryRail &&
-            (activeView === "transcription" ||
-              activeView === "video-transcription") && (
-              <Input
-                aria-label="Search sessions"
-                className="h-9 shrink-0"
-                onChange={(event) => setSessionQuery(event.target.value)}
-                placeholder={
-                  activeView === "video-transcription"
-                    ? "Search videos"
-                    : "Search sessions"
-                }
-                type="search"
-                value={sessionQuery}
-              />
-            )}
-
-          {createAction && (
-            <Button
-              aria-label={createAction.label}
-              className={cn(
-                "h-9 w-full justify-start gap-2",
-                isSecondaryHistoryRail && "px-1"
-              )}
-              disabled={createAction.disabled}
-              onClick={() => {
-                setChatHistoryExpanded(false)
-                createAction.onClick()
-              }}
-            >
-              <CreateIcon data-icon="inline-start" />
-              {createAction.label}
-            </Button>
-          )}
-
-          {actionError && (
-            <Alert className="shrink-0" variant="destructive">
-              <AlertDescription className="text-xs">
-                {actionError}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {activeView === "chat" && (
-            <AssistantThreadList
-              activeConversationId={activeConversationId}
-              archivedConversations={archivedConversations}
-              conversations={conversations}
-              hideSearch={isSecondaryHistoryRail}
-              organizationId={activeOrganization?.id ?? null}
-              historyQuery={historyQuery}
-              onArchive={onArchiveConversation}
-              onDelete={onDeleteConversation}
-              onHistoryQueryChange={setHistoryQuery}
-              onRename={onRenameConversation}
-              onShare={onShareConversation}
-              onConversationRefresh={onConversationRefresh}
-              onSelect={(id) => {
-                setChatHistoryExpanded(false)
-                onNavigate("chat", id)
-              }}
-            />
-          )}
-
-          {(activeView === "transcription" ||
-            activeView === "video-transcription") && (
-            <>
-              {!isSecondaryHistoryRail && (
-                <Input
-                  aria-label="Search sessions"
-                  onChange={(event) => setSessionQuery(event.target.value)}
-                  placeholder={
-                    activeView === "video-transcription"
-                      ? "Search videos"
-                      : "Search sessions"
-                  }
-                  value={sessionQuery}
-                />
-              )}
-              <TranscriptionHistoryPanel
-                activeSessionId={activeSessionId}
-                archivedSessionGroups={archivedSessionGroups}
-                archivedSessions={filteredArchivedSessions}
-                archivedOpen={archivedSessionsOpen}
-                onArchive={onArchiveSession}
-                onDelete={onDeleteSession}
-                onSelect={(id) => {
-                  setChatHistoryExpanded(false)
-                  onNavigate(
-                    activeView === "video-transcription"
-                      ? "video-transcription"
-                      : "transcription",
-                    null,
-                    id
-                  )
-                }}
-                sessionGroups={sessionGroups}
-                setArchivedOpen={setArchivedSessionsOpen}
-                video={activeView === "video-transcription"}
-              />
-            </>
-          )}
-        </div>
-      </div>
-    </aside>
     </>
   )
 }

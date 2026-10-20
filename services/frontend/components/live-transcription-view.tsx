@@ -9,15 +9,13 @@ import {
   Check,
   Copy,
   LoaderCircle,
+  ChevronDown,
   Mic,
   MonitorUp,
   Play,
   Radio,
-  Settings2,
   ShieldCheck,
-  Sparkles,
   Tv,
-  Users,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -38,7 +36,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import {
@@ -62,11 +59,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import {
-  PageDescription,
-  PageEyebrow,
-  PageHeader,
-  PageHeading,
-  PageTitle,
 } from "@/components/ui/page"
 import {
   Select,
@@ -78,6 +70,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { languageItemsFor } from "@/lib/transcription-languages"
 import { api, eventStreamURL } from "@/lib/api"
 import { SSETransport } from "@/lib/sse-transport"
 import type { SSEConnectionState } from "@/lib/sse-transport"
@@ -113,15 +106,14 @@ type SocketEvent = {
 
 type CaptureMode = "microphone" | "system-audio" | "external"
 type ExternalSourceType = "stream" | "meeting-bot"
-type SessionWizardStep = 0 | 1 | 2 | 3
+type SessionWizardStep = 0 | 1 | 2
 type SessionSourceChoice =
   "microphone" | "system-audio" | "stream" | "meeting-bot"
 
 const liveSessionWizardSteps = [
-  { label: "Source", description: "Choose input" },
-  { label: "Setup", description: "Connect it" },
-  { label: "Options", description: "Tune room" },
-  { label: "Review", description: "Start safely" },
+  { label: "Source" },
+  { label: "Setup" },
+  { label: "Options" },
 ] as const
 
 function localDateTimeValue(date: Date) {
@@ -412,13 +404,6 @@ const liveSessionSourceOptions: Array<{
   },
 ]
 
-const botPlatformLabels: Record<string, string> = {
-  generic: "Custom / desktop adapter",
-  zoom: "Zoom",
-  "google-meet": "Google Meet",
-  "microsoft-teams": "Microsoft Teams",
-}
-
 type BotSetup = {
   source: TranscriptionSource
   bot?: { platform?: string; status?: string }
@@ -502,6 +487,7 @@ export function LiveTranscriptionView({
   )
   const [title, setTitle] = useState("Room session")
   const [language, setLanguage] = useState("auto")
+  const languageItems = useMemo(() => languageItemsFor(language), [language])
   const [recordAudio, setRecordAudio] = useState(false)
   const [selectedEndpoint, setSelectedEndpoint] = useState("")
   const [selectedDiarizationEndpoint, setSelectedDiarizationEndpoint] =
@@ -654,10 +640,6 @@ export function LiveTranscriptionView({
   const captureSourceName =
     captureMode === "system-audio" ? "Browser tab audio" : "This laptop"
   const effectiveGrammarEndpoint = selectedGrammarEndpoint
-  const selectedGrammarName =
-    grammarEndpoints.find(
-      (endpoint) => endpoint.id === effectiveGrammarEndpoint
-    )?.name || "Off"
 
   const refreshDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return
@@ -2131,10 +2113,7 @@ export function LiveTranscriptionView({
     transcriptionEndpoints.find(
       (endpoint) => endpoint.id === effectiveSelectedEndpoint
     )?.name || "No endpoint selected"
-  const selectedDiarizationName =
-    diarizationEndpoints.find(
-      (endpoint) => endpoint.id === selectedDiarizationEndpoint
-    )?.name || "Off"
+
   const sourceSetupReady =
     captureMode !== "external" ||
     externalSourceType === "meeting-bot" ||
@@ -2146,7 +2125,7 @@ export function LiveTranscriptionView({
   const canContinueWizard =
     createStep === 0 ||
     (createStep === 1 && sourceSetupReady) ||
-    (createStep >= 2 && Boolean(effectiveSelectedEndpoint))
+    (createStep === 2 && Boolean(effectiveSelectedEndpoint))
   const selectWizardSource = (choice: SessionSourceChoice) => {
     if (choice === "stream" || choice === "meeting-bot") {
       setCaptureMode("external")
@@ -2156,7 +2135,7 @@ export function LiveTranscriptionView({
     setCaptureMode(choice)
   }
   const goToNextWizardStep = () => {
-    if (!canContinueWizard || createStep === 3) return
+    if (!canContinueWizard || createStep === 2) return
     setCreateStep((current) => (current + 1) as SessionWizardStep)
   }
   const goToPreviousWizardStep = () => {
@@ -2185,16 +2164,7 @@ export function LiveTranscriptionView({
 
       {!snapshot && !createOpen ? (
         <>
-          <PageHeader className="shrink-0">
-            <PageHeading>
-              <PageEyebrow>Capture</PageEyebrow>
-              <PageTitle>Live transcription</PageTitle>
-              <PageDescription>
-                Capture conversations, meetings, and live sources in a shared
-                transcription workspace.
-              </PageDescription>
-            </PageHeading>
-          </PageHeader>
+          <h1 className="sr-only">Live transcription</h1>
           <Empty className="min-h-[calc(100svh-14rem)] border-0">
             <EmptyHeader>
               <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
@@ -2289,7 +2259,7 @@ export function LiveTranscriptionView({
       {createOpen && !sessionId ? (
         <TranscriptionCreationFlow
           title="New live session"
-          description="Bring your conversation into focus. Start with an audio source."
+          description="Choose an audio source and how it is processed."
           steps={liveSessionWizardSteps}
           step={createStep}
           onStepChange={(step) => setCreateStep(step as SessionWizardStep)}
@@ -2313,7 +2283,7 @@ export function LiveTranscriptionView({
                     Cancel
                   </Button>
                 )}
-                {createStep < 3 ? (
+                {createStep < 2 ? (
                   <Button
                     disabled={!canContinueWizard}
                     onClick={goToNextWizardStep}
@@ -2639,26 +2609,18 @@ export function LiveTranscriptionView({
                 </FieldGroup>
               )}
             </div>
-          ) : createStep === 2 ? (
+          ) : (
             <div className="flex flex-col gap-5" key="options-step">
-              <div className="flex items-start gap-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <Settings2 aria-hidden="true" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold">Tune the room</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    These settings control how JustAI transcribes, labels, and
-                    retains this session.
-                  </p>
-                </div>
+              <div>
+                <h2 className="text-lg font-semibold">Choose options</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  The defaults work for most sessions.
+                </p>
               </div>
               <FieldGroup>
-                <div className="grid gap-4 sm:grid-cols-[1.5fr_0.75fr]">
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_14rem]">
                   <Field>
-                    <FieldLabel htmlFor="session-title">
-                      Session name
-                    </FieldLabel>
+                    <FieldLabel htmlFor="session-title">Session name</FieldLabel>
                     <Input
                       id="session-title"
                       onChange={(event) => setTitle(event.target.value)}
@@ -2666,25 +2628,110 @@ export function LiveTranscriptionView({
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="session-language">Language</FieldLabel>
-                    <Input
-                      id="session-language"
-                      onChange={(event) =>
-                        setLanguage(event.target.value || "auto")
-                      }
-                      placeholder="auto"
+                    <FieldLabel>Language</FieldLabel>
+                    <Select
+                      items={languageItems}
+                      onValueChange={(value) => setLanguage(value || "auto")}
                       value={language}
-                    />
-                    <FieldDescription>BCP-47 code or auto.</FieldDescription>
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {languageItems.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                   </Field>
                 </div>
-                <div className="flex flex-col gap-4 rounded-2xl bg-muted/40 p-4 sm:p-5">
-                  <div>
-                    <h3 className="text-sm font-semibold">Processing</h3>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Choose the services that turn audio into a transcript.
-                    </p>
+
+                <Field orientation="horizontal">
+                  <div className="flex flex-1 flex-col gap-1">
+                    <FieldLabel htmlFor="session-option-speakers">
+                      Separate speakers
+                    </FieldLabel>
+                    <FieldDescription>
+                      {diarizationEndpoints.length === 0
+                        ? "No speaker separation endpoint is configured."
+                        : "Label who is talking after capture ends. Turns on audio recording."}
+                    </FieldDescription>
                   </div>
+                  <Switch
+                    checked={Boolean(selectedDiarizationEndpoint)}
+                    disabled={diarizationEndpoints.length === 0}
+                    id="session-option-speakers"
+                    onCheckedChange={(on) =>
+                      setSelectedDiarizationEndpoint(
+                        on ? (diarizationEndpoints[0]?.id ?? "") : ""
+                      )
+                    }
+                  />
+                </Field>
+
+                <Field orientation="horizontal">
+                  <div className="flex flex-1 flex-col gap-1">
+                    <FieldLabel htmlFor="session-option-grammar">
+                      Polish grammar
+                    </FieldLabel>
+                    <FieldDescription>
+                      {grammarEndpoints.length === 0
+                        ? "No chat endpoint is configured."
+                        : "Clean up wording when capture ends. The verbatim transcript stays available."}
+                    </FieldDescription>
+                  </div>
+                  <Switch
+                    checked={Boolean(selectedGrammarEndpoint)}
+                    disabled={grammarEndpoints.length === 0}
+                    id="session-option-grammar"
+                    onCheckedChange={(on) =>
+                      setSelectedGrammarEndpoint(
+                        on
+                          ? (grammarEndpoints.find((endpoint) => endpoint.isDefault)
+                              ?.id ??
+                              grammarEndpoints[0]?.id ??
+                              "")
+                          : ""
+                      )
+                    }
+                  />
+                </Field>
+
+                <Field orientation="horizontal">
+                  <div className="flex flex-1 flex-col gap-1">
+                    <FieldLabel htmlFor="session-option-record">
+                      Record source audio
+                    </FieldLabel>
+                    <FieldDescription>
+                      Encrypted, source-separated tracks. Default retention: 30
+                      days.
+                    </FieldDescription>
+                  </div>
+                  <Switch
+                    checked={recordAudio || Boolean(selectedDiarizationEndpoint)}
+                    disabled={Boolean(selectedDiarizationEndpoint)}
+                    id="session-option-record"
+                    onCheckedChange={setRecordAudio}
+                  />
+                </Field>
+
+                <Collapsible defaultOpen={!effectiveSelectedEndpoint}>
+                  <CollapsibleTrigger className="group/advanced flex w-full items-center gap-2 rounded-lg py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    Advanced settings
+                    <span className="min-w-0 flex-1 truncate text-left text-xs font-normal text-muted-foreground">
+                      {selectedEndpointName}
+                    </span>
+                    <ChevronDown
+                      aria-hidden="true"
+                      className="size-4 text-muted-foreground transition-transform group-data-[panel-open]/advanced:rotate-180"
+                    />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <FieldGroup className="pt-4">
                   <Field>
                     <FieldLabel>Transcription endpoint</FieldLabel>
                     <Select
@@ -2713,7 +2760,7 @@ export function LiveTranscriptionView({
                       </SelectContent>
                     </Select>
                   </Field>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                      {selectedDiarizationEndpoint ? (
                     <Field>
                       <FieldLabel>Speaker separation after capture</FieldLabel>
                       <Select
@@ -2753,6 +2800,8 @@ export function LiveTranscriptionView({
                         enabled automatically.
                       </FieldDescription>
                     </Field>
+                      ) : null}
+                      {selectedGrammarEndpoint ? (
                     <Field>
                       <FieldLabel>Grammar polish</FieldLabel>
                       <Select
@@ -2792,117 +2841,11 @@ export function LiveTranscriptionView({
                         capture ends.
                       </FieldDescription>
                     </Field>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between rounded-xl bg-muted/50 p-3">
-                  <div>
-                    <p className="text-sm font-medium">Record source audio</p>
-                    <p className="text-xs text-muted-foreground">
-                      Encrypted, source-separated tracks. Default retention: 30
-                      days.
-                    </p>
-                  </div>
-                  <Switch
-                    aria-label="Record source audio"
-                    checked={
-                      recordAudio || Boolean(selectedDiarizationEndpoint)
-                    }
-                    disabled={Boolean(selectedDiarizationEndpoint)}
-                    onCheckedChange={setRecordAudio}
-                  />
-                </div>
+                      ) : null}
+                    </FieldGroup>
+                  </CollapsibleContent>
+                </Collapsible>
               </FieldGroup>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-5" key="review-step">
-              <div className="flex items-start gap-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <Sparkles aria-hidden="true" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium">Everything looks ready</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Review the first source and room settings, then start when
-                    you are ready.
-                  </p>
-                </div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
-                  <AudioLines className="mt-0.5 shrink-0 text-primary" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">
-                      Audio source
-                    </p>
-                    <p className="truncate text-sm font-medium">
-                      {selectedWizardSourceLabel}
-                    </p>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {selectedWizardSource === "microphone"
-                        ? selectedDeviceName
-                        : selectedWizardSource === "system-audio"
-                          ? "Browser share picker"
-                          : selectedWizardSource === "stream"
-                            ? streamName.trim() || "Live stream"
-                            : `${botPlatformLabels[botPlatform] || "Meeting bot"} adapter`}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
-                  <Settings2 className="mt-0.5 shrink-0 text-primary" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">
-                      Transcription
-                    </p>
-                    <p className="truncate text-sm font-medium">
-                      {selectedEndpointName}
-                    </p>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {language || "auto"} · speakers {selectedDiarizationName}{" "}
-                      · polish {selectedGrammarName}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
-                  <Users className="mt-0.5 shrink-0 text-primary" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">Room</p>
-                    <p className="truncate text-sm font-medium">
-                      {title.trim() || "Room session"}
-                    </p>
-                    <div className="mt-1">
-                      <Badge
-                        variant={
-                          recordAudio || selectedDiarizationEndpoint
-                            ? "secondary"
-                            : "outline"
-                        }
-                      >
-                        {recordAudio || selectedDiarizationEndpoint
-                          ? "Recording enabled"
-                          : "Recording off"}
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-muted/50 p-3">
-                  <ShieldCheck className="mt-0.5 shrink-0 text-primary" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">
-                      Privacy note
-                    </p>
-                    <p className="text-sm font-medium">
-                      {selectedWizardSource === "system-audio"
-                        ? "You choose what to share"
-                        : selectedWizardSource === "meeting-bot"
-                          ? "Bot token shown once"
-                          : selectedWizardSource === "stream"
-                            ? "Stream URL encrypted"
-                            : "Permission requested on start"}
-                    </p>
-                  </div>
-                </div>
-              </div>
               <Alert>
                 <ShieldCheck aria-hidden="true" />
                 <AlertTitle>What happens next</AlertTitle>

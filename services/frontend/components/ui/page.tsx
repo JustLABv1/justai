@@ -1,6 +1,15 @@
-import type { ComponentProps, ReactNode } from "react"
+"use client"
 
+import { useSyncExternalStore, type ComponentProps, type ReactNode } from "react"
+import { createPortal } from "react-dom"
+
+import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
+
+/** Slot in the workspace header bar (right of the breadcrumb). */
+export const PAGE_ACTIONS_SLOT_ID = "workspace-header-actions"
+
+const subscribeNever = () => () => {}
 
 function Page({ className, ...props }: ComponentProps<"div">) {
   return (
@@ -20,7 +29,7 @@ function PageHeader({ className, ...props }: ComponentProps<"header">) {
     <header
       data-slot="page-header"
       className={cn(
-        "flex flex-col gap-5 pb-1 sm:flex-row sm:items-end sm:justify-between",
+        "flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between",
         className
       )}
       {...props}
@@ -51,14 +60,13 @@ function PageEyebrow({ className, ...props }: ComponentProps<"p">) {
   )
 }
 
+// The workspace header breadcrumb already shows where the user is, so the
+// title stays in the DOM for the heading outline but is not rendered twice.
 function PageTitle({ className, ...props }: ComponentProps<"h1">) {
   return (
     <h1
       data-slot="page-title"
-      className={cn(
-        "font-heading text-2xl font-semibold tracking-tight text-foreground sm:text-3xl",
-        className
-      )}
+      className={cn("sr-only", className)}
       {...props}
     />
   )
@@ -69,7 +77,7 @@ function PageDescription({ className, ...props }: ComponentProps<"p">) {
     <p
       data-slot="page-description"
       className={cn(
-        "mt-2 max-w-2xl text-sm leading-6 text-muted-foreground",
+        "max-w-2xl text-sm leading-6 text-muted-foreground",
         className
       )}
       {...props}
@@ -77,14 +85,23 @@ function PageDescription({ className, ...props }: ComponentProps<"p">) {
   )
 }
 
+// On desktop the actions move into the workspace header bar, next to the
+// breadcrumb. On mobile (or outside the workspace shell) they stay inline.
 function PageActions({ className, ...props }: ComponentProps<"div">) {
-  return (
+  const isMobile = useIsMobile()
+  const slot = useSyncExternalStore(
+    subscribeNever,
+    () => document.getElementById(PAGE_ACTIONS_SLOT_ID),
+    () => null
+  )
+  const actions = (
     <div
       data-slot="page-actions"
       className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
       {...props}
     />
   )
+  return slot && !isMobile ? createPortal(actions, slot) : actions
 }
 
 function PageToolbar({ className, ...props }: ComponentProps<"div">) {

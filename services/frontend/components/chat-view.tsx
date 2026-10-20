@@ -1451,12 +1451,11 @@ function ChatAmbient() {
 const subscribeNever = () => () => {}
 
 function ChatBackdrop() {
-  // Rendered into the workspace shell so the image spans the whole window
-  // and sits behind the floating sidebars instead of being clipped to the
-  // chat column.
+  // Rendered into the inset content panel (an isolated stacking context) so
+  // the image sits behind the chat but stays inside the rounded panel.
   const shell = useSyncExternalStore(
     subscribeNever,
-    () => document.getElementById("workspace-shell"),
+    () => document.getElementById("workspace-inset"),
     () => null
   )
   if (!shell) return null

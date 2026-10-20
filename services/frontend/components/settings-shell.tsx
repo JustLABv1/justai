@@ -21,7 +21,6 @@ import {
   Page,
   PageActions,
   PageDescription,
-  PageEyebrow,
   PageHeader,
   PageHeading,
   PageTitle,
@@ -171,7 +170,6 @@ export function SettingsShell({
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageEyebrow>Settings</PageEyebrow>
           <PageTitle>Workspace settings</PageTitle>
           <PageDescription>
             Configure {activeOrganization?.name ?? "your active workspace"} and

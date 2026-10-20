@@ -4,7 +4,6 @@ import { MCPView } from "@/components/mcp-view"
 import {
   Page,
   PageDescription,
-  PageEyebrow,
   PageHeader,
   PageHeading,
   PageTitle,
@@ -32,7 +31,6 @@ export function IntegrationsView({
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageEyebrow>Connected work</PageEyebrow>
           <PageTitle>Integrations</PageTitle>
           <PageDescription>
             Connect the services JustAI can use in your everyday work. Technical

@@ -98,7 +98,6 @@ import {
   Page,
   PageActions,
   PageDescription,
-  PageEyebrow,
   PageHeader,
   PageHeading,
   PageTitle,
@@ -2358,7 +2357,6 @@ export function KnowledgeWorkspace({
       />
       <PageHeader>
         <PageHeading>
-          <PageEyebrow>Workspace context</PageEyebrow>
           <PageTitle>Storage</PageTitle>
           <PageDescription>
             Organize files, notes, repositories, and transcripts in folders that

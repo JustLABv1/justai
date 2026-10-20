@@ -79,7 +79,6 @@ import {
   Page,
   PageActions,
   PageDescription,
-  PageEyebrow,
   PageHeader,
   PageHeading,
   PageTitle,
@@ -496,7 +495,6 @@ export function PlatformAdminShell({
     <Page className="max-w-7xl">
       <PageHeader>
         <PageHeading>
-          <PageEyebrow>Platform administration</PageEyebrow>
           <PageTitle>{title}</PageTitle>
           <PageDescription>
             Global controls for JustAI users, workspaces, integrations, and

@@ -1,11 +1,18 @@
 "use client"
 
-import { useLayoutEffect, useRef, type ReactNode, type CSSProperties } from "react"
+import { useLayoutEffect, useRef, type ReactNode } from "react"
 import { Check } from "lucide-react"
-import { cn } from "@/lib/utils"
-import styles from "./transcription-creation-flow.module.css"
+import {
+  Stepper,
+  StepperIndicator,
+  StepperItem,
+  StepperNav,
+  StepperSeparator,
+  StepperTitle,
+  StepperTrigger,
+} from "@/components/reui/stepper"
 
-type CreationStep = { label: string; description: string }
+type CreationStep = { label: string; description?: string }
 
 export function TranscriptionCreationFlow({
   title, description, steps, step, onStepChange, busy = false, children, footer,
@@ -40,40 +47,40 @@ export function TranscriptionCreationFlow({
   return (
     <section
       aria-label={title}
-      className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-4 sm:py-8"
+      className="mx-auto flex w-full max-w-3xl flex-col gap-6 py-4 sm:py-8"
       onPointerDown={() => { keyboard.current = false }}
       onKeyDown={() => { keyboard.current = true }}
     >
-      <header className="flex flex-col gap-2">
-        <p className="text-xs font-medium tracking-wide text-muted-foreground">TRANSCRIPTION</p>
+      <header className="mx-auto flex w-full max-w-2xl flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
         <p className="max-w-xl text-sm text-muted-foreground">{description}</p>
       </header>
-      <div className="grid min-w-0 gap-6 md:grid-cols-[190px_minmax(0,1fr)] md:gap-10">
-        <nav aria-label={`${title} steps`} className={styles.navigation} style={{ "--step": step, "--steps": steps.length } as CSSProperties}>
-          <div aria-hidden="true" className={styles.track}><div className={styles.progress} /></div>
-          <ol className={styles.steps}>
+      <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col gap-6">
+        <Stepper
+          className="w-full"
+          indicators={{ completed: <Check aria-hidden="true" className="size-3.5" /> }}
+          onValueChange={(value) => onStepChange(value - 1)}
+          value={step + 1}
+        >
+          <StepperNav aria-label={`${title} steps`}>
             {steps.map((item, index) => (
-              <li key={item.label}>
-                <button
-                  type="button"
-                  aria-current={step === index ? "step" : undefined}
-                  disabled={busy || index > step}
-                  onClick={() => onStepChange(index)}
-                  className={cn(styles.step, "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring", step === index ? "text-foreground" : "text-muted-foreground")}
-                >
-                  <span className={cn(styles.number, index <= step ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
-                    {index < step ? <Check className="size-3.5" aria-hidden="true" /> : String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="flex min-w-0 flex-col gap-1">
-                    <span className="text-xs font-medium sm:text-sm">{item.label}</span>
-                    <span className="hidden text-xs text-muted-foreground md:block">{item.description}</span>
-                  </span>
-                </button>
-              </li>
+              <StepperItem
+                className="relative flex-1"
+                disabled={busy || index > step}
+                key={item.label}
+                step={index + 1}
+              >
+                <StepperTrigger className="flex justify-start gap-2">
+                  <StepperIndicator>{index + 1}</StepperIndicator>
+                  <StepperTitle>{item.label}</StepperTitle>
+                </StepperTrigger>
+                {index < steps.length - 1 && (
+                  <StepperSeparator className="group-data-[state=completed]/step:bg-primary md:mx-2.5" />
+                )}
+              </StepperItem>
             ))}
-          </ol>
-        </nav>
+          </StepperNav>
+        </Stepper>
         <div className="min-w-0 rounded-3xl bg-card p-5 sm:p-7">
           <div ref={panel} tabIndex={-1} role="group" aria-label={`Step ${step + 1} of ${steps.length}: ${steps[step].label}`} className="min-h-72 outline-none" aria-busy={busy}>
             {children}
