@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -83,6 +84,8 @@ const (
 	transcriptionInsightChunkMaxBytes      = 18000
 	transcriptionInsightChunkMaxDurationMs = int64(15 * 60 * 1000)
 	transcriptionInsightCallTimeout        = 2 * time.Minute
+	transcriptionInsightJobTimeout         = 30 * time.Minute
+	transcriptionInsightStaleAfter         = transcriptionInsightJobTimeout + 5*time.Minute
 )
 
 type transcriptionInsightChunk struct {
@@ -854,22 +857,73 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("generate insights after transcript output is available"))
 		return
 	}
-	if _, err := a.DB.ExecContext(c, `INSERT INTO transcription_insights (session_id, language, status, error_message, updated_at) VALUES ($1, $2, 'processing', NULL, now()) ON CONFLICT (session_id) DO UPDATE SET language = $2, status = 'processing', error_message = NULL, updated_at = now()`, sessionID, requestedLanguage); err != nil {
+	// Claim the job atomically so repeated clicks or other tabs do not start a
+	// second generation while one is still running.
+	claim, err := a.DB.ExecContext(c, `INSERT INTO transcription_insights (session_id, language, status, error_message, updated_at) VALUES ($1, $2, 'processing', NULL, now()) ON CONFLICT (session_id) DO UPDATE SET language = $2, status = 'processing', error_message = NULL, updated_at = now() WHERE transcription_insights.status <> 'processing' OR transcription_insights.updated_at < now() - make_interval(secs => $3)`, sessionID, requestedLanguage, transcriptionInsightStaleAfter.Seconds())
+	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
+	}
+	if claimed, _ := claim.RowsAffected(); claimed == 0 {
+		insights, loadErr := loadTranscriptionInsights(c, a.DB, sessionID)
+		if loadErr != nil {
+			writeError(c, http.StatusInternalServerError, loadErr)
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"insights": insights})
+		return
+	}
+	// Run in the background: summarising long transcripts takes several LLM
+	// calls and would otherwise exceed the gateway's response timeout.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), transcriptionInsightJobTimeout)
+		defer cancel()
+		a.runTranscriptionInsights(ctx, sessionID, endpoint, title, language, requestedLanguage, durationMs, chunks)
+	}()
+	insights, err := loadTranscriptionInsights(c, a.DB, sessionID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"insights": insights})
+}
+
+func (a *App) getTranscriptionInsights(c *gin.Context) {
+	principal, _ := middleware.GetPrincipal(c)
+	organizationID, _ := middleware.GetOrganizationID(c)
+	sessionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("invalid session id"))
+		return
+	}
+	if err := a.authorizeTranscriptionSession(c, sessionID, principal.UserID, organizationID); err != nil {
+		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	insights, err := loadTranscriptionInsights(c, a.DB, sessionID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"insights": insights})
+}
+
+func (a *App) runTranscriptionInsights(ctx context.Context, sessionID uuid.UUID, endpoint provider.Endpoint, title, language, requestedLanguage string, durationMs int64, chunks []transcriptionInsightChunk) {
+	markFailed := func(cause error) {
+		_, _ = a.DB.ExecContext(context.WithoutCancel(ctx), `UPDATE transcription_insights SET status = 'failed', error_message = $2, updated_at = now() WHERE session_id = $1`, sessionID, cause.Error())
 	}
 	analyses := make([]transcriptionInsightChunkAnalysis, 0, len(chunks))
 	for index, chunk := range chunks {
 		response, chunkErr := requestTranscriptionInsight(
-			c,
+			ctx,
 			endpoint,
 			transcriptionInsightChunkSystemPrompt(requestedLanguage, language, index+1, len(chunks)),
 			buildTranscriptionInsightChunkInput(title, language, chunk, index+1, len(chunks), durationMs),
 		)
 		if chunkErr != nil {
 			generationErr := fmt.Errorf("insight generation failed for transcript window %d/%d: %w", index+1, len(chunks), chunkErr)
-			_, _ = a.DB.ExecContext(c, `UPDATE transcription_insights SET status = 'failed', error_message = $2, updated_at = now() WHERE session_id = $1`, sessionID, generationErr.Error())
-			writeError(c, http.StatusBadGateway, generationErr)
+			markFailed(generationErr)
+			slog.Error("transcription insights failed", "sessionId", sessionID, "error", generationErr)
 			return
 		}
 		analyses = append(analyses, transcriptionInsightChunkAnalysis{Chunk: chunk, Response: response})
@@ -881,7 +935,7 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 	} else {
 		decoded.Summary = fallbackTranscriptionInsightSummary(analyses)
 		reduced, reduceErr := requestTranscriptionInsight(
-			c,
+			ctx,
 			endpoint,
 			transcriptionInsightReduceSystemPrompt(requestedLanguage, language),
 			buildTranscriptionInsightReduceInput(title, language, analyses),
@@ -908,16 +962,11 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 	chaptersJSON, _ := json.Marshal(decoded.Chapters)
 	topicsJSON, _ := json.Marshal(decoded.Topics)
 	actionItemsJSON, _ := json.Marshal(decoded.ActionItems)
-	if _, err := a.DB.ExecContext(c, `UPDATE transcription_insights SET language = $2, status = 'completed', summary = $3, chapters = $4, topics = $5, action_items = $6, error_message = NULL, generated_at = $7, updated_at = $7 WHERE session_id = $1`, sessionID, requestedLanguage, strings.TrimSpace(decoded.Summary), chaptersJSON, topicsJSON, actionItemsJSON, generatedAt); err != nil {
-		writeError(c, http.StatusInternalServerError, err)
+	if _, err := a.DB.ExecContext(ctx, `UPDATE transcription_insights SET language = $2, status = 'completed', summary = $3, chapters = $4, topics = $5, action_items = $6, error_message = NULL, generated_at = $7, updated_at = $7 WHERE session_id = $1`, sessionID, requestedLanguage, strings.TrimSpace(decoded.Summary), chaptersJSON, topicsJSON, actionItemsJSON, generatedAt); err != nil {
+		slog.Error("transcription insights failed", "sessionId", sessionID, "error", err)
+		markFailed(err)
 		return
 	}
-	insights, err := loadTranscriptionInsights(c, a.DB, sessionID)
-	if err != nil {
-		writeError(c, http.StatusInternalServerError, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"insights": insights})
 }
 
 func (a *App) exportTranscription(c *gin.Context) {
@@ -1090,6 +1139,11 @@ func loadTranscriptionInsights(ctx context.Context, db *sql.DB, sessionID uuid.U
 		return item, err
 	}
 	item.Error = errorMessage.String
+	// A job that outlived its timeout was lost (e.g. the server restarted).
+	if item.Status == "processing" && time.Since(item.UpdatedAt) > transcriptionInsightStaleAfter {
+		item.Status = "failed"
+		item.Error = "insight generation was interrupted; please try again"
+	}
 	if err := json.Unmarshal(chaptersJSON, &item.Chapters); err != nil {
 		return item, err
 	}

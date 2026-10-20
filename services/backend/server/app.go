@@ -266,6 +266,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/sessions/:id/annotations", a.platformFeature("transcription"), a.createTranscriptionAnnotation)
 	org.PATCH("/transcription/sessions/:id/annotations/:annotationId", a.platformFeature("transcription"), a.updateTranscriptionAnnotation)
 	org.DELETE("/transcription/sessions/:id/annotations/:annotationId", a.platformFeature("transcription"), a.deleteTranscriptionAnnotation)
+	org.GET("/transcription/sessions/:id/insights", a.platformFeature("transcription"), a.getTranscriptionInsights)
 	org.POST("/transcription/sessions/:id/insights", a.platformFeature("transcription"), a.generateTranscriptionInsights)
 	org.POST("/transcription/sessions/:id/polish", a.platformFeature("transcription"), a.polishTranscriptionSession)
 	org.GET("/transcription/sessions/:id/export/:format", a.platformFeature("transcription"), a.exportTranscription)
