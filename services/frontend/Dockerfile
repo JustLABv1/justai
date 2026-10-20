@@ -1,4 +1,4 @@
-FROM reg.mini.dev/node:26.7.0-dev AS builder
+FROM reg.mini.dev/node:26.12.0-dev AS builder
 
 USER root
 WORKDIR /app
@@ -18,21 +18,24 @@ RUN pnpm run build
 
 # Patch the production filesystem using the dev image's package manager. The
 # production base has no apk; keeping the tool in this stage preserves that.
-FROM reg.mini.dev/node:26.7.0 AS runtime-base
-FROM reg.mini.dev/node:26.7.0-dev AS runtime-patcher
+FROM reg.mini.dev/node:26.12.0 AS runtime-base
+FROM reg.mini.dev/node:26.12.0-dev AS runtime-patcher
 USER root
 COPY --from=runtime-base / /runtime/
-# CVE-2026-84782: keep the OpenSSL libraries and package/SBOM metadata together.
+# npm bundles a vulnerable undici (CVE-2026-109383) and is not needed to run
+# server.js, so remove it. CVE-2026-84782: keep the OpenSSL libraries and package/SBOM metadata together.
 RUN apk --root /runtime --repositories-file /etc/apk/repositories \
     --keys-dir /etc/apk/keys add --upgrade --no-cache \
-    'libcrypto3>=3.5.9-r0' 'libssl3>=3.5.9-r0'
+    'libcrypto3>=3.5.9-r0' 'libssl3>=3.5.9-r0' \
+    && apk --root /runtime --repositories-file /etc/apk/repositories \
+    --keys-dir /etc/apk/keys del npm
 
 # Copy the complete patched root so removed package metadata cannot survive in
 # a lower layer. Restore the production base's environment and entrypoint.
 FROM scratch AS runner
 COPY --from=runtime-patcher /runtime/ /
 ENV IMAGE_NAME=node \
-    NODE_VERSION=26.7.0 \
+    NODE_VERSION=26.12.0 \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt

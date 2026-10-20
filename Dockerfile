@@ -1,4 +1,4 @@
-FROM reg.mini.dev/node:26.7.0-dev AS frontend-builder
+FROM reg.mini.dev/node:26.12.0-dev AS frontend-builder
 USER root
 WORKDIR /app/frontend
 
@@ -111,7 +111,7 @@ RUN apt-get update \
     && chmod 0755 /usr/local/bin/pdftotext
 
 # Stage 5: Create the combined runtime image
-FROM reg.mini.dev/node:26.7.0-dev AS runner
+FROM reg.mini.dev/node:26.12.0-dev AS runner
 USER root
 WORKDIR /app
 
@@ -129,7 +129,7 @@ RUN apk add --upgrade --no-cache \
     && python3 -m venv /opt/templates-venv \
     && /opt/templates-venv/bin/pip install --no-cache-dir pypdf==6.19.0 \
     && /opt/templates-venv/bin/python -c 'import pathlib, shutil, sysconfig; root = pathlib.Path(sysconfig.get_path("purelib")); [shutil.rmtree(path, ignore_errors=True) for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack") for path in (root / name, *root.glob(name + "-*.dist-info"), *root.glob(name + "-*.egg-info"))]; (root / "distutils-precedence.pth").unlink(missing_ok=True); [path.unlink(missing_ok=True) for path in pathlib.Path("/opt/templates-venv/bin").glob("pip*")]' \
-    && apk del py3-pip \
+    && apk del py3-pip npm \
     && if apk info -e py3-setuptools >/dev/null 2>&1; then apk del py3-setuptools; fi \
     && rm -rf /usr/share/python-wheels
 ENV JUSTAI_TEMPLATE_PYTHON=/opt/templates-venv/bin/python
