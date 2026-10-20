@@ -83,6 +83,12 @@ import {
   PageHeading,
   PageTitle,
 } from "@/components/ui/page"
+import {
+  SettingsLayout,
+  SettingsNav,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/ui/settings"
 import { FilterBar } from "@/components/ui/filter-bar"
 import {
   Collapsible,
@@ -238,14 +244,6 @@ export function PlatformAdminShell({
   const [authenticationCreateRequest, setAuthenticationCreateRequest] =
     useState(0)
   const [announcementCreateRequest, setAnnouncementCreateRequest] = useState(0)
-  const activeNavItemRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    activeNavItemRef.current?.scrollIntoView({
-      block: "nearest",
-      inline: "nearest",
-    })
-  }, [activeTab])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -514,50 +512,23 @@ export function PlatformAdminShell({
         </PageActions>
       </PageHeader>
 
-      <div className="grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start">
-        <nav
+      <SettingsLayout>
+        <SettingsNav
+          activeId={activeTab}
           aria-label="Platform administration"
-          className="flex min-w-0 gap-4 overflow-x-auto rounded-xl bg-card p-2 lg:sticky lg:top-4 lg:flex-col lg:gap-5"
-        >
-          {tabGroups.map((group) => (
-            <div
-              className="flex min-w-max flex-col gap-1 lg:min-w-0"
-              key={group.label}
-            >
-              <p className="px-2 text-[0.65rem] font-medium tracking-[0.16em] text-muted-foreground uppercase">
-                {group.label}
-              </p>
-              <div className="flex gap-1 lg:flex-col">
-                {group.ids.map((id) => {
-                  const tab = tabs.find((candidate) => candidate.id === id)
-                  if (!tab) return null
-                  const Icon = tab.icon
-                  return (
-                    <button
-                      aria-current={tab.id === activeTab ? "page" : undefined}
-                      aria-label={tab.label}
-                      className={cn(
-                        "inline-flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                        tab.id === activeTab &&
-                          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
-                      )}
-                      key={tab.id}
-                      onClick={() => {
-                        setListPage(1)
-                        setListStatus("")
-                        onTabChange(tab.id)
-                      }}
-                      ref={tab.id === activeTab ? activeNavItemRef : undefined}
-                      type="button"
-                    >
-                      <Icon className="size-3.5 shrink-0" /> {tab.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-        </nav>
+          groups={tabGroups.map((group) => ({
+            label: group.label,
+            items: group.ids.flatMap((id) => {
+              const tab = tabs.find((candidate) => candidate.id === id)
+              return tab ? [tab] : []
+            }),
+          }))}
+          onSelect={(id) => {
+            setListPage(1)
+            setListStatus("")
+            onTabChange(id as AdminTab)
+          }}
+        />
 
         <div className="min-w-0">
           {error && (
@@ -722,7 +693,7 @@ export function PlatformAdminShell({
             />
           )}
         </div>
-      </div>
+      </SettingsLayout>
     </Page>
   )
 }
@@ -776,61 +747,55 @@ function ControlsView({
   ]
   return (
     <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Platform controls</CardTitle>
-          <CardDescription>
-            Switches are saved as soon as they change. Existing sessions remain
-            valid when login is disabled.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2 sm:grid-cols-2">
-          {controls.map(([key, label, description]) => (
-            <div
-              className="flex items-center justify-between gap-4 rounded-lg border p-3"
-              key={key}
-            >
-              <div>
-                <p className="text-sm font-medium">{label}</p>
-                <p className="text-xs text-muted-foreground">{description}</p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {savingControl === key && (
-                  <span className="text-[11px] text-muted-foreground">
-                    Saving…
-                  </span>
-                )}
-                <Switch
-                  aria-label={label}
-                  checked={Boolean(settings[key])}
-                  disabled={savingControl !== null}
-                  onCheckedChange={(checked) => onToggle(key, checked)}
-                />
-              </div>
+      <SettingsSection
+        description="Switches are saved as soon as they change. Existing sessions remain valid when login is disabled."
+        title="Platform controls"
+      >
+        {controls.map(([key, label, description]) => (
+          <SettingsRow
+            description={description}
+            htmlFor={`platform-control-${key}`}
+            key={key}
+            label={label}
+          >
+            <div className="flex items-center gap-2">
+              {savingControl === key && (
+                <span className="text-xs text-muted-foreground">Saving…</span>
+              )}
+              <Switch
+                checked={Boolean(settings[key])}
+                disabled={savingControl !== null}
+                id={`platform-control-${key}`}
+                onCheckedChange={(checked) => onToggle(key, checked)}
+              />
             </div>
-          ))}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Maintenance message</CardTitle>
-          <CardDescription>
-            Shown with a 503 response while a capability is disabled.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+          </SettingsRow>
+        ))}
+      </SettingsSection>
+      <SettingsSection
+        description="Shown with a 503 response while a capability is disabled."
+        footer={
+          <Button disabled={savingMaintenance} onClick={onSave}>
+            {savingMaintenance ? "Saving…" : "Save maintenance message"}
+          </Button>
+        }
+        title="Maintenance message"
+      >
+        <SettingsRow
+          description="Visible to anyone who hits a disabled capability."
+          htmlFor="platform-maintenance-message"
+          label="Message"
+        >
           <Textarea
+            id="platform-maintenance-message"
             onChange={(event) =>
               onChange({ ...settings, maintenanceMessage: event.target.value })
             }
             placeholder="We’re performing maintenance…"
             value={settings.maintenanceMessage}
           />
-          <Button disabled={savingMaintenance} onClick={onSave}>
-            {savingMaintenance ? "Saving…" : "Save maintenance message"}
-          </Button>
-        </CardContent>
-      </Card>
+        </SettingsRow>
+      </SettingsSection>
     </div>
   )
 }
