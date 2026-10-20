@@ -473,14 +473,9 @@ export function FocusWorkspaceSidebar({
                     />
                   }
                 >
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white">
-                    <BrandMark aria-hidden="true" className="size-5" />
-                  </span>
-                  <span className="min-w-0 flex-1 text-left leading-tight">
-                    <span className="block truncate text-sm font-semibold">JustAI</span>
-                    <span className="block truncate text-xs font-normal text-muted-foreground">
-                      {activeOrganization?.name ?? "Workspace"}
-                    </span>
+                  <BrandMark aria-hidden="true" className="size-8 [&_svg]:size-full!" cropped />
+                  <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
+                    {activeOrganization?.name ?? "Workspace"}
                   </span>
                   <ChevronsUpDown aria-hidden="true" className="text-muted-foreground" />
                 </DropdownMenuTrigger>
