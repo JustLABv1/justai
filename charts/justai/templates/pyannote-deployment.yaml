@@ -17,6 +17,16 @@
 {{- $s3AccessKeyRefName := .Values.secrets.refs.s3AccessKey.name | default "" -}}
 {{- $s3SecretKeyRefName := .Values.secrets.refs.s3SecretKey.name | default "" -}}
 {{- $maxSourceBytes := int64 .Values.pyannote.maxSourceBytes -}}
+{{- range $key := list "segmentationBatchSize" "embeddingBatchSize" }}
+{{- $value := get $.Values.pyannote $key | toString -}}
+{{- if or (not (regexMatch "^[0-9]+$" $value)) (lt (int $value) 1) (gt (int $value) 128) }}
+{{- fail (printf "pyannote.%s must be an integer between 1 and 128" $key) }}
+{{- end }}
+{{- end }}
+{{- $memoryLogInterval := .Values.pyannote.memoryLogIntervalSeconds | toString -}}
+{{- if or (not (regexMatch "^[0-9]+$" $memoryLogInterval)) (lt (int $memoryLogInterval) 0) (gt (int $memoryLogInterval) 3600) }}
+{{- fail "pyannote.memoryLogIntervalSeconds must be an integer between 0 and 3600" }}
+{{- end }}
 {{- if or (lt $maxSourceBytes 1) (gt $maxSourceBytes 21474836480) }}
 {{- fail "pyannote.maxSourceBytes must be an integer between 1 and 21474836480" }}
 {{- end }}
@@ -240,6 +250,12 @@ spec:
               value: {{ .Values.pyannote.minAudioSeconds | quote }}
             - name: PYANNOTE_TORCH_THREADS
               value: {{ .Values.pyannote.torchThreads | quote }}
+            - name: PYANNOTE_SEGMENTATION_BATCH_SIZE
+              value: {{ .Values.pyannote.segmentationBatchSize | quote }}
+            - name: PYANNOTE_EMBEDDING_BATCH_SIZE
+              value: {{ .Values.pyannote.embeddingBatchSize | quote }}
+            - name: PYANNOTE_MEMORY_LOG_INTERVAL_SECONDS
+              value: {{ .Values.pyannote.memoryLogIntervalSeconds | quote }}
             - name: PYANNOTE_DOWNLOAD_TIMEOUT_SECONDS
               value: {{ .Values.pyannote.downloadTimeoutSeconds | quote }}
             - name: PYANNOTE_MAX_SOURCE_BYTES

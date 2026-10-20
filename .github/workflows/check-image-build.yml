@@ -55,6 +55,7 @@ jobs:
               - 'services/pyannote-diarizer/requirements.txt'
               - 'services/pyannote-diarizer/app.py'
               - 'services/pyannote-diarizer/model_sync.py'
+              - 'services/pyannote-diarizer/tests/**'
 
   frontend-compile:
     name: Frontend — Compile Check
@@ -233,7 +234,7 @@ jobs:
         with:
           python-version: '3.15.0'
       - name: Compile service
-        run: python -m py_compile services/pyannote-diarizer/app.py services/pyannote-diarizer/model_sync.py
+        run: python -m py_compile services/pyannote-diarizer/app.py services/pyannote-diarizer/model_sync.py services/pyannote-diarizer/tests/test_app.py
 
   pyannote-image-build:
     name: Pyannote — Docker Build Check
@@ -254,6 +255,11 @@ jobs:
           build-contexts: ${{ needs.resolve-ffmpeg-artifact.outputs.context }}
           cache-from: type=gha,scope=pyannote
           cache-to: type=gha,scope=pyannote,mode=max
+      - name: Test bounded audio decoding and inference lifecycle
+        run: |
+          docker run --rm --network=none --entrypoint python \
+            -v "${{ github.workspace }}/services/pyannote-diarizer/tests:/tests:ro" \
+            justai-pyannote:ci -m unittest discover -s /tests -v
       - name: Verify runtime Python packaging
         run: |
           set -euo pipefail
