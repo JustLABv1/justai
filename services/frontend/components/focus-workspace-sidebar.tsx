@@ -473,7 +473,9 @@ export function FocusWorkspaceSidebar({
                     />
                   }
                 >
-                  <BrandMark aria-hidden="true" className="size-7 shrink-0" />
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent">
+                    <BrandMark aria-hidden="true" className="size-5" />
+                  </span>
                   <span className="min-w-0 flex-1 truncate">
                     {activeOrganization?.name ?? "JustAI"}
                   </span>
@@ -628,6 +630,27 @@ export function FocusWorkspaceSidebar({
               </SidebarGroupContent>
             </SidebarGroup>
           ))}
+          {user.platformAdmin && (
+            <SidebarGroup>
+              <SidebarGroupLabel>Administration</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      aria-current={activeView === "admin" ? "page" : undefined}
+                      className="text-sm"
+                      isActive={activeView === "admin"}
+                      onClick={() => onNavigate("admin")}
+                      tooltip="Platform admin"
+                    >
+                      <ShieldCheck />
+                      <span>Platform admin</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
         </SidebarContent>
 
         <SidebarFooter>
@@ -641,7 +664,7 @@ export function FocusWorkspaceSidebar({
                 tooltip="Workspace settings"
               >
                 <Settings2 />
-                <span>Settings</span>
+                <span>Workspace settings</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -692,12 +715,6 @@ export function FocusWorkspaceSidebar({
                     <UserRound data-icon="inline-start" />
                     Profile
                   </DropdownMenuItem>
-                  {user.platformAdmin && (
-                    <DropdownMenuItem onClick={() => onNavigate("admin")}>
-                      <ShieldCheck data-icon="inline-start" />
-                      Platform admin
-                    </DropdownMenuItem>
-                  )}
                   <DropdownMenuItem onClick={onSignOut}>
                     <LogOut data-icon="inline-start" />
                     Sign out
