@@ -468,16 +468,19 @@ export function FocusWorkspaceSidebar({
                   render={
                     <SidebarMenuButton
                       aria-label={`Select workspace (${activeOrganization?.name ?? "Workspace"})`}
-                      className="h-10 gap-2.5 text-sm font-medium"
+                      className="gap-2.5"
                       size="lg"
                     />
                   }
                 >
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white">
                     <BrandMark aria-hidden="true" className="size-5" />
                   </span>
-                  <span className="min-w-0 flex-1 truncate">
-                    {activeOrganization?.name ?? "JustAI"}
+                  <span className="min-w-0 flex-1 text-left leading-tight">
+                    <span className="block truncate text-sm font-semibold">JustAI</span>
+                    <span className="block truncate text-xs font-normal text-muted-foreground">
+                      {activeOrganization?.name ?? "Workspace"}
+                    </span>
                   </span>
                   <ChevronsUpDown aria-hidden="true" className="text-muted-foreground" />
                 </DropdownMenuTrigger>
@@ -630,27 +633,6 @@ export function FocusWorkspaceSidebar({
               </SidebarGroupContent>
             </SidebarGroup>
           ))}
-          {user.platformAdmin && (
-            <SidebarGroup>
-              <SidebarGroupLabel>Administration</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      aria-current={activeView === "admin" ? "page" : undefined}
-                      className="text-sm"
-                      isActive={activeView === "admin"}
-                      onClick={() => onNavigate("admin")}
-                      tooltip="Platform admin"
-                    >
-                      <ShieldCheck />
-                      <span>Platform admin</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          )}
         </SidebarContent>
 
         <SidebarFooter>
@@ -667,6 +649,20 @@ export function FocusWorkspaceSidebar({
                 <span>Workspace settings</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
+            {user.platformAdmin && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  aria-current={activeView === "admin" ? "page" : undefined}
+                  className="text-sm"
+                  isActive={activeView === "admin"}
+                  onClick={() => onNavigate("admin")}
+                  tooltip="Platform admin"
+                >
+                  <ShieldCheck />
+                  <span>Platform admin</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
             <SidebarMenuItem>
               <DropdownMenu>
                 <DropdownMenuTrigger
