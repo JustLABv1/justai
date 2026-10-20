@@ -14,6 +14,7 @@ var videoPipelineKeys = [...]string{
 	"upload",
 	"transcription",
 	"diarization",
+	"speaker_names",
 	"grammar",
 	"finalization",
 }
@@ -70,6 +71,8 @@ func videoPipelineKeyForStage(stage string) string {
 		return "transcription"
 	case "diarizing":
 		return "diarization"
+	case "naming_speakers":
+		return "speaker_names"
 	case "polishing":
 		return "grammar"
 	case "finalizing":
@@ -85,6 +88,8 @@ func videoRetryStepForPipelineKey(key string) string {
 		return videoRetryStepTranscription
 	case "diarization":
 		return videoRetryStepDiarization
+	case "speaker_names":
+		return videoRetryStepSpeakerNames
 	case "grammar":
 		return videoRetryStepGrammar
 	case "finalization":
@@ -490,7 +495,7 @@ func elapsedVideoPipelineStep(step *models.TranscriptionVideoPipelineStep, now t
 }
 
 func isOptionalVideoPipelineStep(key string) bool {
-	return key == "diarization" || key == "grammar"
+	return key == "diarization" || key == "speaker_names" || key == "grammar"
 }
 
 func videoPipelineIndex(key string) int {

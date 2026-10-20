@@ -33,6 +33,9 @@ func TestRunMigrationsIntegration(t *testing.T) {
 	}
 
 	checks := map[string]string{
+		"video caption pipeline settings":      `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transcription_video_uploads' AND column_name='caption_options') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transcription_video_uploads' AND column_name='caption_run_id')`,
+		"speaker caption runs":                 `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transcription_speaker_caption_runs')`,
+		"one active caption run per session":   `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'transcription_speaker_caption_active_session_idx')`,
 		"latest migration":                     `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '044_unified_knowledge.sql')`,
 		"durable user sessions":                `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'user_sessions')`,
 		"workflow versions":                    `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'agent_workflow_versions')`,

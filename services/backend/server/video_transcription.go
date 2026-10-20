@@ -121,6 +121,7 @@ type videoJobPayload struct {
 const (
 	videoRetryStepTranscription = "transcription"
 	videoRetryStepDiarization   = "diarization"
+	videoRetryStepSpeakerNames  = "speaker_names"
 	videoRetryStepGrammar       = "grammar"
 	videoRetryStepFinalization  = "finalization"
 )
@@ -131,6 +132,8 @@ func normalizeVideoRetryStep(value string) string {
 		return videoRetryStepTranscription
 	case videoRetryStepDiarization:
 		return videoRetryStepDiarization
+	case videoRetryStepSpeakerNames:
+		return videoRetryStepSpeakerNames
 	case videoRetryStepGrammar:
 		return videoRetryStepGrammar
 	case videoRetryStepFinalization:
@@ -144,6 +147,8 @@ func videoRetryStage(retryFrom string) string {
 	switch normalizeVideoRetryStep(retryFrom) {
 	case videoRetryStepDiarization:
 		return "diarizing"
+	case videoRetryStepSpeakerNames:
+		return "naming_speakers"
 	case videoRetryStepGrammar:
 		return "polishing"
 	case videoRetryStepFinalization:
@@ -398,6 +403,8 @@ func (m *TranscriptionManager) finishVideoJob(ctx context.Context, jobID, upload
 			// The transcript is already valid; only speaker assignments need to be
 			// recomputed.
 			_, _ = m.DB.ExecContext(ctx, `DELETE FROM transcription_speakers WHERE session_id = $1`, sessionID)
+		case videoRetryStepSpeakerNames:
+			_, _ = m.DB.ExecContext(ctx, `UPDATE transcription_video_uploads SET caption_run_id=NULL WHERE id=$1 AND caption_run_id IN (SELECT id FROM transcription_speaker_caption_runs WHERE status IN ('failed','cancelled'))`, uploadID)
 		case videoRetryStepGrammar:
 			// Keep the verbatim transcript and speakers, but do not reuse a partial
 			// polished result from the failed attempt.
@@ -528,6 +535,15 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 		if retryFrom == videoRetryStepDiarization && !diarizationEndpoint.Valid {
 			return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("speaker separation is not configured for this video")
 		}
+		if retryFrom == videoRetryStepSpeakerNames {
+			var configured bool
+			if err := transaction.QueryRowContext(ctx, `SELECT caption_options IS NOT NULL AND caption_options <> 'null'::jsonb FROM transcription_video_uploads WHERE id=$1`, uploadID).Scan(&configured); err != nil {
+				return uuid.Nil, models.TranscriptionVideoUpload{}, err
+			}
+			if !configured {
+				return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("speaker name captions are not configured for this video")
+			}
+		}
 		if retryFrom == videoRetryStepGrammar && !grammarEndpoint.Valid {
 			return uuid.Nil, models.TranscriptionVideoUpload{}, fmt.Errorf("grammar polish is not configured for this video")
 		}
@@ -536,6 +552,11 @@ func (m *TranscriptionManager) retryVideoJob(ctx context.Context, uploadID uuid.
 		}
 	}
 
+	if retryFrom == videoRetryStepTranscription || retryFrom == videoRetryStepDiarization || retryFrom == videoRetryStepSpeakerNames {
+		if err := resetVideoCaptionRun(ctx, transaction, uploadID); err != nil {
+			return uuid.Nil, models.TranscriptionVideoUpload{}, err
+		}
+	}
 	switch retryFrom {
 	case videoRetryStepTranscription:
 		if _, err := transaction.ExecContext(ctx, `DELETE FROM transcription_segments WHERE session_id = $1 AND source_id IS NULL`, sessionID); err != nil {
@@ -597,6 +618,9 @@ func (m *TranscriptionManager) cancelVideoJob(ctx context.Context, uploadID uuid
 		return err
 	}
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_jobs SET status = 'cancelled', completed_at = now(), lease_until = NULL, updated_at = now() WHERE job_type = $1 AND payload->>'uploadId' = $2 AND status IN ('queued', 'processing')`, videoTranscriptionJobType, uploadID.String()); err != nil {
+		return err
+	}
+	if err := resetVideoCaptionRun(ctx, transaction, uploadID); err != nil {
 		return err
 	}
 	if _, err := transaction.ExecContext(ctx, `UPDATE transcription_sessions SET status = 'failed', ended_at = COALESCE(ended_at, now()), updated_at = now() WHERE id = $1 AND status = 'processing'`, sessionID); err != nil {
@@ -759,7 +783,7 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 	shouldDiarize := diarizationEndpoint.Valid &&
 		(retryFrom == videoRetryStepTranscription || retryFrom == videoRetryStepDiarization)
 	shouldPolish := grammarEndpoint.Valid &&
-		(retryFrom == videoRetryStepTranscription || retryFrom == videoRetryStepDiarization || retryFrom == videoRetryStepGrammar)
+		(retryFrom == videoRetryStepTranscription || retryFrom == videoRetryStepDiarization || retryFrom == videoRetryStepSpeakerNames || retryFrom == videoRetryStepGrammar)
 	if m.app == nil && (shouldTranscribe || shouldDiarize || shouldPolish) {
 		return fmt.Errorf("%w: transcription manager is not attached to the app", errVideoTranscriptionPermanent)
 	}
@@ -885,6 +909,11 @@ func (m *TranscriptionManager) transcribeVideo(ctx context.Context, jobID, uploa
 				}
 				skipHandled = true
 			}
+		}
+	}
+	if retryFrom != videoRetryStepGrammar {
+		if err := m.processVideoCaptionStep(jobCtx, uploadID, record.model.SessionID); err != nil {
+			return err
 		}
 	}
 	if shouldPolish {

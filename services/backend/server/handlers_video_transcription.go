@@ -22,9 +22,10 @@ import (
 )
 
 type videoUploadInitRequest struct {
-	FileName  string `json:"fileName"`
-	MimeType  string `json:"mimeType"`
-	FileBytes int64  `json:"fileBytes"`
+	CaptionOptions *videoCaptionOptions `json:"captionOptions,omitempty"`
+	FileName       string               `json:"fileName"`
+	MimeType       string               `json:"mimeType"`
+	FileBytes      int64                `json:"fileBytes"`
 }
 
 type videoUploadPart struct {
@@ -69,6 +70,10 @@ func (a *App) initVideoTranscriptionUpload(c *gin.Context) {
 	}
 	if err := a.authorizeTranscriptionSession(c, sessionID, principal.UserID, organizationID); err != nil {
 		writeError(c, http.StatusNotFound, err)
+		return
+	}
+	if err := a.validateVideoCaptionOptions(c, request.CaptionOptions, principal, organizationID, sessionID); err != nil {
+		writeError(c, http.StatusBadRequest, err)
 		return
 	}
 	var sessionStatus string
@@ -116,14 +121,15 @@ func (a *App) initVideoTranscriptionUpload(c *gin.Context) {
 	expiresAt := time.Now().Add(time.Duration(a.Config.Transcription.AudioRetentionDays) * 24 * time.Hour)
 	pipelineStartedAt := time.Now().UTC()
 	pipelineJSON, _ := json.Marshal(initialVideoPipeline(pipelineStartedAt))
+	captionJSON, _ := json.Marshal(request.CaptionOptions)
 	var upload models.TranscriptionVideoUpload
 	var pipelineRaw []byte
 	err = a.DB.QueryRowContext(c, `
 		INSERT INTO transcription_video_uploads
-			(id, session_id, storage_driver, storage_key, multipart_upload_id, file_name, mime_type, expected_bytes, part_size, part_count, expires_at, pipeline_steps)
-		VALUES ($1, $2, 's3', $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			(id, session_id, storage_driver, storage_key, multipart_upload_id, file_name, mime_type, expected_bytes, part_size, part_count, expires_at, pipeline_steps, caption_options)
+		VALUES ($1, $2, 's3', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, session_id, file_name, mime_type, expected_bytes, bytes, part_size, part_count, status, progress, stage, duration_ms, COALESCE(error_message, ''), created_at, updated_at, completed_at, expires_at, pipeline_steps`,
-		uploadID, sessionID, storageKey, multipartID, fileName, mimeType, request.FileBytes, partSize, partCount, expiresAt, pipelineJSON,
+		uploadID, sessionID, storageKey, multipartID, fileName, mimeType, request.FileBytes, partSize, partCount, expiresAt, pipelineJSON, captionJSON,
 	).Scan(&upload.ID, &upload.SessionID, &upload.FileName, &upload.MimeType, &upload.ExpectedBytes, &upload.Bytes, &upload.PartSize, &upload.PartCount, &upload.Status, &upload.Progress, &upload.Stage, &upload.DurationMs, &upload.Error, &upload.CreatedAt, &upload.UpdatedAt, &upload.CompletedAt, &upload.ExpiresAt, &pipelineRaw)
 	if err != nil {
 		_ = storage.abortMultipart(c, storageKey, multipartID)

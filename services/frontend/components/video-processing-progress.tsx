@@ -35,6 +35,12 @@ const presentation: Record<
     description:
       "We're comparing voices and assigning transcript passages to the same speaker.",
   },
+  speaker_names: {
+    label: "Names",
+    title: "Reading speaker name captions",
+    description:
+      "We're reading printed names and matching them to voices. Uncertain matches remain suggestions.",
+  },
   grammar: {
     label: "Polish",
     title: "Polishing your transcript",
@@ -140,7 +146,7 @@ export function VideoProcessingProgress({
       <div className="grid min-w-0 gap-7 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-8">
         <ol
           aria-label="Transcription progress"
-          className="grid grid-cols-4 gap-2 sm:flex sm:flex-col sm:gap-0"
+          className="grid grid-cols-3 gap-2 sm:flex sm:flex-col sm:gap-0"
         >
           {visibleSteps.map((step, stepIndex) => {
             const complete = step.status === "completed"

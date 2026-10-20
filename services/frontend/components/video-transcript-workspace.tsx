@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { SpeakerVideoCaptions } from "@/components/speaker-video-captions"
 
 import {
   Bookmark,
@@ -2254,6 +2255,16 @@ export function TranscriptWorkspace({
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-2 px-4 pb-4">
+                {mediaKind === "video" ? (
+                  <SpeakerVideoCaptions
+                    key={snapshot.session.id}
+                    sessionId={snapshot.session.id}
+                    available={snapshot.videoUpload?.status === "completed" && !!snapshot.videoUpload?.playbackUrl}
+                    speakers={snapshot.speakers}
+                    onSpeakersChange={(speakers) => updateSnapshot((current) => ({ ...current, speakers }))}
+                    onSeek={(offsetMs) => seekTo(offsetMs, false)}
+                  />
+                ) : null}
                 <div className="space-y-2">
                   {speakerSummaries.map((summary) => {
                     const name = speakerDisplayName(summary.speaker)
