@@ -13,6 +13,7 @@ import ipaddress
 import logging
 import math
 import os
+import resource
 import socket
 import ssl
 import subprocess
@@ -22,7 +23,7 @@ import wave
 import warnings
 from pathlib import Path
 from shutil import copytree
-from threading import Lock
+from threading import Event, Lock, Thread
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -44,7 +45,8 @@ from pyannote.audio import Pipeline
 from pyannote.audio.pipelines import speaker_diarization
 
 
-logger = logging.getLogger(__name__)
+# Use Uvicorn's configured handlers so INFO diagnostics reach container logs.
+logger = logging.getLogger("uvicorn.error.pyannote")
 
 MODEL_ID = os.getenv(
     "PYANNOTE_MODEL_ID", "pyannote/speaker-diarization-3.1"
@@ -75,6 +77,24 @@ ALLOW_PRIVATE_MEDIA_ORIGINS = tuple(
 )
 MAX_REDIRECTS = 3
 MIN_AUDIO_SECONDS = float(os.getenv("PYANNOTE_MIN_AUDIO_SECONDS", "1"))
+SEGMENTATION_BATCH_SIZE = int(os.getenv("PYANNOTE_SEGMENTATION_BATCH_SIZE", "1"))
+EMBEDDING_BATCH_SIZE = int(os.getenv("PYANNOTE_EMBEDDING_BATCH_SIZE", "1"))
+MEMORY_LOG_INTERVAL_SECONDS = float(os.getenv("PYANNOTE_MEMORY_LOG_INTERVAL_SECONDS", "30"))
+# A minute of mono PCM is less than 2 MiB. Never retain the full PCM source
+# alongside the full float32 waveform (six hours would add two ~659 MiB copies).
+AUDIO_READ_SECONDS = 60
+
+for name, value in (
+    ("PYANNOTE_SEGMENTATION_BATCH_SIZE", SEGMENTATION_BATCH_SIZE),
+    ("PYANNOTE_EMBEDDING_BATCH_SIZE", EMBEDDING_BATCH_SIZE),
+):
+    if not 1 <= value <= 128:
+        raise RuntimeError(f"{name} must be between 1 and 128")
+if (
+    not math.isfinite(MEMORY_LOG_INTERVAL_SECONDS)
+    or not 0 <= MEMORY_LOG_INTERVAL_SECONDS <= 3600
+):
+    raise RuntimeError("PYANNOTE_MEMORY_LOG_INTERVAL_SECONDS must be between 0 and 3600")
 
 if not SERVICE_TOKEN:
     raise RuntimeError("PYANNOTE_SERVICE_TOKEN is required; refusing to start unauthenticated")
@@ -185,7 +205,15 @@ def load_pipeline() -> Pipeline:
         speaker_diarization.get_plda = original_get_plda
     if pipeline is None:
         raise RuntimeError(f"could not load pyannote pipeline {MODEL_ID}")
+    pipeline.segmentation_batch_size = SEGMENTATION_BATCH_SIZE
+    pipeline.embedding_batch_size = EMBEDDING_BATCH_SIZE
     pipeline.to(DEVICE)
+    logger.info(
+        "loaded pyannote pipeline (device=%s, segmentation_batch_size=%d, embedding_batch_size=%d)",
+        DEVICE,
+        SEGMENTATION_BATCH_SIZE,
+        EMBEDDING_BATCH_SIZE,
+    )
     return pipeline
 
 
@@ -215,6 +243,82 @@ class DiarizeResponse(BaseModel):
     device: str
     speakers: list[str]
     segments: list[DiarizationTurn]
+
+
+def memory_stats() -> dict[str, float | None]:
+    """Best-effort diagnostics: missing procfs/cgroup files must not fail a job."""
+    mib = 1024 * 1024
+    stats: dict[str, float | None] = {}
+    try:
+        resident_pages = int(Path("/proc/self/statm").read_text().split()[1])
+        stats["rss_mib"] = round(resident_pages * os.sysconf("SC_PAGE_SIZE") / mib, 1)
+    except (OSError, ValueError, IndexError):
+        stats["rss_mib"] = None
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    stats["process_peak_rss_mib"] = round(
+        peak / (mib if os.uname().sysname == "Darwin" else 1024), 1
+    )
+    for name, paths in (
+        (
+            "cgroup_memory_mib",
+            ("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes"),
+        ),
+        (
+            "cgroup_limit_mib",
+            ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"),
+        ),
+    ):
+        stats[name] = None
+        for path in paths:
+            try:
+                stats[name] = round(int(Path(path).read_text().strip()) / mib, 1)
+                break
+            except (OSError, ValueError):
+                continue
+    if DEVICE.type == "cuda" and torch.cuda.is_initialized():
+        stats["cuda_allocated_mib"] = round(torch.cuda.memory_allocated(DEVICE) / mib, 1)
+        stats["cuda_reserved_mib"] = round(torch.cuda.memory_reserved(DEVICE) / mib, 1)
+    return stats
+
+
+class MemoryMonitor:
+    """Sample even while clustering is busy and cannot report pipeline progress."""
+
+    def __init__(self) -> None:
+        self.phase = "audio_extraction"
+        self.stopped = Event()
+        self.thread: Thread | None = None
+
+    def log(self) -> None:
+        logger.info("pyannote memory phase=%s stats=%s", self.phase, memory_stats())
+
+    def set_phase(self, phase: str) -> None:
+        if self.phase != phase:
+            self.phase = phase
+            self.log()
+
+    def hook(self, step_name: str, *args: Any, **kwargs: Any) -> None:
+        # Do not retain step_artifact/file: these can contain the entire audio
+        # and segmentation arrays. Only keep the small phase name.
+        self.set_phase(f"inference:{step_name}")
+
+    def sample(self) -> None:
+        while not self.stopped.wait(MEMORY_LOG_INTERVAL_SECONDS):
+            self.log()
+
+    def __enter__(self) -> MemoryMonitor:
+        self.log()
+        if MEMORY_LOG_INTERVAL_SECONDS > 0:
+            self.thread = Thread(target=self.sample, name="pyannote-memory", daemon=True)
+            self.thread.start()
+        return self
+
+    def __exit__(self, error_type: Any, error: Any, traceback: Any) -> None:
+        self.stopped.set()
+        if self.thread is not None:
+            self.thread.join(timeout=2)
+        self.phase = "failed" if error_type else "finished"
+        self.log()
 
 
 def require_service_token(request: Request) -> None:
@@ -463,7 +567,8 @@ def load_extracted_audio(audio_path: Path) -> dict[str, Any]:
     pyannote.audio 4 delegates path-based decoding to TorchCodec. The service
     already normalizes every input into mono 16 kHz 16-bit PCM with FFmpeg, so
     loading those bytes directly is both deterministic and avoids TorchCodec's
-    optional system FFmpeg-library dependency.
+    optional system FFmpeg-library dependency. Decode in bounded blocks into
+    one final tensor instead of retaining two complete PCM byte buffers.
     """
 
     try:
@@ -471,24 +576,43 @@ def load_extracted_audio(audio_path: Path) -> dict[str, Any]:
             channels = audio.getnchannels()
             sample_width = audio.getsampwidth()
             sample_rate = audio.getframerate()
-            frames = audio.readframes(audio.getnframes())
+            frame_count = audio.getnframes()
+            if (
+                channels != 1 or sample_width != 2
+                or sample_rate <= 0 or frame_count <= 0
+            ):
+                raise HTTPException(
+                    status_code=422, detail="extracted audio is not mono 16-bit PCM"
+                )
+            if frame_count * sample_width > audio_path.stat().st_size:
+                raise HTTPException(status_code=422, detail="extracted audio is truncated")
+
+            waveform = torch.empty((1, frame_count), dtype=torch.float32, device="cpu")
+            offset = 0
+            block_frames = sample_rate * AUDIO_READ_SECONDS
+            while offset < frame_count:
+                count = min(block_frames, frame_count - offset)
+                frames = bytearray(audio.readframes(count))
+                if len(frames) != count * sample_width:
+                    raise HTTPException(status_code=422, detail="extracted audio is truncated")
+                pcm = torch.frombuffer(frames, dtype=torch.int16)
+                # copy_ converts int16 directly into the destination float32
+                # slice without allocating a second float32 audio tensor.
+                waveform[0, offset:offset + count].copy_(pcm)
+                offset += count
+                del pcm, frames
+            waveform.div_(32768.0)
     except (OSError, wave.Error) as error:
         raise HTTPException(
             status_code=422, detail=f"extracted audio is invalid: {error}"
         ) from error
 
-    if channels != 1 or sample_width != 2 or sample_rate <= 0 or not frames:
-        raise HTTPException(
-            status_code=422,
-            detail="extracted audio is not mono 16-bit PCM",
-        )
-
-    waveform = torch.frombuffer(bytearray(frames), dtype=torch.int16)
-    waveform = waveform.to(dtype=torch.float32).div_(32768.0).unsqueeze(0)
     return {"waveform": waveform, "sample_rate": sample_rate}
 
 
-def run_diarization(audio_path: Path, request: DiarizeRequest) -> list[DiarizationTurn]:
+def run_diarization(
+    audio_path: Path, request: DiarizeRequest, monitor: MemoryMonitor | None = None
+) -> list[DiarizationTurn]:
     if request.model and request.model != MODEL_ID:
         raise HTTPException(
             status_code=400,
@@ -506,8 +630,20 @@ def run_diarization(audio_path: Path, request: DiarizeRequest) -> list[Diarizati
     # The diarization service never needs gradients. Keeping inference mode
     # enabled is important for long recordings because it avoids retaining
     # autograd state while the pipeline processes the complete WAV.
-    with PIPELINE_LOCK, torch.inference_mode():
-        result = PIPELINE(load_extracted_audio(audio_path), **parameters)
+    # The caller holds PIPELINE_LOCK across extraction, inference and result
+    # conversion. Keeping one global invocation preserves speaker identities.
+    with torch.inference_mode():
+        if monitor is not None:
+            monitor.set_phase("audio_loading")
+            parameters["hook"] = monitor.hook
+        audio = load_extracted_audio(audio_path)
+        if monitor is not None:
+            monitor.set_phase("inference")
+        try:
+            result = PIPELINE(audio, **parameters)
+        finally:
+            # Release the waveform even when inference raises an exception.
+            del audio
 
     # pyannote.audio 4 returns a DiarizeOutput wrapper. Earlier releases (and
     # pipelines configured with legacy mode) return Annotation directly. Keep
@@ -549,29 +685,40 @@ def healthz() -> dict[str, str | bool]:
 @app.post("/v1/diarize", response_model=DiarizeResponse)
 def diarize(request: DiarizeRequest, http_request: Request) -> DiarizeResponse:
     require_service_token(http_request)
+    if request.model and request.model != MODEL_ID:
+        raise HTTPException(
+            status_code=400,
+            detail=f"service is configured for model {MODEL_ID}, not {request.model}",
+        )
     with tempfile.TemporaryDirectory(prefix="justai-pyannote-") as directory:
         directory_path = Path(directory)
         source_path = directory_path / "source.media"
         audio_path = directory_path / "audio.wav"
         download_source(str(request.media_url), source_path)
-        extract_audio(source_path, audio_path)
-        duration = validate_audio(audio_path)
-        logger.info(
-            "starting pyannote diarization (duration=%.3fs, device=%s, model=%s)",
-            duration,
-            DEVICE,
-            MODEL_ID,
-        )
-        try:
-            segments = run_diarization(audio_path, request)
-        except HTTPException:
-            raise
-        except Exception as error:
-            logger.exception("pyannote inference failed")
-            raise HTTPException(
-                status_code=500,
-                detail=f"pyannote inference failed: {error}",
-            ) from error
+        # Downloads stream to disk before waiting, so signed URLs need not stay
+        # valid throughout another long-running inference. Serialize FFmpeg too:
+        # a second multi-hour extraction must not compete for the same RAM.
+        with PIPELINE_LOCK, MemoryMonitor() as monitor:
+            extract_audio(source_path, audio_path)
+            source_path.unlink()
+            duration = validate_audio(audio_path)
+            logger.info(
+                "starting pyannote diarization (duration=%.3fs, waveform_mib=%.1f, device=%s, model=%s)",
+                duration,
+                duration * 16000 * 4 / (1024 * 1024),
+                DEVICE,
+                MODEL_ID,
+            )
+            try:
+                segments = run_diarization(audio_path, request, monitor)
+            except HTTPException:
+                raise
+            except Exception as error:
+                logger.exception("pyannote inference failed")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"pyannote inference failed: {error}",
+                ) from error
     speakers = sorted({segment.speaker for segment in segments})
     return DiarizeResponse(
         model=MODEL_ID,

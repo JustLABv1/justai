@@ -168,6 +168,13 @@ pyannote:
     imageTag: ""
   minAudioSeconds: 1
   torchThreads: 2
+  # Conservative inference batches bound per-batch RAM/VRAM. Increase only
+  # after measuring peak usage on your CPU/GPU.
+  segmentationBatchSize: 1
+  embeddingBatchSize: 1
+  # Log RSS, cgroup memory/limit and CUDA allocator usage during a job.
+  # 0 disables periodic sampling; phase-boundary logs remain enabled.
+  memoryLogIntervalSeconds: 30
   downloadTimeoutSeconds: 1800
   # Bounded by the service at 20 GiB for compatibility with chart releases
   # that used 20 GiB as their default. New installations default to 5 GiB.

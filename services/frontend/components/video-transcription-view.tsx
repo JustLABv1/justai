@@ -564,14 +564,16 @@ export function VideoTranscriptionView({
         organizationId: api.getOrganizationId() ?? undefined,
         uploadedParts,
         resolvePartURL: resolveAPIURL,
-        onProgress: ({ percent }) =>
+        onProgress: ({ loadedBytes, totalBytes }) =>
           setSnapshot((current) =>
             current?.videoUpload?.id === upload.id
               ? {
                   ...current,
                   videoUpload: {
                     ...current.videoUpload,
-                    progress: Math.max(current.videoUpload.progress, percent),
+                    bytes: loadedBytes,
+                    expectedBytes: totalBytes,
+                    progress: Math.floor((loadedBytes / totalBytes) * 100),
                     stage: "uploading",
                   },
                 }
@@ -2529,7 +2531,11 @@ function VideoPipeline({
     showSpeakerSkipAction ||
     onViewPartialTranscript ? (
       <CardHeader
-        className={cn("gap-2 px-4 py-3 sm:px-5", !prominent && "order-first")}
+        className={cn(
+          "gap-2 px-4 py-3 sm:px-5",
+          !prominent && "order-first",
+          prominent && "p-0 sm:px-0"
+        )}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle
@@ -2560,7 +2566,7 @@ function VideoPipeline({
           <div
             className={cn(
               "flex flex-wrap items-center gap-2",
-              prominent && "w-full justify-center pb-3"
+              prominent && "w-full"
             )}
           >
             {failedStep && failedStep.key !== "upload" ? (
@@ -2615,15 +2621,41 @@ function VideoPipeline({
             ) : null}
           </div>
         </div>
-        {isActive && !prominent ? (
+        {upload.status === "uploading" && !prominent ? (
           <Progress
-            aria-label="Overall video processing progress"
+            aria-label="Video upload progress"
             className="h-1"
-            value={Math.max(0, Math.min(100, upload.progress))}
+            value={
+              upload.expectedBytes > 0
+                ? Math.max(
+                    0,
+                    Math.min(100, (upload.bytes / upload.expectedBytes) * 100)
+                  )
+                : null
+            }
           />
         ) : null}
       </CardHeader>
     ) : null
+
+  const output = (
+    <VideoProcessingOutput
+      key={failedStep?.key ?? activeStep?.key ?? upload.stage}
+      step={
+        failedStep?.key ??
+        activeStep?.key ??
+        (upload.status === "uploading"
+          ? "upload"
+          : upload.status === "queued"
+            ? "transcription"
+            : "finalization")
+      }
+      upload={upload}
+      segments={segments}
+      speakers={speakers}
+      error={failedStep?.error || upload.error}
+    />
+  )
 
   return (
     <Collapsible
@@ -2641,7 +2673,9 @@ function VideoPipeline({
         {prominent ? (
           <VideoProcessingProgress
             steps={steps}
-            status={upload.status}
+            upload={upload}
+            segments={segments}
+            actions={statusHeader}
             statusLabel={
               failedStep
                 ? `${videoPipelineStepLabel(failedStep.key)} failed`
@@ -2659,31 +2693,20 @@ function VideoPipeline({
                   )
                 : undefined
             }
-            uploadProgress={Math.max(0, Math.min(100, upload.progress))}
-          />
-        ) : null}
-        {!prominent ? statusHeader : null}
-        <CollapsibleContent>
-          <CardContent
-            className={cn("px-4 pb-4 sm:px-5", prominent && "sm:px-8")}
           >
-            <div className={cn(!prominent && "max-w-3xl")}>
-              <VideoProcessingOutput
-                key={activeStep?.key ?? failedStep?.key ?? upload.stage}
-                step={
-                  activeStep?.key ??
-                  failedStep?.key ??
-                  (upload.status === "uploading" ? "upload" : "finalization")
-                }
-                upload={upload}
-                segments={segments}
-                speakers={speakers}
-                error={failedStep?.error || upload.error}
-              />
-            </div>
-          </CardContent>
-        </CollapsibleContent>
-        {prominent ? statusHeader : null}
+            {output}
+          </VideoProcessingProgress>
+        ) : null}
+        {!prominent ? (
+          <>
+            {statusHeader}
+            <CollapsibleContent>
+              <CardContent className="px-4 pb-4 sm:px-5">
+                <div className="max-w-3xl">{output}</div>
+              </CardContent>
+            </CollapsibleContent>
+          </>
+        ) : null}
       </Card>
     </Collapsible>
   )
@@ -3313,9 +3336,17 @@ function mergeVideoUploadSnapshot(
     ...current,
     ...next,
     pipeline,
+    bytes:
+      current.status === "uploading" && next.status === "uploading"
+        ? Math.max(current.bytes, next.bytes)
+        : next.bytes,
     progress:
       current.status === "uploading" && next.status === "uploading"
-        ? Math.max(current.progress, next.progress)
+        ? Math.floor(
+            (Math.max(current.bytes, next.bytes) /
+              Math.max(1, next.expectedBytes)) *
+              100
+          )
         : next.progress,
     // Session snapshots generate a fresh signed URL on every request. Keep
     // the existing URL during polling so React does not reload the video;

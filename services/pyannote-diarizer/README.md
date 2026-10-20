@@ -103,3 +103,44 @@ podman machine start
 `PYANNOTE_TORCH_THREADS` defaults to `2` to keep CPU thread memory bounded. It
 can be lowered to `1` on a small development machine, at the cost of slower
 inference.
+
+## Long recordings and memory
+
+Audio is decoded in blocks of at most 60 seconds into one CPU float32 tensor.
+This removes the two full-size PCM byte buffers previously held during loading.
+Six hours at 16 kHz still require approximately 1.29 GiB for that final tensor,
+plus model weights, segmentation, embeddings, clustering and CUDA allocations.
+GPU acceleration does not remove the need for container RAM. This change does
+not guarantee that a six-hour recording fits within an 8 GiB memory limit.
+
+The service still invokes the pipeline once for the whole recording so speaker
+labels remain consistent across it. Extraction, waveform loading, inference and
+result conversion are serialized within the single Uvicorn worker. Other media
+downloads stream to disk before waiting so signed URLs do not expire in the
+inference queue. The source video is removed after extraction; queued downloads
+and the extracted WAV still need adequate disk-backed temporary storage. Do not
+mount `/tmp` as a memory-backed volume for long recordings.
+
+The following settings are available in both CPU and GPU images:
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `PYANNOTE_SEGMENTATION_BATCH_SIZE` | `1` | Segmentation inference batch size (1–128). |
+| `PYANNOTE_EMBEDDING_BATCH_SIZE` | `1` | Speaker embedding batch size (1–128). |
+| `PYANNOTE_MEMORY_LOG_INTERVAL_SECONDS` | `30` | Periodic sampling interval (0–3600); 0 disables periodic sampling. |
+
+Larger batches may improve throughput but increase per-batch RAM/VRAM. They do
+not bound the whole-recording clustering footprint. Phase-boundary logs remain
+enabled even with a zero sampling interval. INFO messages report the current
+phase, process RSS, process lifetime peak RSS, cgroup memory usage/limit where
+available, and allocated/reserved CUDA memory on GPU. No media URLs, tokens or
+transcript content are included. Diagnostic logging continues during clustering
+even when the pipeline does not emit intermediate progress.
+
+Run the regression tests in a built image without model downloads:
+
+```bash
+docker run --rm --network=none --entrypoint python \
+  -v "$PWD/services/pyannote-diarizer/tests:/tests:ro" \
+  justai-pyannote -m unittest discover -s /tests -v
+```

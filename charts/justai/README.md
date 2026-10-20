@@ -201,6 +201,40 @@ set `pyannote.gpu.count` to request more than one device. The CPU image and
 behavior remain the default. `pyannote.gpu.imageTag` can select a custom GPU
 image tag without changing the CPU image setting.
 
+### Long recordings and memory
+
+GPU mode still needs host RAM for the audio waveform and pipeline intermediates.
+The default 8 GiB memory limit is not a guarantee for multi-hour recordings.
+For a node with sufficient available memory, a starting override to measure is:
+
+```yaml
+pyannote:
+  resources:
+    requests:
+      memory: 8Gi
+    limits:
+      memory: 16Gi
+  segmentationBatchSize: 1
+  embeddingBatchSize: 1
+  memoryLogIntervalSeconds: 30
+```
+
+Measure actual peak usage before choosing a production limit. `OOMKilled`
+indicates host/container memory pressure; a CUDA out-of-memory exception needs
+separate VRAM investigation. The worker logs RAM/cgroup/CUDA usage at phase
+boundaries and periodically during each job. Set `memoryLogIntervalSeconds: 0`
+to disable periodic sampling (phase logs remain). Batch sizes accept 1–128;
+the interval accepts integer seconds from 0–3600. Increasing batches can improve
+throughput but raises per-batch memory requirements.
+
+The worker loads normalized audio in bounded blocks but still holds the final
+waveform and runs global speaker clustering for the entire recording. The
+backend's `config.transcription.diarizationWindowSeconds` setting does not split
+the pyannote video request. Keep temporary storage disk-backed with enough room
+for extracted audio and queued downloads; do not change `/tmp` to a RAM-backed
+`emptyDir` for long recordings. New settings and decoder improvements require
+an updated pyannote image as well as the chart configuration.
+
 For a private test deployment only, `secrets.create=true` can create the
 Secret from `secrets.data.pyannoteHfToken`, `secrets.data.pyannoteServiceToken`,
 and the proxy data fields. Do not commit those values.
