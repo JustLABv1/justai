@@ -101,6 +101,9 @@ func (m *TranscriptionManager) Start(ctx context.Context) {
 	m.mu.Unlock()
 	go m.cleanupLoop(ctx)
 	m.startVideoWorker(ctx)
+	if m.app != nil {
+		m.app.startSpeakerCaptionWorker(ctx)
+	}
 	go m.streamSourceSchedulerLoop(ctx)
 	go m.liveProcessingLoop(ctx)
 }

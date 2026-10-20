@@ -1,6 +1,11 @@
 "use client"
 
 import {
+  VideoCaptionSettings,
+  type VideoCaptionOptions,
+} from "@/components/video-caption-settings"
+
+import {
   ArrowLeft,
   ArrowRight,
   AudioLines,
@@ -197,6 +202,8 @@ export function VideoTranscriptionView({
   const [selectedEndpoint, setSelectedEndpoint] = useState("")
   const [selectedDiarizationEndpoint, setSelectedDiarizationEndpoint] =
     useState("none")
+  const [captionOptions, setCaptionOptions] =
+    useState<VideoCaptionOptions | null>(null)
   const [grammarChoice, setGrammarChoice] = useState("auto")
   const [modelSelections, setModelSelections] = useState<
     Record<string, string>
@@ -593,6 +600,16 @@ export function VideoTranscriptionView({
       setError("Choose a video file first.")
       return
     }
+    if (effectiveDiarizationEndpoint && captionOptions) {
+      const visionEndpoint = endpoints.find((endpoint) =>
+        endpoint.id === captionOptions.endpointId && endpoint.enabled &&
+        (endpoint.capabilities.vision || endpoint.capabilities.multimodal)
+      )
+      if (!visionEndpoint || !(captionOptions.model.trim() || visionEndpoint.visionModel || visionEndpoint.chatModel)) {
+        setError("Select an available vision endpoint and model for speaker name captions.")
+        return
+      }
+    }
     videoUploadInFlightRef.current = true
     setVideoStarting(true)
     setError("")
@@ -627,6 +644,7 @@ export function VideoTranscriptionView({
           fileName: file.name,
           mimeType: file.type || "application/octet-stream",
           fileBytes: file.size,
+          captionOptions: effectiveDiarizationEndpoint ? captionOptions : undefined,
         }
       )
       setSnapshot({
@@ -2091,6 +2109,12 @@ export function VideoTranscriptionView({
                   value={diarizationModel}
                 />
               ) : null}
+              <VideoCaptionSettings
+                endpoints={endpoints}
+                enabled={Boolean(effectiveDiarizationEndpoint)}
+                value={captionOptions}
+                onChange={setCaptionOptions}
+              />
               <Field>
                 <FieldLabel>Grammar polishing</FieldLabel>
                 <Select
@@ -2185,6 +2209,12 @@ export function VideoTranscriptionView({
                 <dd className="break-words">
                   {selectedDiarizationEndpointItem?.name ||
                     "Keep one transcript stream"}
+                </dd>
+                <dt className="text-muted-foreground">Speaker names</dt>
+                <dd className="break-words">
+                  {effectiveDiarizationEndpoint && captionOptions
+                    ? `${endpoints.find((endpoint) => endpoint.id === captionOptions.endpointId)?.name || "Vision endpoint"} · up to ${captionOptions.frameBudget} images · ${captionOptions.autoApply ? "apply consistent matches" : "suggestions only"}`
+                    : "Skip name caption analysis"}
                 </dd>
                 <dt className="text-muted-foreground">Grammar</dt>
                 <dd className="break-words">
@@ -2716,6 +2746,7 @@ const videoPipelineKeys = [
   "upload",
   "transcription",
   "diarization",
+  "speaker_names",
   "grammar",
   "finalization",
 ] as const
@@ -2755,7 +2786,7 @@ function getVideoPipelineSteps(
     const steps = videoPipelineKeys.map((key) => ({
       ...(byKey.get(key) ?? {
         key,
-        status: "pending" as const,
+        status: key === "speaker_names" ? ("skipped" as const) : ("pending" as const),
       }),
     }))
     repairCancelledVideoPipeline(steps, upload)
@@ -2818,9 +2849,11 @@ function storedVideoPipelineConflictsWithUpload(
   } else if (stage === "diarizing" || stage === "skipping_diarization") {
     authoritativeIndex = 2
   } else if (stage === "polishing") {
+    authoritativeIndex = 4
+  } else if (stage === "naming_speakers") {
     authoritativeIndex = 3
   } else if (stage === "finalizing") {
-    authoritativeIndex = 4
+    authoritativeIndex = 5
   }
   if (authoritativeIndex === null) return false
 
@@ -3075,6 +3108,8 @@ function fallbackVideoPipeline(
     })
   )
   const stepByKey = new Map(steps.map((step) => [step.key, step]))
+  const names = steps.find((step) => step.key === "speaker_names")
+  if (names) names.status = "skipped"
   const startAt = session.startedAt || upload.createdAt
 
   const setStatus = (
@@ -3167,6 +3202,12 @@ function fallbackVideoPipeline(
     setStatus("diarization", "active")
     return steps
   }
+  if (stage === "naming_speakers") {
+    setStatus("transcription", "completed")
+    optionalStatus("diarization")
+    setStatus("speaker_names", "active")
+    return steps
+  }
   if (stage === "polishing") {
     setStatus("transcription", "completed")
     optionalStatus("diarization")
@@ -3205,6 +3246,8 @@ function videoPipelineStepLabel(key: string) {
       return "Transcription"
     case "diarization":
       return "Speaker separation"
+    case "speaker_names":
+      return "Speaker names"
     case "grammar":
       return "Grammar polish"
     case "finalization":

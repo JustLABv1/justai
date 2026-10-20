@@ -33,6 +33,19 @@ export function videoStepProgress(
       detail: `${completed} / ${parallel.sliceCount} audio blocks transcribed`,
     }
   }
+  if (step?.key === "speaker_names" && parallel?.sliceCount) {
+    const completed = Math.max(
+      0,
+      Math.min(parallel.completedSlices ?? 0, parallel.sliceCount)
+    )
+    return {
+      percent: Math.floor((completed / parallel.sliceCount) * 100),
+      detail:
+        parallel.phase === "queued"
+          ? `Waiting for caption analysis · ${parallel.sliceCount} images selected`
+          : `${completed} / ${parallel.sliceCount} caption images analyzed`,
+    }
+  }
   if (step?.key === "grammar") {
     const textSegments = segments.filter((segment) => segment.text.trim())
     const polished = textSegments.filter((segment) =>

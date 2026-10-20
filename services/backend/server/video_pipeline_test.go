@@ -70,20 +70,20 @@ func TestVideoPipelineTracksStagesAndDurations(t *testing.T) {
 	if got := steps[2].Status; got != "skipped" {
 		t.Fatalf("diarization status = %q, want skipped", got)
 	}
-	if got := steps[3].Status; got != "active" {
+	if got := steps[4].Status; got != "active" {
 		t.Fatalf("grammar status = %q, want active", got)
 	}
 
 	markVideoPipelineStep(steps, "grammar", "completed", "", started.Add(9*time.Second))
 	steps = applyVideoPipelineStage(steps, "finalizing", "", started.Add(9*time.Second))
 	completeVideoPipeline(steps, started.Add(10*time.Second))
-	if got := steps[3].Status; got != "completed" {
+	if got := steps[4].Status; got != "completed" {
 		t.Fatalf("grammar status = %q, want completed", got)
 	}
-	if got := steps[4].Status; got != "completed" {
+	if got := steps[5].Status; got != "completed" {
 		t.Fatalf("finalization status = %q, want completed", got)
 	}
-	if got := steps[4].DurationMs; got != 1000 {
+	if got := steps[5].DurationMs; got != 1000 {
 		t.Fatalf("finalization duration = %d, want 1000", got)
 	}
 }
@@ -183,13 +183,13 @@ func TestVideoPipelinePreservesOptionalFailureOnCompletion(t *testing.T) {
 	steps = applyVideoPipelineStage(steps, "finalizing", "", started.Add(3*time.Second))
 	completeVideoPipeline(steps, started.Add(4*time.Second))
 
-	if got := steps[3].Status; got != "failed" {
+	if got := steps[4].Status; got != "failed" {
 		t.Fatalf("grammar status = %q, want failed", got)
 	}
-	if got := steps[3].Error; got != "grammar unavailable" {
+	if got := steps[4].Error; got != "grammar unavailable" {
 		t.Fatalf("grammar error = %q, want preserved error", got)
 	}
-	if got := steps[4].Status; got != "completed" {
+	if got := steps[5].Status; got != "completed" {
 		t.Fatalf("finalization status = %q, want completed", got)
 	}
 }
@@ -208,8 +208,8 @@ func TestVideoPipelinePreservesSkippedDiarizationWhenContinuing(t *testing.T) {
 	if steps[2].Status != "skipped" {
 		t.Fatalf("diarization status = %q, want skipped", steps[2].Status)
 	}
-	if steps[3].Status != "active" {
-		t.Fatalf("grammar status = %q, want active", steps[3].Status)
+	if steps[4].Status != "active" {
+		t.Fatalf("grammar status = %q, want active", steps[4].Status)
 	}
 }
 
@@ -236,7 +236,7 @@ func TestVideoPipelineDiarizationSkipRepairsCompletedBoundaries(t *testing.T) {
 	if steps[1].Parallel == nil || steps[1].Parallel.Phase != "complete" {
 		t.Fatalf("parallel transcription evidence was lost: %+v", steps[1].Parallel)
 	}
-	if steps[2].Status != "skipped" || steps[3].Status != "pending" || steps[4].Status != "pending" {
+	if steps[2].Status != "skipped" || steps[4].Status != "pending" || steps[5].Status != "pending" {
 		t.Fatalf("unexpected downstream skip state: %+v", steps)
 	}
 }
@@ -284,12 +284,12 @@ func TestVideoPipelineFailureKeepsExistingFailedStage(t *testing.T) {
 	steps[0].Status = "completed"
 	steps[1].Status = "completed"
 	steps[2].Status = "skipped"
-	steps[3].Status = "failed"
-	steps[3].Error = "grammar unavailable"
+	steps[4].Status = "failed"
+	steps[4].Error = "grammar unavailable"
 
 	failVideoPipelineStep(steps, started.Add(time.Second), "grammar unavailable")
 
-	if steps[3].Status != "failed" || steps[4].Status != "pending" {
+	if steps[4].Status != "failed" || steps[5].Status != "pending" {
 		t.Fatalf("failure should remain on the failed stage: %+v", steps)
 	}
 }
@@ -329,7 +329,7 @@ func TestVideoPipelineCancellationIsIdempotent(t *testing.T) {
 	if steps[0].Status != "completed" || steps[1].Status != "cancelled" {
 		t.Fatalf("unexpected cancellation state: %+v", steps)
 	}
-	if steps[2].Status != "pending" || steps[3].Status != "pending" || steps[4].Status != "pending" {
+	if steps[2].Status != "pending" || steps[4].Status != "pending" || steps[5].Status != "pending" {
 		t.Fatalf("repeated cancellation should not cancel pending steps: %+v", steps)
 	}
 }
@@ -362,7 +362,7 @@ func TestVideoPipelineCancellationRepairsStaleParallelState(t *testing.T) {
 	if steps[0].Status != "completed" || steps[1].Status != "cancelled" {
 		t.Fatalf("stale parallel state should cancel transcription after upload: %+v", steps)
 	}
-	if steps[2].Status != "pending" || steps[3].Status != "pending" || steps[4].Status != "pending" {
+	if steps[2].Status != "pending" || steps[4].Status != "pending" || steps[5].Status != "pending" {
 		t.Fatalf("downstream steps should remain pending: %+v", steps)
 	}
 }
@@ -417,13 +417,13 @@ func TestVideoRetryStepForPipelineSupportsGrammarAndFinalization(t *testing.T) {
 	steps[0].Status = "completed"
 	steps[1].Status = "completed"
 	steps[2].Status = "skipped"
-	steps[3].Status = "failed"
+	steps[4].Status = "failed"
 	if got := videoRetryStepForPipeline(steps); got != videoRetryStepGrammar {
 		t.Fatalf("failed grammar retry step = %q, want %q", got, videoRetryStepGrammar)
 	}
 
-	steps[3].Status = "completed"
-	steps[4].Status = "active"
+	steps[4].Status = "completed"
+	steps[5].Status = "active"
 	if got := videoRetryStepForPipeline(steps); got != videoRetryStepFinalization {
 		t.Fatalf("active finalization retry step = %q, want %q", got, videoRetryStepFinalization)
 	}
@@ -449,7 +449,7 @@ func TestRetryVideoPipelineStepFromPreservesEarlierCompletedStages(t *testing.T)
 	if steps[2].Status != "retrying" || steps[2].Error != "speaker diarization failed" {
 		t.Fatalf("diarization stage was not marked for retry: %+v", steps[2])
 	}
-	if steps[3].Status != "pending" || steps[4].Status != "pending" {
+	if steps[4].Status != "pending" || steps[5].Status != "pending" {
 		t.Fatalf("downstream stages were not reset: %+v", steps)
 	}
 }
@@ -473,5 +473,26 @@ func TestVideoSpeakerSeparationCanSkip(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestVideoSpeakerNameStepOrderAndResume(t *testing.T) {
+	now := time.Now().UTC()
+	steps := initialVideoPipeline(now)
+	steps = applyVideoPipelineStage(steps, "diarizing", "", now)
+	steps = applyVideoPipelineStage(steps, "naming_speakers", "", now.Add(time.Second))
+	if steps[videoPipelineIndex("diarization")].Status != "completed" || steps[videoPipelineIndex("speaker_names")].Status != "active" {
+		t.Fatalf("name step must follow diarization: %+v", steps)
+	}
+	if videoRetryStepForUploadStage("naming_speakers") != "speaker_names" || videoRetryStage("speaker_names") != "naming_speakers" {
+		t.Fatal("name stage resume would rerun prior work")
+	}
+	steps = applyVideoPipelineStage(steps, "polishing", "", now.Add(2*time.Second))
+	if steps[videoPipelineIndex("speaker_names")].Status != "completed" {
+		t.Fatal("name step was not completed before grammar")
+	}
+	disabled := applyVideoPipelineStage(initialVideoPipeline(now), "polishing", "", now)
+	if disabled[videoPipelineIndex("speaker_names")].Status != "skipped" {
+		t.Fatal("disabled optional name step must be skipped")
 	}
 }

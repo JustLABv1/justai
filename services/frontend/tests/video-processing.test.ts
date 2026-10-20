@@ -86,3 +86,9 @@ test("polishing counts available corrections and ignores empty text blocks", () 
     detail: "1 / 2 text blocks polished",
   })
 })
+
+test("caption progress measures analyzed images and explains queueing", () => {
+ assert.deepEqual(videoStepProgress(upload, step("speaker_names", {phase:"processing",sliceCount:24,completedSlices:6}), []), {percent:25,detail:"6 / 24 caption images analyzed"})
+ assert.deepEqual(videoStepProgress(upload, step("speaker_names", {phase:"queued",sliceCount:24,completedSlices:0}), []), {percent:0,detail:"Waiting for caption analysis · 24 images selected"})
+ assert.equal(videoStepProgress(upload, step("speaker_names"), []).percent,null)
+})
