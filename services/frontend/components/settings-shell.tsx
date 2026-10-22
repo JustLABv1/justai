@@ -222,7 +222,6 @@ export function SettingsShell({
           ) : null}
           {activeTab === "mcp" ? (
             <MCPView
-              mode="advanced"
               servers={mcpServers}
               onChange={onMCPChange}
               organizationRole={activeOrganization?.role}

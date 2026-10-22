@@ -31,15 +31,14 @@ export function IntegrationsView({
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageTitle>Integrations</PageTitle>
+          <PageTitle>MCP servers</PageTitle>
           <PageDescription>
-            Connect the services JustAI can use in your everyday work. Technical
-            MCP servers stay in Settings.
+            Connect and manage the MCP servers JustAI can use in your everyday
+            work.
           </PageDescription>
         </PageHeading>
       </PageHeader>
       <MCPView
-        mode="integrations"
         servers={servers}
         onChange={onChange}
         organizationRole={organization?.role}

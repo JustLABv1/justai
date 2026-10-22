@@ -138,14 +138,14 @@ export const railNavigation: Array<{
   {
     id: "knowledge",
     label: "Storage",
-    hint: "Folders, files, transcripts, and repositories",
+    hint: "Folders, files, and transcripts",
     icon: FolderKanban,
     group: "Storage",
   },
   {
     id: "integrations",
-    label: "Integrations",
-    hint: "GitHub, GitLab, and more",
+    label: "MCP servers",
+    hint: "Manage MCP connections and tools",
     icon: Plug,
     group: "Connect",
     feature: "mcp",

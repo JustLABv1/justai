@@ -144,11 +144,10 @@ const navigationItems: NavigationItem[] = [
   {
     id: "mcp",
     label: "MCP servers",
-    hint: "Connected tools",
+    hint: "Manage MCP connections and tools",
     keywords: ["mcp", "tools", "servers", "integrations"],
     icon: Plug,
-    view: "settings",
-    settingsTab: "mcp",
+    view: "integrations",
     feature: "mcp",
   },
   {

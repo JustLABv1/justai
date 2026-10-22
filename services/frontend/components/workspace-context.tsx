@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   Database,
   FolderKanban,
-  GitBranch,
   Headphones,
   LoaderCircle,
   NotebookPen,
@@ -51,7 +50,6 @@ import type {
   KnowledgeSource,
   MCPServer,
   Note,
-  RepositoryContext,
   TranscriptionSession,
   ViewId,
   WorkspaceProject,
@@ -102,19 +100,12 @@ export function WorkspaceContext({
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState("")
   const [notice, setNotice] = useState("")
-  const [repositoryDialogOpen, setRepositoryDialogOpen] = useState(false)
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [projectName, setProjectName] = useState("")
   const [projectDescription, setProjectDescription] = useState("")
   const [projectVisibility, setProjectVisibility] = useState<
     "private" | "workspace"
   >("private")
-  const [repositoryURL, setRepositoryURL] = useState("")
-  const [repositoryRef, setRepositoryRef] = useState("")
-  const [repositoryToken, setRepositoryToken] = useState("")
-  const [repositoryLibrary, setRepositoryLibrary] = useState<
-    RepositoryContext[]
-  >([])
   const [isMobileViewport, setIsMobileViewport] = useState(false)
   const [loadedConversationId, setLoadedConversationId] = useState<
     string | null
@@ -126,51 +117,6 @@ export function WorkspaceContext({
     updateViewport()
     mediaQuery.addEventListener("change", updateViewport)
     return () => mediaQuery.removeEventListener("change", updateViewport)
-  }, [])
-
-  useEffect(() => {
-    let disposed = false
-    let timer: number | null = null
-    let delay = 10_000
-    let controller: AbortController | null = null
-    const schedule = () => {
-      if (disposed) return
-      if (timer !== null) window.clearTimeout(timer)
-      timer = window.setTimeout(() => void loadRepositoryLibrary(), delay)
-    }
-    const loadRepositoryLibrary = async () => {
-      if (disposed || document.visibilityState === "hidden") {
-        schedule()
-        return
-      }
-      controller?.abort()
-      controller = new AbortController()
-      try {
-        const result = await api.get<{ repositories: RepositoryContext[] }>(
-          "/api/v1/repositories",
-          { signal: controller.signal }
-        )
-        if (!disposed) {
-          setRepositoryLibrary(result.repositories)
-          delay = 10_000
-        }
-      } catch {
-        if (!disposed) delay = Math.min(delay * 2, 60_000)
-      } finally {
-        schedule()
-      }
-    }
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") void loadRepositoryLibrary()
-    }
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    void loadRepositoryLibrary()
-    return () => {
-      disposed = true
-      controller?.abort()
-      if (timer !== null) window.clearTimeout(timer)
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-    }
   }, [])
 
   useEffect(() => {
@@ -339,21 +285,6 @@ export function WorkspaceContext({
   const readySources = availableSources.filter(
     (source) => source.status === "ready"
   )
-  const attachedRepositories = visibleContext.repositories ?? []
-  const repositories = Array.from(
-    new Map(
-      [...repositoryLibrary, ...attachedRepositories].map((repository) => [
-        repository.id,
-        repository,
-      ])
-    ).values()
-  )
-  const attachedRepositoryIds = new Set(
-    attachedRepositories.map((repository) => repository.id)
-  )
-  const readyRepositories = repositories.filter(
-    (repository) => repository.status === "ready"
-  )
   const availableServers = Array.from(
     new Map(
       [...servers, ...visibleContext.mcpServers].map((server) => [
@@ -446,109 +377,6 @@ export function WorkspaceContext({
         caught instanceof Error
           ? caught.message
           : "Context could not be pinned."
-      )
-    } finally {
-      setBusy("")
-    }
-  }
-
-  async function connectRepository(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!repositoryURL.trim()) {
-      setNotice("Enter a GitHub or GitLab repository URL.")
-      return
-    }
-    setBusy("repository-create")
-    setNotice("")
-    try {
-      const targetConversationId = await ensureContextConversation(
-        "A conversation is required before adding a repository."
-      )
-      const repository = await api.post<RepositoryContext>(
-        `/api/v1/conversations/${targetConversationId}/repositories`,
-        {
-          url: repositoryURL.trim(),
-          ref: repositoryRef.trim(),
-          accessToken: repositoryToken,
-        }
-      )
-      const next = await api.get<ConversationContext>(
-        `/api/v1/conversations/${targetConversationId}/context`
-      )
-      setContext(next)
-      setLoadedConversationId(targetConversationId)
-      setRepositoryDialogOpen(false)
-      setRepositoryURL("")
-      setRepositoryRef("")
-      setRepositoryToken("")
-      setNotice(
-        repository.status === "ready"
-          ? "Repository attached. Its existing index is available in this chat."
-          : "Repository import started. It will become searchable when indexing finishes."
-      )
-    } catch (caught) {
-      setNotice(
-        caught instanceof Error
-          ? caught.message
-          : "The repository could not be added."
-      )
-    } finally {
-      setBusy("")
-    }
-  }
-
-  async function attachRepository(item: RepositoryContext) {
-    if (attachedRepositoryIds.has(item.id)) return
-    setBusy(item.id)
-    setNotice("")
-    try {
-      const targetConversationId = await ensureContextConversation(
-        "A conversation is required before adding a repository."
-      )
-      const repository = await api.post<RepositoryContext>(
-        `/api/v1/conversations/${targetConversationId}/repositories`,
-        { url: item.repositoryUrl, ref: item.ref, accessToken: "" }
-      )
-      const next = await api.get<ConversationContext>(
-        `/api/v1/conversations/${targetConversationId}/context`
-      )
-      setContext(next)
-      setLoadedConversationId(targetConversationId)
-      setNotice(
-        repository.status === "ready"
-          ? "Repository attached. Its existing index is available in this chat."
-          : "Repository attached. It will become searchable when indexing finishes."
-      )
-    } catch (caught) {
-      setNotice(
-        caught instanceof Error
-          ? caught.message
-          : "The repository could not be attached."
-      )
-    } finally {
-      setBusy("")
-    }
-  }
-
-  async function removeRepository(item: RepositoryContext) {
-    const targetConversationId = conversationId
-    if (!targetConversationId) return
-    setBusy(item.id)
-    setNotice("")
-    try {
-      await api.delete(
-        `/api/v1/conversations/${targetConversationId}/context/repositories/${item.id}`
-      )
-      const next = await api.get<ConversationContext>(
-        `/api/v1/conversations/${targetConversationId}/context`
-      )
-      setContext(next)
-      setLoadedConversationId(targetConversationId)
-    } catch (caught) {
-      setNotice(
-        caught instanceof Error
-          ? caught.message
-          : "The repository could not be removed."
       )
     } finally {
       setBusy("")
@@ -674,75 +502,6 @@ export function WorkspaceContext({
 
       {activeTab === "sources" && (
         <div className="flex flex-col gap-2">
-          <ContextHeading
-            icon={GitBranch}
-            label="Repositories"
-            meta={`${readyRepositories.length}/${repositories.length} ready`}
-          />
-          {repositories.length > 0 ? (
-            repositories.slice(0, 4).map((item) => (
-              <ContextItem
-                detail={repositoryDetail(item)}
-                icon={GitBranch}
-                key={item.id}
-                label={item.title}
-                status={formatRepositoryStatus(item.status)}
-                action={
-                  attachedRepositoryIds.has(item.id) ? (
-                    <Button
-                      aria-label={`Remove ${item.title} from this chat; keep it indexed for future chats`}
-                      disabled={busy === item.id}
-                      onClick={() => void removeRepository(item)}
-                      size="icon-sm"
-                      title="Remove from this chat (keep indexed for future chats)"
-                      variant="ghost"
-                    >
-                      {busy === item.id ? (
-                        <LoaderCircle className="animate-spin" />
-                      ) : (
-                        <X />
-                      )}
-                    </Button>
-                  ) : (
-                    <Button
-                      aria-label={`Add ${item.title} to this chat`}
-                      disabled={busy === item.id}
-                      onClick={() => void attachRepository(item)}
-                      size="icon-sm"
-                      title="Add to this chat"
-                      variant="ghost"
-                    >
-                      {busy === item.id ? (
-                        <LoaderCircle className="animate-spin" />
-                      ) : (
-                        <Plus />
-                      )}
-                    </Button>
-                  )
-                }
-              />
-            ))
-          ) : (
-            <ContextEmpty
-              icon={GitBranch}
-              text="Add a public GitHub/GitLab repo, or use a read-only token for a private one."
-            />
-          )}
-          <Button
-            className="mt-1 w-full"
-            onClick={() => setRepositoryDialogOpen(true)}
-            size="sm"
-            variant="outline"
-          >
-            <Plus data-icon="inline-start" />
-            Add or reuse repository
-          </Button>
-          <div className="mb-2 rounded-lg border border-dashed p-3 text-[11px] leading-relaxed text-muted-foreground">
-            JustAI imports a bounded set of text files and indexes them as
-            read-only chat context. Provider credentials are encrypted and never
-            sent to the model. Repository files are represented by the
-            repository above rather than listed as separate attachments.
-          </div>
           <ContextHeading
             icon={BookOpenText}
             label="Knowledge sources"
@@ -1005,85 +764,6 @@ export function WorkspaceContext({
       )}
 
       <Dialog
-        open={repositoryDialogOpen}
-        onOpenChange={(open) => {
-          if (busy !== "repository-create") setRepositoryDialogOpen(open)
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add a read-only repository</DialogTitle>
-            <DialogDescription>
-              Connect a public GitHub/GitLab repository, or provide a read-only
-              personal access token for a private one. If it is already in your
-              repository library, JustAI attaches the existing index instead of
-              importing it again.
-            </DialogDescription>
-          </DialogHeader>
-          <form className="flex flex-col gap-4" onSubmit={connectRepository}>
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-medium" htmlFor="repository-url">
-                Repository URL
-              </label>
-              <Input
-                id="repository-url"
-                onChange={(event) => setRepositoryURL(event.target.value)}
-                placeholder="https://github.com/org/project"
-                value={repositoryURL}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-medium" htmlFor="repository-ref">
-                Branch, tag, or commit
-              </label>
-              <Input
-                id="repository-ref"
-                onChange={(event) => setRepositoryRef(event.target.value)}
-                placeholder="HEAD (default branch)"
-                value={repositoryRef}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-medium" htmlFor="repository-token">
-                Optional read-only access token
-              </label>
-              <Input
-                autoComplete="off"
-                id="repository-token"
-                onChange={(event) => setRepositoryToken(event.target.value)}
-                placeholder="Leave empty for public repositories"
-                type="password"
-                value={repositoryToken}
-              />
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                Use the smallest provider scope available. The token is
-                encrypted at rest and never returned by the API.
-              </p>
-            </div>
-            <DialogFooter>
-              <Button
-                disabled={busy === "repository-create"}
-                onClick={() => setRepositoryDialogOpen(false)}
-                type="button"
-                variant="ghost"
-              >
-                Cancel
-              </Button>
-              <Button disabled={busy === "repository-create"} type="submit">
-                {busy === "repository-create" && (
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />
-                )}
-                Connect repository
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
         open={projectDialogOpen}
         onOpenChange={(open) => {
           if (busy !== "project-create") setProjectDialogOpen(open)
@@ -1149,7 +829,7 @@ export function WorkspaceContext({
 
       <div className="mt-auto flex items-center gap-2 border-t pt-4 text-[11px] text-muted-foreground">
         <CheckCircle2 className="size-4 shrink-0" />
-        Repositories stay indexed and available to add across new chats.
+        Knowledge sources stay available to add across new chats.
       </div>
     </div>
   )
@@ -1173,8 +853,8 @@ export function WorkspaceContext({
             <SheetHeader className="sr-only">
               <SheetTitle>Conversation context</SheetTitle>
               <SheetDescription>
-                Attach Knowledge sources, repositories, Notes, MCP servers, and
-                transcription sessions to this conversation.
+                Attach Knowledge sources, Notes, MCP servers, and transcription
+                sessions to this conversation.
               </SheetDescription>
             </SheetHeader>
             {panel}
@@ -1203,20 +883,6 @@ function ContextHeading({
       <span className="shrink-0 text-[10px] text-muted-foreground">{meta}</span>
     </div>
   )
-}
-
-function formatRepositoryStatus(status: string) {
-  if (status === "ready") return "Ready"
-  if (status === "failed") return "Failed"
-  if (status === "queued") return "Queued"
-  return "Indexing"
-}
-
-function repositoryDetail(item: RepositoryContext) {
-  if (item.status === "failed" && item.error) return item.error
-  const skipped =
-    item.skippedFileCount > 0 ? ` · ${item.skippedFileCount} skipped` : ""
-  return `${item.provider} · ${item.readyFileCount}/${item.fileCount || "…"} files${skipped}${item.ref ? ` · ${item.ref}` : ""}`
 }
 
 function ContextItem({
