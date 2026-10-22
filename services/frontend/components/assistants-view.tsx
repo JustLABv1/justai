@@ -13,7 +13,6 @@ import {
   Page,
   PageActions,
   PageDescription,
-  PageEyebrow,
   PageHeader,
   PageHeading,
   PageTitle,
@@ -247,7 +246,6 @@ export function AssistantsView({
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageEyebrow>Reusable behavior</PageEyebrow>
           <PageTitle>Saved assistants</PageTitle>
           <PageDescription>
             Save instructions, memory defaults, context behavior, and model

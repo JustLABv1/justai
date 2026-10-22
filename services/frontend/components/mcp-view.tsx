@@ -1,8 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { HugeiconsIcon } from "@hugeicons/react"
-import { GithubIcon, GitlabIcon } from "@hugeicons/core-free-icons"
 import {
   AlertTriangle,
   Check,
@@ -79,7 +77,6 @@ import {
 type Props = {
   servers: MCPServer[]
   onChange: (servers: MCPServer[]) => void
-  mode?: "advanced" | "integrations"
   organizationRole?: string
   userId?: string
   platformAdmin?: boolean
@@ -123,39 +120,6 @@ type MCPAction = {
   label: string
 }
 
-type IntegrationPreset = {
-  id: "github" | "gitlab"
-  name: string
-  endpointUrl: string
-  description: string
-  tokenHint: string
-  docsUrl: string
-}
-
-const integrationPresets: IntegrationPreset[] = [
-  {
-    id: "github",
-    name: "GitHub",
-    endpointUrl: "https://api.githubcopilot.com/mcp/",
-    description:
-      "Search, create, update, and comment on issues and pull requests.",
-    tokenHint:
-      "Use a fine-grained personal access token with only the repository permissions you need.",
-    docsUrl:
-      "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp-in-your-ide/set-up-the-github-mcp-server",
-  },
-  {
-    id: "gitlab",
-    name: "GitLab",
-    endpointUrl: "https://gitlab.com/api/v4/mcp",
-    description:
-      "Search, create, update, and comment on issues and merge requests.",
-    tokenHint:
-      "Use a personal, project, or group access token. Self-hosted instances can replace the endpoint.",
-    docsUrl: "https://docs.gitlab.com/user/model_context_protocol/mcp_server/",
-  },
-]
-
 const maxMCPServerIconBytes = 2 * 1024 * 1024
 
 function mcpAuthLabel(authType: string) {
@@ -196,7 +160,6 @@ function isRequestAborted(caught: unknown) {
 export function MCPView({
   servers,
   onChange,
-  mode = "advanced",
   organizationRole,
   userId,
   platformAdmin = false,
@@ -219,9 +182,6 @@ export function MCPView({
   const [iconFile, setIconFile] = useState<File | null>(null)
   const [iconPreview, setIconPreview] = useState("")
   const [iconRemoved, setIconRemoved] = useState(false)
-  const [selectedIntegration, setSelectedIntegration] =
-    useState<IntegrationPreset | null>(null)
-  const [setupGuide, setSetupGuide] = useState<IntegrationPreset | null>(null)
   const actionAbortRef = useRef<AbortController | null>(null)
   const iconInputRef = useRef<HTMLInputElement | null>(null)
   const iconObjectURLRef = useRef("")
@@ -230,13 +190,7 @@ export function MCPView({
     platformAdmin ||
     organizationRole === "owner" ||
     organizationRole === "admin"
-  const isIntegrationServer = (server: MCPServer) =>
-    server.endpointUrl === "https://api.githubcopilot.com/mcp/" ||
-    /\/api\/v4\/mcp\/?$/.test(server.endpointUrl)
-  const visibleServers =
-    mode === "integrations"
-      ? servers.filter(isIntegrationServer)
-      : servers.filter((server) => !isIntegrationServer(server))
+  const visibleServers = servers
 
   const canManageServer = (server: MCPServer) => {
     if (server.scopeType === "global") return false
@@ -289,7 +243,6 @@ export function MCPView({
 
   const openCreate = useCallback(() => {
     setEditingServer(null)
-    setSelectedIntegration(null)
     setDialogError("")
     resetIconSelection()
     setForm({
@@ -298,22 +251,6 @@ export function MCPView({
     })
     setOpen(true)
   }, [canManageOrganization, resetIconSelection])
-
-  function openIntegration(preset: IntegrationPreset) {
-    setEditingServer(null)
-    setSelectedIntegration(preset)
-    setDialogError("")
-    resetIconSelection()
-    setForm({
-      ...emptyForm,
-      name: preset.name,
-      endpointUrl: preset.endpointUrl,
-      authType: preset.id === "gitlab" ? "oauth" : "api_key",
-      scopeType: "user",
-      autoDiscover: true,
-    })
-    setOpen(true)
-  }
 
   useEffect(() => {
     if (!createRequest || createRequest === createRequestRef.current) return
@@ -418,13 +355,11 @@ export function MCPView({
     resetIconSelection()
     setForm(emptyForm)
     setEditingServer(null)
-    setSelectedIntegration(null)
     setOpen(false)
   }
 
   function edit(server: MCPServer) {
     setEditingServer(server)
-    setSelectedIntegration(null)
     setDialogError("")
     resetIconSelection(server.iconUrl ?? "")
     setForm({
@@ -632,92 +567,6 @@ export function MCPView({
             </p>
           </div>
         </div>
-      )}
-      {mode === "integrations" && (
-        <section aria-labelledby="integration-catalog-title">
-          <div className="mb-3 flex items-end justify-between gap-4">
-            <div>
-              <h2
-                id="integration-catalog-title"
-                className="text-base font-semibold"
-              >
-                Issue tracker integrations
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Connect an MCP endpoint with a personal token. JustAI keeps
-                every write action approval-gated.
-              </p>
-            </div>
-            <Badge variant="outline" className="shrink-0">
-              Extensible catalog
-            </Badge>
-          </div>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {integrationPresets.map((preset) => {
-              const isConnected = servers.some(
-                (server) => server.endpointUrl === preset.endpointUrl
-              )
-              return (
-                <Card
-                  key={preset.id}
-                  size="sm"
-                  className="flex h-full flex-col gap-0"
-                >
-                  <CardHeader className="flex-row items-start gap-3 pb-3">
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                      <HugeiconsIcon
-                        aria-hidden="true"
-                        icon={preset.id === "github" ? GithubIcon : GitlabIcon}
-                        size={20}
-                      />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <CardTitle className="text-base">
-                          {preset.name}
-                        </CardTitle>
-                        {isConnected && (
-                          <Badge variant="secondary">Connected</Badge>
-                        )}
-                      </div>
-                      <CardDescription className="mt-1">
-                        {preset.description}
-                      </CardDescription>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="flex flex-1 flex-col space-y-3 pt-0">
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      {preset.tokenHint}
-                    </p>
-                    <div className="mt-auto flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="gap-1.5">
-                          <KeyRound aria-hidden="true" /> Token or OAuth
-                        </Badge>
-                        <Button
-                          aria-label={`Open ${preset.name} setup guide`}
-                          onClick={() => setSetupGuide(preset)}
-                          size="sm"
-                          variant="outline"
-                        >
-                          Setup guide
-                        </Button>
-                      </div>
-                      <Button
-                        disabled={isConnected}
-                        onClick={() => openIntegration(preset)}
-                        size="sm"
-                        variant="outline"
-                      >
-                        {isConnected ? "Connected" : "Connect"}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
-          </div>
-        </section>
       )}
       <div className="grid gap-3 lg:grid-cols-2">
         {visibleServers.map((server) => {
@@ -1001,7 +850,7 @@ export function MCPView({
             </Card>
           )
         })}
-        {mode === "advanced" && visibleServers.length === 0 && (
+        {visibleServers.length === 0 && (
           <Card className="bg-muted/30 lg:col-span-2">
             <CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 text-center">
               <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
@@ -1032,124 +881,6 @@ export function MCPView({
           </Card>
         )}
       </div>
-
-      <Dialog
-        open={setupGuide !== null}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setSetupGuide(null)
-        }}
-      >
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{setupGuide?.name} setup</DialogTitle>
-            <DialogDescription>
-              What you need before connecting {setupGuide?.name} to JustAI.
-            </DialogDescription>
-          </DialogHeader>
-          {setupGuide?.id === "github" ? (
-            <div className="space-y-4 text-sm">
-              <ol className="list-decimal space-y-2 pl-5 text-muted-foreground">
-                <li>
-                  Use a GitHub account that can access the repositories and
-                  issues you want JustAI to work with.
-                </li>
-                <li>
-                  Create a fine-grained personal access token, restricted to
-                  only the selected repositories and the permissions you need.
-                </li>
-                <li>
-                  If your organization manages GitHub policies, make sure
-                  personal access tokens or the GitHub MCP OAuth application are
-                  permitted.
-                </li>
-                <li>
-                  Paste the token into JustAI, then save and test the
-                  connection.
-                </li>
-              </ol>
-              <div className="rounded-xl bg-muted/50 px-3 py-2 font-mono text-xs">
-                {setupGuide.endpointUrl}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                OAuth is also available. GitHub&apos;s remote MCP server
-                supports OAuth and personal access tokens.
-              </p>
-            </div>
-          ) : setupGuide ? (
-            <div className="space-y-4 text-sm">
-              <ol className="list-decimal space-y-2 pl-5 text-muted-foreground">
-                <li>
-                  Enable GitLab Duo availability for the relevant top-level
-                  group or your self-managed instance.
-                </li>
-                <li>
-                  Enable beta and experimental features, then allow access to
-                  the GitLab MCP server.
-                </li>
-                <li>
-                  Use the GitLab MCP endpoint below, replacing{" "}
-                  <code>gitlab.com</code> with your self-hosted domain when
-                  needed.
-                </li>
-                <li>
-                  Prefer OAuth. If Dynamic Client Registration is disabled,
-                  create a public OAuth application with the <code>mcp</code>{" "}
-                  scope and configure its client ID in JustAI.
-                </li>
-              </ol>
-              <div className="rounded-xl bg-muted/50 px-3 py-2 font-mono text-xs">
-                {setupGuide.endpointUrl}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                A token works only when your GitLab MCP endpoint accepts
-                bearer-token authentication; GitLab&apos;s documented MCP flow
-                is OAuth.
-              </p>
-              <div className="rounded-lg border border-dashed bg-muted/20 p-3 text-xs text-muted-foreground">
-                <p className="font-medium text-foreground">
-                  Self-managed GitLab
-                </p>
-                <ul className="mt-2 list-disc space-y-1 pl-4">
-                  <li>
-                    Use GitLab 18.6 or later, with the MCP server available for
-                    the instance.
-                  </li>
-                  <li>
-                    Make the instance reachable from the JustAI backend over
-                    HTTPS; private-network instances require the platform&apos;s
-                    private-network access setting.
-                  </li>
-                  <li>
-                    Ask an instance administrator to enable Duo,
-                    beta/experimental features, and MCP server access for the
-                    intended group or instance.
-                  </li>
-                  <li>
-                    If OAuth Dynamic Client Registration is disabled, register a
-                    public OAuth application with the exact JustAI callback URL
-                    and the <code>mcp</code> scope.
-                  </li>
-                </ul>
-              </div>
-            </div>
-          ) : null}
-          <DialogFooter>
-            <Button
-              render={
-                <a
-                  href={setupGuide?.docsUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                />
-              }
-              variant="outline"
-            >
-              Open official documentation
-            </Button>
-            <Button onClick={() => setSetupGuide(null)}>Done</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <AlertDialog
         open={removeTarget !== null}
@@ -1190,7 +921,6 @@ export function MCPView({
           setOpen(value)
           if (!value) {
             setEditingServer(null)
-            setSelectedIntegration(null)
             setDialogError("")
             resetIconSelection()
             setForm(emptyForm)
@@ -1200,16 +930,11 @@ export function MCPView({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editingServer
-                ? "Edit MCP server"
-                : selectedIntegration
-                  ? `Connect ${selectedIntegration.name}`
-                  : "Add MCP server"}
+              {editingServer ? "Edit MCP server" : "Add MCP server"}
             </DialogTitle>
             <DialogDescription>
-              {selectedIntegration
-                ? `${selectedIntegration.tokenHint} The token is encrypted before storage.`
-                : "Use the server's remote HTTP endpoint. Local stdio processes stay outside this web service boundary."}
+              Use the server&apos;s remote HTTP endpoint. Local stdio processes
+              stay outside this web service boundary.
             </DialogDescription>
           </DialogHeader>
           {dialogError && (

@@ -1,27 +1,15 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Download, LockKeyhole, Play, Save } from "lucide-react"
+import { Download, Play, Save } from "lucide-react"
 
 import { api } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { PrivacySettings } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { SettingsRow, SettingsSection } from "@/components/ui/settings"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 export function PrivacyView() {
@@ -170,123 +158,54 @@ export function PrivacyView() {
       savedSettings.transcriptionRetentionDays
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
-      <Card aria-busy={loading || saving}>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LockKeyhole className="size-5 text-primary" />
-            Retention controls
-          </CardTitle>
-          <CardDescription>
-            Choose how long your personal data in this workspace remains. A
-            value of 0 means JustAI never removes it automatically.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {(loadError || error) && (
-            <Alert
-              aria-live="polite"
-              className="mb-4 flex flex-wrap items-start justify-between gap-3"
-              role="alert"
-              variant="destructive"
+    <div className="flex flex-col gap-4">
+      {(loadError || error) && (
+        <Alert
+          aria-live="polite"
+          className="flex flex-wrap items-start justify-between gap-3"
+          role="alert"
+          variant="destructive"
+        >
+          <div>
+            <AlertTitle>
+              {loadError
+                ? "Privacy settings unavailable"
+                : "Privacy action failed"}
+            </AlertTitle>
+            <AlertDescription>{loadError || error}</AlertDescription>
+          </div>
+          {loadError && (
+            <Button
+              onClick={() => {
+                setLoadError("")
+                setLoading(true)
+                setLoadAttempt((attempt) => attempt + 1)
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
             >
-              <div>
-                <AlertTitle>
-                  {loadError
-                    ? "Privacy settings unavailable"
-                    : "Privacy action failed"}
-                </AlertTitle>
-                <AlertDescription>{loadError || error}</AlertDescription>
-              </div>
-              {loadError && (
-                <Button
-                  onClick={() => {
-                    setLoadError("")
-                    setLoading(true)
-                    setLoadAttempt((attempt) => attempt + 1)
-                  }}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Retry
-                </Button>
+              Retry
+            </Button>
+          )}
+        </Alert>
+      )}
+      {notice && (
+        <Alert aria-live="polite" role="status">
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      )}
+      <form onSubmit={(event) => void save(event)}>
+        <SettingsSection
+          aria-busy={loading || saving}
+          description="Choose how long your personal data in this workspace remains. A value of 0 means JustAI never removes it automatically."
+          footer={
+            <>
+              {settingsDirty && (
+                <p className="mr-auto text-xs text-muted-foreground">
+                  Save before running cleanup. It uses the last saved values.
+                </p>
               )}
-            </Alert>
-          )}
-          {notice && (
-            <Alert aria-live="polite" className="mb-4" role="status">
-              <AlertDescription>{notice}</AlertDescription>
-            </Alert>
-          )}
-          <form onSubmit={(event) => void save(event)}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="archived-retention">
-                  Archived conversations
-                </FieldLabel>
-                <Input
-                  disabled={loading || saving}
-                  id="archived-retention"
-                  min={0}
-                  max={3650}
-                  onChange={(event) =>
-                    update(
-                      "archivedConversationRetentionDays",
-                      event.target.value
-                    )
-                  }
-                  type="number"
-                  value={settings.archivedConversationRetentionDays}
-                />
-                <FieldDescription>
-                  Delete archived chats after this many days.
-                </FieldDescription>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="knowledge-retention">
-                  Personal knowledge
-                </FieldLabel>
-                <Input
-                  disabled={loading || saving}
-                  id="knowledge-retention"
-                  min={0}
-                  max={3650}
-                  onChange={(event) =>
-                    update("knowledgeRetentionDays", event.target.value)
-                  }
-                  type="number"
-                  value={settings.knowledgeRetentionDays}
-                />
-                <FieldDescription>
-                  Remove your uploaded and imported knowledge sources.
-                </FieldDescription>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="transcription-retention">
-                  Completed transcripts
-                </FieldLabel>
-                <Input
-                  disabled={loading || saving}
-                  id="transcription-retention"
-                  min={0}
-                  max={3650}
-                  onChange={(event) =>
-                    update("transcriptionRetentionDays", event.target.value)
-                  }
-                  type="number"
-                  value={settings.transcriptionRetentionDays}
-                />
-                <FieldDescription>
-                  Remove completed or failed transcript sessions and recordings.
-                </FieldDescription>
-              </Field>
-            </FieldGroup>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <Button disabled={loading || saving} type="submit">
-                <Save data-icon="inline-start" />
-                {saving ? "Saving…" : "Save retention settings"}
-              </Button>
               <Button
                 disabled={loading || saving || cleaning || settingsDirty}
                 onClick={() => setCleanupOpen(true)}
@@ -296,27 +215,73 @@ export function PrivacyView() {
                 <Play data-icon="inline-start" />
                 {cleaning ? "Running…" : "Run cleanup now"}
               </Button>
-            </div>
-            {settingsDirty && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Save your retention settings before running cleanup. Cleanup
-                uses the last saved values.
-              </p>
-            )}
-          </form>
-        </CardContent>
-      </Card>
+              <Button disabled={loading || saving} type="submit">
+                <Save data-icon="inline-start" />
+                {saving ? "Saving…" : "Save changes"}
+              </Button>
+            </>
+          }
+          title="Retention"
+        >
+          <SettingsRow
+            description="Delete archived chats after this many days."
+            htmlFor="archived-retention"
+            label="Archived conversations"
+          >
+            <Input
+              className="sm:max-w-32"
+              disabled={loading || saving}
+              id="archived-retention"
+              max={3650}
+              min={0}
+              onChange={(event) => update("archivedConversationRetentionDays", event.target.value)}
+              type="number"
+              value={settings.archivedConversationRetentionDays}
+            />
+          </SettingsRow>
+          <SettingsRow
+            description="Remove your uploaded and imported knowledge sources."
+            htmlFor="knowledge-retention"
+            label="Personal knowledge"
+          >
+            <Input
+              className="sm:max-w-32"
+              disabled={loading || saving}
+              id="knowledge-retention"
+              max={3650}
+              min={0}
+              onChange={(event) => update("knowledgeRetentionDays", event.target.value)}
+              type="number"
+              value={settings.knowledgeRetentionDays}
+            />
+          </SettingsRow>
+          <SettingsRow
+            description="Remove completed or failed transcript sessions and recordings."
+            htmlFor="transcription-retention"
+            label="Completed transcripts"
+          >
+            <Input
+              className="sm:max-w-32"
+              disabled={loading || saving}
+              id="transcription-retention"
+              max={3650}
+              min={0}
+              onChange={(event) => update("transcriptionRetentionDays", event.target.value)}
+              type="number"
+              value={settings.transcriptionRetentionDays}
+            />
+          </SettingsRow>
+        </SettingsSection>
+      </form>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Export your data</CardTitle>
-          <CardDescription>
-            Download conversations, messages, notes, memories, projects, and
-            personal source metadata as JSON. Binary files, recordings, and
-            message attachments are not included.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <SettingsSection
+        description="Download conversations, messages, notes, memories, projects, and personal source metadata as JSON. Binary files, recordings, and message attachments are not included."
+        title="Export your data"
+      >
+        <SettingsRow
+          description="Exports are generated on demand and are not stored by JustAI after the response completes."
+          label="Data export"
+        >
           <Button
             disabled={exporting}
             onClick={() => void exportData()}
@@ -325,12 +290,8 @@ export function PrivacyView() {
             <Download data-icon="inline-start" />
             {exporting ? "Preparing export…" : "Download data export"}
           </Button>
-          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-            Exports are generated on demand and are not stored by JustAI after
-            the response completes.
-          </p>
-        </CardContent>
-      </Card>
+        </SettingsRow>
+      </SettingsSection>
       <ConfirmActionDialog
         open={cleanupOpen}
         title="Run retention cleanup now?"

@@ -163,6 +163,8 @@ func (a *App) Router() *gin.Engine {
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.RequireAuth(a.Tokens, a.DB))
 	protected.GET("/auth/me", a.me)
+	protected.GET("/onboarding", a.getOnboarding)
+	protected.PUT("/onboarding", a.updateOnboarding)
 	protected.PATCH("/profile", a.updateProfile)
 	protected.GET("/profile", a.getProfile)
 	protected.GET("/profile/avatar", a.serveProfileAvatar)
@@ -306,13 +308,6 @@ func (a *App) Router() *gin.Engine {
 	// such as /spaces/:spaceId/items/:itemId during router construction.
 	org.POST("/knowledge/space-items/:spaceId/:itemId", a.platformFeature("unified_knowledge"), a.assignKnowledgeItem)
 	org.DELETE("/knowledge/space-items/:spaceId/:itemId", a.platformFeature("unified_knowledge"), a.removeKnowledgeItem)
-	org.POST("/knowledge/repositories", a.platformFeature("unified_knowledge"), a.createKnowledgeRepository)
-	org.POST("/knowledge/repositories/:id/sync", a.platformFeature("unified_knowledge"), a.syncKnowledgeRepository)
-	org.PATCH("/knowledge/repositories/:id/schedule", a.platformFeature("unified_knowledge"), a.updateKnowledgeRepositorySchedule)
-	org.PATCH("/knowledge/repositories/:id/config", a.platformFeature("unified_knowledge"), a.updateKnowledgeRepositoryConfig)
-	org.GET("/knowledge/repositories/:id/files", a.platformFeature("unified_knowledge"), a.listKnowledgeRepositoryFiles)
-	org.DELETE("/knowledge/repositories/:id", a.platformFeature("unified_knowledge"), a.deleteKnowledgeRepository)
-	org.GET("/repositories", a.platformFeature("knowledge"), a.listUserRepositoryContexts)
 	org.GET("/memories", a.listMemories)
 	org.POST("/memories", a.createMemory)
 	org.PATCH("/memories/:id", a.updateMemory)
@@ -401,8 +396,6 @@ func (a *App) Router() *gin.Engine {
 	org.GET("/pdfs/:id", a.serveGeneratedPDF)
 	org.GET("/files/:id", a.serveGeneratedChatFile)
 	org.GET("/conversations/:id/context", a.getConversationContext)
-	org.POST("/conversations/:id/repositories", a.platformFeature("knowledge"), a.createRepositoryContext)
-	org.DELETE("/conversations/:id/context/repositories/:repositoryId", a.platformFeature("knowledge"), a.deleteRepositoryContext)
 	org.POST("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.attachConversationKnowledge)
 	org.PATCH("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.updateConversationKnowledge)
 	org.DELETE("/conversations/:id/context/knowledge/:sourceId", a.platformFeature("knowledge"), a.detachConversationKnowledge)
@@ -596,7 +589,11 @@ func (a *App) authConfig(c *gin.Context) {
 		settings = platformSettings{MaintenanceMessage: "Platform controls are temporarily unavailable"}
 	}
 	providers := a.publicOIDCProviders(c)
+	var setupRequired bool
+	// Only the empty installation advertises administrator account creation.
+	_ = a.DB.QueryRowContext(c, `SELECT NOT EXISTS (SELECT 1 FROM users)`).Scan(&setupRequired)
 	c.JSON(http.StatusOK, gin.H{
+		"setupRequired":       setupRequired,
 		"oidcEnabled":         len(providers) > 0,
 		"oidcLabel":           "Continue with OIDC",
 		"oidcProviders":       providers,

@@ -24,6 +24,7 @@
   "registries": {
     "@assistant-ui": "https://r.assistant-ui.com/styles/{style}/{name}.json",
     "@blocks-so": "https://blocks.so/r/{name}.json",
-    "@react-bits": "https://reactbits.dev/r/{name}.json"
+    "@react-bits": "https://reactbits.dev/r/{name}.json",
+    "@reui": "https://reui.io/r/{name}.json"
   }
 }

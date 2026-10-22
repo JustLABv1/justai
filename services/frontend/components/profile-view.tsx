@@ -47,7 +47,6 @@ import {
 import {
   Page,
   PageDescription,
-  PageEyebrow,
   PageHeader,
   PageHeading,
   PageSection,
@@ -505,7 +504,6 @@ export function ProfileView({
     <Page className="max-w-6xl">
       <PageHeader>
         <PageHeading>
-          <PageEyebrow>Account</PageEyebrow>
           <PageTitle>Profile</PageTitle>
           <PageDescription>
             Your identity, activity, and creative footprint in JustAI.

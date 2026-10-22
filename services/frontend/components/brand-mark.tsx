@@ -2,9 +2,11 @@ import { cn } from "@/lib/utils"
 
 type BrandMarkProps = {
   className?: string
+  /** Crop the viewBox to the drawn glyph so it is optically centered. */
+  cropped?: boolean
 }
 
-export function BrandMark({ className }: BrandMarkProps) {
+export function BrandMark({ className, cropped = false }: BrandMarkProps) {
   return (
     <span
       aria-hidden="true"
@@ -14,7 +16,7 @@ export function BrandMark({ className }: BrandMarkProps) {
         aria-hidden="true"
         className="size-full"
         fill="none"
-        viewBox="0 0 64 64"
+        viewBox={cropped ? "-0.25 0.5 60 60" : "0 0 64 64"}
       >
         <path
           d="M10 12v6c0 7 6 12 15 12"

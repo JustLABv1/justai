@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored ReUI registry source; re-installed with the shadcn CLI.
+    "components/reui/**",
+    "hooks/use-file-upload.ts",
   ]),
 ]);
 

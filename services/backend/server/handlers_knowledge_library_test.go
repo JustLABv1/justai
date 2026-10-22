@@ -105,6 +105,7 @@ func TestKnowledgeItemsWhereUsesStablePlaceholdersAndHidesRepositoryFiles(t *tes
 		"ki.organization_id = $1",
 		"ki.owner_id = $2",
 		"hidden_repo_file.source_id = ki.resource_id",
+		"ki.resource_type <> 'repository'",
 		"ki.resource_type = $3",
 		"ki.status = $4",
 		"ki.title ILIKE $5",

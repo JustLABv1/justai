@@ -128,7 +128,6 @@ import {
   Page,
   PageActions,
   PageDescription,
-  PageEyebrow,
   PageHeader,
   PageHeading,
   PageTitle,
@@ -1575,10 +1574,6 @@ export function AgentsView({
       )}
       <PageHeader>
         <PageHeading>
-          <PageEyebrow className="flex items-center gap-2">
-            Agents
-            <Badge variant="secondary">Native + A2A</Badge>
-          </PageEyebrow>
           <PageTitle>Agent workspace</PageTitle>
           <PageDescription>
             Manage your team of agents, design workflows, and monitor execution.

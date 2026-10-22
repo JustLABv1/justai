@@ -5,12 +5,10 @@ import {
   CheckCircle2,
   CircleAlert,
   Cloud,
-  KeyRound,
   LockKeyhole,
-  MessageSquare,
-  Mic2,
   MoreHorizontal,
   Pencil,
+  Plus,
   Radio,
   Server,
   Sparkles,
@@ -45,20 +43,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { FilterBar } from "@/components/ui/filter-bar"
+import { Input } from "@/components/ui/input"
+import { SettingsSection } from "@/components/ui/settings"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   DropdownMenu,
@@ -78,6 +70,7 @@ type Props = {
   apiBasePath?: string
   defaultScopeType?: "global" | "organization" | "user"
   createRequest?: number
+  showCreateAction?: boolean
   resourceError?: string
   onRetryResource?: () => void
 }
@@ -112,6 +105,7 @@ export function EndpointsView({
   apiBasePath = "/api/v1/endpoints",
   defaultScopeType,
   createRequest,
+  showCreateAction = false,
   resourceError,
   onRetryResource,
 }: Props) {
@@ -512,27 +506,11 @@ export function EndpointsView({
         </div>
       )}
 
-      {!isPlatformCatalog &&
-        endpoints.some((item) => item.scopeType === "global") && (
-          <div className="flex items-start gap-3 rounded-xl border border-dashed bg-muted/30 px-4 py-3 text-sm">
-            <LockKeyhole
-              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <div>
-              <p className="font-medium">Platform-managed endpoints</p>
-              <p className="mt-1 text-muted-foreground">
-                These endpoints are inherited by this workspace and can only be
-                changed from the Platform Admin catalog.
-              </p>
-            </div>
-          </div>
-        )}
-
       <EndpointTable
         endpoints={endpoints}
         visibleEndpoints={visibleEndpoints}
         isPlatformCatalog={isPlatformCatalog}
+        hasManagedEndpoints={endpoints.some((item) => item.scopeType === "global")}
         busyId={busyId}
         search={search}
         scopeFilter={scopeFilter}
@@ -555,6 +533,7 @@ export function EndpointsView({
         onEdit={openEdit}
         onRemove={setRemoveTarget}
         onCreate={openCreate}
+        showCreateAction={showCreateAction}
         resourceError={resourceError}
         onRetryResource={onRetryResource}
       />
@@ -619,6 +598,7 @@ function EndpointTable({
   endpoints,
   visibleEndpoints,
   isPlatformCatalog,
+  hasManagedEndpoints,
   busyId,
   search,
   scopeFilter,
@@ -636,12 +616,14 @@ function EndpointTable({
   onEdit,
   onRemove,
   onCreate,
+  showCreateAction,
   resourceError,
   onRetryResource,
 }: {
   endpoints: Endpoint[]
   visibleEndpoints: Endpoint[]
   isPlatformCatalog: boolean
+  hasManagedEndpoints: boolean
   busyId: string
   search: string
   scopeFilter: string
@@ -658,356 +640,271 @@ function EndpointTable({
   onToggle: (endpoint: Endpoint) => void
   onEdit: (endpoint: Endpoint) => void
   onRemove: (endpoint: Endpoint) => void
+  showCreateAction?: boolean
   onCreate: (kind?: EndpointKind) => void
   resourceError?: string
   onRetryResource?: () => void
 }) {
+  // Scope and status filters only earn their space once the list is long.
+  const showAdvancedFilters = endpoints.length >= 8
   return (
-    <Card>
-      <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <CardTitle>Endpoint inventory</CardTitle>
-          <CardDescription>
-            Open a row to edit connection details.
-          </CardDescription>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-          <span className="size-1.5 rounded-full bg-primary" /> Live catalog
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <FilterBar
-          hasActiveFilters={
-            Boolean(search.trim()) ||
-            scopeFilter !== "all" ||
-            statusFilter !== "all" ||
-            kindFilter !== "all"
+    <SettingsSection
+      description={
+        hasManagedEndpoints && !isPlatformCatalog
+          ? "Locked endpoints are managed by the platform and can only be changed in the Platform Admin catalog."
+          : "Open the menu on a row to test, edit, or remove an endpoint."
+      }
+      title="Endpoints"
+      actions={showCreateAction ? (
+        <Button size="sm" onClick={() => onCreate()}><Plus /> Add AI endpoint</Button>
+      ) : undefined}
+    >
+      <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-5 py-3">
+        <Input
+          aria-label="Search endpoints"
+          className="h-8 min-w-48 flex-1"
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search name, provider, model…"
+          type="search"
+          value={search}
+        />
+        <Tabs
+          value={kindFilter}
+          onValueChange={(value) =>
+            onKindChange((value as "all" | EndpointKind) ?? "all")
           }
-          onClear={onClearFilters}
-          resultCount={visibleEndpoints.length}
-          resultLabel="endpoints"
-          resultTotal={endpoints.length}
-          search={{
-            label: "Search endpoints",
-            onChange: onSearchChange,
-            placeholder: "Search name, provider, model…",
-            value: search,
-          }}
         >
-          <Tabs
-            className="shrink-0"
-            value={kindFilter}
-            onValueChange={(value) =>
-              onKindChange((value as "all" | EndpointKind) ?? "all")
-            }
-          >
-            <TabsList aria-label="Filter endpoint type" variant="line">
-              <TabsTrigger value="all">All endpoints</TabsTrigger>
-              <TabsTrigger value="llm">
-                <MessageSquare aria-hidden="true" /> LLM
-              </TabsTrigger>
-              <TabsTrigger value="diarization">
-                <Mic2 aria-hidden="true" /> Diarization
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <Select
-            value={scopeFilter}
-            onValueChange={(value) => onScopeChange(value ?? "all")}
-          >
-            <SelectTrigger
-              aria-label="Filter endpoint scope"
-              className="h-8 min-w-32 sm:min-w-36"
-              size="sm"
+          <TabsList aria-label="Filter endpoint type">
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="llm">LLM</TabsTrigger>
+            <TabsTrigger value="diarization">Diarization</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {showAdvancedFilters && (
+          <>
+            <Select
+              value={scopeFilter}
+              onValueChange={(value) => onScopeChange(value ?? "all")}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All scopes</SelectItem>
-              <SelectItem value="global">Global</SelectItem>
-              <SelectItem value="organization">Workspace</SelectItem>
-              <SelectItem value="user">Personal</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={statusFilter}
-            onValueChange={(value) => onStatusChange(value ?? "all")}
-          >
-            <SelectTrigger
-              aria-label="Filter endpoint status"
-              className="h-8 min-w-32 sm:min-w-36"
-              size="sm"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="enabled">Enabled</SelectItem>
-              <SelectItem value="disabled">Disabled</SelectItem>
-            </SelectContent>
-          </Select>
-        </FilterBar>
-        {visibleEndpoints.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-xs">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th className="px-4 py-3 font-medium">Endpoint</th>
-                  <th className="px-4 py-3 font-medium">Scope</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Capabilities</th>
-                  <th className="px-4 py-3 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleEndpoints.map((endpoint) => {
-                  const details =
-                    providerDetails[endpoint.providerType] ??
-                    providerDetails["openai-compatible"]
-                  const modelLabel =
-                    endpoint.chatModel ||
-                    endpoint.diarizationModel ||
-                    "model selected at request time"
-                  const manageable = canManageEndpoint(endpoint)
-                  const capabilities = Object.entries(
-                    endpoint.capabilities ?? {}
-                  )
-                    .filter(([, enabled]) => enabled)
-                    .map(([capability]) => capability)
-                  return (
-                    <tr className="border-b last:border-0" key={endpoint.id}>
-                      <td className="max-w-[280px] px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                            <ProviderIcon provider={endpoint.providerType} />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="truncate font-medium">
-                                {endpoint.name}
-                              </p>
-                              {endpoint.isDefault && (
-                                <Badge variant="outline">Default</Badge>
-                              )}
-                              <Badge variant="secondary">
-                                {endpointKindFor(endpoint) === "diarization"
-                                  ? "Diarization"
-                                  : "LLM"}
-                              </Badge>
-                              {endpointKindFor(endpoint) === "llm" &&
-                                endpoint.capabilities.diarization && (
-                                  <Badge variant="outline">Dual role</Badge>
-                                )}
-                              {endpointKindFor(endpoint) === "diarization" &&
-                                endpoint.capabilities.chat && (
-                                  <Badge variant="outline">Dual role</Badge>
-                                )}
-                            </div>
-                            <p
-                              className="truncate text-muted-foreground"
-                              title={endpoint.baseUrl}
-                            >
-                              {details.label} · {modelLabel}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge
-                          variant={
-                            endpoint.scopeType === "global"
-                              ? "outline"
-                              : "secondary"
-                          }
-                        >
-                          {endpoint.scopeType === "global" && (
-                            <LockKeyhole aria-hidden="true" />
-                          )}
-                          {endpoint.scopeType === "global"
-                            ? isPlatformCatalog
-                              ? "Platform catalog"
-                              : "Platform-managed"
-                            : endpoint.scopeType === "organization"
-                              ? "Workspace"
-                              : "Personal"}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Badge variant="outline" className="gap-1.5">
-                            <span
-                              className={`size-1.5 rounded-full ${endpoint.enabled ? "bg-primary" : "bg-muted-foreground"}`}
-                            />
-                            {endpoint.enabled ? "Enabled" : "Disabled"}
-                          </Badge>
-                          {endpoint.credentialConfigured && (
-                            <Badge variant="outline" title="Credential stored">
-                              <KeyRound aria-hidden="true" /> Credential
-                            </Badge>
-                          )}
-                          {endpoint.lastTestedAt && (
-                            <div className="min-w-0">
-                              <Badge
-                                aria-label={endpointHealthSummary(endpoint)}
-                                variant={
-                                  endpoint.lastTestOk === false
-                                    ? "destructive"
-                                    : "outline"
-                                }
-                                title={endpointHealthSummary(endpoint)}
-                              >
-                                <span
-                                  className={`size-1.5 rounded-full ${endpoint.lastTestOk === false ? "bg-destructive" : "bg-primary"}`}
-                                />
-                                {endpoint.lastTestOk === false
-                                  ? "Check failed"
-                                  : "Checked"}
-                              </Badge>
-                              {endpoint.lastTestOk === false &&
-                                endpoint.lastTestError && (
-                                  <p className="mt-1 max-w-44 truncate text-[10px] text-destructive">
-                                    {endpoint.lastTestError}
-                                  </p>
-                                )}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex max-w-[250px] flex-wrap gap-1">
-                          {capabilities.slice(0, 3).map((capability) => (
-                            <Badge
-                              key={capability}
-                              variant="outline"
-                              className="text-[10px]"
-                            >
-                              {capability}
-                            </Badge>
-                          ))}
-                          {capabilities.length > 3 && (
-                            <Badge variant="secondary" className="text-[10px]">
-                              +{capabilities.length - 3}
-                            </Badge>
-                          )}
-                          {capabilities.length === 0 && (
-                            <span className="text-muted-foreground">
-                              None configured
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={`${manageable ? "Actions" : "Test"} for ${endpoint.name}`}
-                              />
-                            }
-                          >
-                            <MoreHorizontal aria-hidden="true" />
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              disabled={
-                                !endpoint.enabled || busyId === endpoint.id
-                              }
-                              onClick={() => void onTest(endpoint)}
-                            >
-                              <Radio aria-hidden="true" /> Test capabilities
-                            </DropdownMenuItem>
-                            {manageable && (
-                              <>
-                                <DropdownMenuSeparator />
-                                {!endpoint.isDefault && (
-                                  <DropdownMenuItem
-                                    disabled={busyId === endpoint.id}
-                                    onClick={() => onSetDefault(endpoint)}
-                                  >
-                                    <CheckCircle2 aria-hidden="true" /> Set
-                                    default
-                                  </DropdownMenuItem>
-                                )}
-                                <DropdownMenuItem
-                                  disabled={busyId === endpoint.id}
-                                  className={
-                                    endpoint.enabled
-                                      ? "text-destructive focus:text-destructive"
-                                      : "text-primary focus:text-primary"
-                                  }
-                                  onClick={() => onToggle(endpoint)}
-                                >
-                                  {endpoint.enabled ? "Disable" : "Enable"}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={busyId === endpoint.id}
-                                  onClick={() => onEdit(endpoint)}
-                                >
-                                  <Pencil aria-hidden="true" /> Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={busyId === endpoint.id}
-                                  variant="destructive"
-                                  onClick={() => onRemove(endpoint)}
-                                >
-                                  <Trash2 aria-hidden="true" /> Remove
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="flex min-h-52 flex-col items-center justify-center gap-3 px-4 py-8 text-center">
-            <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
-              <Cloud aria-hidden="true" />
-            </div>
-            <div>
-              <p className="font-medium">
-                {resourceError && endpoints.length === 0
-                  ? "Endpoint inventory unavailable"
-                  : endpoints.length === 0
-                    ? "No endpoints yet"
-                    : "No endpoints match these filters"}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {resourceError && endpoints.length === 0
-                  ? "JustAI could not load the endpoint catalog. Retry to check again."
-                  : endpoints.length === 0
-                    ? "Connect a provider to make it available for model routing."
-                    : "Try a different search or clear the scope and status filters."}
-              </p>
-            </div>
-            {resourceError && endpoints.length === 0 && onRetryResource ? (
-              <Button variant="outline" size="sm" onClick={onRetryResource}>
-                Retry
-              </Button>
-            ) : endpoints.length === 0 && !resourceError ? (
-              <Button
-                variant="outline"
+              <SelectTrigger
+                aria-label="Filter endpoint scope"
+                className="h-8 min-w-32"
                 size="sm"
-                onClick={() =>
-                  onCreate(kindFilter === "all" ? undefined : kindFilter)
-                }
               >
-                Add your first{" "}
-                {kindFilter === "diarization"
-                  ? "diarization service"
-                  : "model endpoint"}
-              </Button>
-            ) : null}
-          </div>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All scopes</SelectItem>
+                <SelectItem value="global">Global</SelectItem>
+                <SelectItem value="organization">Workspace</SelectItem>
+                <SelectItem value="user">Personal</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => onStatusChange(value ?? "all")}
+            >
+              <SelectTrigger
+                aria-label="Filter endpoint status"
+                className="h-8 min-w-32"
+                size="sm"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="enabled">Enabled</SelectItem>
+                <SelectItem value="disabled">Disabled</SelectItem>
+              </SelectContent>
+            </Select>
+          </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+      {visibleEndpoints.length > 0 ? (
+        visibleEndpoints.map((endpoint) => {
+          const details =
+            providerDetails[endpoint.providerType] ??
+            providerDetails["openai-compatible"]
+          const modelLabel =
+            endpoint.chatModel ||
+            endpoint.diarizationModel ||
+            "model selected at request time"
+          const manageable = canManageEndpoint(endpoint)
+          const managed = endpoint.scopeType === "global"
+          const capabilities = Object.entries(endpoint.capabilities ?? {})
+            .filter(([, enabled]) => enabled)
+            .map(([capability]) => capability)
+          const failed = endpoint.lastTestOk === false
+          const status = !endpoint.enabled
+            ? { label: "Disabled", dot: "bg-muted-foreground" }
+            : failed
+              ? { label: "Check failed", dot: "bg-destructive" }
+              : endpoint.lastTestedAt
+                ? { label: "Healthy", dot: "bg-emerald-500" }
+                : { label: "Enabled", dot: "bg-primary" }
+          const scopeLabel =
+            endpoint.scopeType === "organization"
+              ? "Workspace"
+              : endpoint.scopeType === "user"
+                ? "Personal"
+                : null
+          return (
+            <div
+              className="flex items-center gap-3 border-t border-border/60 px-5 py-3"
+              key={endpoint.id}
+            >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <ProviderIcon provider={endpoint.providerType} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="truncate text-sm font-medium">{endpoint.name}</p>
+                  {endpoint.isDefault && <Badge variant="outline">Default</Badge>}
+                  <Badge variant="secondary">
+                    {endpointKindFor(endpoint) === "diarization"
+                      ? "Diarization"
+                      : "LLM"}
+                  </Badge>
+                </div>
+                <p
+                  className="truncate text-xs text-muted-foreground"
+                  title={[
+                    endpoint.baseUrl,
+                    capabilities.length
+                      ? `Capabilities: ${capabilities.join(", ")}`
+                      : "No capabilities configured",
+                  ].join("\n")}
+                >
+                  {details.label} · {modelLabel}
+                  {scopeLabel ? ` · ${scopeLabel}` : ""}
+                </p>
+              </div>
+              <span
+                className="hidden shrink-0 items-center gap-2 text-sm sm:flex"
+                title={endpointHealthSummary(endpoint)}
+              >
+                <span className={`size-2 rounded-full ${status.dot}`} />
+                <span
+                  className={failed && endpoint.enabled ? "text-destructive" : "text-muted-foreground"}
+                >
+                  {status.label}
+                </span>
+              </span>
+              {managed && (
+                <LockKeyhole
+                  aria-label={
+                    isPlatformCatalog ? "Platform catalog" : "Managed by platform"
+                  }
+                  className="size-4 shrink-0 text-muted-foreground"
+                />
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`${manageable ? "Actions" : "Test"} for ${endpoint.name}`}
+                    />
+                  }
+                >
+                  <MoreHorizontal aria-hidden="true" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    disabled={!endpoint.enabled || busyId === endpoint.id}
+                    onClick={() => void onTest(endpoint)}
+                  >
+                    <Radio aria-hidden="true" /> Test capabilities
+                  </DropdownMenuItem>
+                  {manageable && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {!endpoint.isDefault && (
+                        <DropdownMenuItem
+                          disabled={busyId === endpoint.id}
+                          onClick={() => onSetDefault(endpoint)}
+                        >
+                          <CheckCircle2 aria-hidden="true" /> Set default
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        disabled={busyId === endpoint.id}
+                        className={
+                          endpoint.enabled
+                            ? "text-destructive focus:text-destructive"
+                            : "text-primary focus:text-primary"
+                        }
+                        onClick={() => onToggle(endpoint)}
+                      >
+                        {endpoint.enabled ? "Disable" : "Enable"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={busyId === endpoint.id}
+                        onClick={() => onEdit(endpoint)}
+                      >
+                        <Pencil aria-hidden="true" /> Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={busyId === endpoint.id}
+                        variant="destructive"
+                        onClick={() => onRemove(endpoint)}
+                      >
+                        <Trash2 aria-hidden="true" /> Remove
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )
+        })
+      ) : (
+        <div className="flex min-h-40 flex-col items-center justify-center gap-3 border-t border-border/60 px-4 py-8 text-center">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
+            <Cloud aria-hidden="true" />
+          </div>
+          <div>
+            <p className="font-medium">
+              {resourceError && endpoints.length === 0
+                ? "Endpoint inventory unavailable"
+                : endpoints.length === 0
+                  ? "No endpoints yet"
+                  : "No endpoints match these filters"}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {resourceError && endpoints.length === 0
+                ? "JustAI could not load the endpoint catalog. Retry to check again."
+                : endpoints.length === 0
+                  ? "Connect a provider to make it available for model routing."
+                  : "Try a different search or clear the filters."}
+            </p>
+          </div>
+          {resourceError && endpoints.length === 0 && onRetryResource ? (
+            <Button variant="outline" size="sm" onClick={onRetryResource}>
+              Retry
+            </Button>
+          ) : endpoints.length === 0 && !resourceError ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                onCreate(kindFilter === "all" ? undefined : kindFilter)
+              }
+            >
+              Add your first{" "}
+              {kindFilter === "diarization"
+                ? "diarization service"
+                : "model endpoint"}
+            </Button>
+          ) : endpoints.length > 0 ? (
+            <Button variant="outline" size="sm" onClick={onClearFilters}>
+              Clear filters
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </SettingsSection>
   )
 }
 

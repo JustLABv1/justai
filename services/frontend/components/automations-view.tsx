@@ -49,7 +49,6 @@ import {
   Page,
   PageActions,
   PageDescription,
-  PageEyebrow,
   PageHeader,
   PageHeading,
   PageTitle,
@@ -258,7 +257,6 @@ export function AutomationsView({
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageEyebrow>Automations</PageEyebrow>
           <PageTitle>Give assistants recurring work.</PageTitle>
           <PageDescription>
             Schedule a focused task, choose the assistant and restrict exactly

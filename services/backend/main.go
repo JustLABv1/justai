@@ -59,7 +59,6 @@ func main() {
 	workerContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	application.RAG.Start(workerContext)
-	application.StartRepositoryWorker(workerContext)
 	application.StartLifecycleWorker(workerContext)
 	application.StartAgentWorker(workerContext)
 	application.Live.Start(workerContext)

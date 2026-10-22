@@ -1084,13 +1084,6 @@ function ContextDisplay({
       resourceId: source.id,
       contextScope: source.contextScope,
     })),
-    ...(context.repositories ?? []).map((repository) => ({
-      id: `repository:${repository.id}`,
-      label: repository.title,
-      detail: `repository · ${repository.status}`,
-      kind: "repository" as const,
-      resourceId: repository.id,
-    })),
     ...context.mcpServers.map((server) => ({
       id: `mcp:${server.id}`,
       label: server.name,
@@ -1451,12 +1444,11 @@ function ChatAmbient() {
 const subscribeNever = () => () => {}
 
 function ChatBackdrop() {
-  // Rendered into the workspace shell so the image spans the whole window
-  // and sits behind the floating sidebars instead of being clipped to the
-  // chat column.
+  // Rendered into the inset content panel (an isolated stacking context) so
+  // the image sits behind the chat but stays inside the rounded panel.
   const shell = useSyncExternalStore(
     subscribeNever,
-    () => document.getElementById("workspace-shell"),
+    () => document.getElementById("workspace-inset"),
     () => null
   )
   if (!shell) return null
@@ -2297,19 +2289,11 @@ function ResponseSetupPopover({
   assistantId,
   assistantLocked,
   onAssistantChange,
-  deepContext,
-  deepContextAvailable,
-  onDeepContextChange,
-  deepContextTitle,
 }: {
   assistants: SavedAssistant[]
   assistantId: string
   assistantLocked: boolean
   onAssistantChange: (id: string) => void
-  deepContext: boolean
-  deepContextAvailable: boolean
-  onDeepContextChange: (enabled: boolean) => void
-  deepContextTitle: string
 }) {
   const [view, setView] = useState<"main" | "agent">("main")
   const selectedAssistant = assistants.find(
@@ -2338,12 +2322,6 @@ function ResponseSetupPopover({
       >
         <ShieldCheck className="size-4 shrink-0" aria-hidden="true" />
         <span className="hidden truncate sm:inline">Response setup</span>
-        {deepContext && (
-          <span
-            aria-label="Deep context enabled"
-            className="size-1.5 shrink-0 rounded-full bg-primary"
-          />
-        )}
         <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
@@ -2389,36 +2367,6 @@ function ResponseSetupPopover({
                       <ChevronDown className="size-3.5 -rotate-90 text-muted-foreground" />
                     )}
                   </button>
-                  <div className="flex items-center gap-2.5 rounded-xl px-2.5 py-2">
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                      <BrainCircuit className="size-3.5" aria-hidden="true" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-xs font-medium">
-                        Deep context
-                      </span>
-                      <span className="block truncate text-[11px] text-muted-foreground">
-                        {deepContextAvailable
-                          ? deepContext
-                            ? "Broader retrieval is active"
-                            : "Use a smaller context window"
-                          : deepContextTitle}
-                      </span>
-                    </span>
-                    <button
-                      aria-checked={deepContext}
-                      aria-label="Toggle deep context"
-                      className={cn(
-                        "relative h-5 w-9 shrink-0 rounded-full bg-muted transition-colors duration-150 ease-out after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-background after:shadow-sm after:transition-transform after:duration-150 after:ease-out active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50",
-                        deepContext && "bg-primary after:translate-x-4"
-                      )}
-                      disabled={!deepContextAvailable}
-                      onClick={() => onDeepContextChange(!deepContext)}
-                      role="switch"
-                      title={deepContextTitle}
-                      type="button"
-                    />
-                  </div>
                 </div>
               </>
             ) : (
@@ -2678,23 +2626,9 @@ function Composer({
       attachment.status.type === "running" ||
       attachment.status.type === "incomplete"
   )
-  const readyRepositories = (conversationContext.repositories ?? []).filter(
-    (repository) => repository.status === "ready"
-  )
-  const deepContextAvailable = readyRepositories.length > 0
-  const deepContextTitle = deepContextAvailable
-    ? deepContext
-      ? "Deep context is on · use broader context across files"
-      : "Use broader context for this question"
-    : (conversationContext.repositories ?? []).length > 0
-      ? "Repository is still indexing"
-      : "Connect a repository in Context first"
-
   useEffect(() => {
-    if (!deepContextAvailable && deepContext) {
-      onDeepContextChange(false)
-    }
-  }, [onDeepContextChange, deepContext, deepContextAvailable])
+    if (deepContext) onDeepContextChange(false)
+  }, [deepContext, onDeepContextChange])
 
   const mcpItems = useMemo<Unstable_TriggerItem[]>(() => {
     const attachedServerIds = new Set(
@@ -3178,11 +3112,7 @@ function Composer({
                       assistantId={assistantId}
                       assistantLocked={assistantSelectionLocked}
                       assistants={assistants}
-                      deepContext={deepContext}
-                      deepContextAvailable={deepContextAvailable}
-                      deepContextTitle={deepContextTitle}
                       onAssistantChange={onAssistantChange}
-                      onDeepContextChange={onDeepContextChange}
                     />
                   </div>
                   <div
@@ -4495,8 +4425,7 @@ export function ChatView({
             (source) => source.contextScope !== "message"
           ).length
         }{" "}
-        knowledge sources, {(conversationContext.repositories ?? []).length}{" "}
-        repositories, {conversationContext.mcpServers.length} MCP servers,{" "}
+        knowledge sources, {conversationContext.mcpServers.length} MCP servers,{" "}
         {conversationContext.notes?.length ?? 0} notes,{" "}
         {conversationContext.transcriptionSessions.length} transcription
         sessions attached.

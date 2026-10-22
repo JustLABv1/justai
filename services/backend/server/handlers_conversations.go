@@ -237,7 +237,7 @@ func (a *App) listConversations(c *gin.Context) {
 	}
 	nextCursor := ""
 	if len(result) > 50 {
-		last := result[50]
+		last := result[49]
 		nextCursor = encodeConversationCursor(last.UpdatedAt, last.ID)
 		result = result[:50]
 	}

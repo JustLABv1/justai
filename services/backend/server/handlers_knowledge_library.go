@@ -218,8 +218,8 @@ func knowledgeItemsWhere(options knowledgeItemListOptions, organizationID, userI
 	args := []any{organizationID, userID}
 	where := `ki.organization_id = $1
 		AND (ki.visibility = 'workspace' OR ki.owner_id = $2)
-		-- Repository files retain catalog identities for RAG, but the library
-		-- presents the parent repository as their single top-level item.
+		AND ki.resource_type <> 'repository'
+		-- Keep legacy indexed repository files out of the library.
 		AND (ki.resource_type <> 'source' OR NOT EXISTS (
 			SELECT 1 FROM repository_context_files hidden_repo_file
 			WHERE hidden_repo_file.source_id = ki.resource_id
@@ -451,6 +451,13 @@ func (a *App) listKnowledgeSpaces(c *gin.Context) {
 		       COUNT(ksi.item_id)
 		FROM workspace_projects p
 		LEFT JOIN knowledge_space_items ksi ON ksi.space_id = p.id
+		 AND EXISTS (
+		   SELECT 1 FROM knowledge_items visible_item
+		   WHERE visible_item.id = ksi.item_id AND visible_item.resource_type <> 'repository'
+		     AND (visible_item.resource_type <> 'source' OR NOT EXISTS (
+		       SELECT 1 FROM repository_context_files legacy_file WHERE legacy_file.source_id = visible_item.resource_id
+		     ))
+		 )
 		WHERE p.organization_id = $1 AND (p.user_id = $2 OR p.visibility = 'workspace')
 		GROUP BY p.id ORDER BY p.updated_at DESC, lower(p.name)`, organizationID, principal.UserID)
 	if err != nil {
@@ -499,6 +506,13 @@ func (a *App) getKnowledgeSpace(c *gin.Context) {
 		       COUNT(ksi.item_id), p.user_id
 		FROM workspace_projects p
 		LEFT JOIN knowledge_space_items ksi ON ksi.space_id = p.id
+		 AND EXISTS (
+		   SELECT 1 FROM knowledge_items visible_item
+		   WHERE visible_item.id = ksi.item_id AND visible_item.resource_type <> 'repository'
+		     AND (visible_item.resource_type <> 'source' OR NOT EXISTS (
+		       SELECT 1 FROM repository_context_files legacy_file WHERE legacy_file.source_id = visible_item.resource_id
+		     ))
+		 )
 		WHERE p.id=$1 AND p.organization_id=$2 AND (p.user_id=$3 OR p.visibility='workspace')
 		GROUP BY p.id`, spaceID, organizationID, principal.UserID).Scan(
 		&space.ID, &space.ParentID, &space.Name, &space.Description, &space.Visibility, &space.CreatedAt, &space.UpdatedAt, &space.ItemCount, &ownerID)
