@@ -6,6 +6,19 @@
 
 JustAI is the JustLAB workspace for routing chat, transcription, retrieval, and MCP tools through one local-first surface.
 
+## First-run setup
+
+On a new installation, the sign-in page asks for the first administrator account.
+After registration, `/setup` guides the administrator through naming the workspace,
+adding optional OIDC identity providers, connecting and testing a global AI endpoint,
+and reviewing the configuration. OIDC and AI can also be configured later in
+Platform admin. Keep the local administrator account available for recovery.
+
+New accounts receive a shorter introduction with their workspace, display name,
+and available chat models. Progress is saved on the server and resumed after signing
+in again. Existing installations and users are marked complete by migration
+`061_onboarding.sql`, so upgrading does not interrupt their work.
+
 ## Local development
 
 1. Start PostgreSQL with pgvector:

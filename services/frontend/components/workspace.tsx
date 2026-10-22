@@ -261,6 +261,12 @@ export function Workspace() {
           "/api/v1/auth/me"
         )
         if (cancelled) return
+        const onboarding = await api.get<{ completed: boolean }>("/api/v1/onboarding")
+        if (cancelled) return
+        if (!onboarding.completed) {
+          router.replace("/setup")
+          return
+        }
 
         const storedOrganizationId = api.getOrganizationId()
         const nextOrganization =
@@ -445,7 +451,7 @@ export function Workspace() {
     return () => {
       cancelled = true
     }
-  }, [redirectToLogin, reloadToken])
+  }, [redirectToLogin, reloadToken, router])
 
   // `/settings?tab=admin` was the old platform-admin entry point. Keep the
   // organization Operations page for ordinary workspace owners/admins, but

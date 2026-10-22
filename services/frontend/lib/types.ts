@@ -217,6 +217,7 @@ export type PlatformBanner = {
 }
 
 export type AuthConfig = {
+  setupRequired?: boolean
   oidcEnabled: boolean
   oidcLabel?: string
   oidcProviders: OIDCProviderSummary[]

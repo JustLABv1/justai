@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ExternalLink,
   LoaderCircle,
+  Plus,
   RefreshCw,
   ShieldCheck,
   TestTube2,
@@ -50,6 +51,7 @@ type ProviderForm = {
 
 type Props = {
   createRequest?: number
+  showCreateAction?: boolean
 }
 
 const emptyForm: ProviderForm = {
@@ -63,7 +65,10 @@ const emptyForm: ProviderForm = {
   enabled: true,
 }
 
-export function PlatformAuthenticationView({ createRequest }: Props) {
+export function PlatformAuthenticationView({
+  createRequest,
+  showCreateAction = false,
+}: Props) {
   const [providers, setProviders] = useState<AdminOIDCProvider[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -226,16 +231,33 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
       )}
 
       <Card>
-        <CardHeader>
+        <CardHeader
+          className={
+            showCreateAction ? "grid-cols-1 sm:grid-cols-[1fr_auto]" : undefined
+          }
+        >
           <CardTitle className="flex items-center gap-2">
             <ShieldCheck className="size-4" /> OIDC providers
           </CardTitle>
-          <CardDescription>
+          <CardDescription
+            className={showCreateAction ? "col-span-full" : undefined}
+          >
             Platform-wide identity providers shown on the login page. Provider
             secrets are encrypted and never returned to the browser.
           </CardDescription>
-          <CardAction>
+          <CardAction
+            className={
+              showCreateAction
+                ? "col-start-1 row-span-1 row-start-3 justify-self-start sm:col-start-2 sm:row-start-1 sm:justify-self-end"
+                : undefined
+            }
+          >
             <div className="flex gap-2">
+              {showCreateAction && (
+                <Button size="sm" onClick={openCreate}>
+                  <Plus /> Add identity provider
+                </Button>
+              )}
               <Button
                 aria-label="Refresh OIDC providers"
                 onClick={() => void load()}
@@ -285,8 +307,9 @@ export function PlatformAuthenticationView({ createRequest }: Props) {
                       ? ` · tested ${new Date(provider.lastTestedAt).toLocaleString()}`
                       : ""}
                   </p>
-                  <p className="mt-1 flex items-center gap-1 break-all text-xs text-muted-foreground">
-                    {provider.redirectUrl} <ExternalLink className="size-3 shrink-0" />
+                  <p className="mt-1 flex items-center gap-1 text-xs break-all text-muted-foreground">
+                    {provider.redirectUrl}{" "}
+                    <ExternalLink className="size-3 shrink-0" />
                   </p>
                   {provider.lastError && (
                     <p className="mt-1 text-xs text-destructive">

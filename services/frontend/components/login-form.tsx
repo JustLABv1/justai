@@ -58,7 +58,8 @@ export function LoginForm({
   const signupEnabled = config?.signupEnabled !== false
   const maintenanceMessage = config?.maintenanceMessage ?? ""
 
-  const isRegister = mode === "register"
+  const initialSetup = config?.setupRequired === true
+  const isRegister = initialSetup || mode === "register"
   const adminFallbackAvailable =
     !configLoading && !isRegister && (!localAuthEnabled || !loginEnabled)
   const adminFallbackActive = adminFallbackAvailable && adminFallbackRequested
@@ -117,7 +118,7 @@ export function LoginForm({
           ...(isRegister ? { displayName } : {}),
         }
       )
-      window.location.assign(safeNext(window.location.search))
+      window.location.assign(initialSetup ? "/setup" : safeNext(window.location.search))
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Could not authenticate"
@@ -133,23 +134,29 @@ export function LoginForm({
         <section className={styles.authFormPane}>
           <AuroraBackdrop className="absolute inset-x-0 top-0 -z-10 h-[90%]" />
           <div className={styles.authFormInner}>
-            <div className={styles.authBrandRow}>
-              <BrandMark className="size-10 rounded-xl" />
-              <p className={styles.authBrandName}>JustAI</p>
+            <div
+              className={cn(styles.authBrandRow, initialSetup && "justify-center")}
+              role={initialSetup ? "img" : undefined}
+              aria-label={initialSetup ? "JustAI" : undefined}
+            >
+              <BrandMark className={initialSetup ? "size-16" : "size-10 rounded-xl"} cropped={initialSetup} />
+              {!initialSetup && <p className={styles.authBrandName}>JustAI</p>}
             </div>
 
             <div className={styles.authIntro}>
               <h1 className={styles.authTitle}>
-                {isRegister ? "Create your account" : "Sign in to JustAI"}
+                {initialSetup ? "Create your administrator account" : isRegister ? "Create your account" : "Sign in to JustAI"}
               </h1>
               <p className={styles.authDescription}>
-                {isRegister
+                {initialSetup
+                  ? "Next, we’ll configure your workspace, sign-in and AI models."
+                  : isRegister
                   ? "Set up an account to start working in your workspace."
                   : "Continue to your workspace."}
               </p>
             </div>
 
-            {signupEnabled && localAuthVisible && (
+            {!initialSetup && signupEnabled && localAuthVisible && (
               <div
                 aria-label="Authentication mode"
                 className={styles.authModeSwitch}
@@ -382,7 +389,7 @@ export function LoginForm({
                   </Field>
                 )}
 
-                {signupEnabled && localAuthVisible && (
+                {!initialSetup && signupEnabled && localAuthVisible && (
                   <FieldDescription className={styles.authModeDescription}>
                     {isRegister ? "Already have an account?" : "New to JustAI?"}{" "}
                     <button

@@ -82,6 +82,7 @@ function SettingsSection({
   title,
   description,
   footer,
+  actions,
   children,
   className,
   ...props
@@ -89,6 +90,7 @@ function SettingsSection({
   title: ReactNode
   description?: ReactNode
   footer?: ReactNode
+  actions?: ReactNode
 }) {
   return (
     <section
@@ -96,10 +98,13 @@ function SettingsSection({
       className={cn("overflow-hidden rounded-2xl bg-card", className)}
       {...props}
     >
-      <header className="flex flex-col gap-0.5 px-5 py-4">
-        <h2 className="font-heading text-base font-semibold tracking-tight">
-          {title}
-        </h2>
+      <header className="flex flex-col gap-2 px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-heading text-base font-semibold tracking-tight">
+            {title}
+          </h2>
+          {actions}
+        </div>
         {description && (
           <p className="text-sm text-muted-foreground">{description}</p>
         )}

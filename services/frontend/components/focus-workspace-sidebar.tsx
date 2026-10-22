@@ -374,24 +374,10 @@ export function FocusWorkspaceSidebar({
             ? "Video transcripts"
             : "Live sessions"
       }
-      className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden pt-1 pb-1"
+      className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden pt-1 pb-1"
       role="region"
     >
-      {createAction && (
-        <Button
-          aria-label={createAction.label}
-          className="h-8 w-full shrink-0 justify-start gap-2 rounded-xl"
-          disabled={createAction.disabled}
-          onClick={() => {
-            closeOverlays()
-            createAction.onClick()
-          }}
-          size="sm"
-        >
-          <CreateIcon data-icon="inline-start" />
-          {createAction.label}
-        </Button>
-      )}
+
 
       {actionError && (
         <Alert className="shrink-0" variant="destructive">
@@ -719,11 +705,24 @@ export function FocusWorkspaceSidebar({
       </Sidebar>
 
       <Dialog onOpenChange={setHistoryDialogOpen} open={historyDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(44rem,calc(100dvh-2rem))] flex-col overflow-hidden sm:max-w-xl">
+          <DialogHeader className="shrink-0 flex-row items-center justify-between gap-3 pr-7">
             <DialogTitle>{historyTitle}</DialogTitle>
+            {createAction && (
+              <Button
+                disabled={createAction.disabled}
+                onClick={() => {
+                  closeOverlays()
+                  createAction.onClick()
+                }}
+                size="sm"
+              >
+                <CreateIcon data-icon="inline-start" />
+                {createAction.label}
+              </Button>
+            )}
           </DialogHeader>
-          <div className="flex h-[60vh] min-h-0 flex-col">{historyPanel}</div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{historyPanel}</div>
         </DialogContent>
       </Dialog>
 

@@ -879,7 +879,7 @@ export function AssistantThreadList({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ThreadListPrimitive.Root className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+      <ThreadListPrimitive.Root className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden">
         {!hideSearch && (
           <Input
             aria-label="Search chat history"
@@ -989,7 +989,7 @@ export function AssistantThreadList({
             <Settings2 />
           </Button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
           <ThreadListPrimitive.Items>
             {({ threadListItem }) => (
               <AssistantThreadItem
@@ -1076,7 +1076,11 @@ export function AssistantThreadList({
               )}
             </section>
           )}
-          <ThreadListPrimitive.LoadMore className="mt-2 w-full rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted" />
+          <ThreadListPrimitive.LoadMore
+            className="mt-3 flex h-8 w-full items-center justify-center rounded-lg bg-secondary px-3 text-xs font-medium text-secondary-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:hidden"
+          >
+            Load more chats
+          </ThreadListPrimitive.LoadMore>
           {!conversations.length && !archivedConversations.length && (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">
               {historyQuery

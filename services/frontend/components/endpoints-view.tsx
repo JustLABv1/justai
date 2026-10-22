@@ -8,6 +8,7 @@ import {
   LockKeyhole,
   MoreHorizontal,
   Pencil,
+  Plus,
   Radio,
   Server,
   Sparkles,
@@ -69,6 +70,7 @@ type Props = {
   apiBasePath?: string
   defaultScopeType?: "global" | "organization" | "user"
   createRequest?: number
+  showCreateAction?: boolean
   resourceError?: string
   onRetryResource?: () => void
 }
@@ -103,6 +105,7 @@ export function EndpointsView({
   apiBasePath = "/api/v1/endpoints",
   defaultScopeType,
   createRequest,
+  showCreateAction = false,
   resourceError,
   onRetryResource,
 }: Props) {
@@ -530,6 +533,7 @@ export function EndpointsView({
         onEdit={openEdit}
         onRemove={setRemoveTarget}
         onCreate={openCreate}
+        showCreateAction={showCreateAction}
         resourceError={resourceError}
         onRetryResource={onRetryResource}
       />
@@ -612,6 +616,7 @@ function EndpointTable({
   onEdit,
   onRemove,
   onCreate,
+  showCreateAction,
   resourceError,
   onRetryResource,
 }: {
@@ -635,6 +640,7 @@ function EndpointTable({
   onToggle: (endpoint: Endpoint) => void
   onEdit: (endpoint: Endpoint) => void
   onRemove: (endpoint: Endpoint) => void
+  showCreateAction?: boolean
   onCreate: (kind?: EndpointKind) => void
   resourceError?: string
   onRetryResource?: () => void
@@ -649,6 +655,9 @@ function EndpointTable({
           : "Open the menu on a row to test, edit, or remove an endpoint."
       }
       title="Endpoints"
+      actions={showCreateAction ? (
+        <Button size="sm" onClick={() => onCreate()}><Plus /> Add AI endpoint</Button>
+      ) : undefined}
     >
       <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-5 py-3">
         <Input
