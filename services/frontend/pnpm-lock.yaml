@@ -14,7 +14,7 @@ importers:
   .:
     dependencies:
       '@ai-sdk/react':
-        specifier: ^4.0.150
+        specifier: ^4.0.152
         version: 4.0.152(react@19.3.1)(zod@4.6.5)
       '@assistant-ui/react':
         specifier: ^0.15.30
@@ -59,7 +59,7 @@ importers:
         specifier: ^12.12.0
         version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       ai:
-        specifier: ^7.0.146
+        specifier: ^7.0.148
         version: 7.0.148(zod@4.6.5)
       class-variance-authority:
         specifier: ^0.7.1
@@ -80,7 +80,7 @@ importers:
         specifier: ^0.52.0
         version: 0.52.0(typescript@6.0.3)
       lucide-react:
-        specifier: ^1.60.0
+        specifier: ^1.61.0
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)
       next:
         specifier: 16.4.2
@@ -104,7 +104,7 @@ importers:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.3.0)(react@19.3.1)(supports-color@7.2.0)
       react-resizable-panels:
-        specifier: ^4.14.7
+        specifier: ^4.14.8
         version: 4.14.8(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       recharts:
         specifier: ^3.10.1
