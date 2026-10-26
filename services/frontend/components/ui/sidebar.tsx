@@ -525,7 +525,7 @@ function SidebarMenuButton({
       },
       props
     ),
-    render: !tooltip ? render : <TooltipTrigger render={render} />,
+    render,
     state: {
       slot: "sidebar-menu-button",
       sidebar: "menu-button",
@@ -545,12 +545,11 @@ function SidebarMenuButton({
   }
 
   return (
-    <Tooltip>
-      {comp}
+    <Tooltip disabled={state !== "collapsed" || isMobile}>
+      <TooltipTrigger render={comp} delay={0} />
       <TooltipContent
         side="right"
         align="center"
-        hidden={state !== "collapsed" || isMobile}
         {...tooltip}
       />
     </Tooltip>

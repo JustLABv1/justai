@@ -519,6 +519,7 @@ export function FocusWorkspaceSidebar({
                   render={
                     <SidebarMenuButton
                       aria-label={`Select workspace (${activeOrganization?.name ?? "Workspace"})`}
+                      tooltip={`Select workspace · ${activeOrganization?.name ?? "Workspace"}`}
                       className="gap-2.5"
                       size="lg"
                     />
@@ -648,16 +649,16 @@ export function FocusWorkspaceSidebar({
                               )
                             }
                           }}
-                          className="text-sm"
-                          disabled={disabled}
+                          className="text-sm aria-disabled:pointer-events-auto"
+                          aria-disabled={disabled || undefined}
                           isActive={active}
-                          onClick={() => navigateFromRail(item.id)}
+                          onClick={() => {
+                            if (!disabled) navigateFromRail(item.id)
+                          }}
                           tooltip={
-                            item.id === "chat" && collapsed
-                              ? undefined
-                              : disabled
-                                ? "Disabled by platform administrator"
-                                : item.label
+                            disabled
+                              ? `${item.label} · Disabled by platform administrator`
+                              : item.label
                           }
                         >
                           <Icon />
@@ -801,6 +802,7 @@ export function FocusWorkspaceSidebar({
                   render={
                     <SidebarMenuButton
                       aria-label={`${user.displayName} account menu`}
+                      tooltip={`${user.displayName} · Account menu`}
                       size="lg"
                     />
                   }
