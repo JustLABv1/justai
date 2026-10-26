@@ -1,29 +1,58 @@
 "use client"
 
-import { Fragment, useMemo, useState } from "react"
+import {
+  Fragment,
+  useMemo,
+  useState,
+  type ComponentType,
+  type SVGProps,
+} from "react"
 import {
   Archive,
-  Bot,
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
-  FileVideo,
-  FolderKanban,
-  FileText,
-  Headphones,
   LogOut,
-  MessageSquare,
   MoreHorizontal,
   Plus,
-  Plug,
   RotateCcw,
-  Search,
-  Settings2,
-  ShieldCheck,
   Trash2,
   UserRound,
 } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  Robot01Icon,
+  FileVideoIcon,
+  Folder01Icon,
+  File01Icon,
+  HeadphonesIcon,
+  BubbleChatIcon,
+  Plug01Icon,
+  Search01Icon,
+  Settings02Icon,
+  Shield01Icon,
+} from "@hugeicons/core-free-icons"
+
+type SidebarIcon = ComponentType<SVGProps<SVGSVGElement>>
+
+function sidebarIcon(
+  icon: React.ComponentProps<typeof HugeiconsIcon>["icon"]
+): SidebarIcon {
+  return function SidebarGlyph(props) {
+    return <HugeiconsIcon icon={icon} {...props} strokeWidth={Number(props.strokeWidth ?? 1.75)} />
+  }
+}
+
+const Bot = sidebarIcon(Robot01Icon)
+const FileVideo = sidebarIcon(FileVideoIcon)
+const FolderKanban = sidebarIcon(Folder01Icon)
+const FileText = sidebarIcon(File01Icon)
+const Headphones = sidebarIcon(HeadphonesIcon)
+const MessageSquare = sidebarIcon(BubbleChatIcon)
+const Plug = sidebarIcon(Plug01Icon)
+const Search = sidebarIcon(Search01Icon)
+const Settings2 = sidebarIcon(Settings02Icon)
+const ShieldCheck = sidebarIcon(Shield01Icon)
 
 import { BrandMark } from "@/components/brand-mark"
 import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
@@ -95,7 +124,7 @@ export const railNavigation: Array<{
   id: ViewId
   label: string
   hint: string
-  icon: LucideIcon
+  icon: SidebarIcon
   group: string
   feature?: string
 }> = [
@@ -203,7 +232,7 @@ type RecencyGroup<T> = {
 type CreateAction = {
   label: string
   hint: string
-  icon: LucideIcon
+  icon: SidebarIcon
   onClick: () => void
   disabled?: boolean
 }
@@ -579,6 +608,7 @@ export function FocusWorkspaceSidebar({
                       const button = (
                         <SidebarMenuButton
                           aria-current={active ? "page" : undefined}
+                          aria-label={item.label}
                           data-chat-rail-trigger={
                             item.id === "chat" ? "" : undefined
                           }
@@ -740,6 +770,7 @@ export function FocusWorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 aria-current={activeView === "settings" ? "page" : undefined}
+                aria-label="Workspace settings"
                 className="text-sm"
                 isActive={activeView === "settings"}
                 onClick={() => onNavigate("settings")}
@@ -753,6 +784,7 @@ export function FocusWorkspaceSidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   aria-current={activeView === "admin" ? "page" : undefined}
+                  aria-label="Platform admin"
                   className="text-sm"
                   isActive={activeView === "admin"}
                   onClick={() => onNavigate("admin")}

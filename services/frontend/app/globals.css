@@ -704,30 +704,18 @@
   }
 }
 
-/* Give the collapsed workspace navigation a quiet, spacious icon rail. */
-.workspace-sidebar {
-  --sidebar-width-icon: 3.5rem;
-}
-
-[data-slot="sidebar"]:has(.workspace-sidebar) {
-  --sidebar-width-icon: 3.5rem;
-}
-
+/* Keep compact rail controls on one axis, without expanded labels taking space. */
 [data-collapsible="icon"] .workspace-sidebar [data-sidebar="menu-button"] {
-  width: 2.75rem !important;
-  height: 2.75rem !important;
-  padding: 0.75rem !important;
-  border-radius: 0.875rem;
+  justify-content: center;
+  gap: 0;
 }
 
-[data-collapsible="icon"] .workspace-sidebar [data-sidebar="menu-button"] > svg {
-  width: 1.25rem;
-  height: 1.25rem;
-  stroke-width: 1.75;
+[data-collapsible="icon"] .workspace-sidebar [data-sidebar="menu-button"] > :not(:first-child) {
+  display: none;
 }
 
-[data-collapsible="icon"] .workspace-sidebar [data-sidebar="group"] {
-  padding-block: 0.375rem;
+[data-collapsible="icon"] .workspace-sidebar [data-sidebar="header"] > [data-sidebar="menu"] {
+  gap: 1rem;
 }
 
 .workspace-chat-rail {

@@ -72,7 +72,7 @@ type DeleteTarget =
 
 const HISTORY_OPEN_STORAGE_KEY = "justai.chat-history-open"
 
-export function Workspace() {
+export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: boolean }) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -1120,6 +1120,7 @@ export function Workspace() {
   return (
     <>
       <SidebarProvider
+        defaultOpen={defaultSidebarOpen}
         id="workspace-shell"
         className="isolate h-full min-h-0 flex-1 overflow-hidden"
       >
