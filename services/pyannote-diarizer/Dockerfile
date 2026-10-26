@@ -167,9 +167,10 @@ COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg
 COPY --from=builder /app/app.py /app/app.py
 COPY --from=builder /app/model_sync.py /app/model_sync.py
 
-RUN ["/opt/venv/bin/python", "-c", "import fastapi, lightning, pyannote.audio, torch, torchaudio, uvicorn; import importlib.metadata as metadata, importlib.util, pathlib; installed = {dist.metadata['Name'].lower() for dist in metadata.distributions() if dist.metadata['Name']}; forbidden = {'pip', 'setuptools'}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed); assert not list(pathlib.Path('/opt/venv/bin').glob('pip*')); assert not pathlib.Path('/usr/share/python-wheels').exists()"]
-
+# Validate as the runtime user so imports cannot create root-owned caches.
 USER 1000:1000
+
+RUN ["/opt/venv/bin/python", "-c", "import fastapi, lightning, pyannote.audio, torch, torchaudio, uvicorn; import importlib.metadata as metadata, importlib.util, pathlib; installed = {dist.metadata['Name'].lower() for dist in metadata.distributions() if dist.metadata['Name']}; forbidden = {'pip', 'setuptools'}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed); assert not list(pathlib.Path('/opt/venv/bin').glob('pip*')); assert not pathlib.Path('/usr/share/python-wheels').exists()"]
 
 EXPOSE 8000
 
