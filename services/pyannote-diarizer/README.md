@@ -4,21 +4,17 @@ This service hosts `pyannote/speaker-diarization-3.1` outside the Go backend.
 It is intentionally a separate service because pyannote is a PyTorch pipeline,
 not an OpenAI-compatible language model.
 
-The image uses the versioned Minimus Python build/runtime pair
-(`reg.mini.dev/python:3.14-dev` and `reg.mini.dev/python:3.14`). It installs the
-matching CPU `torch`/`torchaudio` 2.11.0 wheels. A source-verified, fully
-static FFmpeg 9.0.1 binary (with static OpenSSL) is built in a separate stage,
-then copied into the shell-less production image. Release builds replace that
-fallback stage with the digest-pinned shared artifact built from
-`docker/ffmpeg/Dockerfile`, avoiding repeated FFmpeg/OpenSSL compilation. This
-keeps FFmpeg’s HTTPS support while avoiding Alpine’s vulnerable FFmpeg package
-tree. The prepared Minimus runtime filesystem is flattened onto a scratch stage
-after removing its build-time Python packaging tools. This ensures layer-aware
-scanners cannot recover pip's historical embedded SBOM or its stale setuptools
-component from a deleted lower layer. The cleanup also removes the Minimus base
-image's `/usr/share/python-wheels` bootstrap cache. On amd64, that cache contains
-a pip wheel whose nested SBOM declares historical vendored packages even though
-they are not importable.
+The image uses the official `python:3.14.9-slim-trixie` build/runtime pair
+so PyTorch's glibc CPU wheels use the same Python ABI in both stages. It installs
+matching CPU `torch`/`torchaudio` 2.11.0 wheels. A source-verified static FFmpeg
+9.0.1 binary (with static OpenSSL) is built separately. Release builds replace
+that fallback stage with the digest-pinned artifact from `docker/ffmpeg/Dockerfile`.
+Only CPython, its shared-library dependencies, the C++/OpenMP runtimes, certificates
+and timezone data are copied into the shell-less runtime. Python package managers, bootstrap wheels,
+headers, static archives and caches are removed before the prepared filesystem
+is copied onto scratch, keeping removed build tools out of runtime layers.
+The service runs as UID/GID 1000. OS package metadata for the copied libraries is
+retained for CVE scans; shells and OS package managers are absent.
 
 ## Hugging Face setup
 

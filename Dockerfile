@@ -1,4 +1,4 @@
-FROM reg.mini.dev/node:26.12.0-dev AS frontend-builder
+FROM node:26.12.1-alpine3.24 AS frontend-builder
 USER root
 WORKDIR /app/frontend
 
@@ -18,12 +18,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm run build
 
 # Stage 2: Build the backend
-FROM reg.mini.dev/go:v1.27.2 AS backend-builder
+FROM golang:1.27.3-bookworm AS backend-builder
 WORKDIR /app/backend
 COPY services/backend/go.mod services/backend/go.sum ./
 RUN go mod download
 COPY services/backend/ ./
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o justai-backend
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o justai-backend
 
 # Stage 3: Build a static FFmpeg 9 binary. CI overrides this named stage with
 # the digest-pinned image produced by docker/ffmpeg/Dockerfile. The source build
@@ -86,39 +86,40 @@ RUN apk add --no-cache \
     && /opt/ffmpeg/bin/ffmpeg -version \
     && /opt/ffmpeg/bin/ffprobe -version
 
-# Stage 4: Build the PDF extraction utility. The MinimOS Node base image does
-# not publish Poppler in its APK repository, so keep the dependency isolated
-# and copy only the utility's non-glibc shared libraries into the final image.
-FROM debian:bookworm-slim AS poppler-runtime
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /opt/poppler/bin /opt/poppler/lib \
-    && cp /usr/bin/pdftotext /opt/poppler/bin/pdftotext \
-    && ldd /usr/bin/pdftotext \
-        | awk '/=> \// {print $3} /^\// {print $1}' \
-        | while read -r library; do \
-            case "$library" in \
-                */libc.so.*|*/libm.so.*|*/libpthread.so.*|*/libdl.so.*|*/librt.so.*|*/libgcc_s.so.*|*/libstdc++.so.*|*/ld-linux*) ;; \
-                *) cp -L "$library" /opt/poppler/lib/ ;; \
-            esac; \
-        done \
-    && printf '%s\n' \
-        '#!/bin/sh' \
-        'export LD_LIBRARY_PATH="/opt/poppler/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"' \
-        'exec /opt/poppler/bin/pdftotext "$@"' \
-        > /usr/local/bin/pdftotext \
-    && chmod 0755 /usr/local/bin/pdftotext
+# Stage 4: Minimal musl runtime, matching the frontend builder's libc.
+# Copy only Node rather than inheriting npm, Yarn and build headers.
+# Temporary signed security backport, matching JustCD's stable-Alpine pattern.
+# Keep source checksums and package metadata so scanners see the shipped version.
+FROM alpine:3.24 AS expat-builder
+RUN apk add --no-cache alpine-sdk
+WORKDIR /src/expat
+COPY services/backend/packaging/expat/APKBUILD ./
+RUN abuild-keygen -a -n \
+    && cp /root/.abuild/*.rsa.pub /etc/apk/keys/ \
+    && apk update \
+    && abuild -F -r -P /packages \
+    && mkdir -p /out/keys \
+    && cp /root/.abuild/*.rsa.pub /out/keys/ \
+    && find /packages -name 'libexpat-*.apk' -exec cp {} /out/ \; \
+    && rm -f /root/.abuild/*.rsa
 
-# Stage 5: Create the combined runtime image
-FROM reg.mini.dev/node:26.12.0-dev AS runner
-USER root
+FROM alpine:3.24 AS runner
+COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node
 WORKDIR /app
+COPY --from=expat-builder /out/keys/ /etc/apk/keys/
+COPY --from=expat-builder /out/libexpat-*.apk /tmp/expat/
+RUN apk upgrade --no-cache \
+    && apk add --no-cache /tmp/expat/*.apk \
+    && rm -rf /tmp/expat
 
 # pip is only needed while installing pypdf. Remove packaging tools in the same
 # layer so neither the final image nor its layer history keeps setuptools.
 RUN apk add --upgrade --no-cache \
     ca-certificates \
+    libstdc++ \
+    libatomic \
+    poppler-utils \
+    'libexpat>=2.9.0-r0' \
     tini \
     python3 \
     py3-pip \
@@ -127,15 +128,14 @@ RUN apk add --upgrade --no-cache \
     'libcrypto3>=3.5.9-r0' \
     'libssl3>=3.5.9-r0' \
     && python3 -m venv /opt/templates-venv \
-    && /opt/templates-venv/bin/pip install --no-cache-dir pypdf==6.19.0 \
+    && /opt/templates-venv/bin/pip install --no-cache-dir pypdf==6.21.2 \
     && /opt/templates-venv/bin/python -c 'import pathlib, shutil, sysconfig; root = pathlib.Path(sysconfig.get_path("purelib")); [shutil.rmtree(path, ignore_errors=True) for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack") for path in (root / name, *root.glob(name + "-*.dist-info"), *root.glob(name + "-*.egg-info"))]; (root / "distutils-precedence.pth").unlink(missing_ok=True); [path.unlink(missing_ok=True) for path in pathlib.Path("/opt/templates-venv/bin").glob("pip*")]' \
-    && apk del py3-pip npm \
+    && apk del py3-pip \
     && if apk info -e py3-setuptools >/dev/null 2>&1; then apk del py3-setuptools; fi \
     && rm -rf /usr/share/python-wheels
 ENV JUSTAI_TEMPLATE_PYTHON=/opt/templates-venv/bin/python
 
-COPY --from=poppler-runtime /opt/poppler /opt/poppler
-COPY --from=poppler-runtime /usr/local/bin/pdftotext /usr/local/bin/pdftotext
+RUN node --version && pdftotext -v
 COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg
 COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffprobe /opt/ffmpeg/bin/ffprobe
 

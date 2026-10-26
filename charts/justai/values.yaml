@@ -213,7 +213,7 @@ pyannote:
     prefix: pyannote
     forcePathStyle: false
   podAnnotations: {}
-  # Minimus Python runs as UID/GID 1000. fsGroup makes an optional persistent
+  # The Python runtime runs as UID/GID 1000. fsGroup makes an optional persistent
   # Hugging Face cache writable without weakening the non-root runtime.
   podSecurityContext:
     runAsNonRoot: true

@@ -1,0 +1,43 @@
+# Adapted from Alpine's main/expat/APKBUILD (3.24-stable).
+# Upstream maintainer: Carlo Landmeter <clandmeter@alpinelinux.org>
+# Maintainer: JustAI build <build@example.invalid>
+# Temporary security update until Alpine 3.24 supplies Expat >= 2.9.0.
+pkgname=expat
+pkgver=2.9.0
+_tagver=R_${pkgver//./_}
+pkgrel=0
+pkgdesc="XML Parser library written in C"
+url="https://libexpat.github.io/"
+arch="all"
+license="MIT"
+checkdepends="bash"
+source="https://github.com/libexpat/libexpat/releases/download/$_tagver/expat-$pkgver.tar.xz"
+depends_dev="$pkgname=$pkgver-r$pkgrel"
+subpackages="$pkgname-static $pkgname-dev $pkgname-doc lib$pkgname:libs"
+
+# secfixes:
+#   2.9.0-r0:
+#     - CVE-2026-77214
+#     - CVE-2026-102633
+
+build() {
+	./configure \
+		--build="$CBUILD" \
+		--host="$CHOST" \
+		--prefix=/usr \
+		--mandir=/usr/share/man \
+		--enable-static
+	make
+}
+
+check() {
+	make check
+}
+
+package() {
+	make DESTDIR="$pkgdir/" install
+}
+
+sha512sums="
+677b5a39ea47aa238813412061eefba0ff2e819597efee69452eab7fd63b1387537eda0dfd4e5891b938be202dc87df4b5115bdae75c6b81643ac2363bb99b34  expat-2.9.0.tar.xz
+"
