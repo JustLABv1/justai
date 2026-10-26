@@ -4,30 +4,55 @@ import {
   Fragment,
   useMemo,
   useState,
+  type ComponentType,
+  type SVGProps,
 } from "react"
 import {
   Archive,
-  Bot,
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
-  FileVideo,
-  FolderKanban,
-  FileText,
-  Headphones,
   LogOut,
-  MessageSquare,
   MoreHorizontal,
   Plus,
-  Plug,
   RotateCcw,
-  Search,
-  Settings2,
-  ShieldCheck,
   Trash2,
   UserRound,
 } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  Robot01Icon,
+  FileVideoIcon,
+  Folder01Icon,
+  File01Icon,
+  HeadphonesIcon,
+  BubbleChatIcon,
+  Plug01Icon,
+  Search01Icon,
+  Settings02Icon,
+  Shield01Icon,
+} from "@hugeicons/core-free-icons"
+
+type SidebarIcon = ComponentType<SVGProps<SVGSVGElement>>
+
+function sidebarIcon(
+  icon: React.ComponentProps<typeof HugeiconsIcon>["icon"]
+): SidebarIcon {
+  return function SidebarGlyph(props) {
+    return <HugeiconsIcon icon={icon} {...props} strokeWidth={Number(props.strokeWidth ?? 1.75)} />
+  }
+}
+
+const Bot = sidebarIcon(Robot01Icon)
+const FileVideo = sidebarIcon(FileVideoIcon)
+const FolderKanban = sidebarIcon(Folder01Icon)
+const FileText = sidebarIcon(File01Icon)
+const Headphones = sidebarIcon(HeadphonesIcon)
+const MessageSquare = sidebarIcon(BubbleChatIcon)
+const Plug = sidebarIcon(Plug01Icon)
+const Search = sidebarIcon(Search01Icon)
+const Settings2 = sidebarIcon(Settings02Icon)
+const ShieldCheck = sidebarIcon(Shield01Icon)
 
 import { BrandMark } from "@/components/brand-mark"
 import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
@@ -57,7 +82,12 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import {
   Sidebar,
@@ -94,7 +124,7 @@ export const railNavigation: Array<{
   id: ViewId
   label: string
   hint: string
-  icon: LucideIcon
+  icon: SidebarIcon
   group: string
   feature?: string
 }> = [
@@ -202,7 +232,7 @@ type RecencyGroup<T> = {
 type CreateAction = {
   label: string
   hint: string
-  icon: LucideIcon
+  icon: SidebarIcon
   onClick: () => void
   disabled?: boolean
 }
@@ -240,7 +270,19 @@ export function FocusWorkspaceSidebar({
   const [sessionQuery, setSessionQuery] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
   const [archivedSessionsOpen, setArchivedSessionsOpen] = useState(false)
-  const { setOpenMobile } = useSidebar()
+  const { setOpenMobile, state, isMobile } = useSidebar()
+  const [chatRailOpen, setChatRailOpen] = useState(false)
+  const collapsed = state === "collapsed" && !isMobile
+  const recentChats = useMemo(
+    () =>
+      [...conversations]
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        )
+        .slice(0, 20),
+    [conversations]
+  )
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
   const closeOverlays = () => {
     setOpenMobile(false)
@@ -349,12 +391,18 @@ export function FocusWorkspaceSidebar({
   const recentItems = useMemo(() => {
     if (activeView === "chat") {
       return [...conversations]
-        .sort((l, r) => new Date(r.updatedAt).getTime() - new Date(l.updatedAt).getTime())
+        .sort(
+          (l, r) =>
+            new Date(r.updatedAt).getTime() - new Date(l.updatedAt).getTime()
+        )
         .slice(0, 6)
         .map((item) => ({ id: item.id, title: item.title, status: "" }))
     }
     return [...visibleSessions]
-      .sort((l, r) => new Date(r.updatedAt).getTime() - new Date(l.updatedAt).getTime())
+      .sort(
+        (l, r) =>
+          new Date(r.updatedAt).getTime() - new Date(l.updatedAt).getTime()
+      )
       .slice(0, 6)
       .map((item) => ({ id: item.id, title: item.title, status: item.status }))
   }, [activeView, conversations, visibleSessions])
@@ -377,8 +425,6 @@ export function FocusWorkspaceSidebar({
       className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden pt-1 pb-1"
       role="region"
     >
-
-
       {actionError && (
         <Alert className="shrink-0" variant="destructive">
           <AlertDescription className="text-xs">{actionError}</AlertDescription>
@@ -445,7 +491,26 @@ export function FocusWorkspaceSidebar({
 
   return (
     <>
-      <Sidebar collapsible="icon" variant="inset">
+      <Sidebar
+        collapsible="icon"
+        variant="inset"
+        className="workspace-sidebar"
+        onPointerLeave={() => setChatRailOpen(false)}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget))
+            setChatRailOpen(false)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && chatRailOpen) {
+            event.preventDefault()
+            event.stopPropagation()
+            setChatRailOpen(false)
+            event.currentTarget
+              .querySelector<HTMLButtonElement>("[data-chat-rail-trigger]")
+              ?.focus()
+          }
+        }}
+      >
         <SidebarHeader className="gap-2">
           <SidebarMenu>
             <SidebarMenuItem>
@@ -454,18 +519,30 @@ export function FocusWorkspaceSidebar({
                   render={
                     <SidebarMenuButton
                       aria-label={`Select workspace (${activeOrganization?.name ?? "Workspace"})`}
+                      tooltip={`Select workspace · ${activeOrganization?.name ?? "Workspace"}`}
                       className="gap-2.5"
                       size="lg"
                     />
                   }
                 >
-                  <BrandMark aria-hidden="true" className="size-8 [&_svg]:size-full!" cropped />
+                  <BrandMark
+                    aria-hidden="true"
+                    className="size-8 [&_svg]:size-full!"
+                    cropped
+                  />
                   <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
                     {activeOrganization?.name ?? "Workspace"}
                   </span>
-                  <ChevronsUpDown aria-hidden="true" className="text-muted-foreground" />
+                  <ChevronsUpDown
+                    aria-hidden="true"
+                    className="text-muted-foreground"
+                  />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-64" side="bottom">
+                <DropdownMenuContent
+                  align="start"
+                  className="w-64"
+                  side="bottom"
+                >
                   <DropdownMenuGroup>
                     <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
                     {organizations.map((organization) => (
@@ -474,9 +551,13 @@ export function FocusWorkspaceSidebar({
                         onClick={() => onOrganizationSelect(organization.id)}
                       >
                         <Bot data-icon="inline-start" />
-                        <span className="min-w-0 flex-1 truncate">{organization.name}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          {organization.name}
+                        </span>
                         {organization.id === activeOrganization?.id && (
-                          <span className="text-xs text-muted-foreground">Current</span>
+                          <span className="text-xs text-muted-foreground">
+                            Current
+                          </span>
                         )}
                       </DropdownMenuItem>
                     ))}
@@ -499,7 +580,9 @@ export function FocusWorkspaceSidebar({
               >
                 <Search />
                 <span className="flex-1 text-left font-normal">Search…</span>
-                <kbd className="rounded bg-background/60 px-1.5 py-0.5 text-[10px] font-medium">⌘K</kbd>
+                <kbd className="rounded bg-background/60 px-1.5 py-0.5 text-[10px] font-medium">
+                  ⌘K
+                </kbd>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -526,12 +609,56 @@ export function FocusWorkspaceSidebar({
                       const button = (
                         <SidebarMenuButton
                           aria-current={active ? "page" : undefined}
-                          className="text-sm"
-                          disabled={disabled}
+                          aria-label={item.label}
+                          data-chat-rail-trigger={
+                            item.id === "chat" ? "" : undefined
+                          }
+                          aria-expanded={
+                            item.id === "chat" && collapsed
+                              ? chatRailOpen
+                              : undefined
+                          }
+                          aria-controls={
+                            item.id === "chat" && collapsed && chatRailOpen
+                              ? "recent-chat-rail"
+                              : undefined
+                          }
+                          onPointerEnter={() =>
+                            setChatRailOpen(collapsed && item.id === "chat")
+                          }
+                          onFocus={(event) => {
+                            if (
+                              !event.relatedTarget?.closest("#recent-chat-rail")
+                            )
+                              setChatRailOpen(collapsed && item.id === "chat")
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              collapsed &&
+                              item.id === "chat" &&
+                              event.key === "ArrowRight"
+                            ) {
+                              event.preventDefault()
+                              setChatRailOpen(true)
+                              requestAnimationFrame(() =>
+                                document
+                                  .querySelector<HTMLButtonElement>(
+                                    "#recent-chat-rail button"
+                                  )
+                                  ?.focus()
+                              )
+                            }
+                          }}
+                          className="text-sm aria-disabled:pointer-events-auto"
+                          aria-disabled={disabled || undefined}
                           isActive={active}
-                          onClick={() => navigateFromRail(item.id)}
+                          onClick={() => {
+                            if (!disabled) navigateFromRail(item.id)
+                          }}
                           tooltip={
-                            disabled ? "Disabled by platform administrator" : item.label
+                            disabled
+                              ? `${item.label} · Disabled by platform administrator`
+                              : item.label
                           }
                         >
                           <Icon />
@@ -539,7 +666,11 @@ export function FocusWorkspaceSidebar({
                         </SidebarMenuButton>
                       )
                       if (!hasHistory || !active) {
-                        return <SidebarMenuItem key={item.id}>{button}</SidebarMenuItem>
+                        return (
+                          <SidebarMenuItem key={item.id}>
+                            {button}
+                          </SidebarMenuItem>
+                        )
                       }
                       return (
                         <Collapsible
@@ -563,7 +694,16 @@ export function FocusWorkspaceSidebar({
                             </SidebarMenuAction>
                           )}
                           <CollapsibleTrigger
-                            render={<SidebarMenuAction className="right-7" aria-label={historyOpen ? `Hide ${historyTitle.toLocaleLowerCase()}` : `Show ${historyTitle.toLocaleLowerCase()}`} />}
+                            render={
+                              <SidebarMenuAction
+                                className="right-7"
+                                aria-label={
+                                  historyOpen
+                                    ? `Hide ${historyTitle.toLocaleLowerCase()}`
+                                    : `Show ${historyTitle.toLocaleLowerCase()}`
+                                }
+                              />
+                            }
                           >
                             <ChevronRight className="transition-transform group-data-[open]/menu-item:rotate-90 in-data-[open]:rotate-90" />
                           </CollapsibleTrigger>
@@ -581,16 +721,26 @@ export function FocusWorkspaceSidebar({
                                       render={<button type="button" />}
                                       onClick={() => {
                                         setOpenMobile(false)
-                                        if (activeView === "chat") onNavigate("chat", entry.id)
-                                        else onNavigate(activeView, null, entry.id)
+                                        if (activeView === "chat")
+                                          onNavigate("chat", entry.id)
+                                        else
+                                          onNavigate(activeView, null, entry.id)
                                       }}
                                       title={entry.title}
                                     >
-                                      <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+                                      <span className="min-w-0 flex-1 truncate">
+                                        {entry.title}
+                                      </span>
                                       {entry.status === "failed" ? (
-                                        <span aria-label="Failed" className="size-1.5 shrink-0 rounded-full bg-destructive" />
+                                        <span
+                                          aria-label="Failed"
+                                          className="size-1.5 shrink-0 rounded-full bg-destructive"
+                                        />
                                       ) : entry.status === "live" ? (
-                                        <span aria-label="Live" className="size-1.5 shrink-0 rounded-full bg-primary" />
+                                        <span
+                                          aria-label="Live"
+                                          className="size-1.5 shrink-0 rounded-full bg-primary"
+                                        />
                                       ) : null}
                                     </SidebarMenuSubButton>
                                   </SidebarMenuSubItem>
@@ -621,6 +771,7 @@ export function FocusWorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 aria-current={activeView === "settings" ? "page" : undefined}
+                aria-label="Workspace settings"
                 className="text-sm"
                 isActive={activeView === "settings"}
                 onClick={() => onNavigate("settings")}
@@ -634,6 +785,7 @@ export function FocusWorkspaceSidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   aria-current={activeView === "admin" ? "page" : undefined}
+                  aria-label="Platform admin"
                   className="text-sm"
                   isActive={activeView === "admin"}
                   onClick={() => onNavigate("admin")}
@@ -650,6 +802,7 @@ export function FocusWorkspaceSidebar({
                   render={
                     <SidebarMenuButton
                       aria-label={`${user.displayName} account menu`}
+                      tooltip={`${user.displayName} · Account menu`}
                       size="lg"
                     />
                   }
@@ -659,25 +812,39 @@ export function FocusWorkspaceSidebar({
                       <AvatarImage
                         alt={`${user.displayName}'s profile picture`}
                         src={resolveAPIURL(
-                          versionedAvatarURL(user.avatarUrl, user.avatarVersion) ?? user.avatarUrl
+                          versionedAvatarURL(
+                            user.avatarUrl,
+                            user.avatarVersion
+                          ) ?? user.avatarUrl
                         )}
                       />
                     )}
-                    <AvatarFallback className={avatarToneFor(user.id)}>{userInitials}</AvatarFallback>
+                    <AvatarFallback className={avatarToneFor(user.id)}>
+                      {userInitials}
+                    </AvatarFallback>
                   </Avatar>
                   <span className="min-w-0 flex-1 text-left">
-                    <span className="block truncate text-xs font-medium">{user.displayName}</span>
+                    <span className="block truncate text-xs font-medium">
+                      {user.displayName}
+                    </span>
                     <span className="block truncate text-[11px] font-normal text-muted-foreground">
                       {activeOrganization?.name ?? user.email}
                     </span>
                   </span>
-                  <MoreHorizontal aria-hidden="true" className="text-muted-foreground" />
+                  <MoreHorizontal
+                    aria-hidden="true"
+                    className="text-muted-foreground"
+                  />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56" side="top">
                   <DropdownMenuGroup>
                     <DropdownMenuLabel>
-                      <span className="block truncate text-xs font-medium">{user.displayName}</span>
-                      <span className="block truncate text-[11px] font-normal text-muted-foreground">{user.email}</span>
+                      <span className="block truncate text-xs font-medium">
+                        {user.displayName}
+                      </span>
+                      <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                        {user.email}
+                      </span>
                       {activeOrganization?.role && (
                         <span className="mt-1 block truncate text-[11px] font-normal text-muted-foreground">
                           {activeOrganization.name} · {activeOrganization.role}
@@ -701,6 +868,86 @@ export function FocusWorkspaceSidebar({
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarFooter>
+        {collapsed && chatRailOpen && (
+          <div className="workspace-chat-rail">
+            <section
+              id="recent-chat-rail"
+              aria-label="Recent chats"
+              className="flex h-full min-h-0 flex-col gap-4 rounded-2xl bg-sidebar p-4 shadow-lg"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="truncate text-sm font-medium">
+                  {activeOrganization?.name ?? "Workspace"}
+                </h2>
+                <Button
+                  aria-label="Search chats"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => {
+                    setChatRailOpen(false)
+                    setSearchOpen(true)
+                  }}
+                >
+                  <Search />
+                </Button>
+              </div>
+              <Button
+                className="justify-start"
+                variant="ghost"
+                onClick={() => {
+                  setChatRailOpen(false)
+                  onNavigate("chat")
+                }}
+              >
+                <Plus data-icon="inline-start" />
+                New chat
+              </Button>
+              <h3 className="text-xs text-muted-foreground">Recent chats</h3>
+              <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+                {recentChats.length === 0 && (
+                  <p className="px-2 text-sm text-muted-foreground">
+                    Your conversations will appear here.
+                  </p>
+                )}
+                {recentChats.map((chat) => (
+                  <Button
+                    key={chat.id}
+                    variant="ghost"
+                    className={cn(
+                      "shrink-0 justify-start",
+                      activeConversationId === chat.id &&
+                        "bg-sidebar-accent text-sidebar-accent-foreground"
+                    )}
+                    aria-current={
+                      activeView === "chat" && activeConversationId === chat.id
+                        ? "page"
+                        : undefined
+                    }
+                    title={chat.title}
+                    onClick={() => {
+                      setChatRailOpen(false)
+                      onNavigate("chat", chat.id)
+                    }}
+                  >
+                    <span className="truncate">{chat.title}</span>
+                  </Button>
+                ))}
+              </div>
+              <Button
+                variant="ghost"
+                className="justify-start"
+                onClick={() => {
+                  setChatRailOpen(false)
+                  onNavigate("chat")
+                  setHistoryDialogOpen(true)
+                }}
+              >
+                View all chats
+                <ChevronRight data-icon="inline-end" />
+              </Button>
+            </section>
+          </div>
+        )}
         <SidebarRail />
       </Sidebar>
 
@@ -722,7 +969,9 @@ export function FocusWorkspaceSidebar({
               </Button>
             )}
           </DialogHeader>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{historyPanel}</div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {historyPanel}
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -931,7 +1180,9 @@ function SessionRow({
               active ? "text-accent-foreground/75" : "text-muted-foreground"
             )}
           >
-            <span className={cn("min-w-0 truncate", failed && "text-destructive")}>
+            <span
+              className={cn("min-w-0 truncate", failed && "text-destructive")}
+            >
               {statusDescription}
             </span>
             <span aria-hidden="true" className="shrink-0">
