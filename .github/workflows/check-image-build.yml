@@ -42,8 +42,10 @@ jobs:
               - 'services/frontend/Dockerfile'
             backend_image:
               - 'services/backend/Dockerfile'
+              - 'services/backend/packaging/**'
             combined_image:
               - 'Dockerfile'
+              - 'services/backend/packaging/**'
             ffmpeg_image:
               - 'docker/ffmpeg/**'
               - '.github/workflows/build-ffmpeg-image.yml'
@@ -53,6 +55,7 @@ jobs:
             pyannote_image:
               - 'services/pyannote-diarizer/Dockerfile'
               - 'services/pyannote-diarizer/requirements.txt'
+              - 'services/pyannote-diarizer/prepare_runtime.py'
               - 'services/pyannote-diarizer/app.py'
               - 'services/pyannote-diarizer/model_sync.py'
               - 'services/pyannote-diarizer/tests/**'
@@ -124,7 +127,13 @@ jobs:
 
       - name: Verify patched OpenSSL runtime
         run: |
-          docker run --rm --entrypoint node justai-frontend:ci -e 'const fs = require("node:fs"); const assert = require("node:assert/strict"); const packages = fs.readFileSync("/lib/apk/db/installed", "utf8").split("\n\n"); for (const name of ["libssl3", "libcrypto3"]) { const record = packages.find(record => record.split("\n").includes("P:" + name)); assert(record, name + " missing"); const version = record.match(/^V:(.+)$/m)[1]; assert(version.localeCompare("3.5.9-r0", undefined, { numeric: true }) >= 0, name + ": " + version); } assert(process.versions.openssl.localeCompare("3.5.9", undefined, { numeric: true }) >= 0, process.versions.openssl); console.log("OpenSSL", process.versions.openssl); assert(!fs.existsSync("/sbin/apk"));'
+          docker run --rm --entrypoint node justai-frontend:ci -e 'const fs = require("node:fs"); const assert = require("node:assert/strict"); assert(process.versions.openssl.localeCompare("3.5.9", undefined, { numeric: true }) >= 0, process.versions.openssl); console.log("OpenSSL", process.versions.openssl); for (const path of ["/usr/local/lib/node_modules/npm", "/usr/local/bin/npm", "/usr/local/bin/npx", "/opt/yarn", "/usr/local/include/node"]) assert(!fs.existsSync(path), path);'
+
+      - name: Reject high and critical image vulnerabilities
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            aquasec/trivy:0.76.1 image --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 justai-frontend:ci
 
   resolve-ffmpeg-artifact:
     name: Resolve Shared FFmpeg Artifact
@@ -181,6 +190,12 @@ jobs:
           docker run --rm --entrypoint /opt/templates-venv/bin/python justai-backend:ci -c 'import pyexpat; print(pyexpat.EXPAT_VERSION); assert pyexpat.version_info >= (2, 9, 0); parser = pyexpat.ParserCreate(); parser.Parse("<root>ok</root>", True)'
           docker run --rm --entrypoint pdftotext justai-backend:ci -v
 
+      - name: Reject high and critical image vulnerabilities
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            aquasec/trivy:0.76.1 image --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 justai-backend:ci
+
   combined-image-build:
     name: Combined — Docker Build Check
     needs: [changes, resolve-ffmpeg-artifact]
@@ -195,9 +210,17 @@ jobs:
           context: .
           file: Dockerfile
           push: false
+          load: true
+          tags: justai-combined:ci
           build-contexts: ${{ needs.resolve-ffmpeg-artifact.outputs.context }}
           cache-from: type=gha,scope=combined
           cache-to: type=gha,scope=combined,mode=max
+
+      - name: Reject high and critical image vulnerabilities
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            aquasec/trivy:0.76.1 image --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 justai-combined:ci
 
   ffmpeg-image-build:
     name: Shared FFmpeg — Docker Build Check
@@ -268,7 +291,13 @@ jobs:
             exit 1
           fi
           docker run --rm --entrypoint python justai-pyannote:ci -c 'import importlib.metadata as metadata, importlib.util, pathlib; installed = {dist.metadata["Name"].lower() for dist in metadata.distributions() if dist.metadata["Name"]}; forbidden = {"pip", "setuptools"}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed); assert not list(pathlib.Path("/opt/venv/bin").glob("pip*"))'
-          docker run --rm --entrypoint /usr/bin/python justai-pyannote:ci -c 'import importlib.util, pathlib, site; roots = [pathlib.Path(path) for path in site.getsitepackages()]; assert all(importlib.util.find_spec(name) is None for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack")); assert all(not list(root.rglob("bom.cdx.json")) for root in roots); assert not pathlib.Path("/usr/share/python-wheels").exists()'
+          docker run --rm --entrypoint /usr/local/bin/python justai-pyannote:ci -c 'import importlib.util, pathlib, site; roots = [pathlib.Path(path) for path in site.getsitepackages()]; assert all(importlib.util.find_spec(name) is None for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack")); assert all(not list(root.rglob("bom.cdx.json")) for root in roots); assert not pathlib.Path("/usr/share/python-wheels").exists(); assert pathlib.Path("/var/lib/dpkg/status").is_file(); assert all(not pathlib.Path(path).exists() for path in ("/bin/sh", "/bin/bash", "/usr/bin/apt", "/usr/bin/dpkg"))'
           docker run --rm --entrypoint /opt/venv/bin/python -e HF_TOKEN=test-token -e PYANNOTE_SERVICE_TOKEN=0123456789abcdef -e PYANNOTE_ALLOWED_MEDIA_ORIGINS=https://s3.example.com -e PYANNOTE_MAX_SOURCE_BYTES=21474836480 justai-pyannote:ci -c 'import sys, types, warnings; runtime = type("Runtime", (), {"to": lambda self, device: self}); loader = lambda model, token=None: runtime(); pipeline = type("Pipeline", (), {"from_pretrained": staticmethod(loader)}); audio = types.ModuleType("pyannote.audio"); audio.Pipeline = pipeline; speaker = types.ModuleType("pyannote.audio.pipelines.speaker_diarization"); speaker.get_plda = lambda *args, **kwargs: None; pipelines = types.ModuleType("pyannote.audio.pipelines"); pipelines.speaker_diarization = speaker; package = types.ModuleType("pyannote"); package.audio = audio; sys.modules["pyannote"] = package; sys.modules["pyannote.audio"] = audio; sys.modules["pyannote.audio.pipelines"] = pipelines; sys.modules["pyannote.audio.pipelines.speaker_diarization"] = speaker; import app, matplotlib, pathlib; cache = pathlib.Path(matplotlib.get_cachedir()); cache.mkdir(parents=True, exist_ok=True); probe = cache / "write-test"; probe.write_text("ok"); probe.unlink(); assert app.MAX_SOURCE_BYTES == 20 * 1024**3; caught = []; warnings.showwarning = lambda *args, **kwargs: caught.append(args); warnings.warn_explicit("\ntorchcodec is not installed correctly", UserWarning, "io.py", 48, module="pyannote.audio.core.io"); assert not caught; assert str(cache) == "/tmp/matplotlib"'
           layers="$(docker image inspect justai-pyannote:ci --format '{{ len .RootFS.Layers }}')"
           test "$layers" -lt "11"
+
+      - name: Reject high and critical image vulnerabilities
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            aquasec/trivy:0.76.1 image --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 justai-pyannote:ci

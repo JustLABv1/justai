@@ -65,7 +65,7 @@ RUN apk add --no-cache \
     && /opt/ffmpeg/bin/ffmpeg -version \
     && /opt/ffmpeg/bin/ffprobe -version
 
-FROM reg.mini.dev/python:3.14.7-dev AS builder
+FROM python:3.14.9-slim-trixie AS builder
 
 USER root
 
@@ -107,6 +107,9 @@ RUN python -m venv "$VIRTUAL_ENV" \
     && pip check \
     && python -c 'import importlib.metadata as metadata, sys; assert metadata.version("setuptools") == sys.argv[1]' "${SETUPTOOLS_VERSION}"
 
+# Security update for filelock CVE-2026-112940; torch accepts this version.
+RUN pip install --upgrade "filelock==4.2.1" && pip check
+
 RUN python -c 'import pathlib, shutil; root = pathlib.Path("/opt/venv/lib/python3.14/site-packages"); [shutil.rmtree(path, ignore_errors=True) for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack") for path in (root / name, *root.glob(name + "-*.dist-info"), *root.glob(name + "-*.egg-info"))]; (root / "distutils-precedence.pth").unlink(missing_ok=True); [path.unlink(missing_ok=True) for path in pathlib.Path("/opt/venv/bin").glob("pip*")]'
 
 COPY app.py model_sync.py ./
@@ -114,26 +117,27 @@ COPY app.py model_sync.py ./
 RUN python -c 'import fastapi, lightning, pyannote.audio, torch, torchaudio, uvicorn; print(f"torch={torch.__version__} torchaudio={torchaudio.__version__}")' \
     && python -c 'import importlib.metadata as metadata, importlib.util; installed = {dist.metadata["Name"].lower() for dist in metadata.distributions() if dist.metadata["Name"]}; forbidden = {"pip", "setuptools"}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed)'
 
-FROM reg.mini.dev/python:3.14.7 AS runtime-base-prepared
+# Use the same glibc/Python ABI as the wheel builder. Only runtime libraries
+# are installed; pip, headers, static archives and caches are removed before
+# copying the merged filesystem, so they do not survive in lower layers.
+FROM python:3.14.9-slim-trixie AS runtime-base-prepared
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends ca-certificates libgomp1 libstdc++6 \
+    && python -m pip uninstall -y pip setuptools wheel \
+    && rm -rf /usr/local/include /usr/local/lib/pkgconfig \
+      /usr/local/lib/python3.14/ensurepip /usr/local/lib/python3.14/test \
+      /root/.cache /var/lib/apt/lists/* \
+    && find /usr/local/lib -name '*.a' -delete \
+    && groupadd --gid 1000 app \
+    && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /tmp app
 
-USER root
+COPY prepare_runtime.py /tmp/prepare_runtime.py
+RUN python /tmp/prepare_runtime.py
 
-# Runtime-base digests can ship pip 26.2.1 and setuptools 70.3.0 outside
-# /opt/venv. The amd64 image also includes a pip bootstrap wheel under
-# /usr/share/python-wheels whose embedded SBOM declares setuptools 70.3.0 even
-# after the installed packages are removed. Neither pip nor its bootstrap wheel
-# is needed at runtime, so remove both layouts before flattening the base.
-# This base is distroless and has no shell; use exec-form Python for the cleanup.
-RUN ["python", "-c", "import importlib.util, pathlib, shutil, site; roots = {pathlib.Path(path) for path in site.getsitepackages()}; [shutil.rmtree(path, ignore_errors=True) for root in roots for name in ('pip', 'setuptools', 'pkg_resources', '_distutils_hack') for path in (root / name, *root.glob(name + '-*.dist-info'), *root.glob(name + '-*.egg-info'))]; [(root / 'distutils-precedence.pth').unlink(missing_ok=True) for root in roots]; [pathlib.Path(path).unlink(missing_ok=True) for path in ('/usr/bin/pip', '/usr/bin/pip3', '/usr/bin/pip3.14')]; shutil.rmtree('/usr/share/python-wheels', ignore_errors=True); importlib.invalidate_caches(); assert all(importlib.util.find_spec(name) is None for name in ('pip', 'setuptools', 'pkg_resources', '_distutils_hack')); assert not pathlib.Path('/usr/share/python-wheels').exists()"]
-
-# Deleting files in a later container layer only adds whiteouts; scanners that
-# inspect every layer can still read pip's old embedded bom.cdx.json from the
-# Minimus base layer. Copy the prepared merged filesystem onto scratch so the
-# reusable runtime base contains the cleaned filesystem as one physical layer
-# and no inherited pip/setuptools layer history.
 FROM scratch AS runtime-base
 
-COPY --from=runtime-base-prepared / /
+COPY --from=runtime-base-prepared /runtime/ /
 
 FROM runtime-base AS runtime
 
@@ -141,7 +145,7 @@ ARG APP_VERSION=dev
 
 LABEL org.opencontainers.image.version=$APP_VERSION
 
-ENV IMAGE_NAME=python \
+ENV LANG=C.UTF-8 \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -163,9 +167,10 @@ COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffmpeg
 COPY --from=builder /app/app.py /app/app.py
 COPY --from=builder /app/model_sync.py /app/model_sync.py
 
-RUN ["/opt/venv/bin/python", "-c", "import importlib.metadata as metadata, importlib.util, pathlib; installed = {dist.metadata['Name'].lower() for dist in metadata.distributions() if dist.metadata['Name']}; forbidden = {'pip', 'setuptools'}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed); assert not list(pathlib.Path('/opt/venv/bin').glob('pip*')); assert not pathlib.Path('/usr/share/python-wheels').exists()"]
+# Validate as the runtime user so imports cannot create root-owned caches.
+USER 1000:1000
 
-USER 1000
+RUN ["/opt/venv/bin/python", "-c", "import fastapi, lightning, pyannote.audio, torch, torchaudio, uvicorn; import importlib.metadata as metadata, importlib.util, pathlib; installed = {dist.metadata['Name'].lower() for dist in metadata.distributions() if dist.metadata['Name']}; forbidden = {'pip', 'setuptools'}; assert all(importlib.util.find_spec(name) is None for name in forbidden); assert not forbidden.intersection(installed); assert not list(pathlib.Path('/opt/venv/bin').glob('pip*')); assert not pathlib.Path('/usr/share/python-wheels').exists()"]
 
 EXPOSE 8000
 

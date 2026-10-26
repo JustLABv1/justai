@@ -62,7 +62,7 @@ RUN apk add --no-cache \
     && /opt/ffmpeg/bin/ffmpeg -version \
     && /opt/ffmpeg/bin/ffprobe -version
 
-FROM reg.mini.dev/go:v1.27.2 AS builder
+FROM golang:1.27.3-bookworm AS builder
 USER 0
 ARG APP_VERSION=dev
 # Define cache locations for Go build
@@ -80,7 +80,22 @@ RUN go mod download
 COPY . .
 
 # Build
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o justai-backend
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o justai-backend
+
+# Temporary signed security backport, matching JustCD's stable-Alpine pattern.
+# Keep source checksums and package metadata so scanners see the shipped version.
+FROM alpine:3.24 AS expat-builder
+RUN apk add --no-cache alpine-sdk
+WORKDIR /src/expat
+COPY packaging/expat/APKBUILD ./
+RUN abuild-keygen -a -n \
+    && cp /root/.abuild/*.rsa.pub /etc/apk/keys/ \
+    && apk update \
+    && abuild -F -r -P /packages \
+    && mkdir -p /out/keys \
+    && cp /root/.abuild/*.rsa.pub /out/keys/ \
+    && find /packages -name 'libexpat-*.apk' -exec cp {} /out/ \; \
+    && rm -f /root/.abuild/*.rsa
 
 FROM alpine:3.24 AS runner
 ARG APP_VERSION=dev
@@ -88,9 +103,11 @@ WORKDIR /app
 
 LABEL org.opencontainers.image.version=$APP_VERSION
 
-# Alpine 3.24 still ships Expat 2.8.5. Limit the edge repository to the patched
-# library for CVE-2026-77214; all other runtime packages remain on stable.
-RUN printf '%s\n' '@security https://dl-cdn.alpinelinux.org/alpine/edge/main' >> /etc/apk/repositories
+COPY --from=expat-builder /out/keys/ /etc/apk/keys/
+COPY --from=expat-builder /out/libexpat-*.apk /tmp/expat/
+RUN apk upgrade --no-cache \
+    && apk add --no-cache /tmp/expat/*.apk \
+    && rm -rf /tmp/expat
 
 # pip is only needed while installing pypdf. Remove packaging tools in the same
 # layer so neither the final image nor its layer history keeps setuptools.
@@ -98,14 +115,14 @@ RUN apk add --upgrade --no-cache \
     ca-certificates \
     libcrypto3 \
     libssl3 \
-    'libexpat@security>=2.9.0-r0' \
+    'libexpat>=2.9.0-r0' \
     poppler-utils \
     python3 \
     py3-pip \
     tzdata \
     wget \
     && python3 -m venv /opt/templates-venv \
-    && /opt/templates-venv/bin/pip install --no-cache-dir pypdf==6.19.0 \
+    && /opt/templates-venv/bin/pip install --no-cache-dir pypdf==6.21.2 \
     && /opt/templates-venv/bin/python -c 'import pathlib, shutil, sysconfig; root = pathlib.Path(sysconfig.get_path("purelib")); [shutil.rmtree(path, ignore_errors=True) for name in ("pip", "setuptools", "pkg_resources", "_distutils_hack") for path in (root / name, *root.glob(name + "-*.dist-info"), *root.glob(name + "-*.egg-info"))]; (root / "distutils-precedence.pth").unlink(missing_ok=True); [path.unlink(missing_ok=True) for path in pathlib.Path("/opt/templates-venv/bin").glob("pip*")]' \
     && apk del py3-pip \
     && if apk info -e py3-setuptools >/dev/null 2>&1; then apk del py3-setuptools; fi \
