@@ -45,7 +45,7 @@
     "react-day-picker": "^10.0.2",
     "react-dom": "19.3.1",
     "react-markdown": "^10.1.0",
-    "react-resizable-panels": "^4.14.8",
+    "react-resizable-panels": "^4.15.0",
     "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1",
     "shadcn": "^4.22.1",
