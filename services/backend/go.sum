@@ -98,6 +98,8 @@ github.com/signintech/gopdf v0.38.1 h1:mMdVMPKrvHCskYmjet/uTuXRAEV742oTM7GdFcuhu
 github.com/signintech/gopdf v0.38.1/go.mod h1:d23eO35GpEliSrF22eJ4bsM3wVeQJTjXTHq5x5qGKjA=
 github.com/signintech/gopdf v0.38.2 h1:PeBwYjHfyRqjLUKxdnlCE6y/q2ekKlhYqa+wPtErNAY=
 github.com/signintech/gopdf v0.38.2/go.mod h1:d23eO35GpEliSrF22eJ4bsM3wVeQJTjXTHq5x5qGKjA=
+github.com/signintech/gopdf v0.38.3 h1:8P2U6k4dqjifjNCg2qi8CEwlkaG/jTx+WBnBE2H6nzE=
+github.com/signintech/gopdf v0.38.3/go.mod h1:d23eO35GpEliSrF22eJ4bsM3wVeQJTjXTHq5x5qGKjA=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=
