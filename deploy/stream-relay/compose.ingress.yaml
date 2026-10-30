@@ -1,0 +1,30 @@
+# Standalone alternative: TLS terminates at your ingress/load balancer.
+# Host ingress connects to 127.0.0.1:8080. Do not publish this port publicly.
+name: justai-stream-relay
+services:
+  relay:
+    build:
+      context: ../../services/backend
+      dockerfile: Dockerfile
+      target: stream-relay
+    command: ["--http", "--listen", ":8080"]
+    restart: unless-stopped
+    init: true
+    user: "1001:1001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 2
+    ulimits:
+      nofile: {soft: 256, hard: 256}
+    ports:
+      - "127.0.0.1:${RELAY_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./sources.json:/etc/stream-relay/sources.json:ro
+    secrets:
+      - relay_token
+secrets:
+  relay_token:
+    file: ./secrets/relay_token

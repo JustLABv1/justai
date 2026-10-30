@@ -109,7 +109,7 @@ RUN apk upgrade --no-cache \
 COPY --from=relay-builder /app/justai-stream-relay /usr/local/bin/justai-stream-relay
 COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
 USER 1001:1001
-EXPOSE 8443
+EXPOSE 8080 8443
 ENTRYPOINT ["/usr/local/bin/justai-stream-relay"]
 
 FROM alpine:3.24 AS runner

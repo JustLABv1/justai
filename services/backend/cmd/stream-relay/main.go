@@ -1,4 +1,4 @@
-// stream-relay is an authenticated, TLS-only finite-segment MP3 relay.
+// stream-relay is an authenticated, finite-segment MP3 relay.
 package main
 
 import (
@@ -8,6 +8,7 @@ import (
 	"flag"
 	"justai-backend/streamrelay"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,8 +22,15 @@ func main() {
 	tokenFile := flag.String("token-file", "/run/secrets/relay_token", "bearer token file")
 	cert := flag.String("tls-cert", "/etc/stream-relay/tls.crt", "TLS certificate")
 	key := flag.String("tls-key", "/run/secrets/tls_key", "TLS private key")
-	addr := flag.String("listen", ":8443", "listen address")
+	httpMode := flag.Bool("http", false, "serve plain HTTP behind a trusted TLS-terminating ingress; never expose publicly")
+	addr := flag.String("listen", "", "listen address (default :8443 for HTTPS, :8080 with --http)")
 	flag.Parse()
+	if *addr == "" {
+		*addr = ":8443"
+		if *httpMode {
+			*addr = ":8080"
+		}
+	}
 	body, err := os.ReadFile(*config)
 	if err != nil {
 		log.Fatal("cannot read source configuration")
@@ -50,9 +58,27 @@ func main() {
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	relay.Run(ctx, cfg)
-	log.Print("stream relay listening with TLS")
-	if err = srv.ListenAndServeTLS(*cert, *key); err != nil && err != http.ErrServerClosed {
-		log.Fatal("relay TLS listener failed")
+	listener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Fatal("relay listener failed")
 	}
+	defer listener.Close()
+	relay.Run(ctx, cfg)
+	if *httpMode {
+		log.Print("stream relay using HTTP behind a trusted TLS-terminating ingress")
+	} else {
+		log.Print("stream relay using HTTPS")
+	}
+	if err = serveRelay(srv, listener, *httpMode, *cert, *key); err != nil && err != http.ErrServerClosed {
+		log.Fatal("relay listener failed; check listen address and TLS configuration")
+	}
+}
+
+// HTTP is an explicit operator opt-in. Never infer transport from forwarded
+// headers or fall back to plaintext when certificates are missing or invalid.
+func serveRelay(srv *http.Server, listener net.Listener, httpMode bool, cert, key string) error {
+	if httpMode {
+		return srv.Serve(listener)
+	}
+	return srv.ServeTLS(listener, cert, key)
 }
