@@ -100,6 +100,11 @@ monolith:
 backend:
   replicaCount: 1
   # Also applied to the backend process in monolith mode.
+  # Connect to a separately deployed stream relay (also in monolith mode).
+  streamRelay:
+    # Public HTTPS origin, including when the relay uses HTTP behind an ingress.
+    # Empty disables relay configuration and the token mount.
+    url: ""
   proxy:
     http: ""
     https: ""
@@ -325,6 +330,7 @@ secrets:
     encryptionKey: ""
     pyannoteHfToken: ""
     pyannoteServiceToken: ""
+    streamRelayToken: ""
     backendHttpProxy: ""
     backendHttpsProxy: ""
     backendNoProxy: ""
@@ -364,6 +370,9 @@ secrets:
     pyannoteServiceToken:
       name: ""
       key: service-token
+    streamRelayToken:
+      name: ""
+      key: stream-relay-token
     backendHttpProxy:
       name: ""
       key: backend-http-proxy

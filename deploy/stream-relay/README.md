@@ -12,7 +12,7 @@ the parliamentary radio URL in `sources.example.json`. It deliberately rejects
 redirects, webpages, HLS, DASH, RTMP and arbitrary user-supplied upstream URLs.
 The existing direct capture mode remains available for those other protocols.
 
-## Install the relay
+## Install the relay with direct HTTPS
 
 From this directory on the relay host:
 
@@ -45,9 +45,65 @@ several minutes. No public relay image is assumed. Update/rebuild alongside the
 backend to pick up security fixes.
 
 The container runs without root, Linux capabilities or a writable root filesystem,
-with memory, CPU, process and file-descriptor limits. TLS and bearer authentication
-are mandatory. For a wider exposed network, additionally use your ingress's request
+with memory, CPU, process and file-descriptor limits. The public endpoint must use
+TLS and bearer authentication is mandatory in both listener modes. For a wider exposed network, additionally use your ingress's request
 rate and connection limits; this small service is not a volumetric DDoS defense.
+
+## Use your own ingress / load balancer for TLS
+
+The relay supports explicit `--http` mode for this topology:
+
+```text
+JustAI backend --HTTPS--> ingress / load balancer --HTTP--> relay:8080
+```
+
+In this mode no certificate or private key is mounted into the relay. The ingress
+owns certificate issuance and renewal. Bearer authentication and all source/address
+restrictions remain enabled. HTTPS remains the default listener mode; missing or
+invalid certificates never cause an automatic fallback to HTTP.
+
+For an ingress running directly on the same host, configure `sources.json` and
+`secrets/relay_token` as above, then use this **alternative standalone Compose file**:
+
+```sh
+docker compose -f compose.ingress.yaml up -d --build
+```
+
+It binds HTTP to `127.0.0.1:8080` only (override the host port with
+`RELAY_HTTP_PORT` if necessary). Do not combine it with `compose.yaml` using `-f`:
+that file is a separate direct-HTTPS deployment and would retain TLS mounts/ports.
+Stop any existing direct-HTTPS deployment before switching modes.
+
+Configure your ingress to proxy `https://relay.example.org` to
+`http://127.0.0.1:8080`, preserve the request path/query and `Authorization` header,
+and disable caching. Restrict the public endpoint to the application/corporate
+proxy's egress addresses where possible. Reject or redirect public HTTP to HTTPS
+at the ingress; the relay does not enforce the external scheme using forwarded
+headers. Apply request rate and connection limits at your ingress.
+
+For a containerized ingress or OpenShip deployment, set the relay's container
+command to `--http --listen :8080`, connect ingress and relay through a private
+container network, and route to the relay's internal HTTP port 8080. Omit host port
+publication entirely. Mount only the source configuration and token; neither
+`tls.crt` nor `tls_key` is needed. Keep a single relay replica because audio segment
+buffers are local to the process. OpenShip-specific routing and mounts must be
+configured in your deployment; this repository does not install them automatically.
+
+The HTTP hop carries the bearer token and audio in plaintext. Keep it on a trusted,
+isolated host/container network with access limited to the ingress. For hops across
+untrusted networks, retain HTTPS on the relay and use ingress re-encryption instead.
+
+The JustAI backend still uses `JUSTAI_STREAM_RELAY_URL=https://relay.example.org`
+and source URLs such as `https://relay.example.org/v1/sources/bundestag`.
+The backend client continues to require HTTPS and certificate validation.
+
+Listener options:
+
+| Option | Behavior |
+| --- | --- |
+| Default | HTTPS on `:8443`, certificate and key required |
+| `--http` | HTTP on `:8080`, certificates not loaded |
+| `--listen <address>` | Override the bind address/port for the selected mode |
 
 ## Connect JustAI
 
@@ -57,6 +113,11 @@ Set on the **backend**, then restart it:
 JUSTAI_STREAM_RELAY_URL=https://relay.example.org:8443
 JUSTAI_STREAM_RELAY_TOKEN_FILE=/run/secrets/stream_relay_token
 ```
+
+For Helm deployments, set `backend.streamRelay.url` and
+`secrets.refs.streamRelayToken.name` / `key`; the chart mounts the token and sets
+both environment variables in backend and monolith mode. See the
+[Helm relay configuration](../../charts/justai/README.md#external-livestream-relay).
 
 The origin must use HTTPS, with no path, credentials or query. Mount a protected
 copy of the same token file into the backend container. `backend.compose.yaml`
@@ -112,8 +173,8 @@ invalid certificates and redirects fail closed.
 - Rotate the token by replacing both protected copies and restarting the relay
   and backend. Existing sessions must reconnect. No overlap-key rotation is provided.
 - Certificate issuance/renewal, token distribution and network firewall rules are
-  deployment responsibilities. The service refuses to start without usable TLS
-  key/certificate files and a token of at least 32 characters.
+  deployment responsibilities. Direct HTTPS mode refuses to start without usable TLS
+  key/certificate files; both modes require a token of at least 32 characters.
 
 ## Verify
 

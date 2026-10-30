@@ -1,3 +1,4 @@
+# Direct HTTPS deployment. For ingress TLS termination use compose.ingress.yaml.
 name: justai-stream-relay
 services:
   relay:

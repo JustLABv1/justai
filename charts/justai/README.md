@@ -124,6 +124,55 @@ https_proxy="$HTTPS_PROXY" http_proxy="$HTTP_PROXY" no_proxy="$NO_PROXY" \
   wget -O /dev/null https://www.bundestag.de/mediathek/live
 ```
 
+## External livestream relay
+
+Configure the relay connection for the backend, including monolith mode:
+
+```yaml
+backend:
+  streamRelay:
+    url: https://relay.example.org
+secrets:
+  refs:
+    streamRelayToken:
+      name: justai-stream-relay
+      key: stream-relay-token
+```
+
+Create the referenced Secret in the application's namespace from a protected copy
+of the same token file used on the relay (at least 32 characters):
+
+```sh
+kubectl -n justai create secret generic justai-stream-relay \
+  --from-file=stream-relay-token=/secure/path/relay_token
+```
+
+The chart injects `JUSTAI_STREAM_RELAY_URL` and
+`JUSTAI_STREAM_RELAY_TOKEN_FILE` and mounts only the selected Secret key, read-only,
+at `/var/run/justai/stream-relay/token`. It mounts the directory without `subPath`
+so Kubernetes Secret updates can propagate. No relay token is sent to the frontend
+workload. In monolith mode the frontend and backend share a container; its filesystem
+is shared. Leave the URL empty to omit the relay environment variables and mount.
+
+The Secret name falls back to `secrets.existingSecret` or the generated/Vault
+Secret, consistent with other `secrets.refs`. Vault must supply the selected key.
+For private test values, `secrets.create=true` supports
+`secrets.data.streamRelayToken`; keep real tokens out of committed values and Helm
+command arguments. Restart the backend after rotating tokens to reconnect captures.
+
+The URL must be an **HTTPS origin**, without a path, query, fragment or credentials.
+This stays HTTPS when the relay uses `--http` behind your TLS-terminating ingress:
+the backend connects to the public ingress, not directly to the HTTP listener.
+Use `trustedCA` below for a private issuing CA. Existing `backend.proxy` settings
+apply to this connection; set `noProxy` appropriately for internal routing.
+
+Enter `https://relay.example.org/v1/sources/bundestag` in the livestream URL field.
+The relay must already have that source configured. This chart configures the
+**application's connection to an external relay**; it does not deploy a relay into
+the firewall-restricted application cluster. See the
+[relay deployment guide](../../deploy/stream-relay/README.md) for OpenShip/Compose
+and ingress TLS termination.
+
 ## Custom CA for backend connections
 
 When S3, a proxy, or another backend dependency presents a certificate signed
@@ -394,3 +443,10 @@ Ingresses and reverse proxies must allow request bodies at least as large as
 `videoUploadPartBytes` (16 MiB by default) and should permit slow request-body
 streaming for clients on constrained connections. Configure their request
 timeout to at least ten minutes so it matches the browser's per-part timeout.
+
+## Chart configuration checks
+
+Run `helm lint charts/justai` and
+`ruby charts/justai/tests/stream_relay_test.rb` from the repository root. The relay
+checks render both deployment modes and verify credential mounts, frontend
+isolation, Secret/Vault selection, and rejection of invalid configuration.
