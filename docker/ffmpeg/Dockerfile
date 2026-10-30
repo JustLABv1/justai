@@ -16,6 +16,8 @@ RUN apk add --no-cache \
       linux-headers \
       perl \
     && curl --fail --location --silent --show-error \
+      --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 300 \
+      --connect-timeout 30 --max-time 120 \
       --output /tmp/openssl.tar.gz \
       "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
     && echo "${OPENSSL_SHA256}  /tmp/openssl.tar.gz" | sha256sum -c - \
@@ -46,12 +48,18 @@ RUN apk add --no-cache \
     && mkdir -p /tmp/ffmpeg-source /tmp/gnupg /opt/ffmpeg/bin \
     && chmod 700 /tmp/gnupg \
     && curl --fail --location --silent --show-error \
+      --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 300 \
+      --connect-timeout 30 --max-time 120 \
       --output /tmp/ffmpeg-source/ffmpeg.tar.xz \
       "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
     && curl --fail --location --silent --show-error \
+      --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 300 \
+      --connect-timeout 30 --max-time 120 \
       --output /tmp/ffmpeg-source/ffmpeg.tar.xz.asc \
       "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz.asc" \
     && curl --fail --location --silent --show-error \
+      --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 300 \
+      --connect-timeout 30 --max-time 120 \
       --output /tmp/ffmpeg-source/ffmpeg-devel.asc \
       "https://ffmpeg.org/ffmpeg-devel.asc" \
     && GNUPGHOME=/tmp/gnupg gpg --batch --import /tmp/ffmpeg-source/ffmpeg-devel.asc \
