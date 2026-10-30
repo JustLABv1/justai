@@ -1,0 +1,31 @@
+name: justai-stream-relay
+services:
+  relay:
+    build:
+      context: ../../services/backend
+      dockerfile: Dockerfile
+      target: stream-relay
+    restart: unless-stopped
+    init: true
+    user: "1001:1001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 2
+    ulimits:
+      nofile: {soft: 256, hard: 256}
+    ports:
+      - "${RELAY_BIND_ADDRESS:?Set RELAY_BIND_ADDRESS to the intended host interface}:8443:8443"
+    volumes:
+      - ./sources.json:/etc/stream-relay/sources.json:ro
+      - ./tls.crt:/etc/stream-relay/tls.crt:ro
+    secrets:
+      - relay_token
+      - tls_key
+secrets:
+  relay_token:
+    file: ./secrets/relay_token
+  tls_key:
+    file: ./secrets/tls_key

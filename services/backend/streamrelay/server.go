@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -114,12 +115,12 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			http.NotFound(w, req)
 			return
 		}
-		body = segment
+		body = wavFile(segment)
 		if body == nil {
 			http.Error(w, "segment unavailable", 410)
 			return
 		}
-		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Type", "audio/wav")
 	} else {
 		http.NotFound(w, req)
 		return
@@ -134,20 +135,7 @@ func (r *Relay) Run(ctx context.Context, cfg Config) {
 		s := r.sources[id]
 		go func() {
 			for ctx.Err() == nil {
-				_ = capture(ctx, raw, func(pcm []byte) {
-					s.Lock()
-					defer s.Unlock()
-					s.manifest.Latest++
-					seq := s.manifest.Latest
-					s.segments[seq] = pcm
-					if seq > RetainedSegments {
-						delete(s.segments, seq-RetainedSegments)
-					}
-					s.manifest.Oldest = 1
-					if seq > RetainedSegments {
-						s.manifest.Oldest = seq - RetainedSegments + 1
-					}
-				})
+				_ = capture(ctx, raw, s.append)
 				select {
 				case <-ctx.Done():
 					return
@@ -211,6 +199,11 @@ func capture(ctx context.Context, raw string, emit func([]byte)) error {
 	tr := &http.Transport{DialContext: guardedDial, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 10 * time.Second, MaxResponseHeaderBytes: 32 * 1024}
 	defer tr.CloseIdleConnections()
 	client := &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return captureWithClient(ctx, raw, emit, client)
+}
+func captureWithClient(ctx context.Context, raw string, emit func([]byte), client *http.Client) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", raw, nil)
 	if err != nil {
 		return err
@@ -224,7 +217,7 @@ func capture(ctx context.Context, raw string, emit func([]byte)) error {
 		return fmt.Errorf("upstream must return audio/mpeg with HTTP 200; redirects are forbidden")
 	}
 	// Only MP3 bytes enter FFmpeg. It cannot open networks, playlists or local files.
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", "pipe", "-f", "mp3", "-i", "pipe:0", "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", "pipe", "-threads", "1", "-f", "mp3", "-i", "pipe:0", "-map", "0:a:0", "-threads", "1", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -253,4 +246,43 @@ func capture(ctx context.Context, raw string, emit func([]byte)) error {
 		}
 		emit(buf)
 	}
+}
+
+func (s *source) append(pcm []byte) {
+	s.Lock()
+	defer s.Unlock()
+	s.manifest.Latest++
+	seq := s.manifest.Latest
+	s.segments[seq] = pcm
+	if seq > RetainedSegments {
+		delete(s.segments, seq-RetainedSegments)
+	}
+	s.manifest.Oldest = 1
+	if seq > RetainedSegments {
+		s.manifest.Oldest = seq - RetainedSegments + 1
+	}
+}
+
+func wavFile(pcm []byte) []byte {
+	if pcm == nil {
+		return nil
+	}
+	header := wavHeader()
+	return append(header, pcm...)
+}
+func wavHeader() []byte {
+	b := make([]byte, 44)
+	copy(b, "RIFF")
+	binary.LittleEndian.PutUint32(b[4:], SegmentBytes+36)
+	copy(b[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(b[16:], 16)
+	binary.LittleEndian.PutUint16(b[20:], 1)
+	binary.LittleEndian.PutUint16(b[22:], 1)
+	binary.LittleEndian.PutUint32(b[24:], 16000)
+	binary.LittleEndian.PutUint32(b[28:], 32000)
+	binary.LittleEndian.PutUint16(b[32:], 2)
+	binary.LittleEndian.PutUint16(b[34:], 16)
+	copy(b[36:], "data")
+	binary.LittleEndian.PutUint32(b[40:], SegmentBytes)
+	return b
 }

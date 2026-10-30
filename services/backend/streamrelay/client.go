@@ -2,6 +2,7 @@
 package streamrelay
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -116,14 +117,14 @@ func (c *Client) copy(ctx context.Context, w io.Writer) error {
 			return fmt.Errorf("stream relay restarted or audio expired; reconnect required")
 		}
 		for next <= m.Latest {
-			body, status, err := c.get(ctx, "/segments/"+strconv.FormatUint(next, 10)+"?epoch="+url.QueryEscape(epoch), SegmentBytes)
+			body, status, err := c.get(ctx, "/segments/"+strconv.FormatUint(next, 10)+"?epoch="+url.QueryEscape(epoch), SegmentBytes+44)
 			if err != nil {
 				return fmt.Errorf("stream relay audio unavailable (HTTP %d)", status)
 			}
-			if len(body) != SegmentBytes {
+			if len(body) != SegmentBytes+44 || !bytes.Equal(body[:44], wavHeader()) {
 				return fmt.Errorf("stream relay returned invalid PCM audio")
 			}
-			if _, err := w.Write(body); err != nil {
+			if _, err := w.Write(body[44:]); err != nil {
 				return err
 			}
 			lastAudio = time.Now()
@@ -146,3 +147,5 @@ type audioReader struct {
 }
 
 func (r *audioReader) Close() error { r.cancel(); return r.PipeReader.Close() }
+
+func (c *Client) Close() { c.http.CloseIdleConnections() }

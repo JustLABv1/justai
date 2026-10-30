@@ -97,6 +97,21 @@ RUN abuild-keygen -a -n \
     && find /packages -name 'libexpat-*.apk' -exec cp {} /out/ \; \
     && rm -f /root/.abuild/*.rsa
 
+# Optional standalone relay image; the backend remains the default final target.
+FROM builder AS relay-builder
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /app/justai-stream-relay ./cmd/stream-relay
+
+FROM alpine:3.24 AS stream-relay
+RUN apk upgrade --no-cache \
+    && apk add --no-cache ca-certificates \
+    && addgroup -S -g 1001 relay \
+    && adduser -S -D -H -u 1001 -G relay relay
+COPY --from=relay-builder /app/justai-stream-relay /usr/local/bin/justai-stream-relay
+COPY --from=ffmpeg-builder /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+USER 1001:1001
+EXPOSE 8443
+ENTRYPOINT ["/usr/local/bin/justai-stream-relay"]
+
 FROM alpine:3.24 AS runner
 ARG APP_VERSION=dev
 WORKDIR /app

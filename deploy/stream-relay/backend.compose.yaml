@@ -1,0 +1,12 @@
+# Merge into the application's Compose deployment with -f, after compose.yaml.
+# Set an absolute path to a protected copy of the relay token on the backend host.
+services:
+  backend:
+    environment:
+      JUSTAI_STREAM_RELAY_URL: ${JUSTAI_STREAM_RELAY_URL:?Set the HTTPS relay origin}
+      JUSTAI_STREAM_RELAY_TOKEN_FILE: /run/secrets/stream_relay_token
+    secrets:
+      - stream_relay_token
+secrets:
+  stream_relay_token:
+    file: ${JUSTAI_STREAM_RELAY_TOKEN_PATH:?Set the absolute token file path}
