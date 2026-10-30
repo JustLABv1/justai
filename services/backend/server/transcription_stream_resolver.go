@@ -32,6 +32,7 @@ func resolveLiveStream(ctx context.Context, raw string, allowPrivate bool) (reso
 		return resolvedLiveStream{}, err
 	}
 	if relay != nil {
+		defer relay.Close()
 		if _, err := relay.Manifest(ctx); err != nil {
 			return resolvedLiveStream{}, err
 		}

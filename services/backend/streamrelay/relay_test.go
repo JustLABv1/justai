@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -176,5 +177,76 @@ func TestClientRejectsTruncatedAudio(t *testing.T) {
 	defer reader.Close()
 	if _, err := io.ReadAll(reader); err == nil {
 		t.Fatal("truncated audio accepted")
+	}
+}
+
+func TestRingEvictionAndSlowClientsDoNotBlockCapture(t *testing.T) {
+	r := testRelay(t)
+	s := r.sources["radio"]
+	for i := 0; i < 20; i++ {
+		s.append(make([]byte, SegmentBytes))
+	}
+	if len(s.segments) != RetainedSegments || s.manifest.Oldest != 10 || s.manifest.Latest != 21 {
+		t.Fatalf("unbounded/incorrect ring: %+v, %d", s.manifest, len(s.segments))
+	}
+	req := httptest.NewRequest("GET", "/v1/sources/radio/segments/21?epoch=test-epoch", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	w := &blockingWriter{header: make(http.Header), started: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan struct{})
+	go func() { r.ServeHTTP(w, req); close(done) }()
+	<-w.started
+	appended := make(chan struct{})
+	go func() { s.append(make([]byte, SegmentBytes)); close(appended) }()
+	select {
+	case <-appended:
+	case <-time.After(time.Second):
+		close(w.release)
+		t.Fatal("slow client blocked source capture")
+	}
+	close(w.release)
+	<-done
+}
+
+type blockingWriter struct {
+	header           http.Header
+	started, release chan struct{}
+}
+
+func (w *blockingWriter) Header() http.Header { return w.header }
+func (w *blockingWriter) WriteHeader(int)     {}
+func (w *blockingWriter) Write(b []byte) (int, error) {
+	close(w.started)
+	<-w.release
+	return len(b), nil
+}
+
+func TestMP3DecodeProducesCompleteSegments(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	cmd := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=11", "-f", "mp3", "pipe:1")
+	mp3, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write(mp3)
+	}))
+	defer upstream.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	count := 0
+	err = captureWithClient(ctx, upstream.URL, func(pcm []byte) {
+		if len(pcm) != SegmentBytes {
+			t.Errorf("incomplete segment: %d", len(pcm))
+		}
+		if bytes.Equal(pcm, make([]byte, SegmentBytes)) {
+			t.Error("decoded audio is silent")
+		}
+		count++
+	}, upstream.Client())
+	if err == nil || count != 2 {
+		t.Fatalf("decoded %d complete segments; err=%v", count, err)
 	}
 }

@@ -223,3 +223,13 @@ deleted after processing. A reclaimed attempt removes previous temporary objects
 for the session. Other diarization providers use bounded audio windows. Sources
 are labelled separately to avoid merging unrelated source-local speaker IDs.
 Original transcript text and timestamps are retained.
+
+## Livestream capture through a file-inspecting proxy
+
+An optional standalone HTTPS relay converts approved MP3 streams into completed
+five-second WAV files. Set `JUSTAI_STREAM_RELAY_URL` and
+`JUSTAI_STREAM_RELAY_TOKEN_FILE` on the backend, then use the relay source URL in
+the existing livestream field. See [installation and security boundaries](../deploy/stream-relay/README.md).
+The relay uses operator-configured sources, TLS, backend-only bearer authentication,
+public-address dial validation, and bounded in-memory retention. It is not an open
+forward proxy and does not require incoming connections to the application.
