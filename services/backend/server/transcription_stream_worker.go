@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"justai-backend/outbound"
 	"justai-backend/provider"
+	"justai-backend/streamrelay"
 )
 
 var errTranscriptionStreamStopped = errors.New("transcription stream stopped")
@@ -168,9 +170,15 @@ func (m *TranscriptionManager) runStreamSource(ctx context.Context, sessionID, s
 		m.setStreamStatus(sessionID, sourceID, "failed", "live stream URL could not be decrypted", false)
 		return fmt.Errorf("live stream URL could not be decrypted")
 	}
-	if err := provider.ValidateMediaSourceURL(streamURL, m.Config.AllowPrivate); err != nil {
-		m.setStreamStatus(sessionID, sourceID, "failed", err.Error(), false)
-		return err
+	relay, relayErr := streamrelay.ForSource(streamURL)
+	if relayErr != nil {
+		return relayErr
+	}
+	if relay == nil {
+		if err := provider.ValidateMediaSourceURL(streamURL, m.Config.AllowPrivate); err != nil {
+			m.setStreamStatus(sessionID, sourceID, "failed", err.Error(), false)
+			return err
+		}
 	}
 	endpoint, err := m.app.providerEndpoint(ctx, endpointID.UUID)
 	if err != nil {
@@ -344,27 +352,15 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 		eventsDone <- eventErr
 	}()
 
-	ffmpeg := exec.CommandContext(attemptCtx, "ffmpeg", ffmpegLiveAudioArgs(streamURL, protocol)...)
-	proxyEnv, proxyErr := outbound.MediaProxyEnv(streamURL)
-	if proxyErr != nil {
-		stream.Close()
-		<-eventsDone
-		return connected, proxyErr
-	}
-	ffmpeg.Env = proxyEnv
-	var stderr strings.Builder
-	ffmpeg.Stderr = &stderr
-	stdout, err := ffmpeg.StdoutPipe()
+	decoder, err := openLivePCM(attemptCtx, streamURL, protocol)
 	if err != nil {
 		stream.Close()
 		<-eventsDone
 		return connected, err
 	}
-	if err := ffmpeg.Start(); err != nil {
-		stream.Close()
-		<-eventsDone
-		return connected, fmt.Errorf("start live stream decoder: %w", err)
-	}
+	defer decoder.Close()
+	stdout := decoder.reader
+
 	defer func() {
 		stream.Close()
 		eventErr := <-eventsDone
@@ -464,9 +460,9 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 		}
 	readComplete:
 		if readErr == io.EOF {
-			waitErr := ffmpeg.Wait()
+			waitErr := decoder.wait()
 			if waitErr != nil && attemptCtx.Err() == nil {
-				resultErr = fmt.Errorf("live stream decoder stopped: %s", redactTranscriptionStreamError(fmt.Errorf("%s", firstNonEmptyString(strings.TrimSpace(stderr.String()), waitErr.Error())), streamURL))
+				resultErr = fmt.Errorf("live stream decoder stopped: %s", redactTranscriptionStreamError(fmt.Errorf("%s", firstNonEmptyString(strings.TrimSpace(decoder.stderr.String()), waitErr.Error())), streamURL))
 				return connected, resultErr
 			}
 			if attemptCtx.Err() != nil {
@@ -482,14 +478,14 @@ func (m *TranscriptionManager) runLiveStreamAttempt(ctx context.Context, stream 
 		}
 		if readErr != nil {
 			cancel()
-			_ = ffmpeg.Wait()
+			_ = decoder.wait()
 			if ctx.Err() != nil {
 				return connected, ctx.Err()
 			}
 			return connected, readErr
 		}
 		if attemptCtx.Err() != nil {
-			_ = ffmpeg.Wait()
+			_ = decoder.wait()
 			if ctx.Err() != nil {
 				return connected, ctx.Err()
 			}
@@ -676,4 +672,46 @@ func streamProviderName(stream provider.TranscriptionStream) string {
 	default:
 		return "transcription"
 	}
+}
+
+// livePCMDecoder shares the existing recording/VAD/transcription path for local
+// FFmpeg and finite relay segments.
+type livePCMDecoder struct {
+	reader io.ReadCloser
+	wait   func() error
+	cancel context.CancelFunc
+	stderr *strings.Builder
+}
+
+func (d *livePCMDecoder) Close() { d.cancel(); _ = d.reader.Close(); _ = d.wait() }
+func openLivePCM(ctx context.Context, raw, protocol string) (*livePCMDecoder, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	relay, err := streamrelay.ForSource(raw)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if relay != nil {
+		return &livePCMDecoder{reader: relay.Open(ctx), wait: func() error { return ctx.Err() }, cancel: cancel, stderr: &strings.Builder{}}, nil
+	}
+	cmd := exec.CommandContext(ctx, "ffmpeg", ffmpegLiveAudioArgs(raw, protocol)...)
+	env, err := outbound.MediaProxyEnv(raw)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	cmd.Env = env
+	stderr := &strings.Builder{}
+	cmd.Stderr = stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if err = cmd.Start(); err != nil {
+		cancel()
+		_ = stdout.Close()
+		return nil, fmt.Errorf("start live stream decoder: %w", err)
+	}
+	return &livePCMDecoder{reader: stdout, wait: sync.OnceValue(cmd.Wait), cancel: cancel, stderr: stderr}, nil
 }

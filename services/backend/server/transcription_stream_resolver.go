@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/html"
 	"justai-backend/provider"
+	"justai-backend/streamrelay"
 )
 
 type resolvedLiveStream struct {
@@ -26,6 +27,16 @@ type resolvedLiveStream struct {
 
 // Keep the original page URL at rest: media URLs may expire before capture starts.
 func resolveLiveStream(ctx context.Context, raw string, allowPrivate bool) (resolvedLiveStream, error) {
+	relay, err := streamrelay.ForSource(strings.TrimSpace(raw))
+	if err != nil {
+		return resolvedLiveStream{}, err
+	}
+	if relay != nil {
+		if _, err := relay.Manifest(ctx); err != nil {
+			return resolvedLiveStream{}, err
+		}
+		return resolvedLiveStream{URL: relay.URL, Name: "Stream relay", Kind: "direct"}, nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	return resolveLiveStreamWithClient(ctx, strings.TrimSpace(raw), allowPrivate, provider.SafeHTTPClient(15*time.Second, allowPrivate), 0)
