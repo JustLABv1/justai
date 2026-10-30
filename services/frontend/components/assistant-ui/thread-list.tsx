@@ -191,7 +191,11 @@ function orderConversationsByFolder(
 }
 
 function emptyAssistantStream() {
-  return new ReadableStream() as unknown as Awaited<
+  return new ReadableStream({
+    start(controller) {
+      controller.close()
+    },
+  }) as unknown as Awaited<
     ReturnType<RemoteThreadListAdapter["generateTitle"]>
   >
 }
@@ -876,6 +880,14 @@ export function AssistantThreadList({
       if (threadId) onSelect(threadId)
     },
   })
+
+  useEffect(() => {
+    // Chat runs save titles outside this sidebar runtime. Reload its cached
+    // metadata when the workspace refreshes conversations or changes filters.
+    void runtime.threads.reload().catch((error) => {
+      console.error("Could not refresh chat history", error)
+    })
+  }, [runtime, adapter])
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
