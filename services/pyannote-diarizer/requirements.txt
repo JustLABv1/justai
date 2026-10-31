@@ -1,4 +1,4 @@
-boto3>=1.43.120,<2
+boto3>=1.43.121,<2
 fastapi>=0.162.0,<1
 huggingface_hub>=2.3.0,<3
 httpx>=0.28.1,<1
