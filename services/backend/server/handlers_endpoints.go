@@ -114,6 +114,10 @@ func (a *App) listEndpoints(c *gin.Context) {
 		}
 		result = append(result, item)
 	}
+	if err := a.attachEndpointLogos(c, result); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"endpoints": result})
 }
 
@@ -575,7 +579,15 @@ func (a *App) testEndpoint(c *gin.Context) {
 
 func (a *App) getEndpoint(ctx context.Context, id uuid.UUID) (models.Endpoint, error) {
 	row := a.DB.QueryRowContext(ctx, `SELECT id, scope_type, scope_id, endpoint_kind, provider_type, name, base_url, COALESCE(api_path, ''), COALESCE(api_version, ''), COALESCE(chat_model, ''), COALESCE(vision_model, ''), COALESCE(image_model, ''), COALESCE(embedding_model, ''), COALESCE(transcription_model, ''), COALESCE(diarization_model, ''), COALESCE(speech_model, ''), capabilities, credential_ciphertext IS NOT NULL, enabled, is_default, timeout_seconds, max_output_tokens, temperature, last_tested_at, last_test_ok, COALESCE(last_test_error, ''), COALESCE(last_test_results, '{}'::jsonb), created_at, updated_at FROM endpoint_settings WHERE id = $1`, id)
-	return scanEndpoint(row)
+	item, err := scanEndpoint(row)
+	if err != nil {
+		return item, err
+	}
+	items := []models.Endpoint{item}
+	if err := a.attachEndpointLogos(ctx, items); err != nil {
+		return item, err
+	}
+	return items[0], nil
 }
 
 func scanEndpoint(scanner interface{ Scan(dest ...any) error }) (models.Endpoint, error) {

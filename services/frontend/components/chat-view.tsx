@@ -99,7 +99,14 @@ import {
 import { createJustAIVoiceAdapter } from "@/components/assistant-ui/voice-adapter"
 import { BrandMark } from "@/components/brand-mark"
 import { ChatBrandMark } from "@/components/chat-brand-mark"
+import { EndpointBadge } from "@/components/endpoint-badge"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -2022,47 +2029,52 @@ export function ModelEndpointPicker({
           sideOffset={12}
           className="z-50"
         >
-          <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-[1.5rem] bg-popover p-1 text-popover-foreground shadow-sm outline-none">
+          <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] bg-popover p-1 text-popover-foreground shadow-sm outline-none">
             {endpoints.length > 1 && (
-              <div className="px-2.5 pt-2 pb-1">
-                <p className="pb-1.5 text-xs font-medium text-muted-foreground">
-                  {t("Endpoint")}
-                </p>
-                <div
-                  aria-label={t("Endpoints")}
-                  className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto"
-                  role="group"
-                >
+              <div
+                aria-label={t("Endpoints")}
+                className="flex max-h-80 w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1"
+                role="group"
+              >
+                <TooltipProvider delay={0}>
                   {endpoints.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      aria-pressed={item.id === endpointId}
-                      title={item.name}
-                      onClick={() => {
-                        onEndpointChange(item.id)
-                        setQuery("")
-                      }}
-                      className={cn(
-                        "flex h-7 max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                        item.id === endpointId
-                          ? "bg-primary text-primary-foreground hover:bg-primary/85"
-                          : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
-                      )}
-                    >
-                      <EndpointIcon
-                        provider={item.providerType}
-                        className="size-3.5 shrink-0"
-                      />
-                      <span className="truncate">{item.name}</span>
-                    </button>
+                    <Tooltip key={item.id}>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label={item.name}
+                            aria-pressed={item.id === endpointId}
+                            onClick={() => {
+                              onEndpointChange(item.id)
+                              setQuery("")
+                            }}
+                            className={cn(
+                              "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                              item.id === endpointId
+                                ? "bg-primary text-primary-foreground ring-2 ring-primary ring-offset-2 ring-offset-muted hover:bg-primary/85"
+                                : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
+                            )}
+                          />
+                        }
+                      >
+                        <EndpointBadge
+                          name={item.name}
+                          logoUrl={item.logoUrl}
+                          className="size-8"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent side="left" sideOffset={8}>
+                        {item.name}
+                      </TooltipContent>
+                    </Tooltip>
                   ))}
-                </div>
+                </TooltipProvider>
               </div>
             )}
             <div className="min-w-0 flex-1 p-1.5">
               <div className="flex items-center justify-between gap-3 px-2 pt-0.5 pb-1.5">
-                <PopoverPrimitive.Title className="text-sm font-medium text-muted-foreground">
+                <PopoverPrimitive.Title className="min-w-0 truncate text-sm font-medium text-muted-foreground">
                   {t("Models")}
                 </PopoverPrimitive.Title>
                 <label className="flex max-w-40 min-w-0 items-center gap-1 text-muted-foreground">

@@ -546,6 +546,12 @@ export const de = {
   Models: "Modelle",
   "Search models": "Modelle suchen",
   "Quick Search": "Schnellsuche",
+  "The logo could not be saved.": "Das Logo konnte nicht gespeichert werden.",
+  "Endpoint logo could not be saved":
+    "Endpunkt-Logo konnte nicht gespeichert werden",
+  "Shown in the model picker. Without a logo, initials are used. PNG, JPEG, GIF, WebP, or ICO · Max 2 MB":
+    "Wird in der Modellauswahl angezeigt. Ohne Logo erscheinen die Initialen. PNG, JPEG, GIF, WebP oder ICO · max. 2 MB",
+  Logo: "Logo",
   "Retry now": "Jetzt erneut versuchen",
   "Models could not be loaded. Retrying…":
     "Modelle konnten nicht geladen werden. Neuer Versuch…",

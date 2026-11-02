@@ -407,6 +407,7 @@ type Endpoint struct {
 	TranscriptionModel   string          `json:"transcriptionModel,omitempty"`
 	DiarizationModel     string          `json:"diarizationModel,omitempty"`
 	SpeechModel          string          `json:"speechModel,omitempty"`
+	LogoURL              string          `json:"logoUrl,omitempty"`
 	Capabilities         json.RawMessage `json:"capabilities"`
 	CredentialConfigured bool            `json:"credentialConfigured"`
 	Enabled              bool            `json:"enabled"`

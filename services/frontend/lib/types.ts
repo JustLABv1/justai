@@ -318,6 +318,7 @@ export type Endpoint = {
   endpointKind: EndpointKind
   providerType: string
   name: string
+  logoUrl?: string
   baseUrl: string
   apiPath?: string
   apiVersion?: string

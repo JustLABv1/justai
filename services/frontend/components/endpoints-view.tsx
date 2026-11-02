@@ -118,6 +118,8 @@ export function EndpointsView({
   const [open, setOpen] = useState(false)
   const [editingEndpoint, setEditingEndpoint] = useState<Endpoint | null>(null)
   const [form, setForm] = useState<EndpointForm>(defaults)
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [logoRemoved, setLogoRemoved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState("")
   const [notice, setNotice] = useState("")
@@ -225,6 +227,8 @@ export function EndpointsView({
 
   const resetEditor = useCallback(() => {
     setEditingEndpoint(null)
+    setLogoFile(null)
+    setLogoRemoved(false)
     setForm({
       ...defaults,
       scopeType:
@@ -328,11 +332,40 @@ export function EndpointsView({
             ...payload,
             isDefault: capabilities.chat && form.isDefault,
           })
+      let saved = result
+      let logoError = ""
+      try {
+        if (logoFile) {
+          const body = new FormData()
+          body.set("logo", logoFile)
+          saved = await api.upload<Endpoint>(
+            `${endpointPath}/${result.id}/logo`,
+            body
+          )
+        } else if (logoRemoved && editingEndpoint?.logoUrl) {
+          saved = await api.delete<Endpoint>(
+            `${endpointPath}/${result.id}/logo`
+          )
+        }
+      } catch (caught) {
+        // The endpoint itself is saved; only the logo needs another attempt.
+        logoError =
+          caught instanceof Error
+            ? caught.message
+            : "The logo could not be saved."
+      }
       onChange(
         editingEndpoint
-          ? endpoints.map((item) => (item.id === result.id ? result : item))
-          : [result, ...endpoints]
+          ? endpoints.map((item) => (item.id === saved.id ? saved : item))
+          : [saved, ...endpoints]
       )
+      if (logoError) {
+        notifyError(
+          "Endpoint logo could not be saved",
+          new Error(logoError),
+          "The logo could not be saved."
+        )
+      }
       notifySuccess(
         editingEndpoint ? "Endpoint updated" : "Endpoint connected",
         `${result.name} is ready for routing.`
@@ -563,6 +596,16 @@ export function EndpointsView({
         isPlatformCatalog={isPlatformCatalog}
         saving={saving}
         notice={notice}
+        logoFile={logoFile}
+        logoRemoved={logoRemoved}
+        onLogoChange={(file) => {
+          setLogoFile(file)
+          if (file) setLogoRemoved(false)
+        }}
+        onLogoRemove={() => {
+          setLogoFile(null)
+          setLogoRemoved(true)
+        }}
         onSelectProvider={selectProvider}
         onSave={saveEndpoint}
         onClose={closeEditor}
