@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   createContext,
   useCallback,
@@ -107,6 +108,8 @@ function classForSeverity(severity: PlatformBanner["severity"]) {
 }
 
 export function PlatformBannerStack() {
+  const { t } = useTranslations()
+
   const { config } = usePlatformConfig()
   const banners = useMemo(() => config?.banners ?? [], [config?.banners])
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
@@ -155,7 +158,9 @@ export function PlatformBannerStack() {
             )}
             key={banner.id}
           >
-            <AlertTitle className="sr-only">Platform announcement</AlertTitle>
+            <AlertTitle className="sr-only">
+              {t("Platform announcement")}
+            </AlertTitle>
             <AlertDescription className="flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-current">
               <Icon aria-hidden="true" className="size-3.5 shrink-0" />
               <span>{banner.message}</span>
@@ -166,14 +171,14 @@ export function PlatformBannerStack() {
                   rel="noreferrer"
                   target="_blank"
                 >
-                  Learn more <ExternalLink className="size-3" />
+                  {t("Learn more")} <ExternalLink className="size-3" />
                 </a>
               )}
             </AlertDescription>
             {banner.dismissible && (
               <AlertAction>
                 <Button
-                  aria-label="Dismiss announcement"
+                  aria-label={t("Dismiss announcement")}
                   className="size-6"
                   onClick={() => dismiss(banner)}
                   size="icon-sm"

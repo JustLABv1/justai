@@ -1,5 +1,10 @@
 "use client"
 
+import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
+
 import { useMemo, useState } from "react"
 import { Bot, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
 
@@ -86,7 +91,7 @@ const emptyForm: AssistantForm = {
   deepContext: false,
 }
 
-const templates: AssistantTemplate[] = [
+const templatesMessages: AssistantTemplate[] = [
   {
     name: "Meeting Editor",
     description:
@@ -119,6 +124,10 @@ export function AssistantsView({
   endpoints,
   onChange,
 }: AssistantsViewProps) {
+  const templates = useTranslatedConfig(templatesMessages)
+
+  const { t } = useTranslations()
+
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<AssistantForm>(emptyForm)
@@ -238,7 +247,7 @@ export function AssistantsView({
   function endpointName(endpointId?: string | null) {
     return (
       chatEndpoints.find((endpoint) => endpoint.id === endpointId)?.name ??
-      "Workspace default"
+      t("Workspace default")
     )
   }
 
@@ -246,24 +255,25 @@ export function AssistantsView({
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageTitle>Saved assistants</PageTitle>
+          <PageTitle>{t("Saved assistants")}</PageTitle>
           <PageDescription>
-            Save instructions, memory defaults, context behavior, and model
-            preferences for the kinds of work you repeat.
+            {t(
+              "Save instructions, memory defaults, context behavior, and model preferences for the kinds of work you repeat."
+            )}
           </PageDescription>
         </PageHeading>
         <PageActions>
           <Button onClick={() => openCreate()}>
             <Plus data-icon="inline-start" />
-            New assistant
+            {t("New assistant")}
           </Button>
         </PageActions>
       </PageHeader>
 
       {error && (
         <Alert variant="destructive">
-          <AlertTitle>Assistant action failed</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertTitle>{t("Assistant action failed")}</AlertTitle>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
@@ -275,11 +285,12 @@ export function AssistantsView({
             </span>
             <div className="flex max-w-md flex-col gap-1">
               <h2 className="text-base font-semibold">
-                Start with a focused role
+                {t("Start with a focused role")}
               </h2>
               <p className="text-sm text-muted-foreground">
-                These starters are editable. Pick one to make your first saved
-                assistant, or build one from scratch.
+                {t(
+                  "These starters are editable. Pick one to make your first saved assistant, or build one from scratch."
+                )}
               </p>
             </div>
             <div className="flex flex-wrap justify-center gap-2">
@@ -313,7 +324,7 @@ export function AssistantsView({
                 </div>
                 <CardAction className="flex gap-1">
                   <Button
-                    aria-label={`Edit ${assistant.name}`}
+                    aria-label={t("Edit {value0}", { value0: assistant.name })}
                     size="icon-sm"
                     variant="ghost"
                     onClick={() => openEdit(assistant)}
@@ -321,7 +332,9 @@ export function AssistantsView({
                     <Pencil />
                   </Button>
                   <Button
-                    aria-label={`Delete ${assistant.name}`}
+                    aria-label={t("Delete {value0}", {
+                      value0: assistant.name,
+                    })}
                     size="icon-sm"
                     variant="ghost"
                     onClick={() => setDeleteTarget(assistant)}
@@ -333,22 +346,24 @@ export function AssistantsView({
               <CardContent className="flex flex-wrap gap-2">
                 <Badge variant="outline">
                   {assistant.visibility === "workspace"
-                    ? "Workspace"
-                    : "Private"}
+                    ? t("Workspace")
+                    : t("Private")}
                 </Badge>
                 <Badge variant="secondary">
                   {endpointName(assistant.endpointId)}
                 </Badge>
                 {assistant.useMemory && (
-                  <Badge variant="secondary">Memory on</Badge>
+                  <Badge variant="secondary">{t("Memory on")}</Badge>
                 )}
                 {assistant.deepContext && (
-                  <Badge variant="secondary">Deep context default</Badge>
+                  <Badge variant="secondary">{t("Deep context default")}</Badge>
                 )}
               </CardContent>
               <CardFooter className="border-t text-muted-foreground">
-                <span>Version {assistant.version}</span>
-                <span className="ml-auto">Ready for new chats</span>
+                <span>
+                  {t("Version")} {assistant.version}
+                </span>
+                <span className="ml-auto">{t("Ready for new chats")}</span>
               </CardFooter>
             </Card>
           ))}
@@ -363,29 +378,30 @@ export function AssistantsView({
         <DialogContent className="max-h-[min(860px,calc(100vh-2rem))] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingId ? "Edit saved assistant" : "New saved assistant"}
+              {editingId ? t("Edit saved assistant") : t("New saved assistant")}
             </DialogTitle>
             <DialogDescription>
-              This configuration is applied when you start a new conversation
-              with the assistant.
+              {t(
+                "This configuration is applied when you start a new conversation with the assistant."
+              )}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={(event) => void saveAssistant(event)}>
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="assistant-name">Name</FieldLabel>
+                <FieldLabel htmlFor="assistant-name">{t("Name")}</FieldLabel>
                 <Input
                   id="assistant-name"
                   value={form.name}
                   onChange={(event) =>
                     setForm({ ...form, name: event.target.value })
                   }
-                  placeholder="Meeting Editor"
+                  placeholder={t("Meeting Editor")}
                 />
               </Field>
               <Field>
                 <FieldLabel htmlFor="assistant-description">
-                  Description
+                  {t("Description")}
                 </FieldLabel>
                 <Input
                   id="assistant-description"
@@ -393,12 +409,12 @@ export function AssistantsView({
                   onChange={(event) =>
                     setForm({ ...form, description: event.target.value })
                   }
-                  placeholder="What this assistant is best at"
+                  placeholder={t("What this assistant is best at")}
                 />
               </Field>
               <Field>
                 <FieldLabel htmlFor="assistant-instructions">
-                  Instructions
+                  {t("Instructions")}
                 </FieldLabel>
                 <Textarea
                   id="assistant-instructions"
@@ -407,17 +423,20 @@ export function AssistantsView({
                   onChange={(event) =>
                     setForm({ ...form, instructions: event.target.value })
                   }
-                  placeholder="Describe the role, priorities, tone, and boundaries."
+                  placeholder={t(
+                    "Describe the role, priorities, tone, and boundaries."
+                  )}
                 />
                 <FieldDescription>
-                  These instructions are kept on the backend and added to the
-                  system context for this assistant.
+                  {t(
+                    "These instructions are kept on the backend and added to the system context for this assistant."
+                  )}
                 </FieldDescription>
               </Field>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor="assistant-endpoint">
-                    Default endpoint
+                    {t("Default endpoint")}
                   </FieldLabel>
                   <Select
                     value={form.endpointId || "workspace-default"}
@@ -434,7 +453,7 @@ export function AssistantsView({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="workspace-default">
-                        Use workspace default
+                        {t("Use workspace default")}
                       </SelectItem>
                       {chatEndpoints.map((endpoint) => (
                         <SelectItem key={endpoint.id} value={endpoint.id}>
@@ -446,7 +465,7 @@ export function AssistantsView({
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="assistant-model">
-                    Default model
+                    {t("Default model")}
                   </FieldLabel>
                   <Input
                     id="assistant-model"
@@ -454,7 +473,7 @@ export function AssistantsView({
                     onChange={(event) =>
                       setForm({ ...form, model: event.target.value })
                     }
-                    placeholder="Use endpoint default"
+                    placeholder={t("Use endpoint default")}
                   />
                 </Field>
               </div>
@@ -463,7 +482,9 @@ export function AssistantsView({
                   orientation="horizontal"
                   className="rounded-lg border p-3"
                 >
-                  <FieldLabel htmlFor="assistant-memory">Use memory</FieldLabel>
+                  <FieldLabel htmlFor="assistant-memory">
+                    {t("Use memory")}
+                  </FieldLabel>
                   <Switch
                     id="assistant-memory"
                     checked={form.useMemory}
@@ -477,7 +498,7 @@ export function AssistantsView({
                   className="rounded-lg border p-3"
                 >
                   <FieldLabel htmlFor="assistant-deep-context">
-                    Deep context default
+                    {t("Deep context default")}
                   </FieldLabel>
                   <Switch
                     id="assistant-deep-context"
@@ -490,7 +511,7 @@ export function AssistantsView({
               </div>
               <Field>
                 <FieldLabel htmlFor="assistant-visibility">
-                  Visibility
+                  {t("Visibility")}
                 </FieldLabel>
                 <Select
                   value={form.visibility}
@@ -506,9 +527,11 @@ export function AssistantsView({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="private">Private · only me</SelectItem>
+                    <SelectItem value="private">
+                      {t("Private · only me")}
+                    </SelectItem>
                     <SelectItem value="workspace">
-                      Workspace · available to members
+                      {t("Workspace · available to members")}
                     </SelectItem>
                   </SelectContent>
                 </Select>
@@ -520,7 +543,7 @@ export function AssistantsView({
                 className="text-xs text-destructive"
                 role="alert"
               >
-                {error}
+                {t(error)}
               </p>
             )}
             <DialogFooter>
@@ -529,14 +552,14 @@ export function AssistantsView({
                 type="button"
                 onClick={() => setDialogOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button disabled={saving} type="submit">
                 {saving
-                  ? "Saving…"
+                  ? t("Saving…")
                   : editingId
-                    ? "Save changes"
-                    : "Create assistant"}
+                    ? t("Save changes")
+                    : t("Create assistant")}
               </Button>
             </DialogFooter>
           </form>
@@ -544,9 +567,13 @@ export function AssistantsView({
       </Dialog>
       <ConfirmActionDialog
         open={deleteTarget !== null}
-        title={`Delete “${deleteTarget?.name ?? "assistant"}”?`}
-        description="Existing conversations keep their pinned version, but this reusable assistant will no longer be available for new chats."
-        confirmLabel="Delete assistant"
+        title={t("Delete “{value0}”?", {
+          value0: deleteTarget?.name ?? "assistant",
+        })}
+        description={t(
+          "Existing conversations keep their pinned version, but this reusable assistant will no longer be available for new chats."
+        )}
+        confirmLabel={t("Delete assistant")}
         pending={deleting}
         onOpenChange={(open) => {
           if (!open && !deleting) setDeleteTarget(null)

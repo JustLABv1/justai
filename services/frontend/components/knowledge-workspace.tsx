@@ -1,5 +1,10 @@
 "use client"
 
+import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
+
 import { downloadFile } from "@/lib/download-file"
 import {
   Fragment,
@@ -197,7 +202,7 @@ function descendantKnowledgeSpaceIds(spaces: KnowledgeSpace[], rootId: string) {
   return result
 }
 
-const typeLabels: Record<string, string> = {
+const typeLabelsMessages: Record<string, string> = {
   source: "File or URL",
   note: "Note",
   memory: "Memory",
@@ -282,7 +287,7 @@ function itemStatusLabel(status: string) {
 }
 
 function deleteDialogTitle(item: KnowledgeItem | null) {
-  const type = item ? (typeLabels[item.resourceType] ?? "item") : "item"
+  const type = item ? (typeLabelsMessages[item.resourceType] ?? "item") : "item"
   return "Delete " + type.toLocaleLowerCase() + "?"
 }
 
@@ -391,6 +396,10 @@ export function KnowledgeWorkspace({
   onProjectsChange,
   onNavigate,
 }: KnowledgeWorkspaceProps) {
+  const typeLabels = useTranslatedConfig(typeLabelsMessages)
+
+  const { t, locale } = useTranslations()
+
   const [items, setItems] = useState<KnowledgeItem[]>([])
   const [spaces, setSpaces] = useState<KnowledgeSpace[]>([])
   const [memories, setMemories] = useState<Memory[]>([])
@@ -689,7 +698,7 @@ export function KnowledgeWorkspace({
       )
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [requestedType])
+  }, [requestedType, typeLabels])
 
   useEffect(() => {
     if (!requestedItemId) {
@@ -1027,7 +1036,7 @@ export function KnowledgeWorkspace({
     setError("")
     try {
       const result = await api.post<{ note: Note }>("/api/v1/notes", {
-        title: noteTitle.trim() || "Untitled note",
+        title: noteTitle.trim() || t("Untitled note"),
         content: noteContent,
       })
       onNotesChange([result.note, ...notes])
@@ -1479,7 +1488,7 @@ export function KnowledgeWorkspace({
   return (
     <Page className="min-h-0 max-w-[1500px] flex-1 gap-4">
       <input
-        aria-label="Upload knowledge file"
+        aria-label={t("Upload knowledge file")}
         ref={fileInputRef}
         type="file"
         multiple
@@ -1492,10 +1501,11 @@ export function KnowledgeWorkspace({
       />
       <PageHeader>
         <PageHeading>
-          <PageTitle>Storage</PageTitle>
+          <PageTitle>{t("Storage")}</PageTitle>
           <PageDescription>
-            Organize files, notes, and transcripts in folders that chats and
-            agent workflows can use as live context.
+            {t(
+              "Organize files, notes, and transcripts in folders that chats and agent workflows can use as live context."
+            )}
           </PageDescription>
         </PageHeading>
         <PageActions>
@@ -1504,7 +1514,7 @@ export function KnowledgeWorkspace({
             disabled={busy}
             onClick={() => fileInputRef.current?.click()}
           >
-            <Upload data-icon="inline-start" /> Upload file
+            <Upload data-icon="inline-start" /> {t("Upload file")}
           </Button>
           <Button
             variant="outline"
@@ -1513,10 +1523,10 @@ export function KnowledgeWorkspace({
               setSpaceOpen(true)
             }}
           >
-            <FolderPlus data-icon="inline-start" /> New folder
+            <FolderPlus data-icon="inline-start" /> {t("New folder")}
           </Button>
           <Button onClick={() => setAddOpen(true)}>
-            <Plus data-icon="inline-start" /> Add knowledge
+            <Plus data-icon="inline-start" /> {t("Add knowledge")}
           </Button>
         </PageActions>
       </PageHeader>
@@ -1529,7 +1539,7 @@ export function KnowledgeWorkspace({
         >
           {error ? <X /> : <Check />}
           <AlertTitle>
-            {error ? "Knowledge action failed" : "Knowledge updated"}
+            {error ? t("Knowledge action failed") : t("Knowledge updated")}
           </AlertTitle>
           <AlertDescription>{error || notice}</AlertDescription>
         </Alert>
@@ -1539,7 +1549,7 @@ export function KnowledgeWorkspace({
         <div className="min-h-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
-              {`${libraryItemCount} library items`}
+              {t("{value0} library items", { value0: libraryItemCount })}
             </p>
           </div>
           <div className="min-h-0 flex-1">
@@ -1550,7 +1560,7 @@ export function KnowledgeWorkspace({
                     <CardTitle className="flex items-baseline gap-2 text-sm">
                       {selectedSpace ? (
                         <Breadcrumb
-                          aria-label="Folder path"
+                          aria-label={t("Folder path")}
                           className="min-w-0"
                         >
                           <BreadcrumbList className="flex-nowrap">
@@ -1563,7 +1573,7 @@ export function KnowledgeWorkspace({
                                   />
                                 }
                               >
-                                My files
+                                {t("My files")}
                               </BreadcrumbLink>
                             </BreadcrumbItem>
                             {folderPath.map((folder, index) => (
@@ -1593,7 +1603,7 @@ export function KnowledgeWorkspace({
                           </BreadcrumbList>
                         </Breadcrumb>
                       ) : (
-                        <span className="truncate">My files</span>
+                        <span className="truncate">{t("My files")}</span>
                       )}
                       <span
                         aria-live="polite"
@@ -1610,16 +1620,16 @@ export function KnowledgeWorkspace({
                       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                         <span className="rounded-full border px-2 py-0.5">
                           {selectedSpace.visibility === "workspace"
-                            ? "Workspace"
-                            : "Private"}
+                            ? t("Workspace")
+                            : t("Private")}
                         </span>
                         <span>{selectedSpace.itemCount} items</span>
                         <span>·</span>
                         <span>
-                          Updated{" "}
-                          {new Date(
-                            selectedSpace.updatedAt
-                          ).toLocaleDateString()}
+                          {t("Updated")}{" "}
+                          {new Date(selectedSpace.updatedAt).toLocaleDateString(
+                            locale
+                          )}
                         </span>
 
                         {selectedSpaceProblems > 0 && (
@@ -1642,7 +1652,7 @@ export function KnowledgeWorkspace({
                       variant="outline"
                       onClick={() => onNavigate("chat")}
                     >
-                      Start chat
+                      {t("Start chat")}
                     </Button>
                   )}
                 </div>
@@ -1676,17 +1686,17 @@ export function KnowledgeWorkspace({
                     }
                   >
                     <SelectTrigger
-                      aria-label="Filter by type"
+                      aria-label={t("Filter by type")}
                       className="min-w-32"
                     >
                       <SelectValue>
                         {typeFilter === "all"
-                          ? "All types"
-                          : (typeLabels[typeFilter] ?? "All types")}
+                          ? t("All types")
+                          : (typeLabels[typeFilter] ?? t("All types"))}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All types</SelectItem>
+                      <SelectItem value="all">{t("All types")}</SelectItem>
                       {Object.entries(typeLabels).map(([value, label]) => (
                         <SelectItem key={value} value={value}>
                           {label}
@@ -1700,22 +1710,24 @@ export function KnowledgeWorkspace({
                   >
                     <SelectTrigger
                       className="min-w-36"
-                      aria-label="Filter by status"
+                      aria-label={t("Filter by status")}
                     >
                       <Settings2 data-icon="inline-start" />
                       <SelectValue>
                         {statusFilter === "all"
-                          ? "All statuses"
-                          : itemStatusLabel(statusFilter)}
+                          ? t("All statuses")
+                          : t(itemStatusLabel(statusFilter))}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All statuses</SelectItem>
-                      <SelectItem value="ready">Ready</SelectItem>
-                      <SelectItem value="processing">Processing</SelectItem>
-                      <SelectItem value="queued">Queued</SelectItem>
-                      <SelectItem value="failed">Failed</SelectItem>
-                      <SelectItem value="disabled">Disabled</SelectItem>
+                      <SelectItem value="all">{t("All statuses")}</SelectItem>
+                      <SelectItem value="ready">{t("Ready")}</SelectItem>
+                      <SelectItem value="processing">
+                        {t("Processing")}
+                      </SelectItem>
+                      <SelectItem value="queued">{t("Queued")}</SelectItem>
+                      <SelectItem value="failed">{t("Failed")}</SelectItem>
+                      <SelectItem value="disabled">{t("Disabled")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <Select
@@ -1726,20 +1738,22 @@ export function KnowledgeWorkspace({
                   >
                     <SelectTrigger
                       className="min-w-36"
-                      aria-label="Filter by ownership"
+                      aria-label={t("Filter by ownership")}
                     >
                       <SelectValue>
                         {ownershipFilter === "all"
-                          ? "All owners"
+                          ? t("All owners")
                           : ownershipFilter === "private"
-                            ? "Personal"
-                            : "Workspace"}
+                            ? t("Personal")
+                            : t("Workspace")}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All owners</SelectItem>
-                      <SelectItem value="private">Personal</SelectItem>
-                      <SelectItem value="workspace">Workspace</SelectItem>
+                      <SelectItem value="all">{t("All owners")}</SelectItem>
+                      <SelectItem value="private">{t("Personal")}</SelectItem>
+                      <SelectItem value="workspace">
+                        {t("Workspace")}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                   <Select
@@ -1752,20 +1766,22 @@ export function KnowledgeWorkspace({
                   >
                     <SelectTrigger
                       className="min-w-40"
-                      aria-label="Sort knowledge"
+                      aria-label={t("Sort knowledge")}
                     >
                       <SelectValue>
                         {sortBy === "updated"
-                          ? "Recently updated"
+                          ? t("Recently updated")
                           : sortBy === "title"
-                            ? "Title"
-                            : "Type"}
+                            ? t("Title")
+                            : t("Type")}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="updated">Recently updated</SelectItem>
-                      <SelectItem value="title">Title</SelectItem>
-                      <SelectItem value="type">Type</SelectItem>
+                      <SelectItem value="updated">
+                        {t("Recently updated")}
+                      </SelectItem>
+                      <SelectItem value="title">{t("Title")}</SelectItem>
+                      <SelectItem value="type">{t("Type")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <Button
@@ -1779,25 +1795,27 @@ export function KnowledgeWorkspace({
                       )
                     }
                   >
-                    <Check data-icon="inline-start" /> Select visible
+                    <Check data-icon="inline-start" /> {t("Select visible")}
                   </Button>
                 </FilterBar>
                 {selectedItemIds.size > 0 && (
                   <div className="flex translate-y-0 flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground opacity-100 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transform-none starting:translate-y-1 starting:opacity-0">
-                    <span>{selectedItemIds.size} selected</span>
+                    <span>
+                      {selectedItemIds.size} {t("selected")}
+                    </span>
                     <Button
                       size="sm"
                       variant="destructive"
                       onClick={() => setBulkDeleteOpen(true)}
                     >
-                      <Trash2 /> Delete selected
+                      <Trash2 /> {t("Delete selected")}
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
                       onClick={() => setSelectedItemIds(new Set())}
                     >
-                      Clear
+                      {t("Clear")}
                     </Button>
                   </div>
                 )}
@@ -1846,11 +1864,13 @@ export function KnowledgeWorkspace({
                       <span>
                         <span className="block text-sm font-medium">
                           {busy
-                            ? "Uploading files…"
-                            : "Drop files here or click to upload"}
+                            ? t("Uploading files…")
+                            : t("Drop files here or click to upload")}
                         </span>
                         <span className="block text-xs text-muted-foreground">
-                          PDF, Office, email, OpenDocument and text · 25 MB each
+                          {t(
+                            "PDF, Office, email, OpenDocument and text · 25 MB each"
+                          )}
                         </span>
                       </span>
                     </button>
@@ -1861,14 +1881,15 @@ export function KnowledgeWorkspace({
                         className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground"
                         role="status"
                       >
-                        <LoaderCircle className="animate-spin" /> Loading files…
+                        <LoaderCircle className="animate-spin" />{" "}
+                        {t("Loading files…")}
                       </div>
                     ) : loadError &&
                       visibleItems.length === 0 &&
                       childSpaces.length === 0 ? (
                       <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">
                         <p className="text-sm text-destructive" role="alert">
-                          Knowledge could not be loaded completely.
+                          {t("Knowledge could not be loaded completely.")}
                         </p>
                         <Button
                           size="sm"
@@ -1876,7 +1897,7 @@ export function KnowledgeWorkspace({
                           variant="outline"
                           onClick={() => void load()}
                         >
-                          Try again
+                          {t("Try again")}
                         </Button>
                       </div>
                     ) : visibleItems.length === 0 &&
@@ -1888,12 +1909,13 @@ export function KnowledgeWorkspace({
                           </EmptyMedia>
                           <EmptyTitle>
                             {query
-                              ? "No matching files"
-                              : "This folder is empty"}
+                              ? t("No matching files")
+                              : t("This folder is empty")}
                           </EmptyTitle>
                           <EmptyDescription>
-                            Upload a file, or right-click here to create a
-                            folder.
+                            {t(
+                              "Upload a file, or right-click here to create a folder."
+                            )}
                           </EmptyDescription>
                         </EmptyHeader>
                       </Empty>
@@ -1934,7 +1956,10 @@ export function KnowledgeWorkspace({
                                       <DropdownMenuTrigger
                                         render={
                                           <Button
-                                            aria-label={`Actions for ${folder.name}`}
+                                            aria-label={t(
+                                              "Actions for {value0}",
+                                              { value0: folder.name }
+                                            )}
                                             size="icon-sm"
                                             variant="ghost"
                                           />
@@ -1946,7 +1971,7 @@ export function KnowledgeWorkspace({
                                         <DropdownMenuItem
                                           onClick={() => setSpaceId(folder.id)}
                                         >
-                                          <Folder /> Open
+                                          <Folder /> {t("Open")}
                                         </DropdownMenuItem>
                                         <DropdownMenuItem
                                           onClick={() => {
@@ -1954,7 +1979,7 @@ export function KnowledgeWorkspace({
                                             setSpaceOpen(true)
                                           }}
                                         >
-                                          <FolderPlus /> New subfolder
+                                          <FolderPlus /> {t("New subfolder")}
                                         </DropdownMenuItem>
                                         {folder.canManage && (
                                           <>
@@ -1965,7 +1990,7 @@ export function KnowledgeWorkspace({
                                                 setFolderDeleteTarget(folder)
                                               }
                                             >
-                                              <Trash2 /> Delete folder
+                                              <Trash2 /> {t("Delete folder")}
                                             </DropdownMenuItem>
                                           </>
                                         )}
@@ -1986,7 +2011,7 @@ export function KnowledgeWorkspace({
                                   <ContextMenuItem
                                     onClick={() => setSpaceId(folder.id)}
                                   >
-                                    <Folder /> Open
+                                    <Folder /> {t("Open")}
                                   </ContextMenuItem>
                                   <ContextMenuItem
                                     onClick={() => {
@@ -1994,7 +2019,7 @@ export function KnowledgeWorkspace({
                                       setSpaceOpen(true)
                                     }}
                                   >
-                                    <FolderPlus /> New subfolder
+                                    <FolderPlus /> {t("New subfolder")}
                                   </ContextMenuItem>
                                 </ContextMenuGroup>
                                 {folder.canManage && (
@@ -2007,7 +2032,7 @@ export function KnowledgeWorkspace({
                                           setFolderDeleteTarget(folder)
                                         }
                                       >
-                                        <Trash2 /> Delete folder
+                                        <Trash2 /> {t("Delete folder")}
                                       </ContextMenuItem>
                                     </ContextMenuGroup>
                                   </>
@@ -2065,7 +2090,10 @@ export function KnowledgeWorkspace({
                                       <DropdownMenuTrigger
                                         render={
                                           <Button
-                                            aria-label={`Actions for ${item.title}`}
+                                            aria-label={t(
+                                              "Actions for {value0}",
+                                              { value0: item.title }
+                                            )}
                                             size="icon-sm"
                                             variant="ghost"
                                           />
@@ -2077,7 +2105,7 @@ export function KnowledgeWorkspace({
                                         <DropdownMenuItem
                                           onClick={() => openInspector(item)}
                                         >
-                                          <Search /> Open details
+                                          <Search /> {t("Open details")}
                                         </DropdownMenuItem>
                                         {canDeleteKnowledgeItem(item) && (
                                           <>
@@ -2088,7 +2116,7 @@ export function KnowledgeWorkspace({
                                                 setDeleteTarget(item)
                                               }
                                             >
-                                              <Trash2 /> Delete
+                                              <Trash2 /> {t("Delete")}
                                             </DropdownMenuItem>
                                           </>
                                         )}
@@ -2107,7 +2135,7 @@ export function KnowledgeWorkspace({
                                   <span>
                                     {new Date(
                                       item.updatedAt
-                                    ).toLocaleDateString()}
+                                    ).toLocaleDateString(locale)}
                                   </span>
                                 </div>
                                 {pending && (
@@ -2116,8 +2144,14 @@ export function KnowledgeWorkspace({
                                       <span className="flex items-center gap-1.5">
                                         <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" />
                                         {source?.status === "queued"
-                                          ? "Upload complete · Waiting to index"
-                                          : `Indexing${source?.stage ? ` · ${source.stage.replace(/[-_]/g, " ")}` : ""}`}
+                                          ? t(
+                                              "Upload complete · Waiting to index"
+                                            )
+                                          : t("Indexing{value0}", {
+                                              value0: source?.stage
+                                                ? ` · ${source.stage.replace(/[-_]/g, " ")}`
+                                                : "",
+                                            })}
                                       </span>
                                       {source?.status === "processing" && (
                                         <span className="tabular-nums">
@@ -2148,13 +2182,13 @@ export function KnowledgeWorkspace({
                                       <Check />
                                     )}
                                     {selectedItemIds.has(item.id)
-                                      ? "Deselect"
-                                      : "Select"}
+                                      ? t("Deselect")
+                                      : t("Select")}
                                   </ContextMenuItem>
                                   <ContextMenuItem
                                     onClick={() => openInspector(item)}
                                   >
-                                    <Search /> Open details
+                                    <Search /> {t("Open details")}
                                   </ContextMenuItem>
                                 </ContextMenuGroup>
                                 {canDeleteKnowledgeItem(item) && (
@@ -2165,7 +2199,7 @@ export function KnowledgeWorkspace({
                                         variant="destructive"
                                         onClick={() => setDeleteTarget(item)}
                                       >
-                                        <Trash2 /> Delete
+                                        <Trash2 /> {t("Delete")}
                                       </ContextMenuItem>
                                     </ContextMenuGroup>
                                   </>
@@ -2179,8 +2213,8 @@ export function KnowledgeWorkspace({
                     {nextCursor && !loading && (
                       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
                         <span>
-                          Showing {displayedItemCount} of {libraryItemCount}{" "}
-                          items
+                          {t("Showing")} {displayedItemCount} {t("of")}{" "}
+                          {libraryItemCount} items
                         </span>
                         <Button
                           disabled={loadingMore}
@@ -2189,7 +2223,7 @@ export function KnowledgeWorkspace({
                           type="button"
                           variant="outline"
                         >
-                          {loadingMore ? "Loading…" : "Load more"}
+                          {loadingMore ? t("Loading…") : t("Load more")}
                         </Button>
                       </div>
                     )}
@@ -2203,21 +2237,21 @@ export function KnowledgeWorkspace({
                         setSpaceOpen(true)
                       }}
                     >
-                      <FolderPlus /> New folder
+                      <FolderPlus /> {t("New folder")}
                     </ContextMenuItem>
                     <ContextMenuItem
                       onClick={() => fileInputRef.current?.click()}
                     >
-                      <Upload /> Upload file
+                      <Upload /> {t("Upload file")}
                     </ContextMenuItem>
                     <ContextMenuItem onClick={() => setAddOpen(true)}>
-                      <Plus /> Add knowledge
+                      <Plus /> {t("Add knowledge")}
                     </ContextMenuItem>
                   </ContextMenuGroup>
                   <ContextMenuSeparator />
                   <ContextMenuGroup>
                     <ContextMenuItem onClick={() => void load()}>
-                      <RefreshCw /> Refresh
+                      <RefreshCw /> {t("Refresh")}
                     </ContextMenuItem>
                   </ContextMenuGroup>
                 </ContextMenuContent>
@@ -2241,7 +2275,7 @@ export function KnowledgeWorkspace({
             <SheetHeader className="sr-only">
               <SheetTitle>{selected?.title ?? "Knowledge item"}</SheetTitle>
               <SheetDescription>
-                Inspect and manage this Knowledge item.
+                {t("Inspect and manage this Knowledge item.")}
               </SheetDescription>
             </SheetHeader>
             <Card className="min-h-full rounded-none border-0 shadow-none">
@@ -2261,7 +2295,9 @@ export function KnowledgeWorkspace({
                       <div className="flex shrink-0 items-center gap-1">
                         {canDeleteKnowledgeItem(selected) && (
                           <Button
-                            aria-label={`Delete ${selected.title}`}
+                            aria-label={t("Delete {value0}", {
+                              value0: selected.title,
+                            })}
                             size="icon-sm"
                             variant="ghost"
                             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
@@ -2271,7 +2307,7 @@ export function KnowledgeWorkspace({
                           </Button>
                         )}
                         <Button
-                          aria-label="Close item details"
+                          aria-label={t("Close item details")}
                           size="icon-sm"
                           variant="ghost"
                           onClick={closeInspector}
@@ -2286,9 +2322,9 @@ export function KnowledgeWorkspace({
                       <div className="rounded-xl bg-muted/50 p-3">
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <p className="text-sm font-medium">Spaces</p>
+                            <p className="text-sm font-medium">{t("Spaces")}</p>
                             <p className="text-xs text-muted-foreground">
-                              Assign this item to one or more spaces.
+                              {t("Assign this item to one or more spaces.")}
                             </p>
                           </div>
                           <Select
@@ -2299,12 +2335,14 @@ export function KnowledgeWorkspace({
                           >
                             <SelectTrigger
                               className="h-8 w-28"
-                              aria-label="Add to space"
+                              aria-label={t("Add to space")}
                             >
-                              <SelectValue>Add to…</SelectValue>
+                              <SelectValue>{t("Add to…")}</SelectValue>
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="none">Add to…</SelectItem>
+                              <SelectItem value="none">
+                                {t("Add to…")}
+                              </SelectItem>
                               {spaces
                                 .filter(
                                   (space) =>
@@ -2332,7 +2370,9 @@ export function KnowledgeWorkspace({
                                 <button
                                   type="button"
                                   className="text-muted-foreground hover:text-foreground"
-                                  aria-label={`Remove from ${assigned?.name ?? "space"}`}
+                                  aria-label={t("Remove from {value0}", {
+                                    value0: assigned?.name ?? "space",
+                                  })}
                                   onClick={() =>
                                     void removeSelectedSpace(assignedID)
                                   }
@@ -2344,7 +2384,7 @@ export function KnowledgeWorkspace({
                           })}
                           {!selected.spaceIds?.length && (
                             <span className="text-xs text-muted-foreground">
-                              Personal library (not assigned)
+                              {t("Personal library (not assigned)")}
                             </span>
                           )}
                         </div>
@@ -2361,10 +2401,10 @@ export function KnowledgeWorkspace({
                             )}{" "}
                             {selectedSource.sourceType === "url"
                               ? selectedSource.sourceUrl
-                              : "Uploaded source"}
+                              : t("Uploaded source")}
                           </p>
                           <p className="mt-2">
-                            Status: {selectedSource.status}
+                            {t("Status:")} {selectedSource.status}
                             {selectedSource.stage
                               ? ` · ${selectedSource.stage}`
                               : ""}
@@ -2381,7 +2421,7 @@ export function KnowledgeWorkspace({
                             className="text-xs text-muted-foreground"
                             role="status"
                           >
-                            Loading item details…
+                            {t("Loading item details…")}
                           </p>
                         )}
                         {selectedDetail?.content && (
@@ -2413,7 +2453,7 @@ export function KnowledgeWorkspace({
                                 }
                               }}
                             >
-                              Download original
+                              {t("Download original")}
                             </Button>
                           )}
                           <Button
@@ -2422,7 +2462,8 @@ export function KnowledgeWorkspace({
                             disabled={busy}
                             onClick={() => void reindexSelectedSource()}
                           >
-                            <RefreshCw data-icon="inline-start" /> Reindex
+                            <RefreshCw data-icon="inline-start" />{" "}
+                            {t("Reindex")}
                           </Button>
                           <Button
                             size="sm"
@@ -2430,7 +2471,7 @@ export function KnowledgeWorkspace({
                             disabled={busy}
                             onClick={() => setDeleteTarget(selected)}
                           >
-                            <Trash2 data-icon="inline-start" /> Remove
+                            <Trash2 data-icon="inline-start" /> {t("Remove")}
                           </Button>
                         </div>
                       </>
@@ -2453,7 +2494,7 @@ export function KnowledgeWorkspace({
                       <div className="flex flex-col gap-4">
                         <div>
                           <Label htmlFor="inspector-memory-content">
-                            Memory
+                            {t("Memory")}
                           </Label>
                           <Textarea
                             id="inspector-memory-content"
@@ -2471,17 +2512,19 @@ export function KnowledgeWorkspace({
                           onClick={() => void updateSelectedMemory()}
                           disabled={busy || !memoryDraft.trim()}
                         >
-                          {busy ? "Saving…" : "Save memory"}
+                          {busy ? t("Saving…") : t("Save memory")}
                         </Button>
                         <div className="flex items-center justify-between rounded-lg border px-3 py-2">
                           <div>
-                            <p className="text-sm font-medium">Use in chats</p>
+                            <p className="text-sm font-medium">
+                              {t("Use in chats")}
+                            </p>
                             <p className="text-xs text-muted-foreground">
-                              Available across your conversations.
+                              {t("Available across your conversations.")}
                             </p>
                           </div>
                           <Switch
-                            aria-label="Use memory in chats"
+                            aria-label={t("Use memory in chats")}
                             id="inspector-memory-enabled"
                             checked={selectedMemory.enabled}
                             onCheckedChange={(checked) =>
@@ -2491,7 +2534,7 @@ export function KnowledgeWorkspace({
                           />
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          Provenance: {selectedMemory.source}
+                          {t("Provenance:")} {selectedMemory.source}
                         </p>
                       </div>
                     )}
@@ -2499,9 +2542,9 @@ export function KnowledgeWorkspace({
                     {selected.resourceType === "transcript" && (
                       <>
                         <p className="text-sm leading-6 text-muted-foreground">
-                          Transcript passages are searchable with
-                          timestamp-aware citations. Open the transcript
-                          workspace for the full recording.
+                          {t(
+                            "Transcript passages are searchable with timestamp-aware citations. Open the transcript workspace for the full recording."
+                          )}
                         </p>
                         {selectedDetail?.content && (
                           <pre className="max-h-64 overflow-auto rounded-xl bg-muted/50 p-3 text-xs leading-5 whitespace-pre-wrap">
@@ -2512,12 +2555,16 @@ export function KnowledgeWorkspace({
                     )}
                     <div className="mt-auto rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
                       <p>
-                        Added{" "}
-                        {new Date(selected.createdAt).toLocaleDateString()}
+                        {t("Added")}{" "}
+                        {new Date(selected.createdAt).toLocaleDateString(
+                          locale
+                        )}
                       </p>
                       <p className="mt-1">
-                        Updated{" "}
-                        {new Date(selected.updatedAt).toLocaleDateString()}
+                        {t("Updated")}{" "}
+                        {new Date(selected.updatedAt).toLocaleDateString(
+                          locale
+                        )}
                       </p>
                     </div>
                   </CardContent>
@@ -2528,9 +2575,9 @@ export function KnowledgeWorkspace({
                     <EmptyMedia variant="icon">
                       <Search />
                     </EmptyMedia>
-                    <EmptyTitle>Select an item</EmptyTitle>
+                    <EmptyTitle>{t("Select an item")}</EmptyTitle>
                     <EmptyDescription>
-                      Inspect, edit, or manage a Knowledge item here.
+                      {t("Inspect, edit, or manage a Knowledge item here.")}
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -2546,16 +2593,20 @@ export function KnowledgeWorkspace({
           overlayClassName="bg-black/50"
         >
           <DialogHeader className="border-b bg-muted/20 px-6 py-5 pr-14">
-            <DialogTitle className="text-base">Add knowledge</DialogTitle>
+            <DialogTitle className="text-base">
+              {t("Add knowledge")}
+            </DialogTitle>
             <DialogDescription>
-              Choose what you want JustAI to remember and make searchable.
+              {t(
+                "Choose what you want JustAI to remember and make searchable."
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2 p-3 sm:grid-cols-2 sm:p-4">
             <AddKnowledgeOption
               icon={Upload}
-              title="Upload a file"
-              description="PDF, CSV, Markdown, text, HTML, or JSON"
+              title={t("Upload a file")}
+              description={t("PDF, CSV, Markdown, text, HTML, or JSON")}
               onClick={() => {
                 setAddOpen(false)
                 fileInputRef.current?.click()
@@ -2563,8 +2614,8 @@ export function KnowledgeWorkspace({
             />
             <AddKnowledgeOption
               icon={Link2}
-              title="Index a URL"
-              description="Make public documentation searchable"
+              title={t("Index a URL")}
+              description={t("Make public documentation searchable")}
               onClick={() => {
                 setAddOpen(false)
                 setUrlOpen(true)
@@ -2572,8 +2623,8 @@ export function KnowledgeWorkspace({
             />
             <AddKnowledgeOption
               icon={NotebookPen}
-              title="Write a note"
-              description="Keep durable working context close at hand"
+              title={t("Write a note")}
+              description={t("Keep durable working context close at hand")}
               onClick={() => {
                 setAddOpen(false)
                 setNoteOpen(true)
@@ -2581,8 +2632,10 @@ export function KnowledgeWorkspace({
             />
             <AddKnowledgeOption
               icon={Brain}
-              title="Save a memory"
-              description="A preference or recurring fact used across chats"
+              title={t("Save a memory")}
+              description={t(
+                "A preference or recurring fact used across chats"
+              )}
               onClick={() => {
                 setAddOpen(false)
                 setMemoryOpen(true)
@@ -2590,8 +2643,8 @@ export function KnowledgeWorkspace({
             />
             <AddKnowledgeOption
               icon={FileText}
-              title="Import a transcript"
-              description="Store a recorded session in a folder"
+              title={t("Import a transcript")}
+              description={t("Store a recorded session in a folder")}
               onClick={() => {
                 setAddOpen(false)
                 setTranscriptSpaceId(selectedSpace?.id ?? "none")
@@ -2606,33 +2659,33 @@ export function KnowledgeWorkspace({
         <DialogContent>
           <form onSubmit={createSpace}>
             <DialogHeader>
-              <DialogTitle>New storage folder</DialogTitle>
+              <DialogTitle>{t("New storage folder")}</DialogTitle>
               <DialogDescription>
-                Create it at the root or inside another folder.
+                {t("Create it at the root or inside another folder.")}
               </DialogDescription>
             </DialogHeader>
             {error && (
               <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>Could not create folder</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+                <AlertTitle>{t("Could not create folder")}</AlertTitle>
+                <AlertDescription>{t(error)}</AlertDescription>
               </Alert>
             )}
             <div className="flex flex-col gap-3 py-4">
-              <Label htmlFor="space-name">Name</Label>
+              <Label htmlFor="space-name">{t("Name")}</Label>
               <Input
                 id="space-name"
                 value={spaceName}
                 onChange={(event) => setSpaceName(event.target.value)}
-                placeholder="e.g. Product launch"
+                placeholder={t("e.g. Product launch")}
               />
-              <Label htmlFor="space-description">Description</Label>
+              <Label htmlFor="space-description">{t("Description")}</Label>
               <Textarea
                 id="space-description"
                 value={spaceDescription}
                 onChange={(event) => setSpaceDescription(event.target.value)}
-                placeholder="What belongs in this space?"
+                placeholder={t("What belongs in this space?")}
               />
-              <Label htmlFor="space-parent">Parent folder</Label>
+              <Label htmlFor="space-parent">{t("Parent folder")}</Label>
               <Select
                 value={spaceParentId}
                 onValueChange={(value) => setSpaceParentId(value ?? "root")}
@@ -2640,13 +2693,13 @@ export function KnowledgeWorkspace({
                 <SelectTrigger id="space-parent">
                   <SelectValue>
                     {spaceParentId === "root"
-                      ? "Storage root"
+                      ? t("Storage root")
                       : (spaceTree.find((space) => space.id === spaceParentId)
-                          ?.name ?? "Storage root")}
+                          ?.name ?? t("Storage root"))}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="root">Storage root</SelectItem>
+                  <SelectItem value="root">{t("Storage root")}</SelectItem>
                   {spaceTree.map((space) => (
                     <SelectItem key={space.id} value={space.id}>
                       {`${"— ".repeat(space.depth)}${space.name}`}
@@ -2654,7 +2707,7 @@ export function KnowledgeWorkspace({
                   ))}
                 </SelectContent>
               </Select>
-              <Label htmlFor="space-visibility">Visibility</Label>
+              <Label htmlFor="space-visibility">{t("Visibility")}</Label>
               <Select
                 value={spaceVisibility}
                 onValueChange={(value) =>
@@ -2665,12 +2718,14 @@ export function KnowledgeWorkspace({
               >
                 <SelectTrigger id="space-visibility">
                   <SelectValue>
-                    {spaceVisibility === "workspace" ? "Workspace" : "Private"}
+                    {spaceVisibility === "workspace"
+                      ? t("Workspace")
+                      : t("Private")}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="private">Private</SelectItem>
-                  <SelectItem value="workspace">Workspace</SelectItem>
+                  <SelectItem value="private">{t("Private")}</SelectItem>
+                  <SelectItem value="workspace">{t("Workspace")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2680,10 +2735,10 @@ export function KnowledgeWorkspace({
                 variant="ghost"
                 onClick={() => setSpaceOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button type="submit" disabled={busy || !spaceName.trim()}>
-                {busy ? "Creating…" : "Create folder"}
+                {busy ? t("Creating…") : t("Create folder")}
               </Button>
             </DialogFooter>
           </form>
@@ -2694,32 +2749,34 @@ export function KnowledgeWorkspace({
         <DialogContent>
           <form onSubmit={createNote}>
             <DialogHeader>
-              <DialogTitle>Write a note</DialogTitle>
+              <DialogTitle>{t("Write a note")}</DialogTitle>
               <DialogDescription>
-                Notes are durable context and can be updated from the inspector.
+                {t(
+                  "Notes are durable context and can be updated from the inspector."
+                )}
               </DialogDescription>
             </DialogHeader>
             {error && (
               <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>Could not save note</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+                <AlertTitle>{t("Could not save note")}</AlertTitle>
+                <AlertDescription>{t(error)}</AlertDescription>
               </Alert>
             )}
             <div className="flex flex-col gap-3 py-4">
-              <Label htmlFor="knowledge-note-title">Title</Label>
+              <Label htmlFor="knowledge-note-title">{t("Title")}</Label>
               <Input
                 id="knowledge-note-title"
                 value={noteTitle}
                 onChange={(event) => setNoteTitle(event.target.value)}
-                placeholder="Note title"
+                placeholder={t("Note title")}
               />
-              <Label htmlFor="knowledge-note-content">Content</Label>
+              <Label htmlFor="knowledge-note-content">{t("Content")}</Label>
               <Textarea
                 id="knowledge-note-content"
                 className="min-h-36"
                 value={noteContent}
                 onChange={(event) => setNoteContent(event.target.value)}
-                placeholder="What should JustAI know?"
+                placeholder={t("What should JustAI know?")}
               />
             </div>
             <DialogFooter>
@@ -2728,13 +2785,13 @@ export function KnowledgeWorkspace({
                 variant="ghost"
                 onClick={() => setNoteOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button
                 type="submit"
                 disabled={busy || (!noteTitle.trim() && !noteContent.trim())}
               >
-                {busy ? "Saving…" : "Save note"}
+                {busy ? t("Saving…") : t("Save note")}
               </Button>
             </DialogFooter>
           </form>
@@ -2745,25 +2802,25 @@ export function KnowledgeWorkspace({
         <DialogContent>
           <form onSubmit={createMemory}>
             <DialogHeader>
-              <DialogTitle>Save a memory</DialogTitle>
+              <DialogTitle>{t("Save a memory")}</DialogTitle>
               <DialogDescription>
-                Keep it concise. You can disable or delete it any time.
+                {t("Keep it concise. You can disable or delete it any time.")}
               </DialogDescription>
             </DialogHeader>
             {error && (
               <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>Could not save memory</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+                <AlertTitle>{t("Could not save memory")}</AlertTitle>
+                <AlertDescription>{t(error)}</AlertDescription>
               </Alert>
             )}
             <div className="py-4">
-              <Label htmlFor="knowledge-memory-content">Memory</Label>
+              <Label htmlFor="knowledge-memory-content">{t("Memory")}</Label>
               <Textarea
                 id="knowledge-memory-content"
                 maxLength={2000}
                 value={memoryContent}
                 onChange={(event) => setMemoryContent(event.target.value)}
-                placeholder="What should JustAI remember?"
+                placeholder={t("What should JustAI remember?")}
               />
             </div>
             <DialogFooter>
@@ -2772,10 +2829,10 @@ export function KnowledgeWorkspace({
                 variant="ghost"
                 onClick={() => setMemoryOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button type="submit" disabled={busy || !memoryContent.trim()}>
-                {busy ? "Saving…" : "Save memory"}
+                {busy ? t("Saving…") : t("Save memory")}
               </Button>
             </DialogFooter>
           </form>
@@ -2786,20 +2843,23 @@ export function KnowledgeWorkspace({
         <DialogContent>
           <form onSubmit={importTranscript}>
             <DialogHeader>
-              <DialogTitle>Import transcript</DialogTitle>
+              <DialogTitle>{t("Import transcript")}</DialogTitle>
               <DialogDescription>
-                Choose a recorded session and optionally place it in a Knowledge
-                space.
+                {t(
+                  "Choose a recorded session and optionally place it in a Knowledge space."
+                )}
               </DialogDescription>
             </DialogHeader>
             {error && (
               <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>Could not import transcript</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+                <AlertTitle>{t("Could not import transcript")}</AlertTitle>
+                <AlertDescription>{t(error)}</AlertDescription>
               </Alert>
             )}
             <div className="flex flex-col gap-3 py-4">
-              <Label htmlFor="knowledge-transcript-session">Transcript</Label>
+              <Label htmlFor="knowledge-transcript-session">
+                {t("Transcript")}
+              </Label>
               <Select
                 value={transcriptSessionId || "none"}
                 onValueChange={(value) =>
@@ -2811,12 +2871,14 @@ export function KnowledgeWorkspace({
                     {transcriptSessionId
                       ? (transcriptionSessions.find(
                           (session) => session.id === transcriptSessionId
-                        )?.title ?? "Choose a transcript")
-                      : "Choose a transcript"}
+                        )?.title ?? t("Choose a transcript"))
+                      : t("Choose a transcript")}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Choose a transcript</SelectItem>
+                  <SelectItem value="none">
+                    {t("Choose a transcript")}
+                  </SelectItem>
                   {transcriptionSessions.map((session) => (
                     <SelectItem key={session.id} value={session.id}>
                       {session.title}
@@ -2825,8 +2887,8 @@ export function KnowledgeWorkspace({
                 </SelectContent>
               </Select>
               <Label htmlFor="knowledge-transcript-space">
-                Add to space{" "}
-                <span className="text-muted-foreground">(optional)</span>
+                {t("Add to space")}{" "}
+                <span className="text-muted-foreground">{t("(optional)")}</span>
               </Label>
               <Select
                 value={transcriptSpaceId}
@@ -2835,13 +2897,13 @@ export function KnowledgeWorkspace({
                 <SelectTrigger id="knowledge-transcript-space">
                   <SelectValue>
                     {transcriptSpaceId === "none"
-                      ? "Personal library"
+                      ? t("Personal library")
                       : (spaces.find((space) => space.id === transcriptSpaceId)
                           ?.name ?? "Choose a space")}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Personal library</SelectItem>
+                  <SelectItem value="none">{t("Personal library")}</SelectItem>
                   {spaces.map((space) => (
                     <SelectItem key={space.id} value={space.id}>
                       {space.name}
@@ -2856,10 +2918,10 @@ export function KnowledgeWorkspace({
                 variant="ghost"
                 onClick={() => setTranscriptOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button type="submit" disabled={busy || !transcriptSessionId}>
-                {busy ? "Importing…" : "Import transcript"}
+                {busy ? t("Importing…") : t("Import transcript")}
               </Button>
             </DialogFooter>
           </form>
@@ -2870,19 +2932,21 @@ export function KnowledgeWorkspace({
         <DialogContent>
           <form onSubmit={addUrl}>
             <DialogHeader>
-              <DialogTitle>Index a URL</DialogTitle>
+              <DialogTitle>{t("Index a URL")}</DialogTitle>
               <DialogDescription>
-                Public HTTP(S) pages are fetched and indexed asynchronously.
+                {t(
+                  "Public HTTP(S) pages are fetched and indexed asynchronously."
+                )}
               </DialogDescription>
             </DialogHeader>
             {error && (
               <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>Could not index URL</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+                <AlertTitle>{t("Could not index URL")}</AlertTitle>
+                <AlertDescription>{t(error)}</AlertDescription>
               </Alert>
             )}
             <div className="flex flex-col gap-3 py-4">
-              <Label htmlFor="knowledge-url">URL</Label>
+              <Label htmlFor="knowledge-url">{t("URL")}</Label>
               <Input
                 id="knowledge-url"
                 type="url"
@@ -2891,14 +2955,14 @@ export function KnowledgeWorkspace({
                 placeholder="https://docs.example.com"
               />
               <Label htmlFor="knowledge-url-title">
-                Display title{" "}
-                <span className="text-muted-foreground">(optional)</span>
+                {t("Display title")}{" "}
+                <span className="text-muted-foreground">{t("(optional)")}</span>
               </Label>
               <Input
                 id="knowledge-url-title"
                 value={urlTitle}
                 onChange={(event) => setUrlTitle(event.target.value)}
-                placeholder="Documentation"
+                placeholder={t("Documentation")}
               />
             </div>
             <DialogFooter>
@@ -2907,10 +2971,10 @@ export function KnowledgeWorkspace({
                 variant="ghost"
                 onClick={() => setUrlOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button type="submit" disabled={busy || !url.trim()}>
-                {busy ? "Indexing…" : "Index URL"}
+                {busy ? t("Indexing…") : t("Index URL")}
               </Button>
             </DialogFooter>
           </form>
@@ -2920,8 +2984,8 @@ export function KnowledgeWorkspace({
       <ConfirmActionDialog
         open={Boolean(deleteTarget)}
         title={deleteDialogTitle(deleteTarget)}
-        description={deleteDialogDescription(deleteTarget)}
-        confirmLabel="Delete permanently"
+        description={t(deleteDialogDescription(deleteTarget))}
+        confirmLabel={t("Delete permanently")}
         pending={deleteBusy}
         onOpenChange={(open) => {
           if (!open && !deleteBusy) setDeleteTarget(null)
@@ -2932,9 +2996,16 @@ export function KnowledgeWorkspace({
       />
       <ConfirmActionDialog
         open={bulkDeleteOpen}
-        title={`Delete ${selectedItemIds.size} selected item${selectedItemIds.size === 1 ? "" : "s"}?`}
-        description="The selected files and knowledge items will be permanently removed."
-        confirmLabel="Delete selected"
+        title={t(
+          selectedItemIds.size === 1
+            ? "Delete {count} selected item?"
+            : "Delete {count} selected items?",
+          { count: selectedItemIds.size }
+        )}
+        description={t(
+          "The selected files and knowledge items will be permanently removed."
+        )}
+        confirmLabel={t("Delete selected")}
         pending={deleteBusy}
         onOpenChange={(open) => {
           if (!deleteBusy) setBulkDeleteOpen(open)
@@ -2943,13 +3014,16 @@ export function KnowledgeWorkspace({
       />
       <ConfirmActionDialog
         open={Boolean(folderDeleteTarget)}
-        title="Delete folder?"
+        title={t("Delete folder?")}
         description={
           folderDeleteTarget
-            ? `“${folderDeleteTarget.name}” will be deleted. Files are kept in My files, and subfolders move up one level.`
-            : "Files in this folder will be kept."
+            ? t(
+                "“{value0}” will be deleted. Files are kept in My files, and subfolders move up one level.",
+                { value0: folderDeleteTarget.name }
+              )
+            : t("Files in this folder will be kept.")
         }
-        confirmLabel="Delete folder"
+        confirmLabel={t("Delete folder")}
         pending={deleteBusy}
         onOpenChange={(open) => {
           if (!open && !deleteBusy) setFolderDeleteTarget(null)
@@ -2974,22 +3048,24 @@ function NoteInspector({
   onSave: () => void
   saving: boolean
 }) {
+  const { t } = useTranslations()
+
   return (
     <div className="flex flex-col gap-3">
-      <Label htmlFor="inspector-note-title">Title</Label>
+      <Label htmlFor="inspector-note-title">{t("Title")}</Label>
       <Input
         id="inspector-note-title"
         value={note.title}
         onChange={(event) => onChange({ ...note, title: event.target.value })}
       />
-      <Label htmlFor="inspector-note-content">Content</Label>
+      <Label htmlFor="inspector-note-content">{t("Content")}</Label>
       <Textarea
         id="inspector-note-content"
         className="min-h-56"
         value={note.content}
         onChange={(event) => onChange({ ...note, content: event.target.value })}
       />
-      <Label htmlFor="inspector-note-visibility">Visibility</Label>
+      <Label htmlFor="inspector-note-visibility">{t("Visibility")}</Label>
       <Select
         value={note.visibility === "workspace" ? "workspace" : "private"}
         onValueChange={(value) =>
@@ -2998,16 +3074,16 @@ function NoteInspector({
       >
         <SelectTrigger id="inspector-note-visibility">
           <SelectValue>
-            {note.visibility === "workspace" ? "Workspace" : "Private"}
+            {note.visibility === "workspace" ? t("Workspace") : t("Private")}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="private">Private</SelectItem>
-          <SelectItem value="workspace">Workspace</SelectItem>
+          <SelectItem value="private">{t("Private")}</SelectItem>
+          <SelectItem value="workspace">{t("Workspace")}</SelectItem>
         </SelectContent>
       </Select>
       <Button size="sm" className="w-fit" onClick={onSave} disabled={saving}>
-        {saving ? "Saving…" : "Save note"}
+        {saving ? t("Saving…") : t("Save note")}
       </Button>
     </div>
   )

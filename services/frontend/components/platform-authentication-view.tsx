@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ExternalLink,
@@ -69,6 +70,8 @@ export function PlatformAuthenticationView({
   createRequest,
   showCreateAction = false,
 }: Props) {
+  const { t, locale } = useTranslations()
+
   const [providers, setProviders] = useState<AdminOIDCProvider[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -225,8 +228,8 @@ export function PlatformAuthenticationView({
     <div className="flex flex-col gap-4">
       {error && (
         <Alert aria-live="polite" role="alert" variant="destructive">
-          <AlertTitle>Authentication request failed</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertTitle>{t("Authentication request failed")}</AlertTitle>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
@@ -237,13 +240,14 @@ export function PlatformAuthenticationView({
           }
         >
           <CardTitle className="flex items-center gap-2">
-            <ShieldCheck className="size-4" /> OIDC providers
+            <ShieldCheck className="size-4" /> {t("OIDC providers")}
           </CardTitle>
           <CardDescription
             className={showCreateAction ? "col-span-full" : undefined}
           >
-            Platform-wide identity providers shown on the login page. Provider
-            secrets are encrypted and never returned to the browser.
+            {t(
+              "Platform-wide identity providers shown on the login page. Provider secrets are encrypted and never returned to the browser."
+            )}
           </CardDescription>
           <CardAction
             className={
@@ -255,11 +259,11 @@ export function PlatformAuthenticationView({
             <div className="flex gap-2">
               {showCreateAction && (
                 <Button size="sm" onClick={openCreate}>
-                  <Plus /> Add identity provider
+                  <Plus /> {t("Add identity provider")}
                 </Button>
               )}
               <Button
-                aria-label="Refresh OIDC providers"
+                aria-label={t("Refresh OIDC providers")}
                 onClick={() => void load()}
                 size="icon-sm"
                 variant="outline"
@@ -275,12 +279,12 @@ export function PlatformAuthenticationView({
               aria-live="polite"
               className="flex items-center justify-center py-10 text-sm text-muted-foreground"
             >
-              <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading
-              providers…
+              <LoaderCircle className="mr-2 size-4 animate-spin" />{" "}
+              {t("Loading providers…")}
             </div>
           ) : providers.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No OIDC providers configured.
+              {t("No OIDC providers configured.")}
             </p>
           ) : (
             providers.map((provider) => (
@@ -292,10 +296,10 @@ export function PlatformAuthenticationView({
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium">{provider.displayName}</p>
                     <Badge variant={provider.enabled ? "default" : "secondary"}>
-                      {provider.enabled ? "Enabled" : "Disabled"}
+                      {provider.enabled ? t("Enabled") : t("Disabled")}
                     </Badge>
                     {provider.secretConfigured && (
-                      <Badge variant="outline">Secret configured</Badge>
+                      <Badge variant="outline">{t("Secret configured")}</Badge>
                     )}
                   </div>
                   <p className="mt-1 truncate text-xs text-muted-foreground">
@@ -304,7 +308,11 @@ export function PlatformAuthenticationView({
                   <p className="mt-1 text-xs text-muted-foreground">
                     {provider.slug} · {provider.scopes}
                     {provider.lastTestedAt
-                      ? ` · tested ${new Date(provider.lastTestedAt).toLocaleString()}`
+                      ? t(" · tested {value0}", {
+                          value0: new Date(
+                            provider.lastTestedAt
+                          ).toLocaleString(locale),
+                        })
                       : ""}
                   </p>
                   <p className="mt-1 flex items-center gap-1 text-xs break-all text-muted-foreground">
@@ -329,20 +337,22 @@ export function PlatformAuthenticationView({
                     ) : (
                       <TestTube2 />
                     )}{" "}
-                    Test
+                    {t("Test")}
                   </Button>
                   <Button
                     onClick={() => openEdit(provider)}
                     size="sm"
                     variant="outline"
                   >
-                    Edit
+                    {t("Edit")}
                   </Button>
                   <Button
                     onClick={() => setRemoveTarget(provider)}
                     size="icon-sm"
                     variant="ghost"
-                    aria-label={`Delete ${provider.displayName}`}
+                    aria-label={t("Delete {value0}", {
+                      value0: provider.displayName,
+                    })}
                   >
                     <Trash2 />
                   </Button>
@@ -362,17 +372,18 @@ export function PlatformAuthenticationView({
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {editingId ? "Edit OIDC provider" : "Add OIDC provider"}
+              {editingId ? t("Edit OIDC provider") : t("Add OIDC provider")}
             </DialogTitle>
             <DialogDescription>
-              Use the issuer URL from the provider’s OpenID Connect discovery
-              configuration.
+              {t(
+                "Use the issuer URL from the provider’s OpenID Connect discovery configuration."
+              )}
             </DialogDescription>
           </DialogHeader>
           {error && (
             <Alert aria-live="polite" role="alert" variant="destructive">
-              <AlertTitle>Could not save provider</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <AlertTitle>{t("Could not save provider")}</AlertTitle>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
           <form
@@ -383,7 +394,7 @@ export function PlatformAuthenticationView({
               className="grid gap-1.5 text-xs font-medium"
               htmlFor="oidc-display-name"
             >
-              Display name
+              {t("Display name")}
               <Input
                 disabled={saving}
                 id="oidc-display-name"
@@ -392,14 +403,14 @@ export function PlatformAuthenticationView({
                 onChange={(event) =>
                   setForm({ ...form, displayName: event.target.value })
                 }
-                placeholder="Company SSO"
+                placeholder={t("Company SSO")}
               />
             </label>
             <label
               className="grid gap-1.5 text-xs font-medium"
               htmlFor="oidc-slug"
             >
-              Slug
+              {t("Slug")}
               <Input
                 disabled={saving}
                 id="oidc-slug"
@@ -415,7 +426,7 @@ export function PlatformAuthenticationView({
               className="grid gap-1.5 text-xs font-medium sm:col-span-2"
               htmlFor="oidc-issuer"
             >
-              Issuer URL
+              {t("Issuer URL")}
               <Input
                 disabled={saving}
                 id="oidc-issuer"
@@ -432,7 +443,7 @@ export function PlatformAuthenticationView({
               className="grid gap-1.5 text-xs font-medium"
               htmlFor="oidc-client-id"
             >
-              Client ID
+              {t("Client ID")}
               <Input
                 disabled={saving}
                 id="oidc-client-id"
@@ -447,7 +458,7 @@ export function PlatformAuthenticationView({
               className="grid gap-1.5 text-xs font-medium"
               htmlFor="oidc-client-secret"
             >
-              Client secret
+              {t("Client secret")}
               <Input
                 disabled={saving}
                 id="oidc-client-secret"
@@ -456,14 +467,16 @@ export function PlatformAuthenticationView({
                 onChange={(event) =>
                   setForm({ ...form, clientSecret: event.target.value })
                 }
-                placeholder={editingId ? "Leave blank to preserve" : "Required"}
+                placeholder={
+                  editingId ? t("Leave blank to preserve") : t("Required")
+                }
               />
             </label>
             <label
               className="grid gap-1.5 text-xs font-medium sm:col-span-2"
               htmlFor="oidc-redirect-url"
             >
-              Redirect URL
+              {t("Redirect URL")}
               <Input
                 disabled={saving}
                 id="oidc-redirect-url"
@@ -476,14 +489,16 @@ export function PlatformAuthenticationView({
                 placeholder="https://app.example.com/api/v1/auth/oidc/callback"
               />
               <span className="font-normal text-muted-foreground">
-                Register this exact callback URL with this identity provider.
+                {t(
+                  "Register this exact callback URL with this identity provider."
+                )}
               </span>
             </label>
             <label
               className="grid gap-1.5 text-xs font-medium sm:col-span-2"
               htmlFor="oidc-scopes"
             >
-              Scopes
+              {t("Scopes")}
               <Textarea
                 className="min-h-16"
                 disabled={saving}
@@ -496,16 +511,16 @@ export function PlatformAuthenticationView({
             </label>
             <div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
               <div>
-                <p className="text-xs font-medium">Provider enabled</p>
+                <p className="text-xs font-medium">{t("Provider enabled")}</p>
                 <p className="text-xs text-muted-foreground">
-                  Show this provider on the login page.
+                  {t("Show this provider on the login page.")}
                 </p>
               </div>
               <Switch
                 checked={form.enabled}
                 disabled={saving}
                 onCheckedChange={(enabled) => setForm({ ...form, enabled })}
-                aria-label="Provider enabled"
+                aria-label={t("Provider enabled")}
               />
             </div>
             <DialogFooter className="sm:col-span-2">
@@ -514,11 +529,11 @@ export function PlatformAuthenticationView({
                 type="button"
                 variant="outline"
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button disabled={saving} type="submit">
                 {saving && <LoaderCircle className="animate-spin" />}{" "}
-                {saving ? "Saving…" : "Save provider"}
+                {saving ? t("Saving…") : t("Save provider")}
               </Button>
             </DialogFooter>
           </form>
@@ -526,9 +541,13 @@ export function PlatformAuthenticationView({
       </Dialog>
       <ConfirmActionDialog
         open={Boolean(removeTarget)}
-        title={`Delete ${removeTarget?.displayName ?? "identity provider"}?`}
-        description="Users will no longer be able to sign in with this provider. Existing JustAI sessions are not revoked."
-        confirmLabel="Delete provider"
+        title={t("Delete {value0}?", {
+          value0: removeTarget?.displayName ?? "identity provider",
+        })}
+        description={t(
+          "Users will no longer be able to sign in with this provider. Existing JustAI sessions are not revoked."
+        )}
+        confirmLabel={t("Delete provider")}
         pending={removing}
         onOpenChange={(open) => !open && setRemoveTarget(null)}
         onConfirm={() => {

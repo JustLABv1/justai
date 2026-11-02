@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   AlertCircle,
   Mic,
@@ -36,6 +37,8 @@ export function VoiceControl({
   onDismissError?: () => void
   toolApproval?: ToolCallMessagePartProps | null
 }) {
+  const { t } = useTranslations()
+
   const state = useVoiceState()
   const controls = useVoiceControls()
   const volume = useVoiceVolume()
@@ -58,25 +61,25 @@ export function VoiceControl({
 
   if (centered) {
     const statusLabel = error
-      ? "Voice unavailable"
+      ? t("Voice unavailable")
       : toolApproval
-        ? "Approval required"
+        ? t("Approval required")
         : state?.status.type === "starting"
-          ? "Connecting to voice"
+          ? t("Connecting to voice")
           : active
             ? muted
-              ? "Voice muted"
+              ? t("Voice muted")
               : state?.mode === "speaking"
-                ? "Assistant is speaking"
-                : "Listening"
-            : "Voice mode"
+                ? t("Assistant is speaking")
+                : t("Listening")
+            : t("Voice mode")
     const statusDescription = error
       ? error
       : toolApproval
-        ? "Voice is paused while you review this action."
+        ? t("Voice is paused while you review this action.")
         : active
-          ? "Speak naturally. You can interrupt the assistant at any time."
-          : "Start a hands-free conversation with JustAI."
+          ? t("Speak naturally. You can interrupt the assistant at any time.")
+          : t("Start a hands-free conversation with JustAI.")
 
     return (
       <div
@@ -119,14 +122,14 @@ export function VoiceControl({
                   }}
                 >
                   <RotateCcw aria-hidden="true" className="mr-2 size-4" />
-                  Try again
+                  {t("Try again")}
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={onDismissError ?? onClearError}
                 >
-                  Back to chat
+                  {t("Back to chat")}
                 </Button>
               </>
             ) : active ? (
@@ -141,7 +144,7 @@ export function VoiceControl({
                   ) : (
                     <MicOff aria-hidden="true" className="mr-2 size-4" />
                   )}
-                  {muted ? "Unmute" : "Mute"}
+                  {muted ? t("Unmute") : t("Mute")}
                 </Button>
                 <Button
                   type="button"
@@ -149,7 +152,7 @@ export function VoiceControl({
                   onClick={controls.disconnect}
                 >
                   <PhoneOff aria-hidden="true" className="mr-2 size-4" />
-                  End voice
+                  {t("End voice")}
                 </Button>
               </>
             ) : (
@@ -161,7 +164,7 @@ export function VoiceControl({
                 }}
               >
                 <Phone aria-hidden="true" className="mr-2 size-4" />
-                Start voice
+                {t("Start voice")}
               </Button>
             )}
           </div>
@@ -171,13 +174,13 @@ export function VoiceControl({
                 aria-hidden="true"
                 className="mt-0.5 size-4 shrink-0"
               />
-              <span>{error}</span>
+              <span>{t(error)}</span>
             </div>
           )}
           {toolApproval && (
             <div
               className="w-full max-w-lg rounded-xl border bg-card p-2 text-left shadow-sm"
-              aria-label="Tool approval required"
+              aria-label={t("Tool approval required")}
             >
               <ToolFallback {...toolApproval} />
             </div>
@@ -190,9 +193,9 @@ export function VoiceControl({
   if (compact) {
     const label = active
       ? muted
-        ? "Unmute voice"
-        : "Mute voice"
-      : "Start voice"
+        ? t("Unmute voice")
+        : t("Mute voice")
+      : t("Start voice")
     return (
       <div className={cn("relative flex items-center", className)}>
         <Button
@@ -226,7 +229,7 @@ export function VoiceControl({
         </Button>
         {active && (
           <Button
-            aria-label="End voice"
+            aria-label={t("End voice")}
             className="ml-0.5 size-7 rounded-full p-0 text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={controls.disconnect}
             type="button"
@@ -259,12 +262,12 @@ export function VoiceControl({
           )}
         />
         {state?.status.type === "starting"
-          ? "Connecting"
+          ? t("Connecting")
           : active
             ? muted
-              ? "Muted"
-              : "Voice active"
-            : "Voice"}
+              ? t("Muted")
+              : t("Voice active")
+            : t("Voice")}
       </div>
       {active ? (
         <>
@@ -273,7 +276,7 @@ export function VoiceControl({
             size="icon"
             variant="ghost"
             onClick={() => (muted ? controls.unmute() : controls.mute())}
-            aria-label={muted ? "Unmute voice" : "Mute voice"}
+            aria-label={muted ? t("Unmute voice") : t("Mute voice")}
           >
             {muted ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
           </Button>
@@ -282,7 +285,7 @@ export function VoiceControl({
             size="icon"
             variant="ghost"
             onClick={controls.disconnect}
-            aria-label="End voice"
+            aria-label={t("End voice")}
           >
             <PhoneOff aria-hidden="true" />
           </Button>
@@ -293,7 +296,7 @@ export function VoiceControl({
           size="icon"
           variant="ghost"
           onClick={controls.connect}
-          aria-label="Start voice"
+          aria-label={t("Start voice")}
         >
           <Phone aria-hidden="true" />
         </Button>

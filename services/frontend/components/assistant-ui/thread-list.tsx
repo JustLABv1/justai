@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   Archive,
   ArchiveRestore,
@@ -195,9 +196,7 @@ function emptyAssistantStream() {
     start(controller) {
       controller.close()
     },
-  }) as unknown as Awaited<
-    ReturnType<RemoteThreadListAdapter["generateTitle"]>
-  >
+  }) as unknown as Awaited<ReturnType<RemoteThreadListAdapter["generateTitle"]>>
 }
 
 function useThreadListChatRuntime() {
@@ -251,6 +250,8 @@ function AssistantThreadItem({
   onToggleFolder: (folderId: string) => void
   thread: { id: string; title?: string; custom?: Record<string, unknown> }
 }) {
+  const { t } = useTranslations()
+
   const count =
     typeof thread.custom?.messageCount === "number"
       ? thread.custom.messageCount
@@ -326,7 +327,9 @@ function AssistantThreadItem({
       {!sectionCollapsed && (
         <ThreadListItemPrimitive.Root className="group relative rounded-xl transition-colors duration-200 data-[active=true]:bg-accent">
           <ThreadListItemPrimitive.Trigger
-            aria-label={`Open ${thread.title || "conversation"}`}
+            aria-label={t("Open {value0}", {
+              value0: thread.title || "conversation",
+            })}
             className="flex min-h-12 w-full items-center gap-2 rounded-xl px-2.5 py-2 pr-9 text-left text-xs hover:bg-accent/70"
           >
             <span className="size-1.5 shrink-0 rounded-full bg-border group-data-[active=true]:bg-primary" />
@@ -334,8 +337,8 @@ function AssistantThreadItem({
               <span className="flex min-w-0 items-center gap-1.5">
                 {pinned && (
                   <span
-                    aria-label="Pinned conversation"
-                    title="Pinned conversation"
+                    aria-label={t("Pinned conversation")}
+                    title={t("Pinned conversation")}
                   >
                     <Pin
                       aria-hidden="true"
@@ -353,12 +356,12 @@ function AssistantThreadItem({
                 </span>
                 {visibility === "workspace" ? (
                   <Share2
-                    aria-label="Shared with workspace"
+                    aria-label={t("Shared with workspace")}
                     className="size-3"
                   />
                 ) : (
                   <LockKeyhole
-                    aria-label="Private conversation"
+                    aria-label={t("Private conversation")}
                     className="size-3"
                   />
                 )}
@@ -379,10 +382,14 @@ function AssistantThreadItem({
             <DropdownMenuTrigger
               render={
                 <Button
-                  aria-label={`Actions for ${thread.title || "conversation"}`}
+                  aria-label={t("Actions for {value0}", {
+                    value0: thread.title || "conversation",
+                  })}
                   className="absolute top-1/2 right-1 size-7 -translate-y-1/2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
                   size="icon-xs"
-                  title={`Actions for ${thread.title || "conversation"}`}
+                  title={t("Actions for {value0}", {
+                    value0: thread.title || "conversation",
+                  })}
                   variant="ghost"
                 />
               }
@@ -398,18 +405,18 @@ function AssistantThreadItem({
                 ) : (
                   <Pin data-icon="inline-start" />
                 )}
-                {pinned ? "Unpin" : "Pin"}
+                {pinned ? t("Unpin") : t("Pin")}
               </DropdownMenuItem>
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <Folder data-icon="inline-start" />
-                  Move to folder
+                  {t("Move to folder")}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
                   <DropdownMenuItem
                     onClick={() => void onMoveFolder(thread.id, null)}
                   >
-                    No folder
+                    {t("No folder")}
                   </DropdownMenuItem>
                   {folders.map((folder) => (
                     <DropdownMenuItem
@@ -417,18 +424,20 @@ function AssistantThreadItem({
                       onClick={() => void onMoveFolder(thread.id, folder.id)}
                     >
                       {folder.name}
-                      {folder.id === folderId ? " · Current" : ""}
+                      {folder.id === folderId ? t(" · Current") : ""}
                     </DropdownMenuItem>
                   ))}
                   {!folders.length && (
-                    <DropdownMenuItem disabled>No folders yet</DropdownMenuItem>
+                    <DropdownMenuItem disabled>
+                      {t("No folders yet")}
+                    </DropdownMenuItem>
                   )}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <Tag data-icon="inline-start" />
-                  Tags
+                  {t("Tags")}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
                   {tags.map((tag) => (
@@ -443,7 +452,9 @@ function AssistantThreadItem({
                     </DropdownMenuCheckboxItem>
                   ))}
                   {!tags.length && (
-                    <DropdownMenuItem disabled>No tags yet</DropdownMenuItem>
+                    <DropdownMenuItem disabled>
+                      {t("No tags yet")}
+                    </DropdownMenuItem>
                   )}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
@@ -463,8 +474,8 @@ function AssistantThreadItem({
                     <Share2 data-icon="inline-start" />
                   )}
                   {visibility === "workspace"
-                    ? "Make private"
-                    : "Share with workspace"}
+                    ? t("Make private")
+                    : t("Share with workspace")}
                 </DropdownMenuItem>
               )}
               {canManage && (
@@ -475,7 +486,7 @@ function AssistantThreadItem({
                     }
                   >
                     <Pencil data-icon="inline-start" />
-                    Rename
+                    {t("Rename")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onArchive(thread.id)}>
                     {archived ? (
@@ -483,14 +494,14 @@ function AssistantThreadItem({
                     ) : (
                       <Archive data-icon="inline-start" />
                     )}
-                    {archived ? "Restore" : "Archive"}
+                    {archived ? t("Restore") : t("Archive")}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => onDelete(thread.id)}
                     variant="destructive"
                   >
                     <Trash2 data-icon="inline-start" />
-                    Delete
+                    {t("Delete")}
                   </DropdownMenuItem>
                 </>
               )}
@@ -517,6 +528,8 @@ export function AssistantThreadList({
   onSelect,
   onConversationRefresh,
 }: AssistantThreadListProps) {
+  const { t } = useTranslations()
+
   const [archivedOpen, setArchivedOpen] = useState(false)
   const [folderFilter, setFolderFilter] = useState("all")
   const [folders, setFolders] = useState<ConversationFolder[]>([])
@@ -666,7 +679,7 @@ export function AssistantThreadList({
         onDelete(
           conversation ?? {
             id: remoteId,
-            title: "Conversation",
+            title: t("Conversation"),
             createdAt: "",
             updatedAt: "",
             messageCount: 0,
@@ -703,6 +716,7 @@ export function AssistantThreadList({
       onArchive,
       onDelete,
       onRename,
+      t,
     ]
   )
 
@@ -894,10 +908,10 @@ export function AssistantThreadList({
       <ThreadListPrimitive.Root className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden">
         {!hideSearch && (
           <Input
-            aria-label="Search chat history"
+            aria-label={t("Search chat history")}
             className="h-9 shrink-0"
             onChange={(event) => onHistoryQueryChange(event.target.value)}
-            placeholder="Search chats"
+            placeholder={t("Search chats")}
             type="search"
             value={historyQuery}
           />
@@ -916,9 +930,9 @@ export function AssistantThreadList({
               <Folder className="size-3.5 shrink-0" />
               <span className="truncate">
                 {folderFilter === "all"
-                  ? "All chats"
+                  ? t("All chats")
                   : folderFilter === "pinned"
-                    ? "Pinned chats"
+                    ? t("Pinned chats")
                     : folderFilter.startsWith("folder:")
                       ? (folders.find(
                           (folder) => folder.id === folderFilter.slice(7)
@@ -929,10 +943,10 @@ export function AssistantThreadList({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
               <DropdownMenuItem onClick={() => setFolderFilter("all")}>
-                All chats
+                {t("All chats")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setFolderFilter("pinned")}>
-                <Pin data-icon="inline-start" /> Pinned chats
+                <Pin data-icon="inline-start" /> {t("Pinned chats")}
               </DropdownMenuItem>
               {folders.length > 0 && <DropdownMenuSeparator />}
               {folders.map((folder) => (
@@ -960,42 +974,42 @@ export function AssistantThreadList({
                 }}
               >
                 <Settings2 data-icon="inline-start" />
-                Manage folders & tags
+                {t("Manage folders & tags")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button
-            aria-label="Create folder"
+            aria-label={t("Create folder")}
             onClick={() => {
               setLabelError(null)
               setLabelDialog("folder")
             }}
             size="icon-sm"
-            title="Create folder"
+            title={t("Create folder")}
             variant="outline"
           >
             <FolderPlus />
           </Button>
           <Button
-            aria-label="Create tag"
+            aria-label={t("Create tag")}
             onClick={() => {
               setLabelError(null)
               setLabelDialog("tag")
             }}
             size="icon-sm"
-            title="Create tag"
+            title={t("Create tag")}
             variant="outline"
           >
             <Tag />
           </Button>
           <Button
-            aria-label="Manage folders and tags"
+            aria-label={t("Manage folders and tags")}
             onClick={() => {
               setLabelError(null)
               setManageLabelsOpen(true)
             }}
             size="icon-sm"
-            title="Manage folders and tags"
+            title={t("Manage folders and tags")}
             variant="outline"
           >
             <Settings2 />
@@ -1041,7 +1055,7 @@ export function AssistantThreadList({
                 onClick={() => setArchivedOpen((open) => !open)}
                 type="button"
               >
-                <span>Archived chats</span>
+                <span>{t("Archived chats")}</span>
                 <span className="flex items-center gap-1.5">
                   <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
                     {archivedConversations.length}
@@ -1088,16 +1102,14 @@ export function AssistantThreadList({
               )}
             </section>
           )}
-          <ThreadListPrimitive.LoadMore
-            className="mt-3 flex h-8 w-full items-center justify-center rounded-lg bg-secondary px-3 text-xs font-medium text-secondary-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:hidden"
-          >
-            Load more chats
+          <ThreadListPrimitive.LoadMore className="mt-3 flex h-8 w-full items-center justify-center rounded-lg bg-secondary px-3 text-xs font-medium text-secondary-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:hidden">
+            {t("Load more chats")}
           </ThreadListPrimitive.LoadMore>
           {!conversations.length && !archivedConversations.length && (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">
               {historyQuery
-                ? "No chats found."
-                : "No chats yet. Start a new chat."}
+                ? t("No chats found.")
+                : t("No chats yet. Start a new chat.")}
             </p>
           )}
         </div>
@@ -1111,15 +1123,15 @@ export function AssistantThreadList({
       >
         <DialogContent className="max-h-[min(42rem,calc(100vh-2rem))] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Manage folders and tags</DialogTitle>
+            <DialogTitle>{t("Manage folders and tags")}</DialogTitle>
             <DialogDescription>
-              Rename or delete the labels used to organize your chats.
+              {t("Rename or delete the labels used to organize your chats.")}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-5">
             <section className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
-                <h3 className="text-xs font-medium">Folders</h3>
+                <h3 className="text-xs font-medium">{t("Folders")}</h3>
                 <Badge variant="secondary">{folders.length}</Badge>
               </div>
               {folders.length > 0 ? (
@@ -1135,7 +1147,9 @@ export function AssistantThreadList({
                       </span>
                       <div className="flex shrink-0 items-center gap-1">
                         <Button
-                          aria-label={`Edit folder ${folder.name}`}
+                          aria-label={t("Edit folder {value0}", {
+                            value0: folder.name,
+                          })}
                           onClick={() =>
                             startLabelEdit({
                               kind: "folder",
@@ -1144,13 +1158,17 @@ export function AssistantThreadList({
                             })
                           }
                           size="icon-sm"
-                          title={`Edit folder ${folder.name}`}
+                          title={t("Edit folder {value0}", {
+                            value0: folder.name,
+                          })}
                           variant="ghost"
                         >
                           <Pencil />
                         </Button>
                         <Button
-                          aria-label={`Delete folder ${folder.name}`}
+                          aria-label={t("Delete folder {value0}", {
+                            value0: folder.name,
+                          })}
                           className="text-destructive hover:text-destructive"
                           onClick={() =>
                             startLabelDelete({
@@ -1160,7 +1178,9 @@ export function AssistantThreadList({
                             })
                           }
                           size="icon-sm"
-                          title={`Delete folder ${folder.name}`}
+                          title={t("Delete folder {value0}", {
+                            value0: folder.name,
+                          })}
                           variant="ghost"
                         >
                           <Trash2 />
@@ -1171,13 +1191,13 @@ export function AssistantThreadList({
                 </div>
               ) : (
                 <p className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                  No folders yet.
+                  {t("No folders yet.")}
                 </p>
               )}
             </section>
             <section className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
-                <h3 className="text-xs font-medium">Tags</h3>
+                <h3 className="text-xs font-medium">{t("Tags")}</h3>
                 <Badge variant="secondary">{tags.length}</Badge>
               </div>
               {tags.length > 0 ? (
@@ -1193,7 +1213,9 @@ export function AssistantThreadList({
                       </span>
                       <div className="flex shrink-0 items-center gap-1">
                         <Button
-                          aria-label={`Edit tag ${tag.name}`}
+                          aria-label={t("Edit tag {value0}", {
+                            value0: tag.name,
+                          })}
                           onClick={() =>
                             startLabelEdit({
                               kind: "tag",
@@ -1202,13 +1224,15 @@ export function AssistantThreadList({
                             })
                           }
                           size="icon-sm"
-                          title={`Edit tag ${tag.name}`}
+                          title={t("Edit tag {value0}", { value0: tag.name })}
                           variant="ghost"
                         >
                           <Pencil />
                         </Button>
                         <Button
-                          aria-label={`Delete tag ${tag.name}`}
+                          aria-label={t("Delete tag {value0}", {
+                            value0: tag.name,
+                          })}
                           className="text-destructive hover:text-destructive"
                           onClick={() =>
                             startLabelDelete({
@@ -1218,7 +1242,7 @@ export function AssistantThreadList({
                             })
                           }
                           size="icon-sm"
-                          title={`Delete tag ${tag.name}`}
+                          title={t("Delete tag {value0}", { value0: tag.name })}
                           variant="ghost"
                         >
                           <Trash2 />
@@ -1229,7 +1253,7 @@ export function AssistantThreadList({
                 </div>
               ) : (
                 <p className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                  No tags yet.
+                  {t("No tags yet.")}
                 </p>
               )}
             </section>
@@ -1248,15 +1272,18 @@ export function AssistantThreadList({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              Rename {labelEditTarget?.kind === "folder" ? "folder" : "tag"}
+              {t("Rename")}{" "}
+              {labelEditTarget?.kind === "folder" ? "folder" : "tag"}
             </DialogTitle>
             <DialogDescription>
-              The new name will be applied everywhere this label appears.
+              {t("The new name will be applied everywhere this label appears.")}
             </DialogDescription>
           </DialogHeader>
           <Input
             aria-label={
-              labelEditTarget?.kind === "folder" ? "Folder name" : "Tag name"
+              labelEditTarget?.kind === "folder"
+                ? t("Folder name")
+                : t("Tag name")
             }
             autoFocus
             maxLength={labelEditTarget?.kind === "folder" ? 80 : 40}
@@ -1270,7 +1297,7 @@ export function AssistantThreadList({
             value={labelEditName}
           />
           {labelError && (
-            <p className="text-xs text-destructive">{labelError}</p>
+            <p className="text-xs text-destructive">{t(labelError)}</p>
           )}
           <DialogFooter>
             <Button
@@ -1281,13 +1308,13 @@ export function AssistantThreadList({
               }}
               variant="outline"
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={labelEditSaving || !labelEditName.trim()}
               onClick={() => void submitLabelEdit()}
             >
-              {labelEditSaving ? "Saving…" : "Save changes"}
+              {labelEditSaving ? t("Saving…") : t("Save changes")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1304,16 +1331,21 @@ export function AssistantThreadList({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              Delete {labelDeleteTarget?.kind === "folder" ? "folder" : "tag"}?
+              {t("Delete")}{" "}
+              {labelDeleteTarget?.kind === "folder" ? "folder" : "tag"}?
             </DialogTitle>
             <DialogDescription>
               {labelDeleteTarget?.kind === "folder"
-                ? `Chats in “${labelDeleteTarget.name}” will become unfiled.`
-                : `The “${labelDeleteTarget?.name}” tag will be removed from all chats.`}
+                ? t("Chats in “{value0}” will become unfiled.", {
+                    value0: labelDeleteTarget.name,
+                  })
+                : t("The “{value0}” tag will be removed from all chats.", {
+                    value0: labelDeleteTarget?.name,
+                  })}
             </DialogDescription>
           </DialogHeader>
           {labelError && (
-            <p className="text-xs text-destructive">{labelError}</p>
+            <p className="text-xs text-destructive">{t(labelError)}</p>
           )}
           <DialogFooter>
             <Button
@@ -1324,14 +1356,14 @@ export function AssistantThreadList({
               }}
               variant="outline"
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={labelDeleteSaving}
               onClick={() => void deleteLabel()}
               variant="destructive"
             >
-              {labelDeleteSaving ? "Deleting…" : "Delete"}
+              {labelDeleteSaving ? t("Deleting…") : t("Delete")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1344,13 +1376,15 @@ export function AssistantThreadList({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Rename chat</DialogTitle>
+            <DialogTitle>{t("Rename chat")}</DialogTitle>
             <DialogDescription>
-              Choose a short name that makes this conversation easy to find.
+              {t(
+                "Choose a short name that makes this conversation easy to find."
+              )}
             </DialogDescription>
           </DialogHeader>
           <Input
-            aria-label="Chat name"
+            aria-label={t("Chat name")}
             autoFocus
             maxLength={160}
             onChange={(event) => setRenameTitle(event.target.value)}
@@ -1368,13 +1402,13 @@ export function AssistantThreadList({
               onClick={() => setRenameTarget(null)}
               variant="outline"
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={renameSaving || !renameTitle.trim()}
               onClick={() => void submitRename()}
             >
-              {renameSaving ? "Saving…" : "Save changes"}
+              {renameSaving ? t("Saving…") : t("Save changes")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1392,14 +1426,16 @@ export function AssistantThreadList({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              Create {labelDialog === "folder" ? "folder" : "tag"}
+              {t("Create")} {labelDialog === "folder" ? "folder" : "tag"}
             </DialogTitle>
             <DialogDescription>
-              Organize chats so they are easier to find later.
+              {t("Organize chats so they are easier to find later.")}
             </DialogDescription>
           </DialogHeader>
           <Input
-            aria-label={labelDialog === "folder" ? "Folder name" : "Tag name"}
+            aria-label={
+              labelDialog === "folder" ? t("Folder name") : t("Tag name")
+            }
             autoFocus
             maxLength={80}
             onChange={(event) => setLabelName(event.target.value)}
@@ -1410,12 +1446,12 @@ export function AssistantThreadList({
               }
             }}
             placeholder={
-              labelDialog === "folder" ? "Project work" : "Important"
+              labelDialog === "folder" ? t("Project work") : t("Important")
             }
             value={labelName}
           />
           {labelError && (
-            <p className="text-xs text-destructive">{labelError}</p>
+            <p className="text-xs text-destructive">{t(labelError)}</p>
           )}
           <DialogFooter>
             <Button
@@ -1426,13 +1462,13 @@ export function AssistantThreadList({
               }}
               variant="outline"
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={labelSaving || !labelName.trim()}
               onClick={() => void createLabel()}
             >
-              {labelSaving ? "Creating…" : "Create"}
+              {labelSaving ? t("Creating…") : t("Create")}
             </Button>
           </DialogFooter>
         </DialogContent>

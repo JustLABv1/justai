@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   Alert02Icon,
   CheckmarkCircle02Icon,
@@ -63,11 +64,13 @@ export function PlatformAdminDashboard({
   dashboard: AdminDashboardResponse | null
   onTabChange: (tab: AdminTab) => void
 }) {
+  const { t, locale } = useTranslations()
+
   if (!dashboard) {
     return (
       <Card>
         <CardContent className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
-          Loading platform overview…
+          {t("Loading platform overview…")}
         </CardContent>
       </Card>
     )
@@ -76,15 +79,15 @@ export function PlatformAdminDashboard({
   const { counts, health, usage } = dashboard
   const summary = usage.summary
   const stats = [
-    ["Requests", number(summary.requests), "Selected period"],
+    [t("Requests"), number(summary.requests), "Selected period"],
     [
-      "Success rate",
+      t("Success rate"),
       percentage(summary.succeeded, summary.requests),
       "Completed runs",
     ],
     [
       "Total tokens",
-      compactNumber(summary.totalTokens),
+      compactNumber(summary.totalTokens, locale),
       "Reported provider usage",
     ],
     [
@@ -92,8 +95,8 @@ export function PlatformAdminDashboard({
       summary.p95LatencyMs ? `${Math.round(summary.p95LatencyMs)} ms` : "—",
       "Completed runs",
     ],
-    ["Users", number(counts.users), "Platform total"],
-    ["Workspaces", number(counts.workspaces), "Platform total"],
+    [t("Users"), number(counts.users), "Platform total"],
+    [t("Workspaces"), number(counts.workspaces), "Platform total"],
   ] as const
 
   return (
@@ -117,10 +120,11 @@ export function PlatformAdminDashboard({
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Attention required</CardTitle>
+            <CardTitle>{t("Attention required")}</CardTitle>
             <CardDescription>
-              Derived from current service health, failures, and platform
-              controls.
+              {t(
+                "Derived from current service health, failures, and platform controls."
+              )}
             </CardDescription>
             <CardAction>
               <Badge
@@ -135,8 +139,13 @@ export function PlatformAdminDashboard({
                 }
               >
                 {dashboard.attention.length
-                  ? `${dashboard.attention.length} item${dashboard.attention.length === 1 ? "" : "s"}`
-                  : "Clear"}
+                  ? t(
+                      dashboard.attention.length === 1
+                        ? "{count} item"
+                        : "{count} items",
+                      { count: dashboard.attention.length }
+                    )
+                  : t("Clear")}
               </Badge>
             </CardAction>
           </CardHeader>
@@ -149,9 +158,11 @@ export function PlatformAdminDashboard({
                   aria-hidden="true"
                 />
                 <div>
-                  <p className="font-medium">Everything looks healthy</p>
+                  <p className="font-medium">{t("Everything looks healthy")}</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    No current configuration or service issues need attention.
+                    {t(
+                      "No current configuration or service issues need attention."
+                    )}
                   </p>
                 </div>
               </div>
@@ -197,9 +208,9 @@ export function PlatformAdminDashboard({
 
         <Card>
           <CardHeader>
-            <CardTitle>Platform health</CardTitle>
+            <CardTitle>{t("Platform health")}</CardTitle>
             <CardDescription>
-              Runtime status for the core platform dependencies.
+              {t("Runtime status for the core platform dependencies.")}
             </CardDescription>
             <CardAction>
               <Badge
@@ -222,35 +233,44 @@ export function PlatformAdminDashboard({
                 health.workers.rag &&
                 health.workers.transcription &&
                 health.workers.agents
-                  ? "Operational"
-                  : "Degraded"}
+                  ? t("Operational")
+                  : t("Degraded")}
               </Badge>
             </CardAction>
           </CardHeader>
           <CardContent className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
             {[
-              ["Database", health.database.ok, "Primary application store"],
+              [t("Database"), health.database.ok, "Primary application store"],
               [
                 "Model endpoints",
                 health.providers.ok,
-                `${health.providers.enabled} of ${health.providers.total} enabled`,
+                t("{value0} of {value1} enabled", {
+                  value0: health.providers.enabled,
+                  value1: health.providers.total,
+                }),
               ],
               [
                 "MCP",
                 health.mcp.ok,
-                `${health.mcp.enabled} of ${health.mcp.total} enabled`,
+                t("{value0} of {value1} enabled", {
+                  value0: health.mcp.enabled,
+                  value1: health.mcp.total,
+                }),
               ],
               [
-                "Workers",
+                t("Workers"),
                 health.workers.rag &&
                   health.workers.transcription &&
                   health.workers.agents,
                 "RAG, transcription, and agent heartbeats",
               ],
               [
-                "Agents",
+                t("Agents"),
                 health.agents.ok,
-                `${health.agents.activeRuns} active runs · ${health.agents.pendingApprovals} approvals`,
+                t("{value0} active runs · {value1} approvals", {
+                  value0: health.agents.activeRuns,
+                  value1: health.agents.pendingApprovals,
+                }),
               ],
             ].map(([label, ok, detail]) => (
               <div
@@ -262,7 +282,7 @@ export function PlatformAdminDashboard({
                   <p className="text-xs text-muted-foreground">{detail}</p>
                 </div>
                 <Badge variant={ok ? "default" : "destructive"}>
-                  {ok ? "Ready" : "Issue"}
+                  {ok ? t("Ready") : t("Issue")}
                 </Badge>
               </div>
             ))}
@@ -277,9 +297,9 @@ export function PlatformAdminDashboard({
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Top endpoint activity</CardTitle>
+            <CardTitle>{t("Top endpoint activity")}</CardTitle>
             <CardDescription>
-              Highest request volume in the selected period.
+              {t("Highest request volume in the selected period.")}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
@@ -308,7 +328,7 @@ export function PlatformAdminDashboard({
             ))}
             {usage.byEndpoint.length === 0 && (
               <p className="py-6 text-center text-sm text-muted-foreground">
-                No endpoint activity yet.
+                {t("No endpoint activity yet.")}
               </p>
             )}
           </CardContent>
@@ -316,9 +336,9 @@ export function PlatformAdminDashboard({
 
         <Card>
           <CardHeader>
-            <CardTitle>Recent admin activity</CardTitle>
+            <CardTitle>{t("Recent admin activity")}</CardTitle>
             <CardDescription>
-              Latest platform mutations recorded in the audit trail.
+              {t("Latest platform mutations recorded in the audit trail.")}
             </CardDescription>
             <CardAction>
               <Button
@@ -326,7 +346,7 @@ export function PlatformAdminDashboard({
                 size="sm"
                 variant="outline"
               >
-                View audit
+                {t("View audit")}
               </Button>
             </CardAction>
           </CardHeader>
@@ -348,7 +368,7 @@ export function PlatformAdminDashboard({
                   className="shrink-0 text-xs text-muted-foreground"
                   dateTime={item.createdAt}
                 >
-                  {new Date(item.createdAt).toLocaleString([], {
+                  {new Date(item.createdAt).toLocaleString(locale, {
                     month: "short",
                     day: "numeric",
                     hour: "2-digit",
@@ -359,7 +379,7 @@ export function PlatformAdminDashboard({
             ))}
             {dashboard.recentActivity.length === 0 && (
               <p className="py-6 text-center text-sm text-muted-foreground">
-                No admin activity recorded yet.
+                {t("No admin activity recorded yet.")}
               </p>
             )}
           </CardContent>

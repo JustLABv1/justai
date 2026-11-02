@@ -1,5 +1,7 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
+import { LanguageSwitcher } from "@/components/language-switcher"
 import { useState } from "react"
 import { ArrowRight, KeyRound, ShieldCheck } from "lucide-react"
 
@@ -29,6 +31,8 @@ export function LoginForm({
   className,
   ...props
 }: React.ComponentProps<"div">) {
+  const { t } = useTranslations()
+
   const [mode, setMode] = useState<AuthMode>("login")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -46,7 +50,7 @@ export function LoginForm({
           {
             id: "legacy",
             slug: "",
-            displayName: config.oidcLabel || "Continue with OIDC",
+            displayName: config.oidcLabel || t("Continue with OIDC"),
           },
         ]
       : []
@@ -118,7 +122,9 @@ export function LoginForm({
           ...(isRegister ? { displayName } : {}),
         }
       )
-      window.location.assign(initialSetup ? "/setup" : safeNext(window.location.search))
+      window.location.assign(
+        initialSetup ? "/setup" : safeNext(window.location.search)
+      )
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Could not authenticate"
@@ -134,31 +140,46 @@ export function LoginForm({
         <section className={styles.authFormPane}>
           <AuroraBackdrop className="absolute inset-x-0 top-0 -z-10 h-[90%]" />
           <div className={styles.authFormInner}>
+            <div className="flex justify-end">
+              <LanguageSwitcher />
+            </div>
             <div
-              className={cn(styles.authBrandRow, initialSetup && "justify-center")}
+              className={cn(
+                styles.authBrandRow,
+                initialSetup && "justify-center"
+              )}
               role={initialSetup ? "img" : undefined}
               aria-label={initialSetup ? "JustAI" : undefined}
             >
-              <BrandMark className={initialSetup ? "size-16" : "size-10 rounded-xl"} cropped={initialSetup} />
+              <BrandMark
+                className={initialSetup ? "size-16" : "size-10 rounded-xl"}
+                cropped={initialSetup}
+              />
               {!initialSetup && <p className={styles.authBrandName}>JustAI</p>}
             </div>
 
             <div className={styles.authIntro}>
               <h1 className={styles.authTitle}>
-                {initialSetup ? "Create your administrator account" : isRegister ? "Create your account" : "Sign in to JustAI"}
+                {initialSetup
+                  ? t("Create your administrator account")
+                  : isRegister
+                    ? t("Create your account")
+                    : t("Sign in to JustAI")}
               </h1>
               <p className={styles.authDescription}>
                 {initialSetup
-                  ? "Next, we’ll configure your workspace, sign-in and AI models."
+                  ? t(
+                      "Next, we’ll configure your workspace, sign-in and AI models."
+                    )
                   : isRegister
-                  ? "Set up an account to start working in your workspace."
-                  : "Continue to your workspace."}
+                    ? t("Set up an account to start working in your workspace.")
+                    : t("Continue to your workspace.")}
               </p>
             </div>
 
             {!initialSetup && signupEnabled && localAuthVisible && (
               <div
-                aria-label="Authentication mode"
+                aria-label={t("Authentication mode")}
                 className={styles.authModeSwitch}
                 role="group"
               >
@@ -171,7 +192,7 @@ export function LoginForm({
                   type="button"
                   onClick={() => switchMode("login")}
                 >
-                  Sign in
+                  {t("Sign in")}
                 </button>
                 <button
                   aria-pressed={isRegister}
@@ -182,7 +203,7 @@ export function LoginForm({
                   type="button"
                   onClick={() => switchMode("register")}
                 >
-                  Create account
+                  {t("Create account")}
                 </button>
               </div>
             )}
@@ -191,14 +212,14 @@ export function LoginForm({
               <FieldGroup>
                 {configLoading && !config ? (
                   <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                    <Spinner /> Loading sign-in options…
+                    <Spinner /> {t("Loading sign-in options…")}
                   </div>
                 ) : localCredentialsVisible ? (
                   <>
                     {isRegister && (
                       <Field>
                         <FieldLabel htmlFor="display-name">
-                          Display name
+                          {t("Display name")}
                         </FieldLabel>
                         <Input
                           id="display-name"
@@ -214,7 +235,7 @@ export function LoginForm({
                     )}
 
                     <Field>
-                      <FieldLabel htmlFor="email">Email</FieldLabel>
+                      <FieldLabel htmlFor="email">{t("Email")}</FieldLabel>
                       <Input
                         id="email"
                         type="email"
@@ -227,21 +248,23 @@ export function LoginForm({
                     </Field>
 
                     <Field>
-                      <FieldLabel htmlFor="password">Password</FieldLabel>
+                      <FieldLabel htmlFor="password">
+                        {t("Password")}
+                      </FieldLabel>
                       <Input
                         id="password"
                         type="password"
                         autoComplete={
                           isRegister ? "new-password" : "current-password"
                         }
-                        placeholder="At least 8 characters"
+                        placeholder={t("At least 8 characters")}
                         value={password}
                         onChange={(event) => setPassword(event.target.value)}
                         required
                       />
                       {isRegister && (
                         <FieldDescription>
-                          Use at least 8 characters.
+                          {t("Use at least 8 characters.")}
                         </FieldDescription>
                       )}
                     </Field>
@@ -249,7 +272,7 @@ export function LoginForm({
                     {isRegister && (
                       <Field>
                         <FieldLabel htmlFor="confirm-password">
-                          Confirm password
+                          {t("Confirm password")}
                         </FieldLabel>
                         <Input
                           id="confirm-password"
@@ -267,10 +290,11 @@ export function LoginForm({
                     {adminFallbackActive && !error && (
                       <Alert>
                         <ShieldCheck aria-hidden="true" />
-                        <AlertTitle>Administrator fallback</AlertTitle>
+                        <AlertTitle>{t("Administrator fallback")}</AlertTitle>
                         <AlertDescription>
-                          Password sign-in is available here only for platform
-                          administrators.
+                          {t(
+                            "Password sign-in is available here only for platform administrators."
+                          )}
                         </AlertDescription>
                       </Alert>
                     )}
@@ -280,12 +304,16 @@ export function LoginForm({
                       !error && (
                         <Alert>
                           <ShieldCheck aria-hidden="true" />
-                          <AlertTitle>Temporarily unavailable</AlertTitle>
+                          <AlertTitle>
+                            {t("Temporarily unavailable")}
+                          </AlertTitle>
                           <AlertDescription>
                             {maintenanceMessage ||
                               (isRegister
-                                ? "Account creation is temporarily disabled."
-                                : "Sign in is temporarily disabled for regular users.")}
+                                ? t("Account creation is temporarily disabled.")
+                                : t(
+                                    "Sign in is temporarily disabled for regular users."
+                                  ))}
                           </AlertDescription>
                         </Alert>
                       )}
@@ -293,8 +321,8 @@ export function LoginForm({
                     {error && (
                       <Alert variant="destructive">
                         <ShieldCheck aria-hidden="true" />
-                        <AlertTitle>Could not continue</AlertTitle>
-                        <AlertDescription>{error}</AlertDescription>
+                        <AlertTitle>{t("Could not continue")}</AlertTitle>
+                        <AlertDescription>{t(error)}</AlertDescription>
                       </Alert>
                     )}
 
@@ -306,10 +334,10 @@ export function LoginForm({
                       >
                         {loading && <Spinner data-icon="inline-start" />}
                         {loading
-                          ? "Working…"
+                          ? t("Working…")
                           : isRegister
-                            ? "Create workspace"
-                            : "Continue to workspace"}
+                            ? t("Create workspace")
+                            : t("Continue to workspace")}
                         {!loading && (
                           <ArrowRight
                             data-icon="inline-end"
@@ -322,7 +350,7 @@ export function LoginForm({
                 ) : !oidcAvailable ? (
                   <Alert>
                     <ShieldCheck aria-hidden="true" />
-                    <AlertTitle>No sign-in methods available</AlertTitle>
+                    <AlertTitle>{t("No sign-in methods available")}</AlertTitle>
                     <AlertDescription>
                       {maintenanceMessage ||
                         "Local password authentication is disabled. Contact your platform administrator."}
@@ -334,7 +362,7 @@ export function LoginForm({
                   <>
                     {localCredentialsVisible && (
                       <FieldSeparator className={styles.authSeparator}>
-                        Or continue with
+                        {t("Or continue with")}
                       </FieldSeparator>
                     )}
 
@@ -368,7 +396,7 @@ export function LoginForm({
                             data-icon="inline-start"
                             aria-hidden="true"
                           />
-                          {ssoLabel(provider.displayName)}
+                          {ssoLabel(provider.displayName, t)}
                         </a>
                       </Field>
                     ))}
@@ -384,14 +412,16 @@ export function LoginForm({
                       variant="ghost"
                       onClick={enableAdminFallback}
                     >
-                      Platform administrator? Sign in with a password
+                      {t("Platform administrator? Sign in with a password")}
                     </Button>
                   </Field>
                 )}
 
                 {!initialSetup && signupEnabled && localAuthVisible && (
                   <FieldDescription className={styles.authModeDescription}>
-                    {isRegister ? "Already have an account?" : "New to JustAI?"}{" "}
+                    {isRegister
+                      ? t("Already have an account?")
+                      : t("New to JustAI?")}{" "}
                     <button
                       className="underline underline-offset-4 hover:no-underline"
                       type="button"
@@ -399,13 +429,12 @@ export function LoginForm({
                         switchMode(isRegister ? "login" : "register")
                       }
                     >
-                      {isRegister ? "Sign in" : "Create an account"}
+                      {isRegister ? t("Sign in") : t("Create an account")}
                     </button>
                   </FieldDescription>
                 )}
               </FieldGroup>
             </form>
-
           </div>
         </section>
       </div>
@@ -413,10 +442,15 @@ export function LoginForm({
   )
 }
 
-function ssoLabel(displayName?: string) {
+function ssoLabel(
+  displayName: string | undefined,
+  t: (message: string, values?: Record<string, string | number>) => string
+) {
   const name = displayName?.trim()
-  if (!name) return "Continue with SSO"
-  return /^(continue|sign|log)/i.test(name) ? name : `Continue with ${name}`
+  if (!name) return t("Continue with SSO")
+  return /^(continue|sign|log)/i.test(name)
+    ? name
+    : t("Continue with {name}", { name })
 }
 
 function safeNext(search: string) {

@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   AudioLines,
   ChevronDown,
@@ -122,9 +123,11 @@ export function ListenCore({
   activeSpeaker: RoomSpeaker | null
   compact?: boolean
 }) {
+  const { t } = useTranslations()
+
   return (
     <div
-      aria-label={isLive ? "JustAI is listening" : "Transcription paused"}
+      aria-label={isLive ? t("JustAI is listening") : t("Transcription paused")}
       className={cn(
         styles.listenCore,
         compact && styles.listenCoreCompact,
@@ -144,14 +147,14 @@ export function ListenCore({
           <AudioLines data-icon="inline-start" />
         </div>
         <span className="text-[11px] font-semibold tracking-[0.16em] uppercase">
-          {isLive ? "Listening" : "Paused"}
+          {isLive ? t("Listening") : t("Paused")}
         </span>
         <span className="text-[10px] text-muted-foreground">
           {isLive
             ? activeSpeaker
-              ? `${activeSpeaker.name} is speaking`
-              : "Waiting for audio"
-            : "Capture paused"}
+              ? t("{value0} is speaking", { value0: activeSpeaker.name })
+              : t("Waiting for audio")
+            : t("Capture paused")}
         </span>
       </div>
     </div>
@@ -232,6 +235,8 @@ export function TranscriptTray({
   transcript?: RoomTranscriptLine[]
   label?: string
 }) {
+  const { t } = useTranslations()
+
   const [search, setSearch] = useState("")
   const latest = transcript[transcript.length - 1]
   const latestSpeaker = latest
@@ -262,8 +267,10 @@ export function TranscriptTray({
             <Button
               aria-label={
                 open
-                  ? `Collapse ${label.toLocaleLowerCase()}`
-                  : `Expand ${label.toLocaleLowerCase()}`
+                  ? t("Collapse {value0}", {
+                      value0: label.toLocaleLowerCase(),
+                    })
+                  : t("Expand {value0}", { value0: label.toLocaleLowerCase() })
               }
               className="min-w-0 flex-1 justify-start gap-2 px-1.5 text-left"
               variant="ghost"
@@ -271,9 +278,9 @@ export function TranscriptTray({
           }
         >
           <span className={cn(styles.liveDot, open && styles.liveDotActive)} />
-          <span className="truncate text-xs font-semibold">{label}</span>
+          <span className="truncate text-xs font-semibold">{t(label)}</span>
           <Badge className="shrink-0" variant="secondary">
-            {segmentCount} segments
+            {segmentCount} {t("segments")}
           </Badge>
           {messageCount > 0 && messageCount !== segmentCount ? (
             <Badge className="shrink-0" variant="outline">
@@ -300,10 +307,12 @@ export function TranscriptTray({
               className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
             />
             <Input
-              aria-label={`Search ${label.toLocaleLowerCase()}`}
+              aria-label={t("Search {value0}", {
+                value0: label.toLocaleLowerCase(),
+              })}
               className="h-8 pl-8 text-xs"
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search transcript"
+              placeholder={t("Search transcript")}
               value={search}
             />
           </div>
@@ -333,6 +342,8 @@ function TranscriptScroller({
   transcript: RoomTranscriptLine[]
   emptyMessage?: string
 }) {
+  const { t } = useTranslations()
+
   const { scrollToEnd } = useMessageScroller()
   const viewportRef = useRef<HTMLDivElement>(null)
   const followLatestRef = useRef(true)
@@ -356,7 +367,7 @@ function TranscriptScroller({
   return (
     <MessageScroller className="min-h-0 flex-1">
       <MessageScrollerViewport
-        aria-label="Live transcription"
+        aria-label={t("Live transcription")}
         onScroll={handleScroll}
         ref={viewportRef}
       >
@@ -407,7 +418,7 @@ function TranscriptScroller({
                         </Badge>
                       ) : null}
                       {line.provisional ? (
-                        <Badge variant="secondary">Listening</Badge>
+                        <Badge variant="secondary">{t("Listening")}</Badge>
                       ) : null}
                     </div>
                     <p
@@ -426,7 +437,7 @@ function TranscriptScroller({
         </MessageScrollerContent>
       </MessageScrollerViewport>
       <MessageScrollerButton
-        aria-label="Scroll to latest transcript"
+        aria-label={t("Scroll to latest transcript")}
         direction="end"
       />
     </MessageScroller>
@@ -444,6 +455,8 @@ export function SpeakerDetailDialog({
   onOpenChange: (open: boolean) => void
   onSave: (speakerId: string, name: string) => void
 }) {
+  const { t } = useTranslations()
+
   if (!speaker) return null
 
   return (
@@ -463,11 +476,12 @@ export function SpeakerDetailDialog({
                 {speaker.initials}
               </AvatarFallback>
             </Avatar>
-            Speaker details
+            {t("Speaker details")}
           </DialogTitle>
           <DialogDescription>
-            Review the speaker match, rename it, or trace it back to the capture
-            source.
+            {t(
+              "Review the speaker match, rename it, or trace it back to the capture source."
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -477,10 +491,10 @@ export function SpeakerDetailDialog({
           speaker={speaker}
         >
           <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted/50 p-3">
-            <DetailStat label="Role" value={speaker.role} />
-            <DetailStat label="Last spoke" value={speaker.lastSpoke} />
-            <DetailStat label="Confidence" value={speaker.confidence} />
-            <DetailStat label="Words" value={String(speaker.words)} />
+            <DetailStat label={t("Role")} value={speaker.role} />
+            <DetailStat label={t("Last spoke")} value={speaker.lastSpoke} />
+            <DetailStat label={t("Confidence")} value={speaker.confidence} />
+            <DetailStat label={t("Words")} value={String(speaker.words)} />
           </div>
           <Separator />
           <div className="flex items-start gap-3">
@@ -495,7 +509,8 @@ export function SpeakerDetailDialog({
               <div className="mt-2 flex items-center gap-2">
                 <SignalBars accent={speaker.accent} value={speaker.signal} />
                 <span className="text-[11px] text-muted-foreground">
-                  {speaker.signal}% audio level
+                  {speaker.signal}
+                  {t("% audio level")}
                 </span>
               </div>
             </div>
@@ -517,27 +532,29 @@ function SpeakerForm({
   onSave: (speakerId: string, name: string) => void
   children: ReactNode
 }) {
+  const { t } = useTranslations()
+
   const [name, setName] = useState(speaker.name)
 
   return (
     <>
       <FieldGroup>
         <Field>
-          <FieldLabel htmlFor="speaker-name">Speaker name</FieldLabel>
+          <FieldLabel htmlFor="speaker-name">{t("Speaker name")}</FieldLabel>
           <Input
             id="speaker-name"
             onChange={(event) => setName(event.target.value)}
             value={name}
           />
           <FieldDescription>
-            This name is shown across the live transcript for this room.
+            {t("This name is shown across the live transcript for this room.")}
           </FieldDescription>
         </Field>
       </FieldGroup>
       {children}
       <DialogFooter>
         <Button onClick={() => onOpenChange(false)} variant="outline">
-          Cancel
+          {t("Cancel")}
         </Button>
         <Button
           onClick={() => {
@@ -546,7 +563,7 @@ function SpeakerForm({
           }}
         >
           <Pencil data-icon="inline-start" />
-          Save speaker
+          {t("Save speaker")}
         </Button>
       </DialogFooter>
     </>
@@ -554,9 +571,10 @@ function SpeakerForm({
 }
 
 function DetailStat({ label, value }: { label: string; value: string }) {
+  const { t } = useTranslations()
   return (
     <div>
-      <p className="text-[10px] text-muted-foreground">{label}</p>
+      <p className="text-[10px] text-muted-foreground">{t(label)}</p>
       <p className="mt-0.5 text-xs font-medium">{value}</p>
     </div>
   )

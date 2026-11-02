@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useRef, useState } from "react"
 import { ImageGeneration, type ImageGenerationHandle } from "img-fx"
 import {
@@ -175,12 +176,14 @@ export function GeneratedImageCard({
   value: unknown
   isGenerating?: boolean
 }) {
+  const { t } = useTranslations()
+
   const parsed = parseToolResult(value) as ImageToolResult | null
   const image = parsed?.image
   const imageURL = typeof image?.url === "string" ? image.url : ""
   const prompt =
-    typeof image?.prompt === "string" ? image.prompt : "Generated image"
-  const mode = image?.mode === "edit" ? "Edited image" : "Generated image"
+    typeof image?.prompt === "string" ? image.prompt : t("Generated image")
+  const mode = image?.mode === "edit" ? t("Edited image") : t("Generated image")
   const [preview, setPreview] = useState({ source: "", url: "" })
   const [loadError, setLoadError] = useState({ source: "", message: "" })
   const previewRef = useRef("")
@@ -266,7 +269,7 @@ export function GeneratedImageCard({
       </ImageGeneration>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t px-2 py-1.5">
         <span className="text-muted-foreground">
-          {imageReady ? mode : "Generating image…"}
+          {imageReady ? mode : t("Generating image…")}
         </span>
         {imageReady && (
           <a
@@ -275,7 +278,7 @@ export function GeneratedImageCard({
             href={preview.url}
           >
             <Download className="size-3" aria-hidden="true" />
-            Download
+            {t("Download")}
           </a>
         )}
       </div>
@@ -284,6 +287,8 @@ export function GeneratedImageCard({
 }
 
 export function GeneratedFileCard({ value }: { value: unknown }) {
+  const { t } = useTranslations()
+
   const file = parseGeneratedFileResult(value)
   const fileURL = file?.url ?? ""
   const [preview, setPreview] = useState({ source: "", url: "" })
@@ -344,8 +349,9 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
           className="rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive"
           role="alert"
         >
-          The file result is incomplete and does not include a valid download
-          URL.
+          {t(
+            "The file result is incomplete and does not include a valid download URL."
+          )}
         </p>
         <StructuredToolResult value={value} />
       </div>
@@ -359,7 +365,7 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
         className="rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive"
         role="alert"
       >
-        Unable to load this file: {loadError.message}
+        {t("Unable to load this file:")} {loadError.message}
       </p>
     )
   }
@@ -372,7 +378,7 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
         role="status"
       >
         <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-        Loading file…
+        {t("Loading file…")}
       </div>
     )
   }
@@ -407,28 +413,30 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
-        <span className="text-muted-foreground">Generated file</span>
+        <span className="text-muted-foreground">{t("Generated file")}</span>
         <div className="flex flex-wrap items-center gap-1.5">
           {canOpen && (
             <a
-              aria-label={`Open ${file.filename} in a new tab`}
+              aria-label={t("Open {value0} in a new tab", {
+                value0: file.filename,
+              })}
               className="inline-flex items-center gap-1 rounded-md border px-2 py-1 font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
               href={preview.url}
               rel="noopener noreferrer"
               target="_blank"
             >
               <ExternalLink className="size-3" aria-hidden="true" />
-              Open
+              {t("Open")}
             </a>
           )}
           <a
-            aria-label={`Download ${file.filename}`}
+            aria-label={t("Download {value0}", { value0: file.filename })}
             className="inline-flex items-center gap-1 rounded-md border bg-primary px-2 py-1 font-medium text-primary-foreground hover:bg-primary/80 focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
             download={file.filename}
             href={preview.url}
           >
             <Download className="size-3" aria-hidden="true" />
-            Download
+            {t("Download")}
           </a>
         </div>
       </div>
@@ -448,6 +456,8 @@ type WebSearchToolResult = {
 }
 
 function WebSearchResult({ value }: { value: unknown }) {
+  const { t } = useTranslations()
+
   const parsed = parseToolResult(value) as WebSearchToolResult | null
   const results = Array.isArray(parsed?.results) ? parsed.results : []
   if (results.length === 0) {
@@ -464,7 +474,7 @@ function WebSearchResult({ value }: { value: unknown }) {
     <div className="space-y-1.5">
       {results.slice(0, 8).map((result, index) => {
         const title =
-          typeof result.title === "string" ? result.title : "Search result"
+          typeof result.title === "string" ? result.title : t("Search result")
         const url = typeof result.url === "string" ? result.url : ""
         const snippet = typeof result.snippet === "string" ? result.snippet : ""
         return (
@@ -519,6 +529,8 @@ export function ToolResultContent({
 export const ToolFallback: ToolCallMessagePartComponent = (
   props: ToolCallMessagePartProps
 ) => {
+  const { t } = useTranslations()
+
   const [open, setOpen] = useState(props.approval?.approved === undefined)
   const requiresApproval = Boolean(
     props.approval &&
@@ -577,20 +589,20 @@ export const ToolFallback: ToolCallMessagePartComponent = (
           />
         )}
         <span className="min-w-0 flex-1 truncate font-medium">
-          {toolLabel(props.toolName)}
+          {t(toolLabel(props.toolName))}
         </span>
         <span className="text-xs text-muted-foreground">
           {requiresApproval
-            ? "Approval needed"
+            ? t("Approval needed")
             : isCancelled
-              ? "Cancelled"
+              ? t("Cancelled")
               : isDenied
-                ? "Denied"
+                ? t("Denied")
                 : isError
-                  ? "Failed"
+                  ? t("Failed")
                   : hasResult
-                    ? "Completed"
-                    : "Running"}
+                    ? t("Completed")
+                    : t("Running")}
         </span>
         <ChevronDown
           className={cn("size-4 transition-transform", open && "rotate-180")}
@@ -609,7 +621,7 @@ export const ToolFallback: ToolCallMessagePartComponent = (
               className="rounded-lg border bg-background/60 px-2 py-1.5"
             >
               <summary className="cursor-pointer font-medium">
-                Arguments
+                {t("Arguments")}
               </summary>
               <pre className="mt-2 max-h-40 overflow-auto break-all whitespace-pre-wrap text-muted-foreground">
                 {argsText}
@@ -622,7 +634,7 @@ export const ToolFallback: ToolCallMessagePartComponent = (
                 size="sm"
                 onClick={() => props.respondToApproval?.({ approved: true })}
               >
-                Allow
+                {t("Allow")}
               </Button>
               <Button
                 size="sm"
@@ -634,7 +646,7 @@ export const ToolFallback: ToolCallMessagePartComponent = (
                   })
                 }
               >
-                Deny
+                {t("Deny")}
               </Button>
             </div>
           )}

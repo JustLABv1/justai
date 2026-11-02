@@ -1,3 +1,6 @@
+"use client"
+
+import { useTranslations } from "@/components/locale-provider"
 import type { ReactNode } from "react"
 import { Search, X } from "lucide-react"
 
@@ -52,6 +55,8 @@ export function FilterBar({
   actions,
   className,
 }: FilterBarProps) {
+  const { t } = useTranslations()
+
   const showSummary =
     resultCount !== undefined ||
     (hasActiveFilters && Boolean(onClear)) ||
@@ -59,7 +64,7 @@ export function FilterBar({
 
   return (
     <div
-      aria-label="Filters"
+      aria-label={t("Filters")}
       className={cn("flex flex-col gap-2 border-y px-4 py-3", className)}
       data-slot="filter-bar"
       role="search"
@@ -72,7 +77,7 @@ export function FilterBar({
               className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
             />
             <Input
-              aria-label={search.label ?? "Search"}
+              aria-label={search.label ?? t("Search")}
               className="h-8 pl-8"
               disabled={search.disabled}
               onChange={(event) => search.onChange(event.target.value)}
@@ -92,9 +97,12 @@ export function FilterBar({
           {resultCount !== undefined ? (
             <span aria-live="polite">
               {resultTotal !== undefined && resultTotal !== resultCount
-                ? `${resultCount} of ${resultTotal}`
+                ? t("{count} of {total}", {
+                    count: resultCount,
+                    total: resultTotal,
+                  })
                 : resultCount}{" "}
-              {resultLabel}
+              {t(resultLabel)}
             </span>
           ) : (
             <span aria-hidden="true" />
@@ -103,7 +111,7 @@ export function FilterBar({
             {actions}
             {hasActiveFilters && onClear && (
               <Button
-                aria-label={clearLabel}
+                aria-label={t(clearLabel)}
                 className="-mr-1"
                 onClick={onClear}
                 size="sm"
@@ -111,7 +119,7 @@ export function FilterBar({
                 variant="ghost"
               >
                 <X aria-hidden="true" data-icon="inline-start" />
-                {clearLabel}
+                {t(clearLabel)}
               </Button>
             )}
           </div>

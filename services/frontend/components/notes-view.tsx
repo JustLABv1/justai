@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
@@ -59,6 +60,8 @@ type NotesViewProps = {
 }
 
 export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
+  const { t, locale } = useTranslations()
+
   const searchParams = useSearchParams()
   const initialNoteId = searchParams.get("note")
   const [notes, setNotes] = useState<Note[]>([])
@@ -195,7 +198,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
     setSaving(true)
     try {
       const response = await api.post<{ note: Note }>("/api/v1/notes", {
-        title: "Untitled note",
+        title: t("Untitled note"),
         content: "",
       })
       updateNotes((current) => [response.note, ...current])
@@ -222,7 +225,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
       const response = await api.patch<{ note: Note }>(
         `/api/v1/notes/${selected.id}`,
         {
-          title: title.trim() || "Untitled note",
+          title: title.trim() || t("Untitled note"),
           content,
           ...(selected.canManage ? { visibility } : {}),
         }
@@ -324,37 +327,40 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
             <div className="flex items-center gap-2">
               <FileText className="size-5 text-primary" />
               <h1 className="text-xl font-semibold tracking-tight">
-                Notes workspace
+                {t("Notes workspace")}
               </h1>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Keep durable working notes, then bring any note back into a chat
-              as context.
+              {t(
+                "Keep durable working notes, then bring any note back into a chat as context."
+              )}
             </p>
           </div>
           <Button onClick={() => void createNote()} disabled={saving}>
             <Plus data-icon="inline-start" />
-            New note
+            {t("New note")}
           </Button>
         </div>
 
         {error && (
           <Alert aria-live="polite" role="alert" variant="destructive">
-            <AlertTitle>Notes action failed</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertTitle>{t("Notes action failed")}</AlertTitle>
+            <AlertDescription>{t(error)}</AlertDescription>
           </Alert>
         )}
 
         <div className="grid min-h-[34rem] gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
           <Card className="min-h-0 overflow-hidden">
             <CardHeader className="gap-3 border-b">
-              <CardTitle className="text-base">Workspace notes</CardTitle>
+              <CardTitle className="text-base">
+                {t("Workspace notes")}
+              </CardTitle>
               <Input
-                aria-label="Search notes"
+                aria-label={t("Search notes")}
                 onChange={(event) => {
                   setQuery(event.target.value)
                 }}
-                placeholder="Search notes"
+                placeholder={t("Search notes")}
                 type="search"
                 value={query}
               />
@@ -366,7 +372,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                   className="p-4 text-center text-xs text-muted-foreground"
                   role="status"
                 >
-                  Loading notes…
+                  {t("Loading notes…")}
                 </p>
               ) : loadError ? (
                 <div className="flex flex-col items-center gap-3 p-6 text-center">
@@ -375,7 +381,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                     className="text-sm text-destructive"
                     role="alert"
                   >
-                    Notes could not be loaded: {loadError}
+                    {t("Notes could not be loaded:")} {t(loadError)}
                   </p>
                   <Button
                     size="sm"
@@ -383,15 +389,15 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                     variant="outline"
                     onClick={() => void load()}
                   >
-                    Try again
+                    {t("Try again")}
                   </Button>
                 </div>
               ) : notes.length === 0 ? (
                 <Empty className="min-h-48 border-0 p-4">
                   <EmptyHeader>
-                    <EmptyTitle>No notes yet</EmptyTitle>
+                    <EmptyTitle>{t("No notes yet")}</EmptyTitle>
                     <EmptyDescription>
-                      Create a note to start a workspace.
+                      {t("Create a note to start a workspace.")}
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -409,14 +415,14 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                     >
                       <span className="flex items-center gap-2 text-sm font-medium">
                         <span className="min-w-0 flex-1 truncate">
-                          {note.title || "Untitled note"}
+                          {note.title || t("Untitled note")}
                         </span>
                         {note.pinnedAt && (
                           <Pin className="size-3 shrink-0 text-primary" />
                         )}
                       </span>
                       <span className="mt-1 block truncate text-xs text-muted-foreground">
-                        {note.content || "Empty note"}
+                        {note.content || t("Empty note")}
                       </span>
                     </button>
                   ))}
@@ -430,27 +436,34 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
               <>
                 <CardHeader className="flex-row items-start justify-between gap-3 border-b">
                   <div className="min-w-0 flex-1">
-                    <CardTitle className="text-base">Edit note</CardTitle>
+                    <CardTitle className="text-base">
+                      {t("Edit note")}
+                    </CardTitle>
                     <CardDescription>
-                      Updated {new Date(selected.updatedAt).toLocaleString()}
+                      {t("Updated")}{" "}
+                      {new Date(selected.updatedAt).toLocaleString(locale)}
                     </CardDescription>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <Button
-                      aria-label={selected.pinnedAt ? "Unpin note" : "Pin note"}
+                      aria-label={
+                        selected.pinnedAt ? t("Unpin note") : t("Pin note")
+                      }
                       onClick={() => void togglePin()}
                       size="icon-sm"
-                      title={selected.pinnedAt ? "Unpin note" : "Pin note"}
+                      title={
+                        selected.pinnedAt ? t("Unpin note") : t("Pin note")
+                      }
                       variant="ghost"
                     >
                       {selected.pinnedAt ? <PinOff /> : <Pin />}
                     </Button>
                     {selected.canManage && (
                       <Button
-                        aria-label="Delete note"
+                        aria-label={t("Delete note")}
                         onClick={() => setDeleteOpen(true)}
                         size="icon-sm"
-                        title="Delete note"
+                        title={t("Delete note")}
                         variant="ghost"
                       >
                         <Trash2 />
@@ -460,13 +473,13 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                 </CardHeader>
                 <CardContent className="flex min-h-0 flex-col gap-4 pt-5">
                   <label className="sr-only" htmlFor="notes-editor-title">
-                    Note title
+                    {t("Note title")}
                   </label>
                   <Input
                     id="notes-editor-title"
                     maxLength={200}
                     onChange={(event) => setTitle(event.target.value)}
-                    placeholder="Note title"
+                    placeholder={t("Note title")}
                     value={title}
                   />
                   {selected.canManage && (
@@ -477,16 +490,20 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                         <LockKeyhole className="size-4 text-muted-foreground" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-medium">Note visibility</p>
+                        <p className="text-xs font-medium">
+                          {t("Note visibility")}
+                        </p>
                         <p className="text-[11px] text-muted-foreground">
-                          Workspace notes can be read and edited by members.
+                          {t(
+                            "Workspace notes can be read and edited by members."
+                          )}
                         </p>
                       </div>
                       <label
                         className="sr-only"
                         htmlFor="notes-editor-visibility"
                       >
-                        Note visibility
+                        {t("Note visibility")}
                       </label>
                       <Select
                         onValueChange={(value) =>
@@ -502,27 +519,33 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="private">Private</SelectItem>
-                          <SelectItem value="workspace">Workspace</SelectItem>
+                          <SelectItem value="private">
+                            {t("Private")}
+                          </SelectItem>
+                          <SelectItem value="workspace">
+                            {t("Workspace")}
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                   )}
                   <label className="sr-only" htmlFor="notes-editor-content">
-                    Note content
+                    {t("Note content")}
                   </label>
                   <Textarea
                     id="notes-editor-content"
                     className="min-h-72 flex-1"
                     maxLength={100000}
                     onChange={(event) => setContent(event.target.value)}
-                    placeholder="Write your note… Markdown is supported when you bring it into chat."
+                    placeholder={t(
+                      "Write your note… Markdown is supported when you bring it into chat."
+                    )}
                     value={content}
                   />
                   <Separator />
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <span className="text-xs text-muted-foreground">
-                      {content.length} characters
+                      {content.length} {t("characters")}
                     </span>
                     <div className="flex items-center gap-2">
                       {onUseInChat && (
@@ -531,7 +554,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                           type="button"
                           variant="outline"
                         >
-                          Use in chat
+                          {t("Use in chat")}
                         </Button>
                       )}
                       <Button
@@ -540,7 +563,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
                         type="button"
                       >
                         <Save data-icon="inline-start" />
-                        {saving ? "Saving…" : "Save note"}
+                        {saving ? t("Saving…") : t("Save note")}
                       </Button>
                     </div>
                   </div>
@@ -549,9 +572,9 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
             ) : (
               <Empty className="h-full min-h-72 border-0">
                 <EmptyHeader>
-                  <EmptyTitle>Select a note</EmptyTitle>
+                  <EmptyTitle>{t("Select a note")}</EmptyTitle>
                   <EmptyDescription>
-                    Choose a note or create a new one.
+                    {t("Choose a note or create a new one.")}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
@@ -568,21 +591,22 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Discard unsaved changes?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Your changes to “{selected?.title || "Untitled note"}” have not
-              been saved. Switching notes will discard them.
+              {t("Your changes to “")}
+              {selected?.title || t("Untitled note")}
+              {t("” have not been saved. Switching notes will discard them.")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogCancel>{t("Keep editing")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 applySelectedNote(pendingNote)
                 setPendingNote(null)
               }}
             >
-              Discard changes
+              {t("Discard changes")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -591,21 +615,22 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
       <AlertDialog open={discardCreateOpen} onOpenChange={setDiscardCreateOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Start a new note?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Start a new note?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Save your current note first, or discard the unsaved changes to
-              continue with a new note.
+              {t(
+                "Save your current note first, or discard the unsaved changes to continue with a new note."
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogCancel>{t("Keep editing")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 setDiscardCreateOpen(false)
                 void createNote(true)
               }}
             >
-              Discard and create
+              {t("Discard and create")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -613,9 +638,12 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
 
       <ConfirmActionDialog
         open={Boolean(selected && deleteOpen)}
-        title="Delete this note?"
-        description={`“${selected?.title || "Untitled note"}” will be permanently removed. This action cannot be undone.`}
-        confirmLabel="Delete note"
+        title={t("Delete this note?")}
+        description={t(
+          "“{value0}” will be permanently removed. This action cannot be undone.",
+          { value0: selected?.title || t("Untitled note") }
+        )}
+        confirmLabel={t("Delete note")}
         pending={saving}
         onOpenChange={(open) => {
           if (!open && !saving) setDeleteOpen(false)

@@ -1,12 +1,20 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import * as React from "react"
 import { Toast as ToastPrimitive } from "@base-ui/react/toast"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Cancel01Icon, CheckmarkCircle02Icon, InformationCircleIcon, Alert02Icon, MultiplicationSignCircleIcon, Loading03Icon } from "@hugeicons/core-free-icons"
+import {
+  Cancel01Icon,
+  CheckmarkCircle02Icon,
+  InformationCircleIcon,
+  Alert02Icon,
+  MultiplicationSignCircleIcon,
+  Loading03Icon,
+} from "@hugeicons/core-free-icons"
 
 const toast = ToastPrimitive.createToastManager()
 
@@ -115,10 +123,12 @@ function ToastClose({
   render = <Button variant="ghost" size="icon-sm" />,
   ...props
 }: ToastPrimitive.Close.Props) {
+  const { t } = useTranslations()
+
   return (
     <ToastPrimitive.Close
       data-slot="toast-close"
-      aria-label="Close toast"
+      aria-label={t("Close toast")}
       render={render}
       className={cn(
         "relative shrink-0 text-muted-foreground after:absolute after:-inset-2 after:content-[''] hover:text-foreground",
@@ -138,13 +148,21 @@ function ToastIcon({ type }: { type: string | undefined }) {
 
   if (type === "success") {
     icon = (
-      <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} aria-hidden="true" />
+      <HugeiconsIcon
+        icon={CheckmarkCircle02Icon}
+        strokeWidth={2}
+        aria-hidden="true"
+      />
     )
   }
 
   if (type === "info") {
     icon = (
-      <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} aria-hidden="true" />
+      <HugeiconsIcon
+        icon={InformationCircleIcon}
+        strokeWidth={2}
+        aria-hidden="true"
+      />
     )
   }
 
@@ -156,13 +174,23 @@ function ToastIcon({ type }: { type: string | undefined }) {
 
   if (type === "error") {
     icon = (
-      <HugeiconsIcon icon={MultiplicationSignCircleIcon} strokeWidth={2} className="text-destructive" aria-hidden="true" />
+      <HugeiconsIcon
+        icon={MultiplicationSignCircleIcon}
+        strokeWidth={2}
+        className="text-destructive"
+        aria-hidden="true"
+      />
     )
   }
 
   if (type === "loading") {
     icon = (
-      <HugeiconsIcon icon={Loading03Icon} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+      <HugeiconsIcon
+        icon={Loading03Icon}
+        strokeWidth={2}
+        className="animate-spin"
+        aria-hidden="true"
+      />
     )
   }
 
@@ -181,6 +209,7 @@ function ToastIcon({ type }: { type: string | undefined }) {
 }
 
 function ToastList() {
+  const { t } = useTranslations()
   const { toasts } = ToastPrimitive.useToastManager()
 
   return toasts.map((toastItem) => (
@@ -188,8 +217,16 @@ function ToastList() {
       <ToastContent>
         <ToastIcon type={toastItem.type} />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <ToastTitle />
-          <ToastDescription />
+          <ToastTitle>
+            {typeof toastItem.title === "string"
+              ? t(toastItem.title)
+              : toastItem.title}
+          </ToastTitle>
+          <ToastDescription>
+            {typeof toastItem.description === "string"
+              ? t(toastItem.description)
+              : toastItem.description}
+          </ToastDescription>
         </div>
         <ToastAction />
         <ToastClose />

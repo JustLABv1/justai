@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   createContext,
   useCallback,
@@ -69,6 +70,8 @@ function MCPApprovalCardsContent({
 }: {
   approvals: ToolCallEntry[]
 }) {
+  const { t } = useTranslations()
+
   const [submitting, setSubmitting] = useState<Set<string>>(new Set())
   if (!approvals.length) return null
 
@@ -89,8 +92,10 @@ function MCPApprovalCardsContent({
                 aria-hidden="true"
               />
               {approvals.length === 1
-                ? "Action needs your approval"
-                : `${approvals.length} actions need approval`}
+                ? t("Action needs your approval")
+                : t("{value0} actions need approval", {
+                    value0: approvals.length,
+                  })}
             </p>
             <p className="mt-0.5 truncate text-xs text-muted-foreground">
               {approvals
@@ -119,10 +124,10 @@ function MCPApprovalCardsContent({
                     }}
                   >
                     {busy
-                      ? "Allowing…"
+                      ? t("Allowing…")
                       : approvals.length > 1
-                        ? `Allow ${index + 1}`
-                        : "Allow"}
+                        ? t("Allow {value0}", { value0: index + 1 })
+                        : t("Allow")}
                   </Button>
                   <Button
                     size="sm"
@@ -135,7 +140,7 @@ function MCPApprovalCardsContent({
                       })
                     }
                   >
-                    Deny
+                    {t("Deny")}
                   </Button>
                 </div>
               )

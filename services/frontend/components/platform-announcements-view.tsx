@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CalendarClock, LoaderCircle, Megaphone, Trash2 } from "lucide-react"
 
@@ -110,6 +111,8 @@ type Props = {
 }
 
 export function PlatformAnnouncementsView({ createRequest }: Props) {
+  const { t, locale } = useTranslations()
+
   const [banners, setBanners] = useState<PlatformBanner[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -248,19 +251,20 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
     <div className="flex flex-col gap-4">
       {error && (
         <Alert aria-live="polite" role="alert" variant="destructive">
-          <AlertTitle>Announcement request failed</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertTitle>{t("Announcement request failed")}</AlertTitle>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Megaphone className="size-4" /> Global announcements
+            <Megaphone className="size-4" /> {t("Global announcements")}
           </CardTitle>
           <CardDescription>
-            Scheduled messages appear above login, workspace, administration,
-            and public pages. Higher priority messages appear first.
+            {t(
+              "Scheduled messages appear above login, workspace, administration, and public pages. Higher priority messages appear first."
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -269,16 +273,16 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               aria-live="polite"
               className="flex items-center justify-center py-10 text-sm text-muted-foreground"
             >
-              <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading
-              announcements…
+              <LoaderCircle className="mr-2 size-4 animate-spin" />{" "}
+              {t("Loading announcements…")}
             </div>
           ) : sortedBanners.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No announcements configured.
+              {t("No announcements configured.")}
             </p>
           ) : (
             sortedBanners.map((banner) => {
-              const state = bannerState(banner)
+              const state = t(bannerState(banner))
               return (
                 <div
                   className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between"
@@ -289,10 +293,10 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                       <Badge variant={badgeVariant(state)}>{state}</Badge>
                       <Badge variant="outline">{banner.severity}</Badge>
                       <Badge variant="outline">
-                        Priority {banner.priority}
+                        {t("Priority")} {banner.priority}
                       </Badge>
                       {banner.dismissible && (
-                        <Badge variant="secondary">Dismissible</Badge>
+                        <Badge variant="secondary">{t("Dismissible")}</Badge>
                       )}
                     </div>
                     <p className="mt-2 text-sm whitespace-pre-wrap">
@@ -300,10 +304,10 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                     </p>
                     <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                       <CalendarClock className="size-3.5" />
-                      {new Date(banner.startsAt).toLocaleString()} —{" "}
+                      {new Date(banner.startsAt).toLocaleString(locale)} —{" "}
                       {banner.endsAt
-                        ? new Date(banner.endsAt).toLocaleString()
-                        : "No end"}
+                        ? new Date(banner.endsAt).toLocaleString(locale)
+                        : t("No end")}
                       {banner.linkUrl && (
                         <a
                           className="underline underline-offset-2"
@@ -311,7 +315,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                           rel="noreferrer"
                           target="_blank"
                         >
-                          Link
+                          {t("Link")}
                         </a>
                       )}
                     </p>
@@ -322,10 +326,12 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                       size="sm"
                       variant="outline"
                     >
-                      Edit
+                      {t("Edit")}
                     </Button>
                     <Button
-                      aria-label={`Delete announcement: ${banner.message.slice(0, 60)}`}
+                      aria-label={t("Delete announcement: {value0}", {
+                        value0: banner.message.slice(0, 60),
+                      })}
                       onClick={() => setRemoveTarget(banner)}
                       size="icon-sm"
                       variant="ghost"
@@ -349,17 +355,18 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {editingId ? "Edit announcement" : "Add announcement"}
+              {editingId ? t("Edit announcement") : t("Add announcement")}
             </DialogTitle>
             <DialogDescription>
-              Choose when the message is active and how it should appear to
-              users.
+              {t(
+                "Choose when the message is active and how it should appear to users."
+              )}
             </DialogDescription>
           </DialogHeader>
           {error && (
             <Alert aria-live="polite" role="alert" variant="destructive">
-              <AlertTitle>Could not save announcement</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <AlertTitle>{t("Could not save announcement")}</AlertTitle>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
           <form
@@ -370,7 +377,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               className="grid gap-1.5 text-xs font-medium sm:col-span-2"
               htmlFor="announcement-message"
             >
-              Message
+              {t("Message")}
               <Textarea
                 className="min-h-24"
                 disabled={saving}
@@ -381,14 +388,14 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                 onChange={(event) =>
                   setForm({ ...form, message: event.target.value })
                 }
-                placeholder="Scheduled maintenance begins at 22:00 UTC."
+                placeholder={t("Scheduled maintenance begins at 22:00 UTC.")}
               />
             </label>
             <label
               className="grid gap-1.5 text-xs font-medium"
               htmlFor="announcement-severity"
             >
-              Severity
+              {t("Severity")}
               <Select
                 value={form.severity}
                 onValueChange={(value) =>
@@ -403,10 +410,10 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="info">Info</SelectItem>
-                  <SelectItem value="success">Success</SelectItem>
-                  <SelectItem value="warning">Warning</SelectItem>
-                  <SelectItem value="danger">Danger</SelectItem>
+                  <SelectItem value="info">{t("Info")}</SelectItem>
+                  <SelectItem value="success">{t("Success")}</SelectItem>
+                  <SelectItem value="warning">{t("Warning")}</SelectItem>
+                  <SelectItem value="danger">{t("Danger")}</SelectItem>
                 </SelectContent>
               </Select>
             </label>
@@ -414,7 +421,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               className="grid gap-1.5 text-xs font-medium"
               htmlFor="announcement-priority"
             >
-              Priority
+              {t("Priority")}
               <Input
                 disabled={saving}
                 id="announcement-priority"
@@ -431,7 +438,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               className="grid gap-1.5 text-xs font-medium sm:col-span-2"
               htmlFor="announcement-link"
             >
-              Optional link
+              {t("Optional link")}
               <Input
                 disabled={saving}
                 id="announcement-link"
@@ -447,7 +454,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               className="grid gap-1.5 text-xs font-medium"
               htmlFor="announcement-starts-at"
             >
-              Starts at
+              {t("Starts at")}
               <Input
                 disabled={saving}
                 id="announcement-starts-at"
@@ -463,7 +470,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               className="grid gap-1.5 text-xs font-medium"
               htmlFor="announcement-ends-at"
             >
-              Ends at (optional)
+              {t("Ends at (optional)")}
               <Input
                 disabled={saving}
                 id="announcement-ends-at"
@@ -476,13 +483,17 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
             </label>
             <div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
               <div>
-                <p className="text-xs font-medium">Announcement enabled</p>
+                <p className="text-xs font-medium">
+                  {t("Announcement enabled")}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  Only enabled announcements inside the time window are public.
+                  {t(
+                    "Only enabled announcements inside the time window are public."
+                  )}
                 </p>
               </div>
               <Switch
-                aria-label="Announcement enabled"
+                aria-label={t("Announcement enabled")}
                 checked={form.enabled}
                 disabled={saving}
                 onCheckedChange={(enabled) => setForm({ ...form, enabled })}
@@ -490,13 +501,15 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
             </div>
             <div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
               <div>
-                <p className="text-xs font-medium">Allow dismissal</p>
+                <p className="text-xs font-medium">{t("Allow dismissal")}</p>
                 <p className="text-xs text-muted-foreground">
-                  Users can hide this announcement in their current browser.
+                  {t(
+                    "Users can hide this announcement in their current browser."
+                  )}
                 </p>
               </div>
               <Switch
-                aria-label="Allow announcement dismissal"
+                aria-label={t("Allow announcement dismissal")}
                 checked={form.dismissible}
                 disabled={saving}
                 onCheckedChange={(dismissible) =>
@@ -510,11 +523,11 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                 type="button"
                 variant="outline"
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button disabled={saving} type="submit">
                 {saving && <LoaderCircle className="animate-spin" />}{" "}
-                {saving ? "Saving…" : "Save announcement"}
+                {saving ? t("Saving…") : t("Save announcement")}
               </Button>
             </DialogFooter>
           </form>
@@ -522,9 +535,11 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
       </Dialog>
       <ConfirmActionDialog
         open={Boolean(removeTarget)}
-        title="Delete this announcement?"
-        description="It will disappear from every JustAI surface immediately. This cannot be undone."
-        confirmLabel="Delete announcement"
+        title={t("Delete this announcement?")}
+        description={t(
+          "It will disappear from every JustAI surface immediately. This cannot be undone."
+        )}
+        confirmLabel={t("Delete announcement")}
         pending={removing}
         onOpenChange={(open) => !open && setRemoveTarget(null)}
         onConfirm={() => {

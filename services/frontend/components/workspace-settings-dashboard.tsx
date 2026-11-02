@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useMemo } from "react"
 import {
   Activity,
@@ -50,11 +51,6 @@ type WorkspaceSettingsDashboardProps = {
   onLeave: () => void
 }
 
-const dayLabel = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-})
-
 function workspaceInitial(name: string) {
   return name.trim().charAt(0).toUpperCase() || "W"
 }
@@ -64,6 +60,12 @@ function ActivityHeatmap({
 }: {
   analytics: AdminAnalyticsResponse | null
 }) {
+  const { t, locale } = useTranslations()
+  const dayLabel = new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+  })
+
   const days = useMemo(() => {
     const counts = new Map(
       (analytics?.timeSeries ?? []).map((day) => [day.date, day.requests])
@@ -86,8 +88,10 @@ function ActivityHeatmap({
   return (
     <Card className="h-full" size="sm">
       <CardHeader>
-        <CardTitle>Activity rhythm</CardTitle>
-        <CardDescription>Workspace runs over the last 90 days.</CardDescription>
+        <CardTitle>{t("Activity rhythm")}</CardTitle>
+        <CardDescription>
+          {t("Workspace runs over the last 90 days.")}
+        </CardDescription>
         <CardAction>
           <Activity
             className="size-4 text-muted-foreground"
@@ -112,7 +116,10 @@ function ActivityHeatmap({
                         : 1
               return (
                 <span
-                  aria-label={`${day.count} runs on ${dayLabel.format(day.date)}`}
+                  aria-label={t("{value0} runs on {value1}", {
+                    value0: day.count,
+                    value1: dayLabel.format(day.date),
+                  })}
                   className={cn(
                     "aspect-square w-full rounded-[4px] bg-muted",
                     level === 1 && "bg-primary/25",
@@ -122,14 +129,17 @@ function ActivityHeatmap({
                   )}
                   key={day.key}
                   role="img"
-                  title={`${day.count} runs on ${dayLabel.format(day.date)}`}
+                  title={t("{value0} runs on {value1}", {
+                    value0: day.count,
+                    value1: dayLabel.format(day.date),
+                  })}
                 />
               )
             })}
           </div>
         </div>
         <div className="mt-4 flex items-center justify-end gap-1.5 text-[10px] text-muted-foreground">
-          <span>Less</span>
+          <span>{t("Less")}</span>
           {[
             "bg-muted",
             "bg-primary/25",
@@ -139,7 +149,7 @@ function ActivityHeatmap({
           ].map((color) => (
             <span className={cn("size-2.5 rounded-[3px]", color)} key={color} />
           ))}
-          <span>More</span>
+          <span>{t("More")}</span>
         </div>
       </CardContent>
     </Card>
@@ -160,6 +170,8 @@ export function WorkspaceSettingsDashboard({
   onDelete,
   onLeave,
 }: WorkspaceSettingsDashboardProps) {
+  const { t, locale } = useTranslations()
+
   const enabledEndpoints = endpoints.filter(
     (endpoint) => endpoint.enabled
   ).length
@@ -171,21 +183,21 @@ export function WorkspaceSettingsDashboard({
 
   const stats = [
     {
-      label: "Members",
+      label: t("Members"),
       value: membersLoading ? null : memberCount,
       icon: Users,
     },
     {
-      label: "AI runs · 90d",
+      label: t("AI runs · 90d"),
       value: analyticsLoading ? null : requests,
       icon: Bot,
     },
     {
-      label: "Success rate",
+      label: t("Success rate"),
       value: analyticsLoading ? null : `${successRate}%`,
       icon: ShieldCheck,
     },
-    { label: "Connected tools", value: enabledServers, icon: Plug },
+    { label: t("Connected tools"), value: enabledServers, icon: Plug },
   ]
 
   return (
@@ -200,7 +212,7 @@ export function WorkspaceSettingsDashboard({
               <h2 className="font-heading truncate text-xl font-semibold">
                 {organization.name}
               </h2>
-              <Badge variant="secondary">Current workspace</Badge>
+              <Badge variant="secondary">{t("Current workspace")}</Badge>
               <Badge variant="outline">{organization.role || "member"}</Badge>
             </div>
             <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
@@ -209,7 +221,7 @@ export function WorkspaceSettingsDashboard({
           </div>
           {canManage && (
             <Button onClick={onRename} size="sm" variant="outline">
-              <Pencil data-icon="inline-start" /> Rename
+              <Pencil data-icon="inline-start" /> {t("Rename")}
             </Button>
           )}
         </CardContent>
@@ -232,7 +244,9 @@ export function WorkspaceSettingsDashboard({
                 <Skeleton className="h-7 w-16" />
               ) : (
                 <p className="font-heading text-2xl font-semibold tracking-tight">
-                  {typeof value === "number" ? compactNumber(value) : value}
+                  {typeof value === "number"
+                    ? compactNumber(value, locale)
+                    : value}
                 </p>
               )}
             </CardContent>
@@ -244,8 +258,10 @@ export function WorkspaceSettingsDashboard({
         <ActivityHeatmap analytics={analytics} />
         <Card className="h-full" size="sm">
           <CardHeader>
-            <CardTitle>Workspace stack</CardTitle>
-            <CardDescription>Connected capacity at a glance.</CardDescription>
+            <CardTitle>{t("Workspace stack")}</CardTitle>
+            <CardDescription>
+              {t("Connected capacity at a glance.")}
+            </CardDescription>
             <CardAction>
               <Cpu
                 className="size-4 text-muted-foreground"
@@ -256,17 +272,17 @@ export function WorkspaceSettingsDashboard({
           <CardContent className="flex flex-col gap-5">
             {[
               {
-                label: "Endpoints enabled",
+                label: t("Endpoints enabled"),
                 value: enabledEndpoints,
                 total: endpoints.length,
               },
               {
-                label: "MCP servers enabled",
+                label: t("MCP servers enabled"),
                 value: enabledServers,
                 total: mcpServers.length,
               },
               {
-                label: "Successful runs",
+                label: t("Successful runs"),
                 value: successRate,
                 total: 100,
                 suffix: "%",
@@ -296,28 +312,29 @@ export function WorkspaceSettingsDashboard({
 
       <Card size="sm">
         <CardHeader>
-          <CardTitle>Workspace lifecycle</CardTitle>
+          <CardTitle>{t("Workspace lifecycle")}</CardTitle>
           <CardDescription>
-            Archive, leave, or permanently remove this workspace.
+            {t("Archive, leave, or permanently remove this workspace.")}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center justify-between gap-3">
           <p className="max-w-2xl text-xs text-muted-foreground">
-            Archiving hides the workspace without deleting its content.
-            Permanent deletion cannot be undone.
+            {t(
+              "Archiving hides the workspace without deleting its content. Permanent deletion cannot be undone."
+            )}
           </p>
           <div className="flex flex-wrap gap-2">
             {organization.role !== "owner" ? (
               <Button onClick={onLeave} variant="outline">
-                Leave workspace
+                {t("Leave workspace")}
               </Button>
             ) : (
               <>
                 <Button onClick={onArchive} variant="outline">
-                  Archive workspace
+                  {t("Archive workspace")}
                 </Button>
                 <Button onClick={onDelete} variant="destructive">
-                  Delete workspace
+                  {t("Delete workspace")}
                 </Button>
               </>
             )}

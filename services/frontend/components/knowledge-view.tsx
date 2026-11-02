@@ -1,6 +1,11 @@
 "use client"
 
 import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
+
+import {
   forwardRef,
   useEffect,
   useImperativeHandle,
@@ -74,7 +79,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 
-const sourceStatusStyles: Record<
+const sourceStatusStylesMessages: Record<
   KnowledgeSource["status"],
   { label: string; text: string; dot: string }
 > = {
@@ -140,6 +145,10 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
     { sources, onChange, organizationRole, userId, platformAdmin = false },
     ref
   ) {
+    const sourceStatusStyles = useTranslatedConfig(sourceStatusStylesMessages)
+
+    const { t } = useTranslations()
+
     const searchParams = useSearchParams()
     const targetSourceId = searchParams.get("source")
     const fileInputRef = useRef<HTMLInputElement>(null)
@@ -419,21 +428,21 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
         {notice && (
           <Alert>
             <Search aria-hidden="true" />
-            <AlertTitle>Knowledge pipeline</AlertTitle>
-            <AlertDescription>{notice}</AlertDescription>
+            <AlertTitle>{t("Knowledge pipeline")}</AlertTitle>
+            <AlertDescription>{t(notice)}</AlertDescription>
           </Alert>
         )}
 
         <div className="grid gap-3 md:grid-cols-3">
           <Metric
-            label="Indexed sources"
+            label={t("Indexed sources")}
             value={String(
               sources.filter((source) => source.status === "ready").length
             )}
             detail="ready for retrieval"
           />
           <Metric
-            label="In progress"
+            label={t("In progress")}
             value={String(
               sources.filter(
                 (source) =>
@@ -443,7 +452,7 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
             detail="async jobs"
           />
           <Metric
-            label="Scope"
+            label={t("Scope")}
             value="Private"
             detail="org + personal access"
           />
@@ -455,10 +464,11 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
               <EmptyMedia variant="icon">
                 <FileText aria-hidden="true" />
               </EmptyMedia>
-              <EmptyTitle>Your knowledge base is empty</EmptyTitle>
+              <EmptyTitle>{t("Your knowledge base is empty")}</EmptyTitle>
               <EmptyDescription>
-                Start with a project brief, a runbook, or a public documentation
-                URL.
+                {t(
+                  "Start with a project brief, a runbook, or a public documentation URL."
+                )}
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
@@ -467,10 +477,10 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                   variant="outline"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  Upload a file
+                  {t("Upload a file")}
                 </Button>
                 <Button variant="secondary" onClick={() => setDialogOpen(true)}>
-                  Index a URL
+                  {t("Index a URL")}
                 </Button>
               </div>
             </EmptyContent>
@@ -480,10 +490,11 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
             <CardHeader className="gap-4 border-b bg-muted/10">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                 <div className="min-w-0">
-                  <CardTitle className="text-base">Sources</CardTitle>
+                  <CardTitle className="text-base">{t("Sources")}</CardTitle>
                   <CardDescription className="mt-1">
-                    Search and manage the files available for retrieval. Ready
-                    sources are indexed automatically.
+                    {t(
+                      "Search and manage the files available for retrieval. Ready sources are indexed automatically."
+                    )}
                   </CardDescription>
                 </div>
                 <p className="shrink-0 text-xs text-muted-foreground">
@@ -503,8 +514,8 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                       setSearchQuery(event.target.value)
                       setPage(1)
                     }}
-                    placeholder="Search files or paths"
-                    aria-label="Search knowledge sources"
+                    placeholder={t("Search files or paths")}
+                    aria-label={t("Search knowledge sources")}
                     className="h-8 pl-8"
                   />
                 </div>
@@ -518,19 +529,21 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                   <SelectTrigger className="h-8 w-full sm:w-40">
                     <SelectValue>
                       {statusFilter === "all"
-                        ? "All statuses"
+                        ? t("All statuses")
                         : statusFilter === "in-progress"
-                          ? "In progress"
+                          ? t("In progress")
                           : statusFilter === "ready"
-                            ? "Ready"
-                            : "Failed"}
+                            ? t("Ready")
+                            : t("Failed")}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All statuses</SelectItem>
-                    <SelectItem value="ready">Ready</SelectItem>
-                    <SelectItem value="in-progress">In progress</SelectItem>
-                    <SelectItem value="failed">Failed</SelectItem>
+                    <SelectItem value="all">{t("All statuses")}</SelectItem>
+                    <SelectItem value="ready">{t("Ready")}</SelectItem>
+                    <SelectItem value="in-progress">
+                      {t("In progress")}
+                    </SelectItem>
+                    <SelectItem value="failed">{t("Failed")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -543,9 +556,9 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                     className="size-5 text-muted-foreground"
                     aria-hidden="true"
                   />
-                  <p className="text-sm font-medium">No sources found</p>
+                  <p className="text-sm font-medium">{t("No sources found")}</p>
                   <p className="max-w-sm text-xs text-muted-foreground">
-                    Try a different file name, path, or status filter.
+                    {t("Try a different file name, path, or status filter.")}
                   </p>
                   <Button
                     variant="ghost"
@@ -556,15 +569,15 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                       setPage(1)
                     }}
                   >
-                    Clear filters
+                    {t("Clear filters")}
                   </Button>
                 </div>
               ) : (
                 <>
                   <div className="hidden grid-cols-[minmax(0,1fr)_8rem_5rem] gap-3 border-b bg-muted/20 px-4 py-2 text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase sm:grid sm:px-5">
-                    <span>Source</span>
-                    <span>Status</span>
-                    <span className="text-right">Actions</span>
+                    <span>{t("Source")}</span>
+                    <span>{t("Status")}</span>
+                    <span className="text-right">{t("Actions")}</span>
                   </div>
                   <div className="divide-y">
                     {visibleSources.map((source) => {
@@ -613,7 +626,7 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                                 {sourceParts.group}
                                 <span className="px-1.5 text-border">·</span>
                                 {source.sourceType === "url"
-                                  ? "URL"
+                                  ? t("URL")
                                   : source.mimeType || "Text source"}
                               </p>
                               {isPending && (
@@ -664,7 +677,9 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                                   size="icon-xs"
                                   disabled={busyId === source.id}
                                   onClick={() => void reindex(source)}
-                                  aria-label={`Reindex ${source.title}`}
+                                  aria-label={t("Reindex {value0}", {
+                                    value0: source.title,
+                                  })}
                                 >
                                   <RefreshCw aria-hidden="true" />
                                 </Button>
@@ -673,7 +688,9 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                                   size="icon-xs"
                                   disabled={busyId === source.id}
                                   onClick={() => setRemoveTarget(source)}
-                                  aria-label={`Remove ${source.title}`}
+                                  aria-label={t("Remove {value0}", {
+                                    value0: source.title,
+                                  })}
                                 >
                                   <Trash2 aria-hidden="true" />
                                 </Button>
@@ -687,8 +704,8 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
 
                   <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                     <p className="text-xs text-muted-foreground">
-                      Showing {rangeStart}–{rangeEnd} of{" "}
-                      {filteredSources.length} sources
+                      {t("Showing")} {rangeStart}–{rangeEnd} {t("of")}{" "}
+                      {filteredSources.length} {t("sources")}
                     </p>
                     {pageCount > 1 && (
                       <div className="flex items-center justify-end gap-1">
@@ -697,19 +714,19 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                           size="icon-sm"
                           disabled={currentPage === 1}
                           onClick={() => setPage(currentPage - 1)}
-                          aria-label="Previous page"
+                          aria-label={t("Previous page")}
                         >
                           <ChevronLeft aria-hidden="true" />
                         </Button>
                         <span className="min-w-16 text-center text-xs text-muted-foreground">
-                          Page {currentPage} of {pageCount}
+                          {t("Page")} {currentPage} {t("of")} {pageCount}
                         </span>
                         <Button
                           variant="ghost"
                           size="icon-sm"
                           disabled={currentPage === pageCount}
                           onClick={() => setPage(currentPage + 1)}
-                          aria-label="Next page"
+                          aria-label={t("Next page")}
                         >
                           <ChevronRight aria-hidden="true" />
                         </Button>
@@ -725,27 +742,28 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Index a URL</DialogTitle>
+              <DialogTitle>{t("Index a URL")}</DialogTitle>
               <DialogDescription>
-                JustAI fetches public HTTP(S) content and blocks private or
-                loopback targets by default.
+                {t(
+                  "JustAI fetches public HTTP(S) content and blocks private or loopback targets by default."
+                )}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={addURL}>
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="knowledge-title">
-                    Source title
+                    {t("Source title")}
                   </FieldLabel>
                   <Input
                     id="knowledge-title"
                     value={title}
                     onChange={(event) => setTitle(event.target.value)}
-                    placeholder="Product docs"
+                    placeholder={t("Product docs")}
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="knowledge-url">URL</FieldLabel>
+                  <FieldLabel htmlFor="knowledge-url">{t("URL")}</FieldLabel>
                   <Input
                     id="knowledge-url"
                     type="url"
@@ -755,11 +773,11 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                     required
                   />
                   <FieldDescription>
-                    Reindex manually when the source changes.
+                    {t("Reindex manually when the source changes.")}
                   </FieldDescription>
                 </Field>
                 <Field>
-                  <FieldLabel>Visibility</FieldLabel>
+                  <FieldLabel>{t("Visibility")}</FieldLabel>
                   <Select
                     value={scopeType}
                     onValueChange={(value) =>
@@ -775,10 +793,10 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                     <SelectContent>
                       {canManageOrganization && (
                         <SelectItem value="organization">
-                          Organization
+                          {t("Organization")}
                         </SelectItem>
                       )}
-                      <SelectItem value="user">Only me</SelectItem>
+                      <SelectItem value="user">{t("Only me")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
@@ -789,7 +807,7 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                   variant="outline"
                   onClick={() => setDialogOpen(false)}
                 >
-                  Cancel
+                  {t("Cancel")}
                 </Button>
                 <Button type="submit" disabled={uploading}>
                   {uploading ? (
@@ -799,7 +817,7 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                         className="animate-spin"
                         aria-hidden="true"
                       />
-                      Indexing…
+                      {t("Indexing…")}
                     </>
                   ) : (
                     "Start indexing"
@@ -818,16 +836,20 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Remove knowledge source?</AlertDialogTitle>
+              <AlertDialogTitle>
+                {t("Remove knowledge source?")}
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                Remove “{removeTarget?.title}” from Knowledge? Existing messages
-                keep their stored citations, but this source will no longer be
-                available for new retrievals.
+                {t("Remove “")}
+                {removeTarget?.title}
+                {t(
+                  "” from Knowledge? Existing messages keep their stored citations, but this source will no longer be available for new retrievals."
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel disabled={Boolean(busyId)}>
-                Cancel
+                {t("Cancel")}
               </AlertDialogCancel>
               <AlertDialogAction
                 disabled={!removeTarget || Boolean(busyId)}
@@ -838,7 +860,7 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                   if (target) void remove(target)
                 }}
               >
-                Remove source
+                {t("Remove source")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

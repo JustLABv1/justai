@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { LogOut, Mic, MicOff, Radio, Users, Wifi } from "lucide-react"
 import { useEffect, useMemo, useRef, type CSSProperties } from "react"
 
@@ -64,6 +65,8 @@ export function TranscriptionParticipantRoom({
   onToggleMicrophone: () => void | Promise<void>
   onLeaveRoom: () => void
 }) {
+  const { t } = useTranslations()
+
   const sourceById = useMemo(
     () => new Map(snapshot.sources.map((source) => [source.id, source])),
     [snapshot.sources]
@@ -95,7 +98,7 @@ export function TranscriptionParticipantRoom({
           speaker?.label ||
           source?.name ||
           "Unassigned speaker",
-        sourceName: source?.name || "Room audio",
+        sourceName: source?.name || t("Room audio"),
         initials: initials(
           speaker?.displayName || speaker?.label || source?.name || "?"
         ),
@@ -121,7 +124,7 @@ export function TranscriptionParticipantRoom({
           speaker?.label ||
           source?.name ||
           "Unassigned speaker",
-        sourceName: source?.name || "Room audio",
+        sourceName: source?.name || t("Room audio"),
         initials: initials(
           speaker?.displayName || speaker?.label || source?.name || "?"
         ),
@@ -138,6 +141,7 @@ export function TranscriptionParticipantRoom({
     snapshot,
     sourceById,
     speakerById,
+    t,
   ])
   const speakingSource = useMemo(() => {
     if (partialSourceId) return sourceById.get(partialSourceId) || null
@@ -188,9 +192,11 @@ export function TranscriptionParticipantRoom({
                   </Badge>
                 </div>
                 <CardDescription className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span>Live transcription room</span>
+                  <span>{t("Live transcription room")}</span>
                   <span aria-hidden="true">·</span>
-                  <span>{snapshot.sources.length} microphones connected</span>
+                  <span>
+                    {snapshot.sources.length} {t("microphones connected")}
+                  </span>
                 </CardDescription>
               </div>
             </div>
@@ -198,10 +204,10 @@ export function TranscriptionParticipantRoom({
               <Badge className="gap-1.5" variant="outline">
                 <Wifi aria-hidden="true" />
                 {connectionState === "connecting"
-                  ? "Reconnecting…"
+                  ? t("Reconnecting…")
                   : connectionState === "paused"
-                    ? "Microphone paused"
-                    : "Room feed live"}
+                    ? t("Microphone paused")
+                    : t("Room feed live")}
               </Badge>
               <Button
                 disabled={connectionState === "connecting"}
@@ -214,10 +220,12 @@ export function TranscriptionParticipantRoom({
                 ) : (
                   <Mic data-icon="inline-start" />
                 )}
-                {microphoneActive ? "Pause microphone" : "Start microphone"}
+                {microphoneActive
+                  ? t("Pause microphone")
+                  : t("Start microphone")}
               </Button>
               <Button onClick={onLeaveRoom} size="sm" variant="ghost">
-                <LogOut data-icon="inline-start" /> Leave room
+                <LogOut data-icon="inline-start" /> {t("Leave room")}
               </Button>
             </div>
           </CardHeader>
@@ -230,8 +238,8 @@ export function TranscriptionParticipantRoom({
 
         {error ? (
           <Alert variant="destructive">
-            <AlertTitle>Live transcription needs attention</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertTitle>{t("Live transcription needs attention")}</AlertTitle>
+            <AlertDescription>{t(error)}</AlertDescription>
           </Alert>
         ) : null}
 
@@ -240,13 +248,17 @@ export function TranscriptionParticipantRoom({
             <CardHeader className="border-b py-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <CardTitle className="text-sm">Live transcription</CardTitle>
+                  <CardTitle className="text-sm">
+                    {t("Live transcription")}
+                  </CardTitle>
                   <CardDescription className="mt-1">
-                    New messages stay grouped by speaker and include room time.
+                    {t(
+                      "New messages stay grouped by speaker and include room time."
+                    )}
                   </CardDescription>
                 </div>
                 <Badge variant="secondary">
-                  {snapshot.segments.length} segments ·{" "}
+                  {snapshot.segments.length} {t("segments ·")}{" "}
                   {transcript.filter((line) => !line.provisional).length}{" "}
                   messages
                 </Badge>
@@ -254,7 +266,7 @@ export function TranscriptionParticipantRoom({
             </CardHeader>
             <CardContent className="p-0">
               <div
-                aria-label="Live transcription messages"
+                aria-label={t("Live transcription messages")}
                 className="max-h-[min(66svh,720px)] min-h-72 overflow-y-auto overscroll-contain"
                 onScroll={(event) => {
                   const viewport = event.currentTarget
@@ -269,7 +281,7 @@ export function TranscriptionParticipantRoom({
               >
                 {transcript.length === 0 ? (
                   <div className="flex min-h-72 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-                    Waiting for the first spoken message…
+                    {t("Waiting for the first spoken message…")}
                   </div>
                 ) : (
                   <div className="divide-y divide-border/70">
@@ -308,7 +320,9 @@ export function TranscriptionParticipantRoom({
                               {line.sourceName}
                             </Badge>
                             {line.provisional ? (
-                              <Badge variant="secondary">Listening</Badge>
+                              <Badge variant="secondary">
+                                {t("Listening")}
+                              </Badge>
                             ) : null}
                           </div>
                           <p className="mt-1 text-sm leading-relaxed break-words">
@@ -327,10 +341,10 @@ export function TranscriptionParticipantRoom({
             <Card>
               <CardHeader className="gap-1 py-4">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Users aria-hidden="true" /> In this room
+                  <Users aria-hidden="true" /> {t("In this room")}
                 </CardTitle>
                 <CardDescription>
-                  Everyone connected to the live feed.
+                  {t("Everyone connected to the live feed.")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="max-h-[min(50svh,520px)] overflow-y-auto px-3 pb-3">
@@ -358,11 +372,11 @@ export function TranscriptionParticipantRoom({
                               {source.name}
                             </span>
                             {local ? (
-                              <Badge variant="secondary">You</Badge>
+                              <Badge variant="secondary">{t("You")}</Badge>
                             ) : null}
                           </div>
                           <span className="block truncate text-[10px] text-muted-foreground">
-                            {speaking ? "Speaking now" : source.status}
+                            {speaking ? t("Speaking now") : source.status}
                             {source.deviceLabel
                               ? ` · ${source.deviceLabel}`
                               : ""}
@@ -383,10 +397,13 @@ export function TranscriptionParticipantRoom({
 
             <Card>
               <CardHeader className="gap-1 py-4">
-                <CardTitle className="text-sm">Your microphone</CardTitle>
+                <CardTitle className="text-sm">
+                  {t("Your microphone")}
+                </CardTitle>
                 <CardDescription>
-                  Pausing capture keeps you in the room and preserves the live
-                  feed.
+                  {t(
+                    "Pausing capture keeps you in the room and preserves the live feed."
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3 px-4 pb-4">
@@ -395,7 +412,7 @@ export function TranscriptionParticipantRoom({
                     <span className="truncate font-medium">
                       {snapshot.sources.find(
                         (source) => source.id === currentSourceId
-                      )?.name || "Your microphone"}
+                      )?.name || t("Your microphone")}
                     </span>
                     <span className="shrink-0 text-muted-foreground">
                       {Math.round(level * 100)}%
@@ -410,8 +427,8 @@ export function TranscriptionParticipantRoom({
                 </div>
                 <p className="text-[11px] text-muted-foreground">
                   {microphoneActive
-                    ? "Your audio is being sent after host approval."
-                    : "Your audio is paused; you can still see the room."}
+                    ? t("Your audio is being sent after host approval.")
+                    : t("Your audio is paused; you can still see the room.")}
                 </p>
               </CardContent>
             </Card>

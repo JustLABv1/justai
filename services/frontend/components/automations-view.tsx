@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useMemo, useState } from "react"
 import {
   Bot,
@@ -107,6 +108,8 @@ export function AutomationsView({
   servers,
   onChange,
 }: Props) {
+  const { t } = useTranslations()
+
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<Form>(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -257,10 +260,11 @@ export function AutomationsView({
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageTitle>Give assistants recurring work.</PageTitle>
+          <PageTitle>{t("Give assistants recurring work.")}</PageTitle>
           <PageDescription>
-            Schedule a focused task, choose the assistant and restrict exactly
-            which integrations it may use.
+            {t(
+              "Schedule a focused task, choose the assistant and restrict exactly which integrations it may use."
+            )}
           </PageDescription>
         </PageHeading>
         <PageActions>
@@ -271,20 +275,21 @@ export function AutomationsView({
             }}
           >
             <Plus className="mr-2 size-4" />
-            New automation
+            {t("New automation")}
           </Button>
         </PageActions>
       </PageHeader>
       <Alert className="border-primary/20 bg-primary/[0.03]">
         <ShieldCheck className="size-4" />
         <AlertDescription>
-          Integration writes always require review. Only explicitly trusted
-          read-only connections can run without a confirmation.
+          {t(
+            "Integration writes always require review. Only explicitly trusted read-only connections can run without a confirmation."
+          )}
         </AlertDescription>
       </Alert>
       {error && !open && (
         <Alert aria-live="polite" role="alert" variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
       {automations.length === 0 ? (
@@ -293,17 +298,18 @@ export function AutomationsView({
             <div className="rounded-full bg-muted p-3">
               <CalendarClock className="size-5 text-muted-foreground" />
             </div>
-            <h2 className="mt-4 font-medium">Nothing scheduled yet</h2>
+            <h2 className="mt-4 font-medium">{t("Nothing scheduled yet")}</h2>
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-              Create a recurring research brief, issue triage or follow-up –
-              with a small, intentional MCP scope.
+              {t(
+                "Create a recurring research brief, issue triage or follow-up – with a small, intentional MCP scope."
+              )}
             </p>
             <Button
               className="mt-5"
               variant="outline"
               onClick={() => setOpen(true)}
             >
-              Create your first automation
+              {t("Create your first automation")}
             </Button>
           </CardContent>
         </Card>
@@ -331,7 +337,7 @@ export function AutomationsView({
                       checked={item.enabled}
                       disabled={Boolean(actionBusy)}
                       onCheckedChange={(checked) => void toggle(item, checked)}
-                      aria-label={`Enable ${item.name}`}
+                      aria-label={t("Enable {value0}", { value0: item.name })}
                     />
                   </div>
                 </CardHeader>
@@ -342,7 +348,7 @@ export function AutomationsView({
                   </div>
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Bot className="size-4" />
-                    {assistant?.name ?? "Default assistant"}
+                    {assistant?.name ?? t("Default assistant")}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {selectedServers.length ? (
@@ -353,7 +359,7 @@ export function AutomationsView({
                       ))
                     ) : (
                       <span className="text-xs text-muted-foreground">
-                        No integrations selected
+                        {t("No integrations selected")}
                       </span>
                     )}
                   </div>
@@ -366,9 +372,9 @@ export function AutomationsView({
                         >
                           <span className="font-medium text-foreground">
                             {entry.status === "needs_review"
-                              ? "Review needed"
+                              ? t("Review needed")
                               : entry.status === "queued"
-                                ? "Queued"
+                                ? t("Queued")
                                 : entry.status}
                           </span>{" "}
                           · {entry.summary}
@@ -386,14 +392,14 @@ export function AutomationsView({
                     type="button"
                     variant="ghost"
                   >
-                    Run history
+                    {t("Run history")}
                   </Button>
                   <div className="flex gap-1">
                     <Button
                       size="sm"
                       variant="ghost"
                       onClick={() => setRemoveTarget(item)}
-                      aria-label={`Delete ${item.name}`}
+                      aria-label={t("Delete {value0}", { value0: item.name })}
                     >
                       <Trash2 className="size-4" />
                     </Button>
@@ -403,7 +409,7 @@ export function AutomationsView({
                       onClick={() => void run(item)}
                     >
                       <Play className="mr-1.5 size-3.5" />
-                      Run now
+                      {t("Run now")}
                     </Button>
                   </div>
                 </CardFooter>
@@ -421,33 +427,36 @@ export function AutomationsView({
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
           <form onSubmit={(event) => void save(event)}>
             <DialogHeader>
-              <DialogTitle>New automation</DialogTitle>
+              <DialogTitle>{t("New automation")}</DialogTitle>
               <DialogDescription>
-                Keep the task narrow. Scheduled work only sees the integrations
-                you select here.
+                {t(
+                  "Keep the task narrow. Scheduled work only sees the integrations you select here."
+                )}
               </DialogDescription>
             </DialogHeader>
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="automation-name">Name</FieldLabel>
+                <FieldLabel htmlFor="automation-name">{t("Name")}</FieldLabel>
                 <Input
                   id="automation-name"
                   value={form.name}
                   onChange={(event) =>
                     setForm({ ...form, name: event.target.value })
                   }
-                  placeholder="Weekly issue triage"
+                  placeholder={t("Weekly issue triage")}
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="automation-task">Task</FieldLabel>
+                <FieldLabel htmlFor="automation-task">{t("Task")}</FieldLabel>
                 <Textarea
                   id="automation-task"
                   value={form.prompt}
                   onChange={(event) =>
                     setForm({ ...form, prompt: event.target.value })
                   }
-                  placeholder="Review new issues, identify duplicates and prepare a concise summary."
+                  placeholder={t(
+                    "Review new issues, identify duplicates and prepare a concise summary."
+                  )}
                   rows={4}
                 />
               </Field>
@@ -458,7 +467,7 @@ export function AutomationsView({
                 />
                 <Field>
                   <FieldLabel htmlFor="automation-assistant">
-                    Assistant
+                    {t("Assistant")}
                   </FieldLabel>
                   <Select
                     value={form.assistantId || "default"}
@@ -470,10 +479,12 @@ export function AutomationsView({
                     }
                   >
                     <SelectTrigger id="automation-assistant">
-                      <SelectValue placeholder="Default assistant" />
+                      <SelectValue placeholder={t("Default assistant")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">Default assistant</SelectItem>
+                      <SelectItem value="default">
+                        {t("Default assistant")}
+                      </SelectItem>
                       {assistants.map((assistant) => (
                         <SelectItem key={assistant.id} value={assistant.id}>
                           {assistant.name}
@@ -484,7 +495,7 @@ export function AutomationsView({
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="automation-timezone">
-                    Timezone
+                    {t("Timezone")}
                   </FieldLabel>
                   <Select
                     value={timezoneSelectValue}
@@ -501,7 +512,7 @@ export function AutomationsView({
                     <SelectTrigger className="w-full" id="automation-timezone">
                       <SelectValue>
                         {timezoneSelectValue === "__custom__"
-                          ? "Custom timezone"
+                          ? t("Custom timezone")
                           : form.timezone}
                       </SelectValue>
                     </SelectTrigger>
@@ -509,11 +520,11 @@ export function AutomationsView({
                       {[...new Set(timezoneSuggestions)].map((timezone) => (
                         <SelectItem key={timezone} value={timezone}>
                           {timezone}
-                          {timezone === detectedTimezone ? " (local)" : ""}
+                          {timezone === detectedTimezone ? t(" (local)") : ""}
                         </SelectItem>
                       ))}
                       <SelectItem value="__custom__">
-                        Custom timezone…
+                        {t("Custom timezone…")}
                       </SelectItem>
                     </SelectContent>
                   </Select>
@@ -524,20 +535,21 @@ export function AutomationsView({
                       onChange={(event) =>
                         setForm({ ...form, timezone: event.target.value })
                       }
-                      placeholder="e.g. Australia/Sydney"
-                      aria-label="Custom timezone"
+                      placeholder={t("e.g. Australia/Sydney")}
+                      aria-label={t("Custom timezone")}
                     />
                   )}
                   <FieldDescription>
-                    All scheduled runs use this timezone.
+                    {t("All scheduled runs use this timezone.")}
                   </FieldDescription>
                 </Field>
               </div>
               <Field>
-                <FieldLabel>Connected integrations</FieldLabel>
+                <FieldLabel>{t("Connected integrations")}</FieldLabel>
                 <FieldDescription>
-                  Only connected servers are available. Select the minimum
-                  access this task needs.
+                  {t(
+                    "Only connected servers are available. Select the minimum access this task needs."
+                  )}
                 </FieldDescription>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   {availableServers.length ? (
@@ -555,21 +567,21 @@ export function AutomationsView({
                         <span>{server.name}</span>
                         <span className="ml-auto text-xs text-muted-foreground">
                           {server.trustedReadOnly
-                            ? "Read-only"
-                            : "Review required"}
+                            ? t("Read-only")
+                            : t("Review required")}
                         </span>
                       </label>
                     ))
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      Connect GitHub, GitLab or another MCP server first.
+                      {t("Connect GitHub, GitLab or another MCP server first.")}
                     </p>
                   )}
                 </div>
               </Field>
               <Field>
                 <FieldLabel htmlFor="automation-approval">
-                  Execution safeguard
+                  {t("Execution safeguard")}
                 </FieldLabel>
                 <Select
                   value={form.approvalMode}
@@ -583,23 +595,23 @@ export function AutomationsView({
                   <SelectTrigger id="automation-approval">
                     <SelectValue>
                       {form.approvalMode === "review"
-                        ? "Review before integration actions"
-                        : "Auto-run read-only integrations"}
+                        ? t("Review before integration actions")
+                        : t("Auto-run read-only integrations")}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="review">
-                      Review before integration actions
+                      {t("Review before integration actions")}
                     </SelectItem>
                     <SelectItem value="read_only_auto">
-                      Auto-run read-only integrations
+                      {t("Auto-run read-only integrations")}
                     </SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
               {error && (
                 <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertDescription>{t(error)}</AlertDescription>
                 </Alert>
               )}
             </FieldGroup>
@@ -609,13 +621,13 @@ export function AutomationsView({
                 type="button"
                 onClick={() => setOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button
                 disabled={saving || !form.name.trim() || !form.prompt.trim()}
                 type="submit"
               >
-                {saving ? "Saving…" : "Create automation"}
+                {saving ? t("Saving…") : t("Create automation")}
               </Button>
             </DialogFooter>
           </form>
@@ -623,9 +635,13 @@ export function AutomationsView({
       </Dialog>
       <ConfirmActionDialog
         open={removeTarget !== null}
-        title={`Delete ${removeTarget?.name ?? "this automation"}?`}
-        description="Scheduled runs and their history will remain visible, but this automation will no longer run. This action cannot be undone."
-        confirmLabel="Delete automation"
+        title={t("Delete {value0}?", {
+          value0: removeTarget?.name ?? "this automation",
+        })}
+        description={t(
+          "Scheduled runs and their history will remain visible, but this automation will no longer run. This action cannot be undone."
+        )}
+        confirmLabel={t("Delete automation")}
         pending={removing}
         onOpenChange={(nextOpen) => {
           if (!nextOpen && !removing) setRemoveTarget(null)
@@ -644,6 +660,8 @@ type ScheduleBuilderProps = {
 }
 
 function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
+  const { t } = useTranslations()
+
   const [unit, setUnit] = useState<"days" | "weeks" | "months">("weeks")
   const [interval, setInterval] = useState("1")
   const [weekday, setWeekday] = useState("Monday")
@@ -661,15 +679,17 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
   return (
     <Field className="rounded-xl bg-muted/50 p-3 sm:col-span-2">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <FieldLabel htmlFor="automation-schedule-interval">Schedule</FieldLabel>
+        <FieldLabel htmlFor="automation-schedule-interval">
+          {t("Schedule")}
+        </FieldLabel>
         <span className="text-xs text-muted-foreground">{schedule}</span>
       </div>
       <div className="grid grid-cols-[auto_80px_minmax(0,1fr)] gap-2">
         <span className="flex h-7 items-center text-xs font-medium text-muted-foreground">
-          Repeat every
+          {t("Repeat every")}
         </span>
         <Input
-          aria-label="Repeat interval"
+          aria-label={t("Repeat interval")}
           id="automation-schedule-interval"
           min="1"
           max="365"
@@ -686,16 +706,16 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
           }
         >
           <SelectTrigger
-            aria-label="Repeat unit"
+            aria-label={t("Repeat unit")}
             className="w-full"
             id="automation-schedule-unit"
           >
             <SelectValue>{unit}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="days">days</SelectItem>
-            <SelectItem value="weeks">weeks</SelectItem>
-            <SelectItem value="months">months</SelectItem>
+            <SelectItem value="days">{t("days")}</SelectItem>
+            <SelectItem value="weeks">{t("weeks")}</SelectItem>
+            <SelectItem value="months">{t("months")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -706,7 +726,7 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
             onValueChange={(next) => setWeekday(next ?? "Monday")}
           >
             <SelectTrigger
-              aria-label="Weekday"
+              aria-label={t("Weekday")}
               className="w-full"
               id="automation-schedule-weekday"
             >
@@ -714,13 +734,13 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
             </SelectTrigger>
             <SelectContent>
               {[
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday",
+                t("Monday"),
+                t("Tuesday"),
+                t("Wednesday"),
+                t("Thursday"),
+                t("Friday"),
+                t("Saturday"),
+                t("Sunday"),
               ].map((day) => (
                 <SelectItem key={day} value={day}>
                   {day}
@@ -730,11 +750,11 @@ function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
           </Select>
         ) : (
           <div className="flex h-7 items-center text-xs text-muted-foreground">
-            {unit === "months" ? "on the first day" : "starting today"}
+            {unit === "months" ? t("on the first day") : t("starting today")}
           </div>
         )}
         <Input
-          aria-label="Run time"
+          aria-label={t("Run time")}
           id="automation-schedule-time"
           onChange={(event) => setTime(event.target.value)}
           type="time"

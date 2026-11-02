@@ -1,6 +1,11 @@
 "use client"
 
 import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
+
+import {
   Activity,
   AudioLines,
   Bot,
@@ -63,7 +68,7 @@ type SourcePresentation = {
   kind: string[]
 }
 
-const presentation: Record<Props["mode"], SourcePresentation> = {
+const presentationMessages: Record<Props["mode"], SourcePresentation> = {
   microphone: {
     label: "Microphone room",
     shortLabel: "Room presence",
@@ -115,6 +120,10 @@ export function LiveTranscriptionConversationView({
   transportStatus,
   interruptionAt,
 }: Props) {
+  const presentation = useTranslatedConfig(presentationMessages)
+
+  const { t } = useTranslations()
+
   const config = presentation[mode]
   const SourceIcon = config.icon
   const primarySource = useMemo(
@@ -169,34 +178,37 @@ export function LiveTranscriptionConversationView({
         <header className="flex flex-wrap items-center justify-between gap-4 px-6 py-5">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-lg font-semibold">{snapshot.session.title}</h1>
-            <Badge variant="secondary">Scheduled</Badge>
+            <Badge variant="secondary">{t("Scheduled")}</Badge>
           </div>
           <div className="flex flex-wrap gap-2">
             {processingSettings}
             <Button onClick={onShare} size="sm" variant="outline">
-              <Share2 data-icon="inline-start" /> Share
+              <Share2 data-icon="inline-start" /> {t("Share")}
             </Button>
             <AlertDialog>
               <AlertDialogTrigger
                 render={<Button size="sm" variant="outline" />}
               >
-                <X data-icon="inline-start" /> Cancel scheduled capture
+                <X data-icon="inline-start" /> {t("Cancel scheduled capture")}
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Cancel scheduled capture?</AlertDialogTitle>
+                  <AlertDialogTitle>
+                    {t("Cancel scheduled capture?")}
+                  </AlertDialogTitle>
                   <AlertDialogDescription>
-                    The stream will no longer start automatically at the
-                    scheduled time.
+                    {t(
+                      "The stream will no longer start automatically at the scheduled time."
+                    )}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel>Keep scheduled</AlertDialogCancel>
+                  <AlertDialogCancel>{t("Keep scheduled")}</AlertDialogCancel>
                   <AlertDialogAction
                     variant="destructive"
                     onClick={() => void onStopSession()}
                   >
-                    Cancel capture
+                    {t("Cancel capture")}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -204,7 +216,7 @@ export function LiveTranscriptionConversationView({
           </div>
         </header>
         <section
-          aria-label="Scheduled capture"
+          aria-label={t("Scheduled capture")}
           className="flex flex-col items-center gap-5 px-6 py-12 text-center"
         >
           <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
@@ -212,11 +224,12 @@ export function LiveTranscriptionConversationView({
           </div>
           <div className="flex flex-col gap-2">
             <h2 className="text-xl font-semibold">
-              Your transcription is scheduled
+              {t("Your transcription is scheduled")}
             </h2>
             <p className="text-sm text-muted-foreground">
-              JustAI will capture the stream automatically. You can close your
-              browser.
+              {t(
+                "JustAI will capture the stream automatically. You can close your browser."
+              )}
             </p>
           </div>
           <dl className="flex w-full max-w-lg flex-col gap-4 rounded-xl bg-muted/40 p-5 text-left text-sm">
@@ -224,28 +237,33 @@ export function LiveTranscriptionConversationView({
               <div key={source.id} className="flex flex-col gap-2">
                 <dt className="font-medium">{source.name || "Livestream"}</dt>
                 <dd>
-                  <span className="text-muted-foreground">Starts · </span>
+                  <span className="text-muted-foreground">
+                    {t("Starts ·")}{" "}
+                  </span>
                   {scheduleTime(source.scheduledStartAt!)}
                 </dd>
                 {source.scheduledEndAt ? (
                   <dd>
-                    <span className="text-muted-foreground">Ends · </span>
+                    <span className="text-muted-foreground">
+                      {t("Ends ·")}{" "}
+                    </span>
                     {scheduleTime(source.scheduledEndAt)}
                   </dd>
                 ) : (
                   <dd className="text-muted-foreground">
-                    Stops when the stream ends.
+                    {t("Stops when the stream ends.")}
                   </dd>
                 )}
               </div>
             ))}
             <div className="text-xs text-muted-foreground">
-              Times shown in {Intl.DateTimeFormat().resolvedOptions().timeZone}.
-              The JustAI server must remain running.
+              {t("Times shown in")}{" "}
+              {Intl.DateTimeFormat().resolvedOptions().timeZone}
+              {t(". The JustAI server must remain running.")}
             </div>
           </dl>
           <p className="text-xs text-muted-foreground">
-            The transcript will appear here when capture starts.
+            {t("The transcript will appear here when capture starts.")}
           </p>
         </section>
       </div>
@@ -256,9 +274,9 @@ export function LiveTranscriptionConversationView({
       <header className="flex flex-wrap items-start justify-between gap-4 border-b px-5 py-4 sm:px-6">
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">
-            Live transcription <span className="mx-1">/</span>{" "}
+            {t("Live transcription")} <span className="mx-1">/</span>{" "}
             {snapshot.session.language === "auto"
-              ? "Automatic language"
+              ? t("Automatic language")
               : snapshot.session.language}
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -266,10 +284,10 @@ export function LiveTranscriptionConversationView({
               {snapshot.session.title}
             </h1>
             <Badge variant={live ? "default" : "secondary"}>
-              {loading ? "Syncing" : snapshot.session.status}
+              {loading ? t("Syncing") : snapshot.session.status}
             </Badge>
             <span className="text-xs text-muted-foreground">
-              Hosted by {user.displayName}
+              {t("Hosted by")} {user.displayName}
             </span>
           </div>
         </div>
@@ -277,15 +295,15 @@ export function LiveTranscriptionConversationView({
           <Badge className="hidden sm:inline-flex" variant="secondary">
             <Users data-icon="inline-start" />
             {isMicRoom
-              ? `${snapshot.speakers.length || 1} in room`
-              : "1 source"}
+              ? t("{value0} in room", { value0: snapshot.speakers.length || 1 })
+              : t("1 source")}
           </Badge>
           <Button onClick={onShare} size="sm" variant="outline">
-            <Share2 data-icon="inline-start" /> Share
+            <Share2 data-icon="inline-start" /> {t("Share")}
           </Button>
           {!capturing && mode === "browser-system" && canStartCapture ? (
             <Button onClick={() => void onStartCapture()} size="sm">
-              <Play data-icon="inline-start" /> Start source
+              <Play data-icon="inline-start" /> {t("Start source")}
             </Button>
           ) : (
             <Button
@@ -299,8 +317,8 @@ export function LiveTranscriptionConversationView({
                 <Pause data-icon="inline-start" />
               )}
               {snapshot.session.status === "paused"
-                ? "Resume session"
-                : "Pause session"}
+                ? t("Resume session")
+                : t("Pause session")}
             </Button>
           )}
           <AlertDialog>
@@ -313,23 +331,26 @@ export function LiveTranscriptionConversationView({
                 />
               }
             >
-              <Square data-icon="inline-start" /> End session
+              <Square data-icon="inline-start" /> {t("End session")}
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>End this transcription?</AlertDialogTitle>
+                <AlertDialogTitle>
+                  {t("End this transcription?")}
+                </AlertDialogTitle>
                 <AlertDialogDescription>
-                  The live feed will stop for everyone. The transcript collected
-                  so far will be kept.
+                  {t(
+                    "The live feed will stop for everyone. The transcript collected so far will be kept."
+                  )}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Keep session live</AlertDialogCancel>
+                <AlertDialogCancel>{t("Keep session live")}</AlertDialogCancel>
                 <AlertDialogAction
                   variant="destructive"
                   onClick={() => void onStopSession()}
                 >
-                  End session
+                  {t("End session")}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -338,7 +359,7 @@ export function LiveTranscriptionConversationView({
             <DropdownMenuTrigger
               render={
                 <Button
-                  aria-label="More session actions"
+                  aria-label={t("More session actions")}
                   className="sm:hidden"
                   size="icon-sm"
                   variant="outline"
@@ -352,23 +373,28 @@ export function LiveTranscriptionConversationView({
                 <AlertDialogTrigger
                   render={<DropdownMenuItem variant="destructive" />}
                 >
-                  <Square /> End session
+                  <Square /> {t("End session")}
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>End this transcription?</AlertDialogTitle>
+                    <AlertDialogTitle>
+                      {t("End this transcription?")}
+                    </AlertDialogTitle>
                     <AlertDialogDescription>
-                      The live feed will stop for everyone. The transcript
-                      collected so far will be kept.
+                      {t(
+                        "The live feed will stop for everyone. The transcript collected so far will be kept."
+                      )}
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel>Keep session live</AlertDialogCancel>
+                    <AlertDialogCancel>
+                      {t("Keep session live")}
+                    </AlertDialogCancel>
                     <AlertDialogAction
                       variant="destructive"
                       onClick={() => void onStopSession()}
                     >
-                      End session
+                      {t("End session")}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -389,19 +415,19 @@ export function LiveTranscriptionConversationView({
           <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
             <div>
               <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                <AudioLines className="size-4" /> Live conversation
+                <AudioLines className="size-4" /> {t("Live conversation")}
               </div>
               <h2 className="mt-1 text-base font-semibold tracking-tight">
-                Transcript in progress
+                {t("Transcript in progress")}
               </h2>
             </div>
             <Badge variant={hasSignal && live ? "default" : "secondary"}>
               <Volume2 data-icon="inline-start" />
               {hasSignal && live
                 ? isMicRoom
-                  ? "Someone is speaking"
-                  : "Audio flowing"
-                : "Listening"}
+                  ? t("Someone is speaking")
+                  : t("Audio flowing")
+                : t("Listening")}
             </Badge>
           </div>
           <div className="flex flex-1 flex-col divide-y">
@@ -412,12 +438,17 @@ export function LiveTranscriptionConversationView({
                   <AudioLines className="size-7" />
                 </div>
                 <h3 className="mt-6 text-sm font-semibold">
-                  Listening for the first words
+                  {t("Listening for the first words")}
                 </h3>
                 <p className="mt-2 max-w-sm text-xs leading-5 text-muted-foreground">
                   {isMicRoom
-                    ? "When someone in the room speaks, their words will appear here in real time."
-                    : `${config.label} is ready. The transcript starts as soon as audio arrives.`}
+                    ? t(
+                        "When someone in the room speaks, their words will appear here in real time."
+                      )
+                    : t(
+                        "{value0} is ready. The transcript starts as soon as audio arrives.",
+                        { value0: config.label }
+                      )}
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-2 text-xs">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-muted-foreground">
@@ -428,7 +459,7 @@ export function LiveTranscriptionConversationView({
                           : "size-1.5 rounded-full bg-amber-500"
                       }
                     />{" "}
-                    {hasSignal ? "Audio detected" : "Room is quiet"}
+                    {hasSignal ? t("Audio detected") : t("Room is quiet")}
                   </span>
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-muted-foreground">
                     <SourceIcon className="size-3.5" />{" "}
@@ -438,7 +469,9 @@ export function LiveTranscriptionConversationView({
                 {isMicRoom ? (
                   <div
                     className="mt-5 flex items-center -space-x-2"
-                    aria-label={`${snapshot.speakers.length || 1} people in the room`}
+                    aria-label={t("{value0} people in the room", {
+                      value0: snapshot.speakers.length || 1,
+                    })}
                   >
                     {(snapshot.speakers.length
                       ? snapshot.speakers
@@ -473,7 +506,7 @@ export function LiveTranscriptionConversationView({
                   </time>
                   <p className="text-sm leading-6">
                     <span className="mr-2 font-semibold text-foreground">
-                      {speakerName(snapshot, line.speakerKey)}
+                      {t(speakerName(snapshot, line.speakerKey))}
                     </span>
                     {line.text}
                   </p>
@@ -482,10 +515,10 @@ export function LiveTranscriptionConversationView({
             )}
             {partial ? (
               <article className="grid grid-cols-[3.75rem_minmax(0,1fr)] gap-3 py-4 text-muted-foreground">
-                <time className="pt-0.5 text-xs">Live</time>
+                <time className="pt-0.5 text-xs">{t("Live")}</time>
                 <p className="text-sm leading-6">
                   <span className="mr-2 font-semibold">
-                    {partialSourceId ? "Speaker" : "Listening"}
+                    {partialSourceId ? t("Speaker") : t("Listening")}
                   </span>
                   {partial}
                 </p>
@@ -499,7 +532,7 @@ export function LiveTranscriptionConversationView({
             <section className="rounded-xl border bg-background p-4">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="flex items-center gap-2 text-sm font-semibold">
-                  <Users className="size-4" /> In this room
+                  <Users className="size-4" /> {t("In this room")}
                 </h2>
                 <Badge variant="secondary">
                   {snapshot.speakers.length || 1}
@@ -541,7 +574,7 @@ export function LiveTranscriptionConversationView({
                               : "text-[11px] text-muted-foreground"
                           }
                         >
-                          {speaking ? "Speaking now" : "Listening"}
+                          {speaking ? t("Speaking now") : t("Listening")}
                         </small>
                       </span>
                       {speaking ? (
@@ -557,10 +590,10 @@ export function LiveTranscriptionConversationView({
                 <div className="mt-3 border-t pt-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <p className="text-xs font-medium">
-                      {pendingRequests.length} waiting to join
+                      {pendingRequests.length} {t("waiting to join")}
                     </p>
                     <Button
-                      aria-label="Refresh join requests"
+                      aria-label={t("Refresh join requests")}
                       onClick={() => void onRefreshJoinRequests()}
                       size="icon-sm"
                       variant="ghost"
@@ -581,11 +614,13 @@ export function LiveTranscriptionConversationView({
                               {request.sourceName}
                             </p>
                             <p className="truncate text-[10px] text-muted-foreground">
-                              {request.deviceLabel || "Unknown device"}
+                              {request.deviceLabel || t("Unknown device")}
                             </p>
                           </div>
                           <Button
-                            aria-label={`Accept ${request.sourceName}`}
+                            aria-label={t("Accept {value0}", {
+                              value0: request.sourceName,
+                            })}
                             disabled={updatingRequestId !== null}
                             onClick={() =>
                               void updateJoinRequest(request, "approve")
@@ -597,10 +632,12 @@ export function LiveTranscriptionConversationView({
                             ) : (
                               <Check />
                             )}
-                            Accept
+                            {t("Accept")}
                           </Button>
                           <Button
-                            aria-label={`Reject ${request.sourceName}`}
+                            aria-label={t("Reject {value0}", {
+                              value0: request.sourceName,
+                            })}
                             disabled={updatingRequestId !== null}
                             onClick={() =>
                               void updateJoinRequest(request, "deny")
@@ -609,7 +646,7 @@ export function LiveTranscriptionConversationView({
                             variant="outline"
                           >
                             <X />
-                            Reject
+                            {t("Reject")}
                           </Button>
                         </div>
                       )
@@ -625,7 +662,7 @@ export function LiveTranscriptionConversationView({
                   <SourceIcon className="size-4" /> {config.shortLabel}
                 </h2>
                 <Badge variant={sourceConnected ? "default" : "secondary"}>
-                  {sourceConnected ? "Connected" : "Waiting"}
+                  {sourceConnected ? t("Connected") : t("Waiting")}
                 </Badge>
               </div>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -633,13 +670,13 @@ export function LiveTranscriptionConversationView({
               </p>
               <dl className="mt-4 grid grid-cols-2 gap-3 border-t pt-3 text-xs">
                 <div>
-                  <dt className="text-muted-foreground">Input</dt>
+                  <dt className="text-muted-foreground">{t("Input")}</dt>
                   <dd className="mt-1 font-medium">
                     {primarySource?.deviceLabel || config.shortLabel}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">Audio level</dt>
+                  <dt className="text-muted-foreground">{t("Audio level")}</dt>
                   <dd className="mt-1 flex items-center gap-1 font-medium">
                     <span
                       className={
@@ -648,7 +685,7 @@ export function LiveTranscriptionConversationView({
                           : "size-2 rounded-full bg-muted-foreground/40"
                       }
                     />{" "}
-                    {hasSignal ? "Active" : "Quiet"}
+                    {hasSignal ? t("Active") : t("Quiet")}
                   </dd>
                 </div>
               </dl>
@@ -657,27 +694,29 @@ export function LiveTranscriptionConversationView({
           <section className="rounded-xl border bg-background p-4">
             <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-sm font-semibold">
-                <Activity className="size-4" /> Room health
+                <Activity className="size-4" /> {t("Room health")}
               </h2>
               <Badge variant="secondary">
                 {transportStatus.audioQuality === "good"
-                  ? "Good"
-                  : "Needs attention"}
+                  ? t("Good")
+                  : t("Needs attention")}
               </Badge>
             </div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              Connection status and signal level are measured separately.
+              {t("Connection status and signal level are measured separately.")}
             </p>
             <div className="mt-4 grid grid-cols-2 gap-3 border-t pt-3 text-xs">
               <div>
-                <span className="block text-muted-foreground">Connection</span>
+                <span className="block text-muted-foreground">
+                  {t("Connection")}
+                </span>
                 <strong className="mt-1 block capitalize">
                   {transportStatus.state}
                 </strong>
               </div>
               <div>
                 <span className="block text-muted-foreground">
-                  Signal level
+                  {t("Signal level")}
                 </span>
                 <strong className="mt-1 block">
                   {Math.round(level * 100)}%

@@ -80,3 +80,30 @@ double-submit protection.
   worker health rather than retrying the browser request indefinitely.
 - UI and API types disagree: update `lib/types.ts` with the backend response and
   add a contract test covering the changed payload.
+
+## Interface languages
+
+The interface supports German (`de`) and English (`en`). The language menu is
+available on the sign-in page, in the account menu, and on the profile page.
+An explicit choice is stored in the `justai.locale` cookie for one year. Without
+a preference, the server negotiates the language from `Accept-Language`, including
+regional variants and quality weights, and falls back to English. Server-rendered
+content and the HTML `lang` attribute use the same initial language. Switching
+languages updates the interface without remounting the workspace or changing URLs.
+
+Use `useTranslations()` from `components/locale-provider.tsx` in client components:
+
+```tsx
+const { t, locale } = useTranslations()
+t("New chat")
+t("Continue with {name}", { name: provider.displayName })
+new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date)
+```
+
+English source messages are stable keys. Add their German translations in
+`lib/i18n/de.ts`; missing messages fall back to their English source. Use named
+placeholders for complete sentences. `useTranslatedConfig` localizes static UI
+configuration while retaining identifiers, values, icons, and protocol fields.
+Keep user-authored content, model responses, provider identifiers, and API values
+in their original form. Interface language and transcription/output language are
+independent settings.

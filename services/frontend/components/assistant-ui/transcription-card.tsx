@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useRef, useState } from "react"
 import { useAui } from "@assistant-ui/react"
 import { Button } from "@/components/ui/button"
@@ -20,6 +21,8 @@ type Snapshot = {
 }
 
 export function TranscriptionCard({ value }: { value: unknown }) {
+  const { t } = useTranslations()
+
   const parsed = parseToolResult(value)
   const result =
     parsed && typeof parsed === "object"
@@ -132,28 +135,32 @@ export function TranscriptionCard({ value }: { value: unknown }) {
 
   return (
     <section
-      aria-label="Video transcription"
+      aria-label={t("Video transcription")}
       className="my-3 flex max-w-2xl flex-col gap-3 rounded-2xl bg-card p-4"
     >
       <p className="font-medium">
         {snapshot?.session.title ||
-          String(result?.title || "Video transcription")}
+          String(result?.title || t("Video transcription"))}
       </p>
       <p className="text-sm text-muted-foreground" role="status">
         {busy
-          ? `Uploading ${Math.round(progress)}%`
+          ? t("Uploading {value0}%", { value0: Math.round(progress) })
           : complete
-            ? "Transcript ready. Ask questions, summarize it, or export it in chat."
+            ? t(
+                "Transcript ready. Ask questions, summarize it, or export it in chat."
+              )
             : upload
               ? `${upload.stage || upload.status} · ${Math.round(upload.progress)}%`
-              : "Choose a video to transcribe. Language is detected automatically unless specified."}
+              : t(
+                  "Choose a video to transcribe. Language is detected automatically unless specified."
+                )}
       </p>
       {canUpload && (
         <>
           <label className="flex flex-col gap-2 text-sm">
             {upload?.status === "uploading"
-              ? `Resume with ${upload.fileName}`
-              : "Video file"}
+              ? t("Resume with {value0}", { value0: upload.fileName })
+              : t("Video file")}
             <input
               type="file"
               accept=".mp4,.mov,.m4v,.webm,.mkv,.avi,.mpeg,.mpg,.wmv"
@@ -164,16 +171,16 @@ export function TranscriptionCard({ value }: { value: unknown }) {
           </label>
           <Button disabled={!file || busy} onClick={() => void start()}>
             {busy
-              ? "Uploading…"
+              ? t("Uploading…")
               : upload?.status === "uploading"
-                ? "Resume upload"
-                : "Upload and transcribe"}
+                ? t("Resume upload")
+                : t("Upload and transcribe")}
           </Button>
         </>
       )}
       {busy && (
         <Button variant="secondary" onClick={() => controller.current?.abort()}>
-          Pause upload
+          {t("Pause upload")}
         </Button>
       )}
       {complete && (
@@ -186,12 +193,12 @@ export function TranscriptionCard({ value }: { value: unknown }) {
               )
           }
         >
-          Discuss transcript
+          {t("Discuss transcript")}
         </Button>
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {t(error)}
         </p>
       )}
       {upload?.error && (
@@ -203,7 +210,7 @@ export function TranscriptionCard({ value }: { value: unknown }) {
         href={`/video-transcription/${id}`}
         className="text-sm text-primary underline"
       >
-        Open transcription workspace
+        {t("Open transcription workspace")}
       </a>
     </section>
   )

@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useState } from "react"
 import { Download, Play, Save } from "lucide-react"
 
@@ -13,6 +14,8 @@ import { SettingsRow, SettingsSection } from "@/components/ui/settings"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 export function PrivacyView() {
+  const { t } = useTranslations()
+
   const defaultSettings: PrivacySettings = {
     archivedConversationRetentionDays: 0,
     knowledgeRetentionDays: 0,
@@ -169,8 +172,8 @@ export function PrivacyView() {
           <div>
             <AlertTitle>
               {loadError
-                ? "Privacy settings unavailable"
-                : "Privacy action failed"}
+                ? t("Privacy settings unavailable")
+                : t("Privacy action failed")}
             </AlertTitle>
             <AlertDescription>{loadError || error}</AlertDescription>
           </div>
@@ -185,20 +188,22 @@ export function PrivacyView() {
               type="button"
               variant="outline"
             >
-              Retry
+              {t("Retry")}
             </Button>
           )}
         </Alert>
       )}
       {notice && (
         <Alert aria-live="polite" role="status">
-          <AlertDescription>{notice}</AlertDescription>
+          <AlertDescription>{t(notice)}</AlertDescription>
         </Alert>
       )}
       <form onSubmit={(event) => void save(event)}>
         <SettingsSection
           aria-busy={loading || saving}
-          description="Choose how long your personal data in this workspace remains. A value of 0 means JustAI never removes it automatically."
+          description={t(
+            "Choose how long your personal data in this workspace remains. A value of 0 means JustAI never removes it automatically."
+          )}
           footer={
             <>
               {settingsDirty && (
@@ -221,12 +226,12 @@ export function PrivacyView() {
               </Button>
             </>
           }
-          title="Retention"
+          title={t("Retention")}
         >
           <SettingsRow
-            description="Delete archived chats after this many days."
+            description={t("Delete archived chats after this many days.")}
             htmlFor="archived-retention"
-            label="Archived conversations"
+            label={t("Archived conversations")}
           >
             <Input
               className="sm:max-w-32"
@@ -234,15 +239,19 @@ export function PrivacyView() {
               id="archived-retention"
               max={3650}
               min={0}
-              onChange={(event) => update("archivedConversationRetentionDays", event.target.value)}
+              onChange={(event) =>
+                update("archivedConversationRetentionDays", event.target.value)
+              }
               type="number"
               value={settings.archivedConversationRetentionDays}
             />
           </SettingsRow>
           <SettingsRow
-            description="Remove your uploaded and imported knowledge sources."
+            description={t(
+              "Remove your uploaded and imported knowledge sources."
+            )}
             htmlFor="knowledge-retention"
-            label="Personal knowledge"
+            label={t("Personal knowledge")}
           >
             <Input
               className="sm:max-w-32"
@@ -250,15 +259,19 @@ export function PrivacyView() {
               id="knowledge-retention"
               max={3650}
               min={0}
-              onChange={(event) => update("knowledgeRetentionDays", event.target.value)}
+              onChange={(event) =>
+                update("knowledgeRetentionDays", event.target.value)
+              }
               type="number"
               value={settings.knowledgeRetentionDays}
             />
           </SettingsRow>
           <SettingsRow
-            description="Remove completed or failed transcript sessions and recordings."
+            description={t(
+              "Remove completed or failed transcript sessions and recordings."
+            )}
             htmlFor="transcription-retention"
-            label="Completed transcripts"
+            label={t("Completed transcripts")}
           >
             <Input
               className="sm:max-w-32"
@@ -266,7 +279,9 @@ export function PrivacyView() {
               id="transcription-retention"
               max={3650}
               min={0}
-              onChange={(event) => update("transcriptionRetentionDays", event.target.value)}
+              onChange={(event) =>
+                update("transcriptionRetentionDays", event.target.value)
+              }
               type="number"
               value={settings.transcriptionRetentionDays}
             />
@@ -275,12 +290,16 @@ export function PrivacyView() {
       </form>
 
       <SettingsSection
-        description="Download conversations, messages, notes, memories, projects, and personal source metadata as JSON. Binary files, recordings, and message attachments are not included."
-        title="Export your data"
+        description={t(
+          "Download conversations, messages, notes, memories, projects, and personal source metadata as JSON. Binary files, recordings, and message attachments are not included."
+        )}
+        title={t("Export your data")}
       >
         <SettingsRow
-          description="Exports are generated on demand and are not stored by JustAI after the response completes."
-          label="Data export"
+          description={t(
+            "Exports are generated on demand and are not stored by JustAI after the response completes."
+          )}
+          label={t("Data export")}
         >
           <Button
             disabled={exporting}
@@ -288,15 +307,17 @@ export function PrivacyView() {
             variant="outline"
           >
             <Download data-icon="inline-start" />
-            {exporting ? "Preparing export…" : "Download data export"}
+            {exporting ? t("Preparing export…") : t("Download data export")}
           </Button>
         </SettingsRow>
       </SettingsSection>
       <ConfirmActionDialog
         open={cleanupOpen}
-        title="Run retention cleanup now?"
-        description="Data older than your retention limits will be permanently removed. Review the values above before continuing."
-        confirmLabel="Run cleanup"
+        title={t("Run retention cleanup now?")}
+        description={t(
+          "Data older than your retention limits will be permanently removed. Review the values above before continuing."
+        )}
+        confirmLabel={t("Run cleanup")}
         pending={cleaning}
         onOpenChange={setCleanupOpen}
         onConfirm={runCleanup}

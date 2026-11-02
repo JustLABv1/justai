@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { Check, LoaderCircle, Mic, Radio, ShieldCheck } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
@@ -137,6 +138,8 @@ function sourceStatus(value: unknown): TranscriptionSource["status"] {
 }
 
 export function TranscriptionJoin() {
+  const { t } = useTranslations()
+
   const searchParams = useSearchParams()
   const initialCode = searchParams.get("code") ?? ""
   const requestFromURL = searchParams.get("request") ?? ""
@@ -858,26 +861,30 @@ export function TranscriptionJoin() {
           </div>
           <CardTitle>
             {state === "connected"
-              ? "Microphone connected"
-              : "Join live transcription"}
+              ? t("Microphone connected")
+              : t("Join live transcription")}
           </CardTitle>
           <CardDescription>
             {state === "connected"
-              ? `You are sending audio to ${title}. Keep this tab open.`
-              : "Choose a unique microphone name. The host must approve the connection before any audio is sent."}
+              ? t("You are sending audio to {value0}. Keep this tab open.", {
+                  value0: title,
+                })
+              : t(
+                  "Choose a unique microphone name. The host must approve the connection before any audio is sent."
+                )}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
           {error ? (
             <Alert variant="destructive">
-              <AlertTitle>Could not join</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <AlertTitle>{t("Could not join")}</AlertTitle>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           ) : null}
           {state === "form" ? (
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="room-code">Room code</FieldLabel>
+                <FieldLabel htmlFor="room-code">{t("Room code")}</FieldLabel>
                 <Input
                   autoComplete="one-time-code"
                   id="room-code"
@@ -885,25 +892,29 @@ export function TranscriptionJoin() {
                   onChange={(event) =>
                     setCode(event.target.value.toUpperCase())
                   }
-                  placeholder="8 characters"
+                  placeholder={t("8 characters")}
                   value={code}
                 />
                 <FieldDescription>
-                  The room link keeps this code in the address bar for
-                  refreshes.
+                  {t(
+                    "The room link keeps this code in the address bar for refreshes."
+                  )}
                 </FieldDescription>
               </Field>
               <Field>
-                <FieldLabel htmlFor="source-name">Microphone name</FieldLabel>
+                <FieldLabel htmlFor="source-name">
+                  {t("Microphone name")}
+                </FieldLabel>
                 <Input
                   id="source-name"
                   onChange={(event) => setSourceName(event.target.value)}
-                  placeholder="Conference room mic"
+                  placeholder={t("Conference room mic")}
                   value={sourceName}
                 />
                 <FieldDescription>
-                  This name must be unique in the room and appears beside your
-                  transcript.
+                  {t(
+                    "This name must be unique in the room and appears beside your transcript."
+                  )}
                 </FieldDescription>
               </Field>
               <Button
@@ -918,7 +929,7 @@ export function TranscriptionJoin() {
                 ) : (
                   <Mic data-icon="inline-start" />
                 )}
-                {submitting ? "Requesting…" : "Request to join"}
+                {submitting ? t("Requesting…") : t("Request to join")}
               </Button>
             </FieldGroup>
           ) : null}
@@ -926,10 +937,11 @@ export function TranscriptionJoin() {
             <div className="flex flex-col items-center gap-4 py-8 text-center">
               <Spinner />
               <div>
-                <p className="font-medium">Waiting for host approval</p>
+                <p className="font-medium">{t("Waiting for host approval")}</p>
                 <p className="text-sm text-muted-foreground">
-                  No microphone audio is sent yet. This page will reconnect
-                  after approval.
+                  {t(
+                    "No microphone audio is sent yet. This page will reconnect after approval."
+                  )}
                 </p>
               </div>
             </div>
@@ -937,20 +949,22 @@ export function TranscriptionJoin() {
           {state === "approved" ? (
             <div className="flex flex-col items-center gap-4 py-8 text-center">
               <LoaderCircle className="animate-spin text-primary" />
-              <p className="font-medium">Connecting microphone…</p>
+              <p className="font-medium">{t("Connecting microphone…")}</p>
             </div>
           ) : null}
           {state === "paused" ? (
             <div className="flex flex-col items-center gap-4 py-8 text-center">
               <VoiceOrb className="size-40" state="idle" volume={0} />
               <div>
-                <p className="font-medium">Microphone paused</p>
+                <p className="font-medium">{t("Microphone paused")}</p>
                 <p className="text-sm text-muted-foreground">
-                  You remain in the room and can restart capture at any time.
+                  {t(
+                    "You remain in the room and can restart capture at any time."
+                  )}
                 </p>
               </div>
               <Button onClick={() => void toggleMicrophone()}>
-                <Mic data-icon="inline-start" /> Start microphone
+                <Mic data-icon="inline-start" /> {t("Start microphone")}
               </Button>
             </div>
           ) : null}
@@ -964,17 +978,18 @@ export function TranscriptionJoin() {
               <div>
                 <p className="font-medium">{sourceName || "Room microphone"}</p>
                 <p className="text-sm text-muted-foreground">
-                  Audio level {Math.round(level * 100)}% · audio is live
+                  {t("Audio level")} {Math.round(level * 100)}
+                  {t("% · audio is live")}
                 </p>
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <ShieldCheck /> Approved by the session host
+                <ShieldCheck /> {t("Approved by the session host")}
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Check /> Keep this window open while speaking
+                <Check /> {t("Keep this window open while speaking")}
               </div>
               <Button onClick={() => void toggleMicrophone()} variant="outline">
-                Stop microphone
+                {t("Stop microphone")}
               </Button>
             </div>
           ) : null}

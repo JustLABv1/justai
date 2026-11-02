@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { type ComponentPropsWithoutRef, type MouseEvent, useState } from "react"
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown"
 import ReactMarkdown from "react-markdown"
@@ -26,6 +27,8 @@ function MarkdownLink({
   onClick,
   ...props
 }: MarkdownLinkProps) {
+  const { t } = useTranslations()
+
   void _node
   const [error, setError] = useState("")
   const [isDownloading, setIsDownloading] = useState(false)
@@ -73,7 +76,7 @@ function MarkdownLink({
       </a>
       {error && (
         <span className="ml-2 text-destructive" role="alert">
-          {error}
+          {t(error)}
         </span>
       )}
     </>

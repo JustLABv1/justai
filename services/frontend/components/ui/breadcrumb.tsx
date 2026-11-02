@@ -1,3 +1,6 @@
+"use client"
+
+import { useTranslations } from "@/components/locale-provider"
 import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
@@ -97,6 +100,8 @@ function BreadcrumbEllipsis({
   className,
   ...props
 }: React.ComponentProps<"span">) {
+  const { t } = useTranslations()
+
   return (
     <span
       data-slot="breadcrumb-ellipsis"
@@ -109,7 +114,7 @@ function BreadcrumbEllipsis({
       {...props}
     >
       <HugeiconsIcon icon={MoreHorizontalCircle01Icon} strokeWidth={2} />
-      <span className="sr-only">More</span>
+      <span className="sr-only">{t("More")}</span>
     </span>
   )
 }

@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   AlertTriangle,
@@ -167,6 +168,8 @@ export function MCPView({
   resourceError,
   onRetryResource,
 }: Props) {
+  const { t, locale } = useTranslations()
+
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<MCPForm>(emptyForm)
   const [editingServer, setEditingServer] = useState<MCPServer | null>(null)
@@ -322,7 +325,9 @@ export function MCPView({
           server = {
             ...server,
             lastError:
-              caught instanceof Error ? caught.message : "Verification failed.",
+              caught instanceof Error
+                ? caught.message
+                : t("Verification failed."),
           }
           connectionNotice =
             " The server was saved, but verification needs attention."
@@ -336,7 +341,7 @@ export function MCPView({
           : [server, ...servers]
       )
       setNotice(
-        `${form.name} is connected.${connectionNotice} ${form.autoDiscover ? "Relevant tools can now be surfaced automatically." : "Add it to a chat when you want to use its tools."}`
+        `${form.name} is connected.${t(connectionNotice)} ${form.autoDiscover ? "Relevant tools can now be surfaced automatically." : "Add it to a chat when you want to use its tools."}`
       )
     } catch (caught) {
       if (caught instanceof APIError) {
@@ -406,7 +411,7 @@ export function MCPView({
     const controller = new AbortController()
     actionAbortRef.current = controller
     setBusyId(server.id)
-    setActiveAction({ serverId: server.id, label: "Discovering tools…" })
+    setActiveAction({ serverId: server.id, label: t("Discovering tools…") })
     setNotice("")
     onChange(
       servers.map((item) =>
@@ -436,7 +441,7 @@ export function MCPView({
       const message =
         caught instanceof Error
           ? caught.message
-          : "MCP tool discovery failed. Check the endpoint and auth token."
+          : t("MCP tool discovery failed. Check the endpoint and auth token.")
       onChange(
         servers.map((item) =>
           item.id === server.id ? { ...item, lastError: message } : item
@@ -454,7 +459,7 @@ export function MCPView({
     const controller = new AbortController()
     actionAbortRef.current = controller
     setBusyId(server.id)
-    setActiveAction({ serverId: server.id, label: "Testing connection…" })
+    setActiveAction({ serverId: server.id, label: t("Testing connection…") })
     setNotice("")
     onChange(
       servers.map((item) =>
@@ -536,10 +541,12 @@ export function MCPView({
           className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
           role="alert"
         >
-          <span>MCP servers could not be loaded. {resourceError}</span>
+          <span>
+            {t("MCP servers could not be loaded.")} {t(resourceError)}
+          </span>
           {onRetryResource && (
             <Button size="sm" variant="outline" onClick={onRetryResource}>
-              Retry
+              {t("Retry")}
             </Button>
           )}
         </div>
@@ -550,7 +557,7 @@ export function MCPView({
           className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground"
           role="status"
         >
-          {notice}
+          {t(notice)}
         </div>
       )}
       {visibleServers.some((server) => server.scopeType === "global") && (
@@ -560,10 +567,11 @@ export function MCPView({
             aria-hidden="true"
           />
           <div>
-            <p className="font-medium">Platform-managed MCP servers</p>
+            <p className="font-medium">{t("Platform-managed MCP servers")}</p>
             <p className="mt-1 text-muted-foreground">
-              These servers are inherited by this workspace and can only be
-              changed from the Platform Admin catalog.
+              {t(
+                "These servers are inherited by this workspace and can only be changed from the Platform Admin catalog."
+              )}
             </p>
           </div>
         </div>
@@ -595,7 +603,7 @@ export function MCPView({
                   <div className="flex flex-wrap items-center gap-2">
                     <CardTitle className="text-base">{server.name}</CardTitle>
                     <Badge variant="outline">
-                      {mcpAuthLabel(server.authType)}
+                      {t(mcpAuthLabel(server.authType))}
                     </Badge>
                   </div>
                   <CardDescription className="mt-1 truncate font-mono text-xs">
@@ -607,31 +615,34 @@ export function MCPView({
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   {server.scopeType === "global" ? (
                     <Badge variant="outline" className="gap-1.5">
-                      <LockKeyhole aria-hidden="true" /> Platform-managed
+                      <LockKeyhole aria-hidden="true" /> {t("Platform-managed")}
                     </Badge>
                   ) : (
                     <Badge variant="secondary">
                       {server.scopeType === "organization"
-                        ? "Workspace"
-                        : "Personal"}
+                        ? t("Workspace")
+                        : t("Personal")}
                     </Badge>
                   )}
-                  {!server.enabled && <Badge variant="outline">Disabled</Badge>}
+                  {!server.enabled && (
+                    <Badge variant="outline">{t("Disabled")}</Badge>
+                  )}
                   {server.trustedReadOnly && (
                     <Badge variant="outline" className="gap-1.5">
                       <ShieldCheck aria-hidden="true" />
-                      Trusted read-only
+                      {t("Trusted read-only")}
                     </Badge>
                   )}
                   {server.autoDiscover && (
                     <Badge variant="outline" className="gap-1.5">
-                      <Sparkles aria-hidden="true" /> Available automatically
+                      <Sparkles aria-hidden="true" />{" "}
+                      {t("Available automatically")}
                     </Badge>
                   )}
                   {server.credentialConfigured && (
                     <Badge variant="outline" className="gap-1.5">
                       <KeyRound aria-hidden="true" />
-                      Credential stored
+                      {t("Credential stored")}
                     </Badge>
                   )}
                   {server.authType === "oauth" && (
@@ -642,46 +653,50 @@ export function MCPView({
                       title={oauthExpiryLabel(server.oauthExpiresAt)}
                     >
                       {oauthState === "expired"
-                        ? "OAuth expired"
+                        ? t("OAuth expired")
                         : oauthState === "expiring"
-                          ? "OAuth expiring soon"
+                          ? t("OAuth expiring soon")
                           : server.oauthExpiresAt
-                            ? "OAuth active"
+                            ? t("OAuth active")
                             : server.credentialConfigured
-                              ? "OAuth connected"
-                              : "OAuth not authorized"}
+                              ? t("OAuth connected")
+                              : t("OAuth not authorized")}
                     </Badge>
                   )}
                   <Badge variant="outline" className="gap-1.5">
                     <ShieldCheck aria-hidden="true" />
-                    Approval gated
+                    {t("Approval gated")}
                   </Badge>
                 </div>
                 <Separator className="my-4" />
                 <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                   <div>
                     <span className="font-medium text-foreground">
-                      Protocol:
+                      {t("Protocol:")}
                     </span>{" "}
                     {server.protocolVersion || "Negotiating"}
                   </div>
                   <div>
                     <span className="font-medium text-foreground">
-                      Last test:
+                      {t("Last test:")}
                     </span>{" "}
                     {server.lastTestedAt
-                      ? new Date(server.lastTestedAt).toLocaleString()
-                      : "Not tested"}
+                      ? new Date(server.lastTestedAt).toLocaleString(locale)
+                      : t("Not tested")}
                   </div>
                 </div>
                 <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-xs text-muted-foreground">
                   <Wrench aria-hidden="true" className="size-3.5" />
                   <span className="truncate">
                     {server.toolCount
-                      ? `${server.toolCount} discovered tools`
+                      ? t("{value0} discovered tools", {
+                          value0: server.toolCount,
+                        })
                       : server.allowedTools.length
-                        ? `${server.allowedTools.length} allowlisted tools`
-                        : "No tools discovered yet"}
+                        ? t("{value0} allowlisted tools", {
+                            value0: server.allowedTools.length,
+                          })
+                        : t("No tools discovered yet")}
                   </span>
                 </div>
                 {tools[server.id] && (
@@ -710,7 +725,9 @@ export function MCPView({
                       className="mt-0.5 size-3.5 shrink-0"
                     />
                     <span className="min-w-0 break-words">
-                      <span className="font-medium">MCP action failed: </span>
+                      <span className="font-medium">
+                        {t("MCP action failed:")}{" "}
+                      </span>
                       {server.lastError}
                     </span>
                   </div>
@@ -731,14 +748,16 @@ export function MCPView({
                           <span className="truncate">{activeAction.label}</span>
                         </div>
                         <Button
-                          aria-label={`Stop action for ${server.name}`}
+                          aria-label={t("Stop action for {value0}", {
+                            value0: server.name,
+                          })}
                           onClick={stopActiveAction}
                           size="sm"
                           type="button"
                           variant="outline"
                         >
                           <Square data-icon="inline-start" aria-hidden="true" />
-                          Stop
+                          {t("Stop")}
                         </Button>
                       </div>
                     ) : (
@@ -749,7 +768,9 @@ export function MCPView({
                               disabled={busyId === server.id}
                               variant="outline"
                               size="sm"
-                              aria-label={`Actions for ${server.name}`}
+                              aria-label={t("Actions for {value0}", {
+                                value0: server.name,
+                              })}
                             />
                           }
                         >
@@ -757,20 +778,21 @@ export function MCPView({
                             data-icon="inline-start"
                             aria-hidden="true"
                           />
-                          Actions
+                          {t("Actions")}
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
                             disabled={busyId === server.id}
                             onClick={() => void discover(server)}
                           >
-                            <TerminalSquare aria-hidden="true" /> Discover tools
+                            <TerminalSquare aria-hidden="true" />{" "}
+                            {t("Discover tools")}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             disabled={busyId === server.id}
                             onClick={() => void test(server)}
                           >
-                            <Check aria-hidden="true" /> Test connection
+                            <Check aria-hidden="true" /> {t("Test connection")}
                           </DropdownMenuItem>
                           {server.authType === "oauth" && (
                             <DropdownMenuItem
@@ -779,8 +801,8 @@ export function MCPView({
                             >
                               <KeyRound aria-hidden="true" />
                               {server.credentialConfigured
-                                ? "Reconnect OAuth"
-                                : "Authorize"}
+                                ? t("Reconnect OAuth")
+                                : t("Authorize")}
                             </DropdownMenuItem>
                           )}
                           {canManageServer(server) && (
@@ -790,7 +812,7 @@ export function MCPView({
                                 disabled={busyId === server.id}
                                 onClick={() => edit(server)}
                               >
-                                <Pencil aria-hidden="true" /> Edit server
+                                <Pencil aria-hidden="true" /> {t("Edit server")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 disabled={busyId === server.id}
@@ -805,7 +827,7 @@ export function MCPView({
                                   })
                                 }
                               >
-                                {server.enabled ? "Disable" : "Enable"}
+                                {server.enabled ? t("Disable") : t("Enable")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 disabled={busyId === server.id}
@@ -816,8 +838,8 @@ export function MCPView({
                                 }
                               >
                                 {server.trustedReadOnly
-                                  ? "Remove read-only trust"
-                                  : "Trust read-only tools"}
+                                  ? t("Remove read-only trust")
+                                  : t("Trust read-only tools")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 disabled={busyId === server.id}
@@ -829,15 +851,15 @@ export function MCPView({
                               >
                                 <Sparkles aria-hidden="true" />
                                 {server.autoDiscover
-                                  ? "Require manual attachment"
-                                  : "Make available automatically"}
+                                  ? t("Require manual attachment")
+                                  : t("Make available automatically")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 disabled={busyId === server.id}
                                 variant="destructive"
                                 onClick={() => setRemoveTarget(server)}
                               >
-                                <Trash2 aria-hidden="true" /> Remove
+                                <Trash2 aria-hidden="true" /> {t("Remove")}
                               </DropdownMenuItem>
                             </>
                           )}
@@ -858,23 +880,27 @@ export function MCPView({
               </div>
               <p className="font-medium">
                 {resourceError
-                  ? "MCP server inventory unavailable"
-                  : "No MCP servers connected"}
+                  ? t("MCP server inventory unavailable")
+                  : t("No MCP servers connected")}
               </p>
               <p className="max-w-md text-sm text-muted-foreground">
                 {resourceError
-                  ? "JustAI could not load the MCP server catalog. Retry to check again."
-                  : "Add a remote server over Streamable HTTP or legacy HTTP+SSE. JustAI does not run arbitrary stdio processes from the web app."}
+                  ? t(
+                      "JustAI could not load the MCP server catalog. Retry to check again."
+                    )
+                  : t(
+                      "Add a remote server over Streamable HTTP or legacy HTTP+SSE. JustAI does not run arbitrary stdio processes from the web app."
+                    )}
               </p>
               {resourceError ? (
                 onRetryResource && (
                   <Button variant="outline" size="sm" onClick={onRetryResource}>
-                    Retry
+                    {t("Retry")}
                   </Button>
                 )
               ) : (
                 <Button variant="outline" size="sm" onClick={openCreate}>
-                  Add a server
+                  {t("Add a server")}
                 </Button>
               )}
             </CardContent>
@@ -890,16 +916,18 @@ export function MCPView({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove MCP server?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Remove MCP server?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Remove “{removeTarget?.name}”? Existing conversations keep their
-              messages, but this server and its tools will no longer be
-              available for new calls.
+              {t("Remove “")}
+              {removeTarget?.name}
+              {t(
+                "”? Existing conversations keep their messages, but this server and its tools will no longer be available for new calls."
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={Boolean(busyId)}>
-              Cancel
+              {t("Cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={!removeTarget || Boolean(busyId)}
@@ -910,7 +938,7 @@ export function MCPView({
                 if (target) void remove(target)
               }}
             >
-              Remove server
+              {t("Remove server")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -930,11 +958,12 @@ export function MCPView({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editingServer ? "Edit MCP server" : "Add MCP server"}
+              {editingServer ? t("Edit MCP server") : t("Add MCP server")}
             </DialogTitle>
             <DialogDescription>
-              Use the server&apos;s remote HTTP endpoint. Local stdio processes
-              stay outside this web service boundary.
+              {t(
+                "Use the server's remote HTTP endpoint. Local stdio processes stay outside this web service boundary."
+              )}
             </DialogDescription>
           </DialogHeader>
           {dialogError && (
@@ -947,13 +976,13 @@ export function MCPView({
                 aria-hidden="true"
                 className="mt-0.5 size-4 shrink-0"
               />
-              <span className="min-w-0 break-words">{dialogError}</span>
+              <span className="min-w-0 break-words">{t(dialogError)}</span>
             </div>
           )}
           <form onSubmit={save}>
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="mcp-name">Display name</FieldLabel>
+                <FieldLabel htmlFor="mcp-name">{t("Display name")}</FieldLabel>
                 <Input
                   id="mcp-name"
                   value={form.name}
@@ -971,7 +1000,7 @@ export function MCPView({
                       // a Next Image host allowlist.
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        alt="Selected MCP logo preview"
+                        alt={t("Selected MCP logo preview")}
                         className="size-full rounded-md object-contain"
                         src={resolveAPIURL(iconPreview)}
                       />
@@ -996,12 +1025,13 @@ export function MCPView({
                     <p className="truncate text-sm font-medium">
                       {iconFile?.name ??
                         (iconPreview && !iconRemoved
-                          ? "Current logo"
-                          : "No logo selected")}
+                          ? t("Current logo")
+                          : t("No logo selected"))}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on
-                      upload
+                      {t(
+                        "PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on upload"
+                      )}
                     </p>
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Button
@@ -1015,8 +1045,8 @@ export function MCPView({
                           aria-hidden="true"
                         />
                         {iconPreview && !iconRemoved
-                          ? "Replace logo"
-                          : "Choose logo"}
+                          ? t("Replace logo")
+                          : t("Choose logo")}
                       </Button>
                       {((iconPreview && !iconRemoved) ||
                         (editingServer?.iconUrl && !iconRemoved)) && (
@@ -1030,7 +1060,7 @@ export function MCPView({
                           }}
                         >
                           <X data-icon="inline-start" aria-hidden="true" />
-                          Remove logo
+                          {t("Remove logo")}
                         </Button>
                       )}
                     </div>
@@ -1038,7 +1068,7 @@ export function MCPView({
                 </div>
               </Field>
               <Field>
-                <FieldLabel htmlFor="mcp-url">Endpoint URL</FieldLabel>
+                <FieldLabel htmlFor="mcp-url">{t("Endpoint URL")}</FieldLabel>
                 <Input
                   id="mcp-url"
                   type="url"
@@ -1050,13 +1080,14 @@ export function MCPView({
                   required
                 />
                 <FieldDescription>
-                  Streamable HTTP is preferred; legacy HTTP+SSE is supported by
-                  the backend client.
+                  {t(
+                    "Streamable HTTP is preferred; legacy HTTP+SSE is supported by the backend client."
+                  )}
                 </FieldDescription>
               </Field>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field>
-                  <FieldLabel>Authentication</FieldLabel>
+                  <FieldLabel>{t("Authentication")}</FieldLabel>
                   <Select
                     items={{
                       none: "No auth",
@@ -1073,8 +1104,10 @@ export function MCPView({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="none">No auth</SelectItem>
-                        <SelectItem value="api_key">Bearer token</SelectItem>
+                        <SelectItem value="none">{t("No auth")}</SelectItem>
+                        <SelectItem value="api_key">
+                          {t("Bearer token")}
+                        </SelectItem>
                         <SelectItem value="oauth">OAuth 2.1</SelectItem>
                       </SelectGroup>
                     </SelectContent>
@@ -1082,13 +1115,15 @@ export function MCPView({
                   {(form.authType === "none" || form.authType === "oauth") && (
                     <FieldDescription>
                       {form.authType === "none"
-                        ? "No credential is sent to this server."
-                        : "Sign in with the provider after saving; JustAI manages the access and refresh tokens."}
+                        ? t("No credential is sent to this server.")
+                        : t(
+                            "Sign in with the provider after saving; JustAI manages the access and refresh tokens."
+                          )}
                     </FieldDescription>
                   )}
                 </Field>
                 <Field>
-                  <FieldLabel>Visibility</FieldLabel>
+                  <FieldLabel>{t("Visibility")}</FieldLabel>
                   <Select
                     items={{
                       organization: "Workspace",
@@ -1110,10 +1145,10 @@ export function MCPView({
                       <SelectGroup>
                         {canManageOrganization && (
                           <SelectItem value="organization">
-                            Workspace
+                            {t("Workspace")}
                           </SelectItem>
                         )}
-                        <SelectItem value="user">Only me</SelectItem>
+                        <SelectItem value="user">{t("Only me")}</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
@@ -1123,7 +1158,7 @@ export function MCPView({
                 <div className="grid gap-4 rounded-xl border bg-muted/35 p-3 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="mcp-oauth-authorize">
-                      Authorization URL
+                      {t("Authorization URL")}
                     </FieldLabel>
                     <Input
                       id="mcp-oauth-authorize"
@@ -1132,11 +1167,13 @@ export function MCPView({
                       onChange={(event) =>
                         update("oauthAuthorizationUrl", event.target.value)
                       }
-                      placeholder="Auto-discovered from the server"
+                      placeholder={t("Auto-discovered from the server")}
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="mcp-oauth-token">Token URL</FieldLabel>
+                    <FieldLabel htmlFor="mcp-oauth-token">
+                      {t("Token URL")}
+                    </FieldLabel>
                     <Input
                       id="mcp-oauth-token"
                       type="url"
@@ -1144,12 +1181,12 @@ export function MCPView({
                       onChange={(event) =>
                         update("oauthTokenUrl", event.target.value)
                       }
-                      placeholder="Auto-discovered from the server"
+                      placeholder={t("Auto-discovered from the server")}
                     />
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="mcp-oauth-client">
-                      Client ID
+                      {t("Client ID")}
                     </FieldLabel>
                     <Input
                       id="mcp-oauth-client"
@@ -1161,7 +1198,9 @@ export function MCPView({
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="mcp-oauth-scopes">Scopes</FieldLabel>
+                    <FieldLabel htmlFor="mcp-oauth-scopes">
+                      {t("Scopes")}
+                    </FieldLabel>
                     <Input
                       id="mcp-oauth-scopes"
                       value={form.oauthScopes}
@@ -1172,9 +1211,9 @@ export function MCPView({
                     />
                   </Field>
                   <FieldDescription className="sm:col-span-2">
-                    PKCE, resource indicators, metadata discovery, and encrypted
-                    token storage are handled by the backend. Manual URLs are an
-                    advanced compatibility override.
+                    {t(
+                      "PKCE, resource indicators, metadata discovery, and encrypted token storage are handled by the backend. Manual URLs are an advanced compatibility override."
+                    )}
                   </FieldDescription>
                 </div>
               )}
@@ -1182,8 +1221,8 @@ export function MCPView({
                 <Field>
                   <FieldLabel htmlFor="mcp-credential">
                     {form.authType === "oauth"
-                      ? "Access token (optional)"
-                      : "Bearer token"}
+                      ? t("Access token (optional)")
+                      : t("Bearer token")}
                   </FieldLabel>
                   <Input
                     id="mcp-credential"
@@ -1194,24 +1233,28 @@ export function MCPView({
                     }
                     placeholder={
                       form.authType === "oauth"
-                        ? "Leave blank to authorize after saving"
-                        : "Paste the token from your MCP provider"
+                        ? t("Leave blank to authorize after saving")
+                        : t("Paste the token from your MCP provider")
                     }
                     autoComplete="off"
                   />
                   <FieldDescription>
                     {form.authType === "oauth"
                       ? editingServer
-                        ? "Leave blank to keep the stored token, or authorize again after saving."
-                        : "Leave blank to authorize after saving."
+                        ? t(
+                            "Leave blank to keep the stored token, or authorize again after saving."
+                          )
+                        : t("Leave blank to authorize after saving.")
                       : editingServer
-                        ? "Leave blank to keep the stored token."
-                        : "Stored encrypted by JustAI."}
+                        ? t("Leave blank to keep the stored token.")
+                        : t("Stored encrypted by JustAI.")}
                   </FieldDescription>
                 </Field>
               )}
               <Field>
-                <FieldLabel htmlFor="mcp-tools">Allowlisted tools</FieldLabel>
+                <FieldLabel htmlFor="mcp-tools">
+                  {t("Allowlisted tools")}
+                </FieldLabel>
                 <Input
                   id="mcp-tools"
                   value={form.allowedTools}
@@ -1221,19 +1264,20 @@ export function MCPView({
                   placeholder="search, create_issue"
                 />
                 <FieldDescription>
-                  Comma-separated. Leave empty to inspect all discovered tools,
-                  subject to approval policy.
+                  {t(
+                    "Comma-separated. Leave empty to inspect all discovered tools, subject to approval policy."
+                  )}
                 </FieldDescription>
               </Field>
               <Field orientation="horizontal">
                 <div className="min-w-0 flex-1">
                   <FieldLabel htmlFor="mcp-auto-discover">
-                    Available automatically
+                    {t("Available automatically")}
                   </FieldLabel>
                   <FieldDescription>
-                    Let JustAI surface a small set of relevant tools without
-                    adding this server to every chat. Automatically selected
-                    calls always require approval.
+                    {t(
+                      "Let JustAI surface a small set of relevant tools without adding this server to every chat. Automatically selected calls always require approval."
+                    )}
                   </FieldDescription>
                 </div>
                 <Switch
@@ -1249,7 +1293,7 @@ export function MCPView({
                 variant="outline"
                 onClick={() => setOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? (
@@ -1259,10 +1303,10 @@ export function MCPView({
                       data-icon="inline-start"
                       aria-hidden="true"
                     />
-                    Saving…
+                    {t("Saving…")}
                   </>
                 ) : editingServer ? (
-                  "Save changes"
+                  t("Save changes")
                 ) : (
                   "Save server"
                 )}

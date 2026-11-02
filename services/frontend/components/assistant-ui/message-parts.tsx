@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { TranscriptionCard } from "./transcription-card"
 import { MentionMessageText } from "./composer-mention"
 import { MCPActionCard } from "./mcp-action-card"
@@ -59,6 +60,8 @@ type RetrievalStatus = {
 }
 
 function RetrievalStatusPart({ data }: { data: unknown }) {
+  const { t } = useTranslations()
+
   const value = (data ?? {}) as RetrievalStatus
   const status = value.status ?? "started"
   // Keep recognizing the previous mode name so messages persisted before the
@@ -72,10 +75,10 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
 
   const label =
     status === "failed"
-      ? "Knowledge search unavailable"
+      ? t("Knowledge search unavailable")
       : deepContext
-        ? "Analyzing deeper context…"
-        : "Searching context…"
+        ? t("Analyzing deeper context…")
+        : t("Searching context…")
 
   return (
     <div
@@ -83,7 +86,9 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
         "my-2 inline-flex max-w-full items-center gap-2 rounded-full border border-transparent bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground",
         status === "failed" && "border-destructive/30 text-destructive"
       )}
-      title={value.query ? `Query: ${value.query}` : undefined}
+      title={
+        value.query ? t("Query: {value0}", { value0: value.query }) : undefined
+      }
     >
       {status === "started" ? (
         <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
@@ -97,11 +102,13 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
 }
 
 function AssistantErrorPart({ data }: { data: unknown }) {
+  const { t } = useTranslations()
+
   const value = data as { message?: unknown } | null
   const message =
     value && typeof value.message === "string"
       ? value.message
-      : "The assistant could not complete this response."
+      : t("The assistant could not complete this response.")
 
   return (
     <Alert className="my-2 max-w-4xl" variant="destructive">
@@ -123,6 +130,8 @@ type AgentRunPartData = {
 }
 
 function AgentRunPart({ data }: { data: unknown }) {
+  const { t, locale } = useTranslations()
+
   const value = (data ?? {}) as AgentRunPartData
   const runId = typeof value.runId === "string" ? value.runId : ""
   const status = typeof value.status === "string" ? value.status : "running"
@@ -172,13 +181,15 @@ function AgentRunPart({ data }: { data: unknown }) {
         <div className="min-w-0 flex-1">
           <p className="font-medium text-foreground">
             {status === "waiting_approval"
-              ? "Agent action needs approval"
-              : "Agent run"}
+              ? t("Agent action needs approval")
+              : t("Agent run")}
           </p>
           <p className="mt-0.5 text-muted-foreground">
             {status.replaceAll("_", " ")}
             {typeof value.expiresAt === "string"
-              ? ` · expires ${new Date(value.expiresAt).toLocaleString()}`
+              ? t(" · expires {value0}", {
+                  value0: new Date(value.expiresAt).toLocaleString(locale),
+                })
               : ""}
           </p>
         </div>
@@ -187,7 +198,8 @@ function AgentRunPart({ data }: { data: unknown }) {
             className="inline-flex items-center gap-1 text-primary hover:underline"
             href="/agents?tab=runs"
           >
-            Open run <ExternalLink className="size-3" aria-hidden="true" />
+            {t("Open run")}{" "}
+            <ExternalLink className="size-3" aria-hidden="true" />
           </Link>
         )}
       </div>
@@ -198,7 +210,7 @@ function AgentRunPart({ data }: { data: unknown }) {
       )}
       {argumentHash && (
         <p className="mt-2 text-[10px] break-all text-muted-foreground">
-          Exact action hash: {argumentHash}
+          {t("Exact action hash:")} {argumentHash}
         </p>
       )}
       {approvalId && !decision && status === "waiting_approval" && (
@@ -210,7 +222,7 @@ function AgentRunPart({ data }: { data: unknown }) {
             type="button"
             variant="outline"
           >
-            <X data-icon="inline-start" aria-hidden="true" /> Reject
+            <X data-icon="inline-start" aria-hidden="true" /> {t("Reject")}
           </Button>
           <Button
             disabled={busy}
@@ -219,28 +231,30 @@ function AgentRunPart({ data }: { data: unknown }) {
             type="button"
             variant="default"
           >
-            <Check data-icon="inline-start" aria-hidden="true" /> Approve exact
-            action
+            <Check data-icon="inline-start" aria-hidden="true" />{" "}
+            {t("Approve exact action")}
           </Button>
         </div>
       )}
       {decision && (
         <p className="mt-2 text-primary">
-          {decision === "approved" ? "Approved" : "Rejected"}. The durable run
-          will continue or close accordingly.
+          {decision === "approved" ? t("Approved") : t("Rejected")}
+          {t(". The durable run will continue or close accordingly.")}
         </p>
       )}
-      {error && <p className="mt-2 text-destructive">{error}</p>}
+      {error && <p className="mt-2 text-destructive">{t(error)}</p>}
     </div>
   )
 }
 
 function ReasoningPart({ text }: { text: string }) {
+  const { t } = useTranslations()
+
   return (
     <div className="my-2 rounded-xl bg-card px-3 py-2 text-xs text-muted-foreground">
       <div className="flex items-center gap-2 font-medium text-foreground">
         <Sparkles className="size-3.5" aria-hidden="true" />
-        Thinking
+        {t("Thinking")}
       </div>
       <div className="mt-1 whitespace-pre-wrap opacity-80">{text}</div>
     </div>
@@ -249,7 +263,7 @@ function ReasoningPart({ text }: { text: string }) {
 
 type ToolCallPart = Extract<PartState, { type: "tool-call" }>
 
-const toolLabels: Record<string, string> = {
+const toolLabelsMessages: Record<string, string> = {
   web_search: "Web search",
   browse_url: "Browse URL",
   generate_image: "Generate image",
@@ -293,7 +307,7 @@ function formatMCPToolName(toolName: string) {
 
 function toolLabel(toolName: string, rawToolName?: string) {
   if (rawToolName) return formatMCPToolName(rawToolName)
-  return toolLabels[toolName] ?? formatToolName(toolName)
+  return toolLabelsMessages[toolName] ?? formatToolName(toolName)
 }
 
 function justAIToolMetadata(part: ToolCallPart) {
@@ -389,6 +403,8 @@ function toolCallError(part: ToolCallPart) {
 }
 
 function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
+  const { t } = useTranslations()
+
   const aui = useAui()
   const messageId = useAuiState((state) => state.message.id)
   const messageParts = useAuiState((state) => state.message.parts)
@@ -407,7 +423,7 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
               part.toolName,
               displayMetadata.serverName
             ),
-            message: toolLabel(part.toolName, displayMetadata.toolName),
+            message: t(toolLabel(part.toolName, displayMetadata.toolName)),
             show_category: true,
             tool_call_id: part.toolCallId,
             integration_name: displayMetadata.serverName,
@@ -426,7 +442,7 @@ function ToolActivityGroup({ indices }: { indices: readonly number[] }) {
           },
         ]
       }),
-    [aui, indices, messageParts, threadIsRunning]
+    [aui, indices, messageParts, threadIsRunning, t]
   )
 
   const generatedImages = useMemo(
@@ -544,6 +560,8 @@ function SourceGroup({
   indices: readonly number[]
   suppressAutomatic?: boolean
 }) {
+  const { t } = useTranslations()
+
   const messageParts = useAuiState((state) => state.message.parts)
   const sourceParts = useMemo(
     () =>
@@ -568,9 +586,9 @@ function SourceGroup({
     <details className="my-2 w-full max-w-2xl overflow-hidden rounded-xl bg-muted/40 text-xs">
       <summary className="group flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 font-medium text-foreground [&::-webkit-details-marker]:hidden">
         <Files className="size-3.5 text-muted-foreground" aria-hidden="true" />
-        <span>Sources provided</span>
+        <span>{t("Sources provided")}</span>
         <span className="font-normal text-muted-foreground">
-          · {sourceParts.length} sources
+          · {sourceParts.length} {t("sources")}
         </span>
         <ChevronDown
           className="ml-auto size-3.5 text-muted-foreground transition-transform duration-150 ease-out group-open:rotate-180"
@@ -682,6 +700,8 @@ function renderPart(part: EnrichedPartState, textClassName?: string) {
 }
 
 export function AssistantMessageParts() {
+  const { t } = useTranslations()
+
   const parts = useAuiState((state) => state.message.parts)
   const suppressAutomatic = useAuiState((state) => {
     let mcpOnly = false
@@ -721,7 +741,7 @@ export function AssistantMessageParts() {
               <details className="my-2 rounded-xl bg-muted/40" open>
                 <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
                   <Sparkles className="size-3.5" aria-hidden="true" />
-                  Thinking
+                  {t("Thinking")}
                 </summary>
                 <div className="border-t px-3 py-2">{children}</div>
               </details>
@@ -744,7 +764,7 @@ export function AssistantMessageParts() {
                   className="size-3.5 animate-spin"
                   aria-hidden="true"
                 />
-                Working…
+                {t("Working…")}
               </span>
             )
           }

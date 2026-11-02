@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useState } from "react"
 import {
   Cpu,
@@ -78,50 +79,61 @@ export function SettingsShell({
   resourceErrors = {},
   onRetryResource,
 }: SettingsShellProps) {
+  const { t } = useTranslations()
+
   const activeOrganization =
     organizations.find((item) => item.id === activeOrganizationId) ??
     organizations[0]
-  const visibleTabs = tabs
+  const visibleTabs = tabs.map((tab) => ({ ...tab, label: t(tab.label) }))
   const pageMeta = {
     workspace: {
-      eyebrow: "Workspace summary",
-      title: "Overview",
-      description: "Review activity, connected capacity, and workspace health.",
+      eyebrow: t("Workspace summary"),
+      title: t("Overview"),
+      description: t(
+        "Review activity, connected capacity, and workspace health."
+      ),
     },
     endpoints: {
-      eyebrow: "AI infrastructure",
-      title: "AI models",
-      description:
-        "Configure the model providers and transcription services available here.",
+      eyebrow: t("AI infrastructure"),
+      title: t("AI models"),
+      description: t(
+        "Configure the model providers and transcription services available here."
+      ),
     },
     knowledge: {
-      eyebrow: "Knowledge",
-      title: "Knowledge",
-      description:
-        "Index sources that can be attached to conversations and cited in answers.",
+      eyebrow: t("Knowledge"),
+      title: t("Knowledge"),
+      description: t(
+        "Index sources that can be attached to conversations and cited in answers."
+      ),
     },
     mcp: {
-      eyebrow: "Connected tools",
-      title: "Tools & MCP",
-      description:
-        "Manage the remote tools and integrations available to assistants.",
+      eyebrow: t("Connected tools"),
+      title: t("Tools & MCP"),
+      description: t(
+        "Manage the remote tools and integrations available to assistants."
+      ),
     },
     members: {
-      eyebrow: "Access",
-      title: "Members",
-      description: "Invite people and manage access for the active workspace.",
+      eyebrow: t("Access"),
+      title: t("Members"),
+      description: t(
+        "Invite people and manage access for the active workspace."
+      ),
     },
     privacy: {
-      eyebrow: "Data controls",
-      title: "Data & privacy",
-      description:
-        "Control retention, cleanup, and exports for your workspace data.",
+      eyebrow: t("Data controls"),
+      title: t("Data & privacy"),
+      description: t(
+        "Control retention, cleanup, and exports for your workspace data."
+      ),
     },
     admin: {
-      eyebrow: "Operations",
-      title: "Workspace operations",
-      description:
-        "Set chat defaults and review usage and reliability metrics.",
+      eyebrow: t("Operations"),
+      title: t("Workspace operations"),
+      description: t(
+        "Set chat defaults and review usage and reliability metrics."
+      ),
     },
   } satisfies Record<
     SettingsTab,
@@ -135,24 +147,26 @@ export function SettingsShell({
   const pageAction =
     activeTab === "workspace" ? (
       <Button onClick={() => setWorkspaceCreateRequest((value) => value + 1)}>
-        <Plus data-icon="inline-start" aria-hidden="true" /> New workspace
+        <Plus data-icon="inline-start" aria-hidden="true" />{" "}
+        {t("New workspace")}
       </Button>
     ) : activeTab === "members" &&
       (user.platformAdmin ||
         activeOrganization?.role === "owner" ||
         activeOrganization?.role === "admin") ? (
       <Button onClick={() => setMemberCreateRequest((value) => value + 1)}>
-        <UserPlus data-icon="inline-start" aria-hidden="true" /> Add member
+        <UserPlus data-icon="inline-start" aria-hidden="true" />{" "}
+        {t("Add member")}
       </Button>
     ) : activeTab === "endpoints" ? (
       <Button onClick={() => setEndpointCreateRequest((value) => value + 1)}>
         <Plus data-icon="inline-start" aria-hidden="true" />
-        Add endpoint
+        {t("Add endpoint")}
       </Button>
     ) : activeTab === "mcp" ? (
       <Button onClick={() => setMcpCreateRequest((value) => value + 1)}>
         <Plus data-icon="inline-start" aria-hidden="true" />
-        Add MCP server
+        {t("Add MCP server")}
       </Button>
     ) : null
 
@@ -160,10 +174,15 @@ export function SettingsShell({
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageTitle>Workspace settings</PageTitle>
+          <PageTitle>{t("Workspace settings")}</PageTitle>
           <PageDescription>
-            Configure {activeOrganization?.name ?? "your active workspace"} and
-            everything available to its members.
+            {t(
+              "Configure {workspace} and everything available to its members.",
+              {
+                workspace:
+                  activeOrganization?.name ?? t("your active workspace"),
+              }
+            )}
           </PageDescription>
         </PageHeading>
         {pageAction && <PageActions>{pageAction}</PageActions>}
@@ -172,7 +191,7 @@ export function SettingsShell({
       <SettingsLayout>
         <SettingsNav
           activeId={activeTab}
-          aria-label="Workspace settings sections"
+          aria-label={t("Workspace settings sections")}
           groups={[{ items: visibleTabs }]}
           onSelect={(id) => onTabChange(id as SettingsTab)}
         />

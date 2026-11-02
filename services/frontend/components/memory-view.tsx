@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useState } from "react"
 import { Brain, Plus, Power, Trash2 } from "lucide-react"
 
@@ -27,6 +28,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 export function MemoryView() {
+  const { t, locale } = useTranslations()
+
   const [memories, setMemories] = useState<Memory[]>([])
   const [content, setContent] = useState("")
   const [loading, setLoading] = useState(true)
@@ -154,17 +157,18 @@ export function MemoryView() {
         <div className="flex items-center gap-2">
           <Brain className="size-5 text-primary" />
           <h1 className="text-xl font-semibold tracking-tight">
-            Persistent memory
+            {t("Persistent memory")}
           </h1>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Save stable preferences and facts you want JustAI to use in future
-          chats. You can disable or remove any memory at any time.
+          {t(
+            "Save stable preferences and facts you want JustAI to use in future chats. You can disable or remove any memory at any time."
+          )}
         </p>
         {!loading && memories.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Badge variant="secondary">
-              {enabledCount} of {memories.length} active
+              {enabledCount} {t("of")} {memories.length} active
             </Badge>
             <Button
               disabled={saving || enabledCount === memories.length}
@@ -173,7 +177,7 @@ export function MemoryView() {
               type="button"
               variant="outline"
             >
-              <Power data-icon="inline-start" /> Enable all
+              <Power data-icon="inline-start" /> {t("Enable all")}
             </Button>
             <Button
               disabled={saving || enabledCount === 0}
@@ -182,7 +186,7 @@ export function MemoryView() {
               type="button"
               variant="ghost"
             >
-              Disable all
+              {t("Disable all")}
             </Button>
           </div>
         )}
@@ -190,27 +194,29 @@ export function MemoryView() {
 
       {error && (
         <Alert variant="destructive">
-          <AlertTitle>Memory action failed</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertTitle>{t("Memory action failed")}</AlertTitle>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Add a memory</CardTitle>
+          <CardTitle className="text-base">{t("Add a memory")}</CardTitle>
           <CardDescription>
-            Keep it concise, for example: “I prefer concise answers in German.”
+            {t(
+              "Keep it concise, for example: “I prefer concise answers in German.”"
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form className="flex flex-col gap-3" onSubmit={addMemory}>
             <Field>
-              <FieldLabel htmlFor="new-memory">Memory</FieldLabel>
+              <FieldLabel htmlFor="new-memory">{t("Memory")}</FieldLabel>
               <Textarea
                 id="new-memory"
                 maxLength={2000}
                 onChange={(event) => setContent(event.target.value)}
-                placeholder="What should JustAI remember?"
+                placeholder={t("What should JustAI remember?")}
                 value={content}
               />
               <FieldDescription>
@@ -223,7 +229,7 @@ export function MemoryView() {
               type="submit"
             >
               <Plus data-icon="inline-start" />
-              {saving ? "Saving…" : "Save memory"}
+              {saving ? t("Saving…") : t("Save memory")}
             </Button>
           </form>
         </CardContent>
@@ -231,15 +237,16 @@ export function MemoryView() {
 
       {loading ? (
         <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Loading memories…
+          {t("Loading memories…")}
         </div>
       ) : memories.length === 0 ? (
         <Empty className="min-h-52">
           <EmptyHeader>
-            <EmptyTitle>No memories saved</EmptyTitle>
+            <EmptyTitle>{t("No memories saved")}</EmptyTitle>
             <EmptyDescription>
-              Add a preference or recurring detail and it will be available in
-              later chats.
+              {t(
+                "Add a preference or recurring detail and it will be available in later chats."
+              )}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -255,23 +262,26 @@ export function MemoryView() {
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{memory.source}</Badge>
                     <span className="text-xs text-muted-foreground">
-                      Updated {new Date(memory.updatedAt).toLocaleDateString()}
+                      {t("Updated")}{" "}
+                      {new Date(memory.updatedAt).toLocaleDateString(locale)}
                     </span>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <Switch
-                    aria-label={`${memory.enabled ? "Disable" : "Enable"} memory`}
+                    aria-label={t("{value0} memory", {
+                      value0: memory.enabled ? t("Disable") : t("Enable"),
+                    })}
                     checked={memory.enabled}
                     onCheckedChange={(checked) =>
                       void toggleMemory(memory, checked)
                     }
                   />
                   <Button
-                    aria-label="Delete memory"
+                    aria-label={t("Delete memory")}
                     onClick={() => setRemoveTarget(memory)}
                     size="icon-sm"
-                    title="Delete memory"
+                    title={t("Delete memory")}
                     variant="ghost"
                   >
                     <Trash2 />
@@ -284,9 +294,11 @@ export function MemoryView() {
       )}
       <ConfirmActionDialog
         open={Boolean(removeTarget)}
-        title="Delete this memory?"
-        description="JustAI will stop using this information in future conversations. This cannot be undone."
-        confirmLabel="Delete memory"
+        title={t("Delete this memory?")}
+        description={t(
+          "JustAI will stop using this information in future conversations. This cannot be undone."
+        )}
+        confirmLabel={t("Delete memory")}
         pending={removing}
         onOpenChange={(open) => !open && setRemoveTarget(null)}
         onConfirm={() => {

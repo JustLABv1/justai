@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -158,6 +159,8 @@ export function ChatAttachmentPreview({
   showRemove = false,
   variant = "message",
 }: ChatAttachmentPreviewProps) {
+  const { t } = useTranslations()
+
   const aui = useAui()
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState("")
@@ -250,7 +253,7 @@ export function ChatAttachmentPreview({
             className="pointer-events-none absolute inset-0 size-14 text-[var(--composer-accent)]"
             viewBox="0 0 64 64"
             role="progressbar"
-            aria-label={`Uploading ${attachment.name}`}
+            aria-label={t("Uploading {value0}", { value0: attachment.name })}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={progress}
@@ -269,7 +272,7 @@ export function ChatAttachmentPreview({
         )}
         {showRemove && (
           <AttachmentPrimitive.Remove
-            aria-label={`Remove ${attachment.name}`}
+            aria-label={t("Remove {value0}", { value0: attachment.name })}
             className="absolute -top-2 -right-2 flex size-8 items-center justify-center rounded-full border bg-background text-muted-foreground opacity-0 shadow-sm transition-[opacity,box-shadow] duration-150 group-focus-within/thumbnail:opacity-100 group-hover/thumbnail:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none [@media(hover:none)]:opacity-100"
           >
             <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
@@ -280,12 +283,12 @@ export function ChatAttachmentPreview({
             type="button"
             onClick={() => void retryAttachment()}
             disabled={retrying}
-            aria-label={`Retry ${attachment.name}`}
+            aria-label={t("Retry {value0}", { value0: attachment.name })}
             className="absolute inset-x-1 bottom-1 h-8 rounded-md bg-background/95 px-1 text-[10px] text-destructive shadow-sm hover:bg-background hover:text-destructive"
             size="sm"
             variant="outline"
           >
-            {retrying ? "Retrying…" : "Retry"}
+            {retrying ? t("Retrying…") : t("Retry")}
           </Button>
         )}
         {status === "error" && (
@@ -323,12 +326,12 @@ export function ChatAttachmentPreview({
         <AttachmentActions className="gap-0.5">
           {canRetry && (
             <Button
-              aria-label={`Retry ${attachment.name}`}
+              aria-label={t("Retry {value0}", { value0: attachment.name })}
               className="text-muted-foreground hover:bg-muted hover:text-foreground"
               disabled={retrying}
               onClick={() => void retryAttachment()}
               size="icon-sm"
-              title={`Retry ${attachment.name}`}
+              title={t("Retry {value0}", { value0: attachment.name })}
               type="button"
               variant="ghost"
             >
@@ -340,7 +343,7 @@ export function ChatAttachmentPreview({
             </Button>
           )}
           <AttachmentPrimitive.Remove
-            aria-label={`Remove ${attachment.name}`}
+            aria-label={t("Remove {value0}", { value0: attachment.name })}
             className="size-8 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
           >
             <HugeiconsIcon icon={Cancel01Icon} className="size-4" />

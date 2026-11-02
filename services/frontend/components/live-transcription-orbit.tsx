@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   Activity,
   AudioLines,
@@ -124,6 +125,8 @@ export function LiveTranscriptionOrbit({
   onSetJoinRequest,
   onRenameSpeaker,
 }: LiveTranscriptionOrbitProps) {
+  const { t } = useTranslations()
+
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null)
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<string | null>(
@@ -176,7 +179,7 @@ export function LiveTranscriptionOrbit({
           id: speaker.id,
           name,
           initials: initials(name),
-          role: "Speaker",
+          role: t("Speaker"),
           sourceId: source?.id || "",
           source: source?.name || "Room source",
           device: source?.deviceLabel || "Unknown capture device",
@@ -232,6 +235,7 @@ export function LiveTranscriptionOrbit({
     snapshot.sources,
     snapshot.speakers,
     sourceById,
+    t,
   ])
 
   const transcriptSpeakers = useMemo(() => {
@@ -241,7 +245,7 @@ export function LiveTranscriptionOrbit({
       initials: "·",
       role: "Unassigned",
       sourceId: "",
-      source: "Room audio",
+      source: t("Room audio"),
       device: "",
       location: "",
       lastSpoke: "—",
@@ -252,7 +256,7 @@ export function LiveTranscriptionOrbit({
       status: "quiet",
     }
     return [...mappedSpeakers, unassigned]
-  }, [mappedSpeakers])
+  }, [mappedSpeakers, t])
 
   const activeSpeaker = dominantSourceId
     ? mappedSpeakers.find((speaker) => speaker.sourceId === dominantSourceId) ||
@@ -322,11 +326,11 @@ export function LiveTranscriptionOrbit({
       <header className={orbitStyles.sessionHeader}>
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <span>Live transcription</span>
+            <span>{t("Live transcription")}</span>
             <span>/</span>
             <span className="truncate">
               {snapshot.session.language === "auto"
-                ? "Automatic language"
+                ? t("Automatic language")
                 : snapshot.session.language}
             </span>
           </div>
@@ -335,10 +339,10 @@ export function LiveTranscriptionOrbit({
               {snapshot.session.title}
             </h1>
             <Badge variant={isLive ? "default" : "secondary"}>
-              {loading ? "Syncing" : snapshot.session.status}
+              {loading ? t("Syncing") : snapshot.session.status}
             </Badge>
             <span className="hidden truncate text-[10px] text-muted-foreground sm:inline">
-              Hosted by {user.displayName}
+              {t("Hosted by")} {user.displayName}
             </span>
           </div>
         </div>
@@ -356,37 +360,38 @@ export function LiveTranscriptionOrbit({
             volume={capturing ? level : 0}
           />
           <Badge className="hidden sm:inline-flex" variant="secondary">
-            <Users data-icon="inline-start" /> {snapshot.sources.length} sources
+            <Users data-icon="inline-start" /> {snapshot.sources.length}{" "}
+            {t("sources")}
           </Badge>
           {snapshot.session.status !== "completed" ? (
             <Button
-              aria-label="Share transcription room"
+              aria-label={t("Share transcription room")}
               onClick={onShare}
               size="sm"
               variant="outline"
             >
               <Share2 data-icon="inline-start" />
-              <span className="hidden sm:inline">Share</span>
+              <span className="hidden sm:inline">{t("Share")}</span>
             </Button>
           ) : null}
           {!capturing &&
           canStartCapture &&
           snapshot.session.status !== "completed" ? (
             <Button
-              aria-label="Start audio capture"
+              aria-label={t("Start audio capture")}
               onClick={() => void onStartCapture()}
               size="sm"
             >
               <Mic2 data-icon="inline-start" />
-              <span className="hidden sm:inline">Start audio</span>
+              <span className="hidden sm:inline">{t("Start audio")}</span>
             </Button>
           ) : null}
           {capturing && snapshot.session.status !== "completed" ? (
             <Button
               aria-label={
                 snapshot.session.status === "paused"
-                  ? "Resume listening"
-                  : "Pause listening"
+                  ? t("Resume listening")
+                  : t("Pause listening")
               }
               onClick={() => void onPauseOrResume()}
               size="sm"
@@ -398,19 +403,21 @@ export function LiveTranscriptionOrbit({
                 <X data-icon="inline-start" />
               )}
               <span className="hidden sm:inline">
-                {snapshot.session.status === "paused" ? "Resume" : "Pause"}
+                {snapshot.session.status === "paused"
+                  ? t("Resume")
+                  : t("Pause")}
               </span>
             </Button>
           ) : null}
           {snapshot.session.status !== "completed" ? (
             <Button
-              aria-label="Stop transcription session"
+              aria-label={t("Stop transcription session")}
               onClick={() => void onStopSession()}
               size="sm"
               variant="destructive"
             >
               <Square data-icon="inline-start" />
-              <span className="hidden sm:inline">Stop</span>
+              <span className="hidden sm:inline">{t("Stop")}</span>
             </Button>
           ) : null}
         </div>
@@ -419,36 +426,40 @@ export function LiveTranscriptionOrbit({
       <div className={orbitStyles.productionContent}>
         <div className="flex shrink-0 items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-semibold">Room orbit</p>
+            <p className="text-xs font-semibold">{t("Room orbit")}</p>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              Click a speaker to inspect its source, audio level, and label.
+              {t(
+                "Click a speaker to inspect its source, audio level, and label."
+              )}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Badge variant="outline">
               <ShieldCheck data-icon="inline-start" />{" "}
-              {snapshot.session.recordAudio ? "Recording on" : "Recording off"}
+              {snapshot.session.recordAudio
+                ? t("Recording on")
+                : t("Recording off")}
             </Badge>
             <Badge className="hidden sm:inline-flex" variant="secondary">
               <Activity data-icon="inline-start" /> {snapshot.segments.length}{" "}
-              segments
+              {t("segments")}
             </Badge>
           </div>
         </div>
 
         <div className={orbitStyles.orbitWorkspace}>
           <section
-            aria-label="Speaker orbit"
+            aria-label={t("Speaker orbit")}
             className={orbitStyles.orbitCanvas}
           >
             <div className={orbitStyles.orbitHint}>
               <Badge variant="secondary">
-                <CircleDot data-icon="inline-start" /> Room view
+                <CircleDot data-icon="inline-start" /> {t("Room view")}
               </Badge>
               <span className={orbitStyles.orbitHintText}>
                 {snapshot.speakers.length > 0
-                  ? "Anonymous speaker labels are editable"
-                  : "Sources are ready; labels arrive after diarization"}
+                  ? t("Anonymous speaker labels are editable")
+                  : t("Sources are ready; labels arrive after diarization")}
               </span>
             </div>
             <div aria-hidden="true" className={orbitStyles.orbitTrack} />
@@ -465,13 +476,15 @@ export function LiveTranscriptionOrbit({
             <div className="absolute bottom-5 left-1/2 z-[2] -translate-x-1/2 text-center">
               <p className="text-xs font-medium">
                 {activeSpeaker
-                  ? `${activeSpeaker.source} is dominant`
-                  : "Waiting for audio"}
+                  ? t("{value0} is dominant", { value0: activeSpeaker.source })
+                  : t("Waiting for audio")}
               </p>
               <p className="mt-1 text-[10px] text-muted-foreground">
                 {capturing
-                  ? `${Math.round(level * 100)}% local audio level · source-separated audio`
-                  : "Viewer mode · live room feed"}
+                  ? t("{value0}% local audio level · source-separated audio", {
+                      value0: Math.round(level * 100),
+                    })
+                  : t("Viewer mode · live room feed")}
               </p>
             </div>
           </section>
@@ -484,7 +497,7 @@ export function LiveTranscriptionOrbit({
               <CardHeader className="gap-2 px-4 py-4">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="text-sm">
-                    {selectedSpeaker ? "Selected source" : "Room audio"}
+                    {selectedSpeaker ? t("Selected source") : t("Room audio")}
                   </CardTitle>
                   <Badge
                     variant={
@@ -494,16 +507,16 @@ export function LiveTranscriptionOrbit({
                     }
                   >
                     {selectedSpeaker?.status === "speaking"
-                      ? "Speaking"
+                      ? t("Speaking")
                       : isLive
-                        ? "Listening"
-                        : "Paused"}
+                        ? t("Listening")
+                        : t("Paused")}
                   </Badge>
                 </div>
                 <CardDescription className="text-[11px]">
                   {selectedSpeaker
-                    ? "The selected circle follows this capture source."
-                    : "The orb follows the loudest connected audio source."}
+                    ? t("The selected circle follows this capture source.")
+                    : t("The orb follows the loudest connected audio source.")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3 px-4 pb-4">
@@ -550,7 +563,7 @@ export function LiveTranscriptionOrbit({
                 )}
                 <div className="flex items-center justify-between gap-2 rounded-xl bg-muted/55 px-3 py-2">
                   <span className="text-[11px] text-muted-foreground">
-                    Audio level
+                    {t("Audio level")}
                   </span>
                   <span className="flex items-center gap-2 text-xs font-medium">
                     <SignalBars
@@ -571,7 +584,8 @@ export function LiveTranscriptionOrbit({
                     size="sm"
                     variant="outline"
                   >
-                    <Pencil data-icon="inline-start" /> Edit speaker details
+                    <Pencil data-icon="inline-start" />{" "}
+                    {t("Edit speaker details")}
                   </Button>
                 ) : null}
               </CardContent>
@@ -588,13 +602,15 @@ export function LiveTranscriptionOrbit({
               <Card>
                 <CardHeader className="flex-row items-center justify-between gap-3 px-4 py-4">
                   <div>
-                    <CardTitle className="text-sm">Join requests</CardTitle>
+                    <CardTitle className="text-sm">
+                      {t("Join requests")}
+                    </CardTitle>
                     <CardDescription className="text-[11px]">
-                      Approve another audio source.
+                      {t("Approve another audio source.")}
                     </CardDescription>
                   </div>
                   <Button
-                    aria-label="Refresh join requests"
+                    aria-label={t("Refresh join requests")}
                     onClick={() => void onRefreshJoinRequests()}
                     size="icon-sm"
                     variant="ghost"
@@ -610,11 +626,13 @@ export function LiveTranscriptionOrbit({
                           {request.sourceName}
                         </p>
                         <p className="truncate text-[10px] text-muted-foreground">
-                          {request.deviceLabel || "Unknown device"}
+                          {request.deviceLabel || t("Unknown device")}
                         </p>
                       </div>
                       <Button
-                        aria-label={`Approve ${request.sourceName}`}
+                        aria-label={t("Approve {value0}", {
+                          value0: request.sourceName,
+                        })}
                         onClick={() =>
                           void onSetJoinRequest(request, "approve")
                         }
@@ -624,7 +642,9 @@ export function LiveTranscriptionOrbit({
                         <Check data-icon="inline-start" />
                       </Button>
                       <Button
-                        aria-label={`Deny ${request.sourceName}`}
+                        aria-label={t("Deny {value0}", {
+                          value0: request.sourceName,
+                        })}
                         onClick={() => void onSetJoinRequest(request, "deny")}
                         size="icon-sm"
                         variant="ghost"
@@ -647,19 +667,19 @@ export function LiveTranscriptionOrbit({
             <Card className="shadow-none">
               <CardHeader className="gap-1 px-4 py-4">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Gauge /> Room health
+                  <Gauge /> {t("Room health")}
                 </CardTitle>
                 <CardDescription className="text-[11px]">
-                  Live pipeline diagnostics.
+                  {t("Live pipeline diagnostics.")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-2 px-4 pb-4">
                 <HealthMetric
-                  label="Sources"
+                  label={t("Sources")}
                   value={String(snapshot.sources.length)}
                 />
                 <HealthMetric
-                  label="Confidence"
+                  label={t("Confidence")}
                   value={averageConfidence(snapshot.segments)}
                 />
               </CardContent>
@@ -673,7 +693,7 @@ export function LiveTranscriptionOrbit({
           open={transcriptOpen}
           speakers={transcriptSpeakers}
           segmentCount={snapshot.segments.length}
-          label="Live transcription"
+          label={t("Live transcription")}
           transcript={transcript}
         />
       </div>
@@ -699,20 +719,22 @@ function ProductionSourceSummary({
   activeSourceId: string | null
   onSourceChange: (sourceId: string) => void
 }) {
+  const { t } = useTranslations()
+
   return (
     <Card className="shadow-none">
       <CardHeader className="gap-1 px-4 py-4">
         <CardTitle className="flex items-center gap-2 text-sm">
-          <Mic2 /> Capture sources
+          <Mic2 /> {t("Capture sources")}
         </CardTitle>
         <CardDescription className="text-[11px]">
-          Each audio source stays source-separated.
+          {t("Each audio source stays source-separated.")}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-1 px-3 pb-3">
         {sources.length === 0 ? (
           <p className="px-2 py-2 text-xs text-muted-foreground">
-            No audio sources have joined yet.
+            {t("No audio sources have joined yet.")}
           </p>
         ) : (
           sources.map((source) => {
@@ -760,12 +782,14 @@ function RecordingCard({
   recordings: TranscriptionRecording[]
   sources: TranscriptionSource[]
 }) {
+  const { t, locale } = useTranslations()
+
   return (
     <Card>
       <CardHeader className="gap-1 px-4 py-4">
-        <CardTitle className="text-sm">Audio tracks</CardTitle>
+        <CardTitle className="text-sm">{t("Audio tracks")}</CardTitle>
         <CardDescription className="text-[11px]">
-          Source recordings remain available until retention expires.
+          {t("Source recordings remain available until retention expires.")}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 px-4 pb-4">
@@ -777,11 +801,15 @@ function RecordingCard({
             <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
               <span className="truncate">
                 {sources.find((source) => source.id === recording.sourceId)
-                  ?.name || "Source"}
+                  ?.name || t("Source")}
               </span>
               <span className="shrink-0">
                 {recording.expiresAt
-                  ? `Until ${new Date(recording.expiresAt).toLocaleDateString()}`
+                  ? t("Until {value0}", {
+                      value0: new Date(recording.expiresAt).toLocaleDateString(
+                        locale
+                      ),
+                    })
                   : ""}
               </span>
             </div>
@@ -794,6 +822,8 @@ function RecordingCard({
 }
 
 function RecordingAudio({ recording }: { recording: TranscriptionRecording }) {
+  const { t } = useTranslations()
+
   const [sourceURL, setSourceURL] = useState("")
   const [error, setError] = useState("")
 
@@ -821,9 +851,11 @@ function RecordingAudio({ recording }: { recording: TranscriptionRecording }) {
     }
   }, [recording.id, recording.completedAt])
 
-  if (error) return <p className="text-xs text-destructive">{error}</p>
+  if (error) return <p className="text-xs text-destructive">{t(error)}</p>
   if (!sourceURL)
-    return <p className="text-xs text-muted-foreground">Loading audio…</p>
+    return (
+      <p className="text-xs text-muted-foreground">{t("Loading audio…")}</p>
+    )
   return <audio controls preload="none" src={sourceURL} />
 }
 

@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useState } from "react"
 import { ExternalLink, Globe2, Loader2, Plus, Search } from "lucide-react"
 
@@ -28,6 +29,8 @@ export function WebSearchDialog({
   onEnsureConversation,
   onAttached,
 }: WebSearchDialogProps) {
+  const { t } = useTranslations()
+
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [urlInput, setURLInput] = useState("")
@@ -116,9 +119,9 @@ export function WebSearchDialog({
       <DialogTrigger
         render={
           <Button
-            aria-label="Search the web"
+            aria-label={t("Search the web")}
             size="icon-sm"
-            title="Search the web"
+            title={t("Search the web")}
             variant="ghost"
           />
         }
@@ -127,17 +130,18 @@ export function WebSearchDialog({
       </DialogTrigger>
       <DialogContent className="flex max-h-[min(44rem,calc(100vh-2rem))] flex-col sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Web search and browsing</DialogTitle>
+          <DialogTitle>{t("Web search and browsing")}</DialogTitle>
           <DialogDescription>
-            Search the public web, preview a page, or attach it as durable chat
-            context.
+            {t(
+              "Search the public web, preview a page, or attach it as durable chat context."
+            )}
           </DialogDescription>
         </DialogHeader>
 
         {error && (
           <Alert aria-live="polite" role="alert" variant="destructive">
-            <AlertTitle>Web action failed</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertTitle>{t("Web action failed")}</AlertTitle>
+            <AlertDescription>{t(error)}</AlertDescription>
           </Alert>
         )}
 
@@ -149,16 +153,16 @@ export function WebSearchDialog({
           }}
         >
           <Input
-            aria-label="Web search query"
+            aria-label={t("Web search query")}
             autoFocus
             id="web-search-query"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search the web…"
+            placeholder={t("Search the web…")}
             value={query}
           />
           <Button disabled={searching || !query.trim()} type="submit">
             {searching ? <Loader2 className="animate-spin" /> : <Search />}
-            Search
+            {t("Search")}
           </Button>
         </form>
         <form
@@ -169,10 +173,12 @@ export function WebSearchDialog({
           }}
         >
           <Input
-            aria-label="URL to browse"
+            aria-label={t("URL to browse")}
             id="web-browse-url"
             onChange={(event) => setURLInput(event.target.value)}
-            placeholder="Or browse a URL directly, e.g. https://example.com"
+            placeholder={t(
+              "Or browse a URL directly, e.g. https://example.com"
+            )}
             type="url"
             value={urlInput}
           />
@@ -182,7 +188,7 @@ export function WebSearchDialog({
             variant="outline"
           >
             {previewing ? <Loader2 className="animate-spin" /> : <Globe2 />}
-            Browse URL
+            {t("Browse URL")}
           </Button>
         </form>
 
@@ -191,7 +197,7 @@ export function WebSearchDialog({
             <div className="flex flex-col gap-1 p-2">
               {results.length === 0 ? (
                 <p className="p-6 text-center text-sm text-muted-foreground">
-                  Search results will appear here.
+                  {t("Search results will appear here.")}
                 </p>
               ) : (
                 results.map((result) => (
@@ -218,11 +224,13 @@ export function WebSearchDialog({
                       </div>
                       <div className="flex shrink-0 flex-col gap-1">
                         <Button
-                          aria-label={`Preview ${result.title}`}
+                          aria-label={t("Preview {value0}", {
+                            value0: result.title,
+                          })}
                           disabled={previewing}
                           onClick={() => void browse(result)}
                           size="icon-sm"
-                          title="Preview page"
+                          title={t("Preview page")}
                           type="button"
                           variant="ghost"
                         >
@@ -233,11 +241,13 @@ export function WebSearchDialog({
                           )}
                         </Button>
                         <Button
-                          aria-label={`Attach ${result.title} to chat`}
+                          aria-label={t("Attach {value0} to chat", {
+                            value0: result.title,
+                          })}
                           disabled={attaching === result.url}
                           onClick={() => void attach(result)}
                           size="icon-sm"
-                          title="Attach to chat"
+                          title={t("Attach to chat")}
                           type="button"
                           variant="ghost"
                         >
@@ -261,13 +271,13 @@ export function WebSearchDialog({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-muted-foreground">
-                      Page preview
+                      {t("Page preview")}
                     </p>
                     <p className="mt-1 text-xs break-all">{preview.url}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <Button
-                      aria-label="Attach preview to chat"
+                      aria-label={t("Attach preview to chat")}
                       disabled={attaching === preview.url}
                       onClick={() =>
                         void attach({
@@ -277,7 +287,7 @@ export function WebSearchDialog({
                         })
                       }
                       size="icon-sm"
-                      title="Attach page to chat"
+                      title={t("Attach page to chat")}
                       type="button"
                       variant="ghost"
                     >
@@ -288,7 +298,7 @@ export function WebSearchDialog({
                       )}
                     </Button>
                     <Button
-                      aria-label="Open preview in a new tab"
+                      aria-label={t("Open preview in a new tab")}
                       onClick={() =>
                         window.open(
                           preview.url,
@@ -297,7 +307,7 @@ export function WebSearchDialog({
                         )
                       }
                       size="icon-sm"
-                      title="Open page"
+                      title={t("Open page")}
                       type="button"
                       variant="ghost"
                     >
@@ -311,7 +321,9 @@ export function WebSearchDialog({
               </div>
             ) : (
               <p className="p-6 text-center text-sm text-muted-foreground">
-                Select Preview on a result to read a safe text extraction.
+                {t(
+                  "Select Preview on a result to read a safe text extraction."
+                )}
               </p>
             )}
           </div>
@@ -323,7 +335,7 @@ export function WebSearchDialog({
             type="button"
             variant="outline"
           >
-            Done
+            {t("Done")}
           </Button>
         </DialogFooter>
       </DialogContent>

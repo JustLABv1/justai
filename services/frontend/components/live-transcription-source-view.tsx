@@ -1,6 +1,10 @@
 "use client"
 
 import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
+import {
   Activity,
   AudioLines,
   Bot,
@@ -61,7 +65,7 @@ type CaptureModeConfig = {
   transportLabel: string
 }
 
-const captureModeConfig: Record<
+const captureModeConfigMessages: Record<
   LiveTranscriptionCaptureViewMode,
   CaptureModeConfig
 > = {
@@ -127,6 +131,10 @@ export function LiveTranscriptionSourceView({
   onPauseOrResume,
   onStopSession,
 }: LiveTranscriptionSourceViewProps) {
+  const captureModeConfig = useTranslatedConfig(captureModeConfigMessages)
+
+  const { t } = useTranslations()
+
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const config = captureModeConfig[mode]
   const source = useMemo(
@@ -135,7 +143,8 @@ export function LiveTranscriptionSourceView({
   )
   const signalLevel = clamp(Math.max(level, source?.signalLevel ?? 0))
   const signalValue = Math.round(signalLevel * 100)
-  const sourceStatus = getCaptureStatus(snapshot, source, mode)
+  const rawSourceStatus = getCaptureStatus(snapshot, source, mode)
+  const sourceStatus = { ...rawSourceStatus, label: t(rawSourceStatus.label) }
   const sourceName = source?.name || config.sourceFallback
   const isLive = snapshot.session.status === "live"
   const sourceConnected = source?.status === "connected"
@@ -154,11 +163,11 @@ export function LiveTranscriptionSourceView({
       <header className={orbitStyles.sessionHeader}>
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <span>Live transcription</span>
+            <span>{t("Live transcription")}</span>
             <span>/</span>
             <span className="truncate">
               {snapshot.session.language === "auto"
-                ? "Automatic language"
+                ? t("Automatic language")
                 : snapshot.session.language}
             </span>
           </div>
@@ -167,10 +176,10 @@ export function LiveTranscriptionSourceView({
               {snapshot.session.title}
             </h1>
             <Badge variant={isLive ? "default" : "secondary"}>
-              {loading ? "Syncing" : snapshot.session.status}
+              {loading ? t("Syncing") : snapshot.session.status}
             </Badge>
             <span className="hidden truncate text-[10px] text-muted-foreground sm:inline">
-              Hosted by {user.displayName}
+              {t("Hosted by")} {user.displayName}
             </span>
           </div>
         </div>
@@ -192,13 +201,13 @@ export function LiveTranscriptionSourceView({
           </Badge>
           {snapshot.session.status !== "completed" ? (
             <Button
-              aria-label="Share transcription room"
+              aria-label={t("Share transcription room")}
               onClick={onShare}
               size="sm"
               variant="outline"
             >
               <Share2 data-icon="inline-start" />
-              <span className="hidden sm:inline">Share</span>
+              <span className="hidden sm:inline">{t("Share")}</span>
             </Button>
           ) : null}
           {!capturing &&
@@ -207,12 +216,12 @@ export function LiveTranscriptionSourceView({
           snapshot.session.status !== "paused" &&
           snapshot.session.status !== "completed" ? (
             <Button
-              aria-label="Start audio capture"
+              aria-label={t("Start audio capture")}
               onClick={() => void onStartCapture()}
               size="sm"
             >
               <AudioLines data-icon="inline-start" />
-              <span className="hidden sm:inline">Start audio</span>
+              <span className="hidden sm:inline">{t("Start audio")}</span>
             </Button>
           ) : null}
           {(capturing ||
@@ -222,8 +231,8 @@ export function LiveTranscriptionSourceView({
             <Button
               aria-label={
                 snapshot.session.status === "paused"
-                  ? "Resume listening"
-                  : "Pause listening"
+                  ? t("Resume listening")
+                  : t("Pause listening")
               }
               onClick={() => void onPauseOrResume()}
               size="sm"
@@ -235,19 +244,21 @@ export function LiveTranscriptionSourceView({
                 <Pause data-icon="inline-start" />
               )}
               <span className="hidden sm:inline">
-                {snapshot.session.status === "paused" ? "Resume" : "Pause"}
+                {snapshot.session.status === "paused"
+                  ? t("Resume")
+                  : t("Pause")}
               </span>
             </Button>
           ) : null}
           {snapshot.session.status !== "completed" ? (
             <Button
-              aria-label="Stop transcription session"
+              aria-label={t("Stop transcription session")}
               onClick={() => void onStopSession()}
               size="sm"
               variant="destructive"
             >
               <Square data-icon="inline-start" />
-              <span className="hidden sm:inline">Stop</span>
+              <span className="hidden sm:inline">{t("Stop")}</span>
             </Button>
           ) : null}
         </div>
@@ -264,18 +275,20 @@ export function LiveTranscriptionSourceView({
           <div className="flex shrink-0 items-center gap-2">
             <Badge variant="outline">
               <ShieldCheck data-icon="inline-start" />{" "}
-              {snapshot.session.recordAudio ? "Recording on" : "Recording off"}
+              {snapshot.session.recordAudio
+                ? t("Recording on")
+                : t("Recording off")}
             </Badge>
             <Badge className="hidden sm:inline-flex" variant="secondary">
               <Activity data-icon="inline-start" /> {snapshot.segments.length}{" "}
-              segments
+              {t("segments")}
             </Badge>
           </div>
         </div>
 
         <div className={orbitStyles.orbitWorkspace}>
           <section
-            aria-label={`${config.eyebrow} source view`}
+            aria-label={t("{value0} source view", { value0: config.eyebrow })}
             className={orbitStyles.captureStage}
             data-capture-state={sourceStatus.key}
             style={{ "--capture-accent": sourceAccent(mode) } as CSSProperties}
@@ -313,7 +326,7 @@ export function LiveTranscriptionSourceView({
                   <div className={orbitStyles.captureStageVisualCore}>
                     <Wifi aria-hidden="true" />
                     <strong>{signalValue}%</strong>
-                    <span>audio level</span>
+                    <span>{t("audio level")}</span>
                   </div>
                   <CaptureWaveform
                     active={sourceConnected && isLive}
@@ -325,21 +338,21 @@ export function LiveTranscriptionSourceView({
               <div className={orbitStyles.captureStageFooter}>
                 <CaptureStageFact
                   icon={Icon}
-                  label="Source"
+                  label={t("Source")}
                   value={sourceName}
                 />
                 <CaptureStageFact
                   icon={Link2}
-                  label="Path"
+                  label={t("Path")}
                   value={getTransportValue(mode, source)}
                 />
                 <CaptureStageFact
                   icon={Radio}
-                  label="Transcript"
+                  label={t("Transcript")}
                   value={
                     isLive
                       ? "Live"
-                      : formatSessionStatus(snapshot.session.status)
+                      : t(formatSessionStatus(snapshot.session.status))
                   }
                 />
               </div>
@@ -368,16 +381,19 @@ export function LiveTranscriptionSourceView({
             <Card className="shadow-none">
               <CardHeader className="gap-1 px-4 py-4">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Gauge /> Pipeline health
+                  <Gauge /> {t("Pipeline health")}
                 </CardTitle>
                 <CardDescription className="text-[11px]">
-                  Live source diagnostics.
+                  {t("Live source diagnostics.")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-2 px-4 pb-4">
-                <HealthMetric label="Audio level" value={`${signalValue}%`} />
                 <HealthMetric
-                  label="Confidence"
+                  label={t("Audio level")}
+                  value={`${signalValue}%`}
+                />
+                <HealthMetric
+                  label={t("Confidence")}
                   value={averageConfidence(snapshot.segments)}
                 />
               </CardContent>
@@ -389,8 +405,8 @@ export function LiveTranscriptionSourceView({
           key={snapshot.session.id}
           label={
             mode === "meeting-bot"
-              ? "Meeting transcription"
-              : "Live transcription"
+              ? t("Meeting transcription")
+              : t("Live transcription")
           }
           onOpenChange={setTranscriptOpen}
           open={transcriptOpen}
@@ -416,6 +432,10 @@ function CaptureSignalCard({
   sourceName: string
   sourceStatus: CaptureStatus
 }) {
+  const captureModeConfig = useTranslatedConfig(captureModeConfigMessages)
+
+  const { t } = useTranslations()
+
   const Icon = captureModeConfig[mode].icon
   return (
     <Card
@@ -424,7 +444,7 @@ function CaptureSignalCard({
     >
       <CardHeader className="gap-2 px-4 py-4">
         <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-sm">Audio level</CardTitle>
+          <CardTitle className="text-sm">{t("Audio level")}</CardTitle>
           <Badge variant={sourceStatus.variant}>{sourceStatus.label}</Badge>
         </div>
         <CardDescription className="text-[11px]">
@@ -439,12 +459,14 @@ function CaptureSignalCard({
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{sourceName}</p>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {getSourceSubtitle(mode, source)}
+              {t(getSourceSubtitle(mode, source))}
             </p>
           </div>
         </div>
         <div className="flex items-center justify-between gap-2 rounded-xl bg-muted/55 px-3 py-2">
-          <span className="text-[11px] text-muted-foreground">Audio level</span>
+          <span className="text-[11px] text-muted-foreground">
+            {t("Audio level")}
+          </span>
           <span className="flex items-center gap-2 text-xs font-medium">
             <SignalBars accent={sourceAccent(mode)} value={signalValue} />
             {signalValue}%
@@ -466,29 +488,39 @@ function CaptureConnectionCard({
   source?: TranscriptionSourceLike
   sourceConnected: boolean
 }) {
+  const captureModeConfig = useTranslatedConfig(captureModeConfigMessages)
+
+  const { t, locale } = useTranslations()
+
   const config = captureModeConfig[mode]
   const transportStatus = source?.transportStatus || source?.status || "pending"
   const rows =
     mode === "browser-system"
       ? [
-          ["Capture permission", sourceConnected ? "Granted" : "Waiting"],
-          ["Audio track", sourceConnected ? "Receiving" : "Not receiving"],
-          ["Transcription", formatSessionStatus(sessionStatus)],
+          ["Capture permission", sourceConnected ? t("Granted") : t("Waiting")],
+          [
+            "Audio track",
+            sourceConnected ? t("Receiving") : t("Not receiving"),
+          ],
+          [t("Transcription"), t(formatSessionStatus(sessionStatus))],
         ]
       : mode === "stream"
         ? [
-            [config.transportLabel, formatTransportStatus(transportStatus)],
+            [config.transportLabel, t(formatTransportStatus(transportStatus))],
             ["Protocol", source?.protocol || "Remote media"],
             source?.scheduledStartAt
-              ? ["Starts", new Date(source.scheduledStartAt).toLocaleString()]
+              ? [
+                  "Starts",
+                  new Date(source.scheduledStartAt).toLocaleString(locale),
+                ]
               : ["Reconnects", String(source?.reconnectCount ?? 0)],
           ]
         : [
-            ["Adapter", formatTransportStatus(transportStatus)],
-            ["Platform", formatPlatform(source?.platform)],
+            ["Adapter", t(formatTransportStatus(transportStatus))],
+            [t("Platform"), formatPlatform(source?.platform)],
             [
               "Ingress",
-              sourceConnected ? "Receiving audio" : "Waiting for bot",
+              sourceConnected ? t("Receiving audio") : t("Waiting for bot"),
             ],
           ]
 
@@ -496,12 +528,12 @@ function CaptureConnectionCard({
     <Card className="shadow-none">
       <CardHeader className="gap-1 px-4 py-4">
         <CardTitle className="flex items-center gap-2 text-sm">
-          <Link2 /> Connection path
+          <Link2 /> {t("Connection path")}
         </CardTitle>
         <CardDescription className="text-[11px]">
           {mode === "browser-system"
-            ? "Audio stays in the browser capture session."
-            : "The source transport stays separate from the transcript."}
+            ? t("Audio stays in the browser capture session.")
+            : t("The source transport stays separate from the transcript.")}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-2 px-4 pb-4">

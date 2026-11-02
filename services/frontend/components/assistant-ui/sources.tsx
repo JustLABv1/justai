@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { Database, ExternalLink, FileText, ShieldCheck } from "lucide-react"
 import {
   useAui,
@@ -10,6 +11,8 @@ import {
 import { Button } from "@/components/ui/button"
 
 export const AssistantSource: SourceMessagePartComponent = (part) => {
+  const { t } = useTranslations()
+
   const aui = useAui()
   const messageId = useAuiState((state) => state.message.id)
   const metadata =
@@ -27,12 +30,15 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
     typeof metadata?.chunkIndex === "number" ? metadata.chunkIndex : undefined
   const quoteText = snippet || part.title || part.id
   const isExternal = Boolean(part.url)
-  const provenance = isExternal ? "External source" : "Workspace source"
-  const trustLabel = contextOrigin === "selected"
-    ? "Selected source"
-    : contextOrigin === "automatic"
-      ? "Found automatically"
-      : isExternal ? "Linked source" : "Source provided to model"
+  const provenance = isExternal ? t("External source") : t("Workspace source")
+  const trustLabel =
+    contextOrigin === "selected"
+      ? t("Selected source")
+      : contextOrigin === "automatic"
+        ? t("Found automatically")
+        : isExternal
+          ? t("Linked source")
+          : t("Source provided to model")
 
   return (
     <details className="my-2 max-w-xl rounded-xl bg-card px-2.5 py-1.5 text-xs text-card-foreground">
@@ -41,7 +47,7 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
           className="size-3.5 text-muted-foreground"
           aria-hidden="true"
         />
-        <span className="truncate">{part.title ?? "Source"}</span>
+        <span className="truncate">{part.title ?? t("Source")}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] font-normal text-muted-foreground">
           <ShieldCheck className="size-3 text-primary" aria-hidden="true" />
           {trustLabel}
@@ -66,9 +72,21 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
             {part.url}
           </a>
         )}
-        {!part.url && <p>Source ID: {part.id}</p>}
-        {locator && <p>Location: {locator}</p>}
-        {chunkIndex !== undefined && <p>Chunk {chunkIndex + 1}</p>}
+        {!part.url && (
+          <p>
+            {t("Source ID:")} {part.id}
+          </p>
+        )}
+        {locator && (
+          <p>
+            {t("Location:")} {locator}
+          </p>
+        )}
+        {chunkIndex !== undefined && (
+          <p>
+            {t("Chunk")} {chunkIndex + 1}
+          </p>
+        )}
         {snippet && <p className="max-w-md">{snippet}</p>}
         <Button
           className="mt-1"
@@ -82,7 +100,7 @@ export const AssistantSource: SourceMessagePartComponent = (part) => {
           type="button"
           variant="outline"
         >
-          Ask about this source
+          {t("Ask about this source")}
         </Button>
       </div>
     </details>

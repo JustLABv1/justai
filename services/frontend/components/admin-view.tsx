@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useMemo, useState } from "react"
 import { BarChart3, Check, LoaderCircle, ShieldCheck } from "lucide-react"
 
@@ -44,6 +45,8 @@ export function AdminView({
   endpoints,
   mcpServers,
 }: AdminViewProps) {
+  const { t } = useTranslations()
+
   const canManage =
     platformAdmin ||
     organizationRole === "owner" ||
@@ -88,12 +91,12 @@ export function AdminView({
   )
   const analyticsRangeLabel =
     analyticsDays === 7
-      ? "Last 7 days"
+      ? t("Last 7 days")
       : analyticsDays === 30
-        ? "Last 30 days"
+        ? t("Last 30 days")
         : analyticsDays === 90
-          ? "Last 90 days"
-          : "Last year"
+          ? t("Last 90 days")
+          : t("Last year")
 
   useEffect(() => {
     if (!canManage || (!organizationId && !platformAdmin)) {
@@ -191,11 +194,12 @@ export function AdminView({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <ShieldCheck /> Workspace operations
+            <ShieldCheck /> {t("Workspace operations")}
           </CardTitle>
           <CardDescription>
-            Organization owners and administrators can manage defaults and
-            analytics.
+            {t(
+              "Organization owners and administrators can manage defaults and analytics."
+            )}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -205,8 +209,8 @@ export function AdminView({
   if (loading) {
     return (
       <div className="flex min-h-56 items-center justify-center text-sm text-muted-foreground">
-        <LoaderCircle className="mr-2 size-4 animate-spin" /> Loading workspace
-        operations…
+        <LoaderCircle className="mr-2 size-4 animate-spin" />{" "}
+        {t("Loading workspace operations…")}
       </div>
     )
   }
@@ -215,23 +219,23 @@ export function AdminView({
     <div className="mx-auto w-full max-w-6xl space-y-5">
       {notice && (
         <Alert>
-          <AlertTitle>Operations update</AlertTitle>
-          <AlertDescription>{notice}</AlertDescription>
+          <AlertTitle>{t("Operations update")}</AlertTitle>
+          <AlertDescription>{t(notice)}</AlertDescription>
         </Alert>
       )}
 
       <Card size="sm" className="gap-0">
         <CardHeader className="border-b pb-4">
-          <CardTitle>New chat defaults</CardTitle>
+          <CardTitle>{t("New chat defaults")}</CardTitle>
           <CardDescription>
-            These choices are applied when a new conversation is created.
+            {t("These choices are applied when a new conversation is created.")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5 pt-4">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-xl bg-muted/40 p-4">
               <label className="block space-y-2 text-sm font-medium">
-                <span className="block">Default chat endpoint</span>
+                <span className="block">{t("Default chat endpoint")}</span>
                 <Select
                   value={defaults.endpointId ?? "none"}
                   onValueChange={(value) =>
@@ -242,13 +246,15 @@ export function AdminView({
                   }
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choose an endpoint" />
+                    <SelectValue placeholder={t("Choose an endpoint")} />
                   </SelectTrigger>
                   <SelectContent
                     align="start"
                     className="max-w-[calc(100vw-2rem)] min-w-[min(30rem,calc(100vw-2rem))]"
                   >
-                    <SelectItem value="none">Use routing precedence</SelectItem>
+                    <SelectItem value="none">
+                      {t("Use routing precedence")}
+                    </SelectItem>
                     {enabledChatEndpoints.map((endpoint) => (
                       <SelectItem key={endpoint.id} value={endpoint.id}>
                         {endpoint.name} ·{" "}
@@ -257,7 +263,7 @@ export function AdminView({
                     ))}
                     {enabledChatEndpoints.length === 0 && (
                       <SelectItem value="no-endpoints" disabled>
-                        No enabled chat endpoints configured
+                        {t("No enabled chat endpoints configured")}
                       </SelectItem>
                     )}
                   </SelectContent>
@@ -265,11 +271,13 @@ export function AdminView({
               </label>
             </div>
             <div className="rounded-xl bg-muted/40 p-4">
-              <span className="text-sm font-medium">Default MCP servers</span>
+              <span className="text-sm font-medium">
+                {t("Default MCP servers")}
+              </span>
               <div className="mt-2 grid gap-1 rounded-xl bg-muted/50 p-1">
                 {enabledServers.length === 0 && (
                   <p className="text-xs text-muted-foreground">
-                    No enabled MCP servers.
+                    {t("No enabled MCP servers.")}
                   </p>
                 )}
                 {enabledServers.map((server) => {
@@ -310,8 +318,8 @@ export function AdminView({
           </div>
           <div className="flex justify-end">
             <Button disabled={saving} onClick={() => void saveDefaults()}>
-              {saving && <LoaderCircle className="animate-spin" />} Save
-              defaults
+              {saving && <LoaderCircle className="animate-spin" />}{" "}
+              {t("Save defaults")}
             </Button>
           </div>
         </CardContent>
@@ -320,15 +328,16 @@ export function AdminView({
       {platformAdmin && (
         <Card size="sm" className="gap-0">
           <CardHeader className="border-b pb-4">
-            <CardTitle>Platform defaults</CardTitle>
+            <CardTitle>{t("Platform defaults")}</CardTitle>
             <CardDescription>
-              Fallback endpoint selection for organizations without an explicit
-              default.
+              {t(
+                "Fallback endpoint selection for organizations without an explicit default."
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-end gap-4 pt-4">
             <label className="min-w-64 flex-1 space-y-2 text-sm font-medium">
-              <span className="block">Global chat endpoint</span>
+              <span className="block">{t("Global chat endpoint")}</span>
               <Select
                 value={globalDefaults.endpointId ?? "none"}
                 onValueChange={(value) =>
@@ -339,14 +348,14 @@ export function AdminView({
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Choose an endpoint" />
+                  <SelectValue placeholder={t("Choose an endpoint")} />
                 </SelectTrigger>
                 <SelectContent
                   align="start"
                   className="max-w-[calc(100vw-2rem)] min-w-[min(30rem,calc(100vw-2rem))]"
                 >
                   <SelectItem value="none">
-                    Use endpoint routing precedence
+                    {t("Use endpoint routing precedence")}
                   </SelectItem>
                   {globalChatEndpoints.map((endpoint) => (
                     <SelectItem key={endpoint.id} value={endpoint.id}>
@@ -356,7 +365,7 @@ export function AdminView({
                   ))}
                   {globalChatEndpoints.length === 0 && (
                     <SelectItem value="no-global-endpoints" disabled>
-                      No global chat endpoints configured
+                      {t("No global chat endpoints configured")}
                     </SelectItem>
                   )}
                 </SelectContent>
@@ -366,8 +375,8 @@ export function AdminView({
               disabled={savingGlobal}
               onClick={() => void saveGlobalDefaults()}
             >
-              {savingGlobal && <LoaderCircle className="animate-spin" />} Save
-              platform default
+              {savingGlobal && <LoaderCircle className="animate-spin" />}{" "}
+              {t("Save platform default")}
             </Button>
           </CardContent>
         </Card>
@@ -378,10 +387,10 @@ export function AdminView({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <BarChart3 /> Analytics
+                <BarChart3 /> {t("Analytics")}
               </CardTitle>
               <CardDescription>
-                Operational and usage metrics from chat runs.
+                {t("Operational and usage metrics from chat runs.")}
               </CardDescription>
             </div>
             <Select
@@ -392,10 +401,10 @@ export function AdminView({
                 <SelectValue>{analyticsRangeLabel}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="7">Last 7 days</SelectItem>
-                <SelectItem value="30">Last 30 days</SelectItem>
-                <SelectItem value="90">Last 90 days</SelectItem>
-                <SelectItem value="365">Last year</SelectItem>
+                <SelectItem value="7">{t("Last 7 days")}</SelectItem>
+                <SelectItem value="30">{t("Last 30 days")}</SelectItem>
+                <SelectItem value="90">{t("Last 90 days")}</SelectItem>
+                <SelectItem value="365">{t("Last year")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -403,20 +412,20 @@ export function AdminView({
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
             {[
-              ["Requests", analytics?.summary.requests ?? 0],
+              [t("Requests"), analytics?.summary.requests ?? 0],
               [
-                "Success rate",
+                t("Success rate"),
                 `${analytics?.summary.requests ? Math.round((analytics.summary.succeeded / analytics.summary.requests) * 100) : 0}%`,
               ],
               [
-                "Avg latency",
+                t("Avg latency"),
                 `${Math.round(analytics?.summary.averageLatencyMs ?? 0)} ms`,
               ],
               [
                 "Avg TTFT",
                 `${Math.round(analytics?.summary.averageTtftMs ?? 0)} ms`,
               ],
-              ["Tool calls", analytics?.summary.toolCalls ?? 0],
+              [t("Tool calls"), analytics?.summary.toolCalls ?? 0],
               ["Total tokens", analytics?.summary.totalTokens ?? "—"],
             ].map(([label, value]) => (
               <div className="rounded-xl bg-muted/50 p-3" key={label}>
@@ -433,11 +442,11 @@ export function AdminView({
               <table className="w-full text-left text-xs">
                 <thead className="text-muted-foreground">
                   <tr>
-                    <th className="pb-2 font-medium">Endpoint</th>
-                    <th className="pb-2 font-medium">Model</th>
-                    <th className="pb-2 font-medium">Requests</th>
-                    <th className="pb-2 font-medium">Errors</th>
-                    <th className="pb-2 font-medium">Avg latency</th>
+                    <th className="pb-2 font-medium">{t("Endpoint")}</th>
+                    <th className="pb-2 font-medium">{t("Model")}</th>
+                    <th className="pb-2 font-medium">{t("Requests")}</th>
+                    <th className="pb-2 font-medium">{t("Errors")}</th>
+                    <th className="pb-2 font-medium">{t("Avg latency")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -466,12 +475,12 @@ export function AdminView({
               <table className="w-full text-left text-xs">
                 <thead className="text-muted-foreground">
                   <tr>
-                    <th className="pb-2 font-medium">Day</th>
-                    <th className="pb-2 font-medium">Requests</th>
-                    <th className="pb-2 font-medium">Success</th>
-                    <th className="pb-2 font-medium">Errors</th>
-                    <th className="pb-2 font-medium">Avg latency</th>
-                    <th className="pb-2 font-medium">Tools</th>
+                    <th className="pb-2 font-medium">{t("Day")}</th>
+                    <th className="pb-2 font-medium">{t("Requests")}</th>
+                    <th className="pb-2 font-medium">{t("Success")}</th>
+                    <th className="pb-2 font-medium">{t("Errors")}</th>
+                    <th className="pb-2 font-medium">{t("Avg latency")}</th>
+                    <th className="pb-2 font-medium">{t("Tools")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -493,7 +502,7 @@ export function AdminView({
           )}
           {analytics?.summary.inputTokens == null && (
             <p className="mt-4 text-xs text-muted-foreground">
-              Token usage is unavailable for the selected providers.
+              {t("Token usage is unavailable for the selected providers.")}
             </p>
           )}
         </CardContent>

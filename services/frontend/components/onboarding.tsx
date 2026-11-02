@@ -1,5 +1,9 @@
 "use client"
 
+import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
@@ -53,20 +57,25 @@ type OnboardingState = {
   step: string
   completed: boolean
 }
-const installationSteps = [
+const installationStepsMessages = [
   { id: "welcome", title: "Welcome" },
   { id: "workspace", title: "Workspace" },
   { id: "authentication", title: "Sign-in" },
   { id: "endpoints", title: "AI models" },
   { id: "ready", title: "Review" },
 ]
-const userSteps = [
+const userStepsMessages = [
   { id: "welcome", title: "Welcome" },
   { id: "workspace", title: "Your workspace" },
   { id: "ready", title: "Get started" },
 ]
 
 export function Onboarding() {
+  const installationSteps = useTranslatedConfig(installationStepsMessages)
+  const userSteps = useTranslatedConfig(userStepsMessages)
+
+  const { t } = useTranslations()
+
   const router = useRouter()
   const [state, setState] = useState<OnboardingState | null>(null)
   const [user, setUser] = useState<User | null>(null)
@@ -170,8 +179,8 @@ export function Onboarding() {
         if (!name.trim())
           throw new Error(
             state.installation
-              ? "Enter a workspace name."
-              : "Enter your display name."
+              ? t("Enter a workspace name.")
+              : t("Enter your display name.")
           )
         if (state.installation && organization) {
           await api.patch(`/api/v1/organizations/${organization.id}`, {
@@ -218,19 +227,19 @@ export function Onboarding() {
       <main className="flex min-h-dvh items-center justify-center bg-background p-6">
         {error ? (
           <Alert variant="destructive" className="max-w-lg">
-            <AlertTitle>Setup unavailable</AlertTitle>
+            <AlertTitle>{t("Setup unavailable")}</AlertTitle>
             <AlertDescription>
-              {error}
+              {t(error)}
               <Button
                 onClick={() => setReload((value) => value + 1)}
                 variant="secondary"
               >
-                Try again
+                {t("Try again")}
               </Button>
             </AlertDescription>
           </Alert>
         ) : (
-          <Spinner aria-label="Loading setup" />
+          <Spinner aria-label={t("Loading setup")} />
         )}
       </main>
     )
@@ -257,13 +266,13 @@ export function Onboarding() {
           <div className="hidden flex-col gap-2 md:flex">
             <h2 className="text-lg font-semibold tracking-tight">
               {state.installation
-                ? "Let’s make it yours."
-                : "Make yourself at home."}
+                ? t("Let’s make it yours.")
+                : t("Make yourself at home.")}
             </h2>
             <p className="text-sm leading-relaxed text-muted-foreground">
               {state.installation
-                ? "Your workspace, your team, your AI."
-                : "A quick introduction to your workspace."}
+                ? t("Your workspace, your team, your AI.")
+                : t("A quick introduction to your workspace.")}
             </p>
           </div>
           <StepperNav className="hidden gap-1 md:flex">
@@ -282,16 +291,16 @@ export function Onboarding() {
                     <StepperTitle>{step.title}</StepperTitle>
                     <span className="text-xs leading-normal text-muted-foreground">
                       {step.id === "welcome"
-                        ? "What we’ll set up"
+                        ? t("What we’ll set up")
                         : step.id === "workspace"
                           ? state.installation
-                            ? "Name and identity"
-                            : "Your profile and access"
+                            ? t("Name and identity")
+                            : t("Your profile and access")
                           : step.id === "authentication"
-                            ? "OIDC · optional"
+                            ? t("OIDC · optional")
                             : step.id === "endpoints"
-                              ? "Provider and model"
-                              : "Check and launch"}
+                              ? t("Provider and model")
+                              : t("Check and launch")}
                     </span>
                   </span>
                 </StepperTrigger>
@@ -300,7 +309,7 @@ export function Onboarding() {
           </StepperNav>
           <div className="mt-auto hidden flex-col gap-2 pt-5 md:flex">
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Check className="size-3.5" /> Progress saved automatically
+              <Check className="size-3.5" /> {t("Progress saved automatically")}
             </p>
             <p
               className="truncate text-xs text-muted-foreground"
@@ -314,7 +323,7 @@ export function Onboarding() {
           <StepperPanel className="min-w-0 flex-1">
             <div className="mb-6 flex flex-col gap-3">
               <p className="text-xs text-muted-foreground">
-                Step {index + 1} of {steps.length}
+                {t("Step")} {index + 1} {t("of")} {steps.length}
               </p>
               <h1
                 ref={headingRef}
@@ -323,54 +332,58 @@ export function Onboarding() {
               >
                 {current.id === "welcome"
                   ? state.installation
-                    ? "Your workspace starts here."
-                    : `Welcome, ${user.displayName}.`
+                    ? t("Your workspace starts here.")
+                    : t("Welcome, {value0}.", { value0: user.displayName })
                   : current.id === "workspace"
                     ? state.installation
-                      ? "Make this workspace yours"
-                      : "A space for your work"
+                      ? t("Make this workspace yours")
+                      : t("A space for your work")
                     : current.id === "authentication"
-                      ? "Choose how your team signs in"
+                      ? t("Choose how your team signs in")
                       : current.id === "endpoints"
-                        ? "Connect your first AI model"
-                        : "Ready for your first conversation"}
+                        ? t("Connect your first AI model")
+                        : t("Ready for your first conversation")}
               </h1>
             </div>
             <StepperContent value={1}>
               <div className="flex flex-col gap-6">
                 <p className="text-sm leading-relaxed text-muted-foreground">
                   {state.installation
-                    ? "Connect the essentials and you’re ready to go. We’ll guide you through each step; optional settings can wait until later."
-                    : "Get to know your workspace and make sure you’re ready to start. Your administrator manages sign-in and shared AI models."}
+                    ? t(
+                        "Connect the essentials and you’re ready to go. We’ll guide you through each step; optional settings can wait until later."
+                      )
+                    : t(
+                        "Get to know your workspace and make sure you’re ready to start. Your administrator manages sign-in and shared AI models."
+                      )}
                 </p>
                 <div className="flex flex-col gap-5 rounded-2xl bg-muted/50 p-5 sm:p-6">
                   {(state.installation
                     ? [
                         {
                           icon: MessageSquare,
-                          title: "Create a home for your team",
+                          title: t("Create a home for your team"),
                           text: "Name your workspace. Invite people and organize shared resources whenever you’re ready.",
                         },
                         {
                           icon: ShieldCheck,
-                          title: "Choose how people sign in",
+                          title: t("Choose how people sign in"),
                           text: "Use existing accounts or connect your company’s identity provider with OIDC. You can do this later.",
                         },
                         {
                           icon: Sparkles,
-                          title: "Bring your preferred AI",
+                          title: t("Bring your preferred AI"),
                           text: "Connect a hosted provider or your own model server, choose a model and test the connection.",
                         },
                       ]
                     : [
                         {
                           icon: MessageSquare,
-                          title: "Meet your workspace",
+                          title: t("Meet your workspace"),
                           text: "See where you’re working, check your access and choose the name others will see.",
                         },
                         {
                           icon: Sparkles,
-                          title: "Start your first conversation",
+                          title: t("Start your first conversation"),
                           text: "Find the models your administrator has made available and learn where your chat history lives.",
                         },
                       ]
@@ -392,8 +405,9 @@ export function Onboarding() {
                   <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
                     <Check className="mt-0.5 size-4 shrink-0 text-primary" />
                     <span>
-                      Your administrator account is ready. You can change these
-                      settings later in Platform admin.
+                      {t(
+                        "Your administrator account is ready. You can change these settings later in Platform admin."
+                      )}
                     </span>
                   </p>
                 )}
@@ -405,15 +419,24 @@ export function Onboarding() {
                   <CardTitle>{organization?.name ?? "Your account"}</CardTitle>
                   <CardDescription>
                     {state.installation
-                      ? "This is the shared space created with your administrator account. You can invite your team later in workspace settings."
-                      : `You’re signed in as ${user.email}${organization ? ` and have ${organization.role ?? "member"} access to this workspace` : ""}.`}
+                      ? t(
+                          "This is the shared space created with your administrator account. You can invite your team later in workspace settings."
+                        )
+                      : t("You’re signed in as {value0}{value1}.", {
+                          value0: user.email,
+                          value1: organization
+                            ? ` and have ${organization.role ?? "member"} access to this workspace`
+                            : "",
+                        })}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <FieldGroup>
                     <Field>
                       <FieldLabel htmlFor="onboarding-name">
-                        {state.installation ? "Workspace name" : "Display name"}
+                        {state.installation
+                          ? t("Workspace name")
+                          : t("Display name")}
                       </FieldLabel>
                       <Input
                         id="onboarding-name"
@@ -426,8 +449,10 @@ export function Onboarding() {
                       />
                       <FieldDescription>
                         {state.installation
-                          ? "Choose a name your team will recognize."
-                          : "This is how your name appears to others. You can change it in your profile."}
+                          ? t("Choose a name your team will recognize.")
+                          : t(
+                              "This is how your name appears to others. You can change it in your profile."
+                            )}
                       </FieldDescription>
                     </Field>
                   </FieldGroup>
@@ -438,14 +463,15 @@ export function Onboarding() {
               <StepperContent value={3}>
                 <div className="flex flex-col gap-4">
                   <p className="text-sm text-muted-foreground">
-                    Local sign-in is already available. Optionally connect your
-                    company’s identity provider using OIDC. Add its issuer URL
-                    and client credentials, then run the discovery test.
+                    {t(
+                      "Local sign-in is already available. Optionally connect your company’s identity provider using OIDC. Add its issuer URL and client credentials, then run the discovery test."
+                    )}
                   </p>
                   <PlatformAuthenticationView showCreateAction />
                   <p className="text-xs text-muted-foreground">
-                    You can continue with local sign-in and configure SSO later
-                    in Platform admin → Authentication.
+                    {t(
+                      "You can continue with local sign-in and configure SSO later in Platform admin → Authentication."
+                    )}
                   </p>
                 </div>
               </StepperContent>
@@ -454,10 +480,9 @@ export function Onboarding() {
               <StepperContent value={4}>
                 <div className="flex flex-col gap-4">
                   <p className="text-sm text-muted-foreground">
-                    Connect a hosted provider or your own model server. Choose
-                    an LLM endpoint, select a chat model and test the
-                    connection. Global endpoints are shared across the
-                    installation.
+                    {t(
+                      "Connect a hosted provider or your own model server. Choose an LLM endpoint, select a chat model and test the connection. Global endpoints are shared across the installation."
+                    )}
                   </p>
                   <EndpointsView
                     endpoints={endpoints}
@@ -469,8 +494,9 @@ export function Onboarding() {
                     showCreateAction
                   />
                   <p className="text-xs text-muted-foreground">
-                    Prefer to configure AI later? Continue to review; chat
-                    becomes available once a model is connected.
+                    {t(
+                      "Prefer to configure AI later? Continue to review; chat becomes available once a model is connected."
+                    )}
                   </p>
                 </div>
               </StepperContent>
@@ -480,60 +506,80 @@ export function Onboarding() {
                 <Card>
                   <CardHeader>
                     <CardTitle>
-                      {organization?.name ?? "Your workspace"}
+                      {organization?.name ?? t("Your workspace")}
                     </CardTitle>
-                    <CardDescription>Your setup at a glance</CardDescription>
+                    <CardDescription>
+                      {t("Your setup at a glance")}
+                    </CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-4 text-sm">
                     <p>
                       <span className="text-muted-foreground">
-                        Signed in as
+                        {t("Signed in as")}
                       </span>
                       <br />
                       {user.email}
                     </p>
                     {state.installation && (
                       <p>
-                        <span className="text-muted-foreground">Sign-in</span>
+                        <span className="text-muted-foreground">
+                          {t("Sign-in")}
+                        </span>
                         <br />
-                        Local administrator account
+                        {t("Local administrator account")}
                         {providers.some((provider) => provider.enabled)
-                          ? ` · ${providers.filter((provider) => provider.enabled).length} OIDC provider(s) enabled`
-                          : " · OIDC not configured"}
+                          ? t(" · {value0} OIDC provider(s) enabled", {
+                              value0: providers.filter(
+                                (provider) => provider.enabled
+                              ).length,
+                            })
+                          : t(" · OIDC not configured")}
                       </p>
                     )}
                     <p>
-                      <span className="text-muted-foreground">AI models</span>
+                      <span className="text-muted-foreground">
+                        {t("AI models")}
+                      </span>
                       <br />
                       {hasChat
-                        ? "A chat model is connected. Start a conversation and select your model in the composer."
-                        : "No chat model is configured yet."}
+                        ? t(
+                            "A chat model is connected. Start a conversation and select your model in the composer."
+                          )
+                        : t("No chat model is configured yet.")}
                     </p>
                   </CardContent>
                 </Card>
                 {!hasChat && (
                   <Alert>
                     <MessageSquare />
-                    <AlertTitle>AI still needs a model</AlertTitle>
+                    <AlertTitle>{t("AI still needs a model")}</AlertTitle>
                     <AlertDescription>
                       {state.installation
-                        ? "You can finish setup now and add an endpoint later in Platform admin → Endpoints."
-                        : "Ask your workspace administrator to connect an AI endpoint. You can still explore the workspace."}
+                        ? t(
+                            "You can finish setup now and add an endpoint later in Platform admin → Endpoints."
+                          )
+                        : t(
+                            "Ask your workspace administrator to connect an AI endpoint. You can still explore the workspace."
+                          )}
                     </AlertDescription>
                   </Alert>
                 )}
                 <p className="text-sm text-muted-foreground">
                   {state.installation
-                    ? "Manage team access in workspace settings. Return to Platform admin whenever you want to change authentication or shared models."
-                    : "Start with Chat in the sidebar. Your history keeps previous conversations; workspace settings show the shared models and tools available to you."}
+                    ? t(
+                        "Manage team access in workspace settings. Return to Platform admin whenever you want to change authentication or shared models."
+                      )
+                    : t(
+                        "Start with Chat in the sidebar. Your history keeps previous conversations; workspace settings show the shared models and tools available to you."
+                      )}
                 </p>
               </div>
             </StepperContent>
           </StepperPanel>
           {error && (
             <Alert variant="destructive" role="alert">
-              <AlertTitle>Could not continue</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <AlertTitle>{t("Could not continue")}</AlertTitle>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
           <footer className="mt-auto flex items-center justify-between gap-3 pt-4">
@@ -543,7 +589,7 @@ export function Onboarding() {
               variant="ghost"
               onClick={() => void navigate(index - 1)}
             >
-              <ArrowLeft /> Back
+              <ArrowLeft /> {t("Back")}
             </Button>
             <Button
               disabled={busy}
@@ -557,13 +603,13 @@ export function Onboarding() {
               {busy && <Spinner />}
               {index === steps.length - 1
                 ? hasChat
-                  ? "Open JustAI"
+                  ? t("Open JustAI")
                   : state.installation
-                    ? "Finish without AI"
-                    : "Open workspace"
+                    ? t("Finish without AI")
+                    : t("Open workspace")
                 : index === 0
-                  ? "Let’s get started"
-                  : "Continue"}
+                  ? t("Let’s get started")
+                  : t("Continue")}
               <ArrowRight />
             </Button>
           </footer>

@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useState } from "react"
 import { api } from "@/lib/api"
 import { downloadFile } from "@/lib/download-file"
@@ -62,6 +63,8 @@ type Template = {
 }
 
 export function TemplatesView() {
+  const { t } = useTranslations()
+
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -161,26 +164,27 @@ export function TemplatesView() {
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageTitle>Templates</PageTitle>
+          <PageTitle>{t("Templates")}</PageTitle>
           <PageDescription>
-            Save a template once, then ask for it by name in any chat. Your
-            templates are private to you in this workspace.
+            {t(
+              "Save a template once, then ask for it by name in any chat. Your templates are private to you in this workspace."
+            )}
           </PageDescription>
         </PageHeading>
         <PageActions>
           <Button disabled={busy} onClick={() => void open()}>
-            Add template
+            {t("Add template")}
           </Button>
         </PageActions>
       </PageHeader>
       {error && !editor && !remove && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
       <Input
-        aria-label="Search templates"
-        placeholder="Search templates…"
+        aria-label={t("Search templates")}
+        placeholder={t("Search templates…")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
@@ -191,13 +195,13 @@ export function TemplatesView() {
           <EmptyHeader>
             <EmptyTitle>
               {templates.length
-                ? "No matching templates"
-                : "Your reusable templates"}
+                ? t("No matching templates")
+                : t("Your reusable templates")}
             </EmptyTitle>
             <EmptyDescription>
-              Upload a report, expense form, letter, spreadsheet, or
-              presentation. Then ask: “Use my expense template with these
-              receipts.”
+              {t(
+                "Upload a report, expense form, letter, spreadsheet, or presentation. Then ask: “Use my expense template with these receipts.”"
+              )}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -214,7 +218,9 @@ export function TemplatesView() {
                   {template.instructions ||
                     "Ask the chat to use this template by name."}
                 </p>
-                <Badge variant="secondary">Revision {template.revision}</Badge>
+                <Badge variant="secondary">
+                  {t("Revision")} {template.revision}
+                </Badge>
               </CardContent>
               <CardFooter className="flex flex-wrap gap-2">
                 <Button
@@ -223,7 +229,7 @@ export function TemplatesView() {
                   disabled={busy}
                   onClick={() => void open(template)}
                 >
-                  Edit
+                  {t("Edit")}
                 </Button>
                 <Button
                   variant="ghost"
@@ -235,7 +241,7 @@ export function TemplatesView() {
                     ).catch((err) => setError(err.message))
                   }
                 >
-                  Original
+                  {t("Original")}
                 </Button>
                 <Button
                   variant="ghost"
@@ -246,7 +252,7 @@ export function TemplatesView() {
                     setRemove(template)
                   }}
                 >
-                  Delete
+                  {t("Delete")}
                 </Button>
               </CardFooter>
             </Card>
@@ -262,34 +268,36 @@ export function TemplatesView() {
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {existing ? "Edit template" : "Add template"}
+              {existing ? t("Edit template") : t("Add template")}
             </DialogTitle>
             <DialogDescription>
-              Office and OpenDocument files keep their document structure. PDF
-              forms can be filled; PDFs without form fields are reference
-              material for a new document.
+              {t(
+                "Office and OpenDocument files keep their document structure. PDF forms can be filled; PDFs without form fields are reference material for a new document."
+              )}
             </DialogDescription>
           </DialogHeader>
           {error && (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="template-name">Name</FieldLabel>
+              <FieldLabel htmlFor="template-name">{t("Name")}</FieldLabel>
               <Input
                 id="template-name"
                 value={name}
                 maxLength={120}
                 disabled={busy}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Travel expenses"
+                placeholder={t("Travel expenses")}
               />
             </Field>
             <Field>
               <FieldLabel htmlFor="template-file">
-                {existing ? "Replace original (optional)" : "Template file"}
+                {existing
+                  ? t("Replace original (optional)")
+                  : t("Template file")}
               </FieldLabel>
               <Input
                 key={existing?.id ?? "new"}
@@ -304,14 +312,14 @@ export function TemplatesView() {
                 }}
               />
               <FieldDescription>
-                Up to 8 MB. Word, Excel, PowerPoint, OpenDocument, PDF,
-                Markdown, text, CSV, HTML, JSON and XML. Convert older .doc,
-                .xls, .ppt and .rtf files to a modern Office format first.
+                {t(
+                  "Up to 8 MB. Word, Excel, PowerPoint, OpenDocument, PDF, Markdown, text, CSV, HTML, JSON and XML. Convert older .doc, .xls, .ppt and .rtf files to a modern Office format first."
+                )}
               </FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="template-instructions">
-                How to use this template
+                {t("How to use this template")}
               </FieldLabel>
               <Textarea
                 id="template-instructions"
@@ -319,13 +327,16 @@ export function TemplatesView() {
                 maxLength={12000}
                 disabled={busy}
                 onChange={(e) => setInstructions(e.target.value)}
-                placeholder="Describe required information, which fields or cells to fill, and rules the assistant should follow."
+                placeholder={t(
+                  "Describe required information, which fields or cells to fill, and rules the assistant should follow."
+                )}
                 rows={5}
               />
               <FieldDescription>
-                Optional placeholders such as {"{{name}}"} are supported.
-                Existing paragraphs, spreadsheet cells and PDF form fields can
-                also be filled without placeholders.
+                {t("Optional placeholders such as")} {"{{name}}"}{" "}
+                {t(
+                  "are supported. Existing paragraphs, spreadsheet cells and PDF form fields can also be filled without placeholders."
+                )}
               </FieldDescription>
             </Field>
           </FieldGroup>
@@ -333,12 +344,15 @@ export function TemplatesView() {
             <div className="flex flex-col gap-2">
               <Badge variant="secondary">
                 {existing.inspection.mode === "reference"
-                  ? "Reference PDF · creates a new document"
-                  : `${existing.inspection.targets.length} document targets`}
+                  ? t("Reference PDF · creates a new document")
+                  : t("{value0} document targets", {
+                      value0: existing.inspection.targets.length,
+                    })}
               </Badge>
               {existing.inspection.placeholders.length > 0 && (
                 <p className="text-sm text-muted-foreground">
-                  Placeholders: {existing.inspection.placeholders.join(", ")}
+                  {t("Placeholders:")}{" "}
+                  {existing.inspection.placeholders.join(", ")}
                 </p>
               )}
             </div>
@@ -349,7 +363,7 @@ export function TemplatesView() {
               disabled={busy}
               onClick={() => setEditor(null)}
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={
@@ -360,12 +374,12 @@ export function TemplatesView() {
               }
               onClick={() => void save()}
             >
-              {busy ? "Saving…" : "Save template"}
+              {busy ? t("Saving…") : t("Save template")}
             </Button>
           </DialogFooter>
           {file && file.size > 8 * 1024 * 1024 && (
             <Alert variant="destructive">
-              <AlertDescription>The file exceeds 8 MB.</AlertDescription>
+              <AlertDescription>{t("The file exceeds 8 MB.")}</AlertDescription>
             </Alert>
           )}
         </DialogContent>
@@ -378,15 +392,18 @@ export function TemplatesView() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete {remove?.name}?</DialogTitle>
+            <DialogTitle>
+              {t("Delete")} {remove?.name}?
+            </DialogTitle>
             <DialogDescription>
-              The saved template will be removed. Files already generated from
-              it remain available.
+              {t(
+                "The saved template will be removed. Files already generated from it remain available."
+              )}
             </DialogDescription>
           </DialogHeader>
           {error && (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
           <DialogFooter>
@@ -395,14 +412,14 @@ export function TemplatesView() {
               disabled={busy}
               onClick={() => setRemove(null)}
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               variant="destructive"
               disabled={busy}
               onClick={() => void deleteTemplate()}
             >
-              Delete template
+              {t("Delete template")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,5 +1,7 @@
 "use client"
 
+import { LanguageSwitcher } from "@/components/language-switcher"
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Bot,
@@ -70,12 +72,6 @@ type ProfileViewProps = {
   onUserChange?: (user: User) => void
 }
 
-const dayFormatter = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-})
-
 function dateKey(date: Date) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, "0")
@@ -108,6 +104,13 @@ function deviceLabel(userAgent: string) {
 }
 
 function ActivityHeatmap({ activity }: { activity: ProfileData["activity"] }) {
+  const { t, locale } = useTranslations()
+  const dayFormatter = new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
+
   const days = useMemo(() => {
     const counts = new Map(activity.map((day) => [day.date, day.count]))
     const end = new Date()
@@ -129,13 +132,13 @@ function ActivityHeatmap({ activity }: { activity: ProfileData["activity"] }) {
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle className="text-base">Your year in JustAI</CardTitle>
+        <CardTitle className="text-base">{t("Your year in JustAI")}</CardTitle>
         <CardDescription>
-          {total.toLocaleString()} actions across the last 365 days
+          {total.toLocaleString(locale)} {t("actions across the last 365 days")}
         </CardDescription>
         <CardAction>
           <Badge variant="secondary">
-            {activity.filter((day) => day.count > 0).length} active days
+            {activity.filter((day) => day.count > 0).length} {t("active days")}
           </Badge>
         </CardAction>
       </CardHeader>
@@ -144,21 +147,21 @@ function ActivityHeatmap({ activity }: { activity: ProfileData["activity"] }) {
           <div className="mx-auto flex w-max min-w-[720px] gap-2">
             <div className="grid grid-rows-7 gap-1 pt-5 text-[10px] leading-3 text-muted-foreground">
               <span />
-              <span>Mon</span>
+              <span>{t("Mon")}</span>
               <span />
-              <span>Wed</span>
+              <span>{t("Wed")}</span>
               <span />
-              <span>Fri</span>
+              <span>{t("Fri")}</span>
               <span />
             </div>
             <div>
               <div className="mb-2 flex justify-between text-[10px] text-muted-foreground">
                 <span>{dayFormatter.format(days[0]?.date ?? new Date())}</span>
-                <span>Today</span>
+                <span>{t("Today")}</span>
               </div>
               <div
                 className="grid grid-flow-col grid-rows-7 gap-1"
-                aria-label="Activity over the last year"
+                aria-label={t("Activity over the last year")}
               >
                 {days.map((day) => {
                   const ratio = day.count / max
@@ -174,7 +177,10 @@ function ActivityHeatmap({ activity }: { activity: ProfileData["activity"] }) {
                             : 1
                   return (
                     <span
-                      aria-label={`${day.count} actions on ${dayFormatter.format(day.date)}`}
+                      aria-label={t("{value0} actions on {value1}", {
+                        value0: day.count,
+                        value1: dayFormatter.format(day.date),
+                      })}
                       className={cn(
                         "size-2.5 rounded-[3px] bg-muted sm:size-3",
                         level === 1 && "bg-primary/25",
@@ -184,7 +190,10 @@ function ActivityHeatmap({ activity }: { activity: ProfileData["activity"] }) {
                       )}
                       key={day.key}
                       role="img"
-                      title={`${day.count} actions on ${dayFormatter.format(day.date)}`}
+                      title={t("{value0} actions on {value1}", {
+                        value0: day.count,
+                        value1: dayFormatter.format(day.date),
+                      })}
                     />
                   )
                 })}
@@ -193,7 +202,7 @@ function ActivityHeatmap({ activity }: { activity: ProfileData["activity"] }) {
           </div>
         </div>
         <div className="mt-4 flex items-center justify-end gap-1.5 text-[10px] text-muted-foreground">
-          <span>Less</span>
+          <span>{t("Less")}</span>
           {[
             "bg-muted",
             "bg-primary/25",
@@ -203,7 +212,7 @@ function ActivityHeatmap({ activity }: { activity: ProfileData["activity"] }) {
           ].map((color) => (
             <span className={cn("size-2.5 rounded-[3px]", color)} key={color} />
           ))}
-          <span>More</span>
+          <span>{t("More")}</span>
         </div>
       </CardContent>
     </Card>
@@ -215,6 +224,13 @@ export function ProfileView({
   organization,
   onUserChange,
 }: ProfileViewProps) {
+  const { t, locale } = useTranslations()
+  const dayFormatter = new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
+
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [profile, setProfile] = useState<ProfileData | null>(null)
@@ -464,37 +480,37 @@ export function ProfileView({
   const statCards = profile
     ? [
         {
-          label: "Current streak",
-          value: `${profile.stats.currentStreak ?? streak} ${(profile.stats.currentStreak ?? streak) === 1 ? "day" : "days"}`,
+          label: t("Current streak"),
+          value: `${profile.stats.currentStreak ?? streak} ${(profile.stats.currentStreak ?? streak) === 1 ? t("day") : t("days")}`,
           icon: Flame,
         },
         {
-          label: "Longest streak",
+          label: t("Longest streak"),
           value: `${profile.stats.longestStreak ?? streak} days`,
           icon: Flame,
         },
         {
-          label: "Prompts sent",
-          value: profile.stats.prompts.toLocaleString(),
+          label: t("Prompts sent"),
+          value: profile.stats.prompts.toLocaleString(locale),
           icon: MessageSquare,
         },
         {
-          label: "Agent runs",
-          value: profile.stats.agentRuns.toLocaleString(),
+          label: t("Agent runs"),
+          value: profile.stats.agentRuns.toLocaleString(locale),
           icon: Bot,
         },
         {
-          label: "Productive weekday",
-          value: profile.stats.productiveWeekday || "—",
+          label: t("Productive weekday"),
+          value: t(profile.stats.productiveWeekday || "—"),
           icon: NotebookPen,
         },
         {
-          label: "Last 30 days",
+          label: t("Last 30 days"),
           value:
             profile.stats.previous30DaysActions &&
             profile.stats.previous30DaysActions > 0
               ? `${Math.round(((profile.stats.last30DaysActions ?? 0) / profile.stats.previous30DaysActions - 1) * 100)}%`
-              : `${(profile.stats.last30DaysActions ?? 0).toLocaleString()} actions`,
+              : `${(profile.stats.last30DaysActions ?? 0).toLocaleString(locale)} actions`,
           icon: Sparkles,
         },
       ]
@@ -504,21 +520,21 @@ export function ProfileView({
     <Page className="max-w-6xl">
       <PageHeader>
         <PageHeading>
-          <PageTitle>Profile</PageTitle>
+          <PageTitle>{t("Profile")}</PageTitle>
           <PageDescription>
-            Your identity, activity, and creative footprint in JustAI.
+            {t("Your identity, activity, and creative footprint in JustAI.")}
           </PageDescription>
         </PageHeading>
       </PageHeader>
       {error && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
       {notice && (
         <Alert aria-live="polite">
           <Check />
-          <AlertDescription>{notice}</AlertDescription>
+          <AlertDescription>{t(notice)}</AlertDescription>
         </Alert>
       )}
       <Card>
@@ -528,7 +544,9 @@ export function ProfileView({
               {avatarSrc && (
                 <AvatarImage
                   src={resolveAPIURL(avatarSrc)}
-                  alt={`${user.displayName}'s profile picture`}
+                  alt={t("{value0}'s profile picture", {
+                    value0: user.displayName,
+                  })}
                 />
               )}
               <AvatarFallback
@@ -538,7 +556,7 @@ export function ProfileView({
               </AvatarFallback>
             </Avatar>
             <Button
-              aria-label="Upload profile picture"
+              aria-label={t("Upload profile picture")}
               className="absolute -right-0.5 -bottom-0.5 size-7! rounded-full [&_svg]:size-3.5!"
               disabled={busy}
               onClick={() => inputRef.current?.click()}
@@ -565,7 +583,7 @@ export function ProfileView({
                   onSubmit={(event) => void saveDisplayName(event)}
                 >
                   <Input
-                    aria-label="Display name"
+                    aria-label={t("Display name")}
                     autoComplete="name"
                     className="font-heading h-8 max-w-64 text-base font-semibold"
                     maxLength={120}
@@ -574,7 +592,7 @@ export function ProfileView({
                     autoFocus
                   />
                   <Button
-                    aria-label="Save display name"
+                    aria-label={t("Save display name")}
                     disabled={savingName || !displayName.trim()}
                     size="icon-xs"
                     type="submit"
@@ -582,7 +600,7 @@ export function ProfileView({
                     <Check />
                   </Button>
                   <Button
-                    aria-label="Cancel editing display name"
+                    aria-label={t("Cancel editing display name")}
                     disabled={savingName}
                     onClick={() => {
                       setDisplayName(user.displayName)
@@ -601,7 +619,7 @@ export function ProfileView({
                     {user.displayName}
                   </h2>
                   <Button
-                    aria-label="Edit display name"
+                    aria-label={t("Edit display name")}
                     onClick={() => setEditingName(true)}
                     size="icon-xs"
                     variant="ghost"
@@ -613,10 +631,10 @@ export function ProfileView({
               <Badge variant="outline">
                 <ShieldCheck data-icon="inline-start" />
                 {user.platformAdmin
-                  ? "Platform administrator"
+                  ? t("Platform administrator")
                   : organization?.role
                     ? `${organization.role} · ${organization.name}`
-                    : "Workspace member"}
+                    : t("Workspace member")}
               </Badge>
             </div>
             <p className="mt-1 truncate text-sm text-muted-foreground">
@@ -624,8 +642,10 @@ export function ProfileView({
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               {profile
-                ? `Account created ${dayFormatter.format(new Date(profile.createdAt))}`
-                : "Loading membership details…"}
+                ? t("Account created {value0}", {
+                    value0: dayFormatter.format(new Date(profile.createdAt)),
+                  })
+                : t("Loading membership details…")}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 sm:self-start">
@@ -636,11 +656,11 @@ export function ProfileView({
               variant="outline"
             >
               <Camera data-icon="inline-start" />
-              Change photo
+              {t("Change photo")}
             </Button>
             {avatarSrc && (
               <Button
-                aria-label="Remove profile picture"
+                aria-label={t("Remove profile picture")}
                 disabled={busy}
                 onClick={() => setRemoveAvatarOpen(true)}
                 size="icon-sm"
@@ -652,6 +672,9 @@ export function ProfileView({
           </div>
         </CardContent>
       </Card>
+      <div className="flex justify-end">
+        <LanguageSwitcher />
+      </div>
       <Dialog
         open={Boolean(pendingAvatar)}
         onOpenChange={(open) => {
@@ -660,17 +683,18 @@ export function ProfileView({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Preview profile picture</DialogTitle>
+            <DialogTitle>{t("Preview profile picture")}</DialogTitle>
             <DialogDescription>
-              The square crop keeps your face centered in account menus and
-              member lists.
+              {t(
+                "The square crop keeps your face centered in account menus and member lists."
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="mx-auto flex size-48 items-center justify-center overflow-hidden rounded-full bg-muted">
             {pendingAvatar && (
               <Avatar className="size-48">
                 <AvatarImage
-                  alt="Profile picture preview"
+                  alt={t("Profile picture preview")}
                   className="size-full object-cover"
                   src={pendingAvatar.previewURL}
                 />
@@ -684,7 +708,7 @@ export function ProfileView({
               variant="outline"
             >
               <X data-icon="inline-start" />
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={busy || !pendingAvatar}
@@ -693,23 +717,25 @@ export function ProfileView({
               }}
             >
               <Check data-icon="inline-start" />
-              {busy ? "Uploading…" : "Use this photo"}
+              {busy ? t("Uploading…") : t("Use this photo")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       <ConfirmActionDialog
-        confirmLabel="Remove photo"
-        description="Your profile will use initials everywhere until you upload a new picture."
+        confirmLabel={t("Remove photo")}
+        description={t(
+          "Your profile will use initials everywhere until you upload a new picture."
+        )}
         onConfirm={() => void removeAvatar()}
         onOpenChange={setRemoveAvatarOpen}
         open={removeAvatarOpen}
         pending={busy}
-        title="Remove profile picture?"
+        title={t("Remove profile picture?")}
       />
       <PageSection
-        title="At a glance"
-        description="A few signals from your work across JustAI."
+        title={t("At a glance")}
+        description={t("A few signals from your work across JustAI.")}
       >
         {profile ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -751,10 +777,11 @@ export function ProfileView({
             <CardHeader>
               <Sparkles className="mb-2 size-5 text-primary" />
               <CardTitle>
-                {profile.stats.conversations.toLocaleString()} conversations
+                {profile.stats.conversations.toLocaleString(locale)}{" "}
+                {t("conversations")}
               </CardTitle>
               <CardDescription>
-                Threads you have started and shaped.
+                {t("Threads you have started and shaped.")}
               </CardDescription>
             </CardHeader>
           </Card>
@@ -762,11 +789,11 @@ export function ProfileView({
             <CardHeader>
               <Clock3 className="mb-2 size-5 text-primary" />
               <CardTitle>
-                {profile.stats.transcriptionMinutes.toLocaleString()} minutes
-                captured
+                {profile.stats.transcriptionMinutes.toLocaleString(locale)}{" "}
+                {t("minutes captured")}
               </CardTitle>
               <CardDescription>
-                Time turned into searchable transcripts.
+                {t("Time turned into searchable transcripts.")}
               </CardDescription>
             </CardHeader>
           </Card>
@@ -774,11 +801,11 @@ export function ProfileView({
             <CardHeader>
               <Flame className="mb-2 size-5 text-primary" />
               <CardTitle>
-                {profile.activity.filter((day) => day.count > 0).length} active
-                days
+                {profile.activity.filter((day) => day.count > 0).length}{" "}
+                {t("active days")}
               </CardTitle>
               <CardDescription>
-                Days you made something happen this year.
+                {t("Days you made something happen this year.")}
               </CardDescription>
             </CardHeader>
           </Card>
@@ -789,7 +816,7 @@ export function ProfileView({
                 {profile.stats.favoriteAgent || "No favorite agent yet"}
               </CardTitle>
               <CardDescription>
-                Most-used saved agent by conversation.
+                {t("Most-used saved agent by conversation.")}
               </CardDescription>
             </CardHeader>
           </Card>
@@ -800,7 +827,7 @@ export function ProfileView({
                 {profile.stats.favoriteModel || "No model preference yet"}
               </CardTitle>
               <CardDescription>
-                Model used most often in completed runs.
+                {t("Model used most often in completed runs.")}
               </CardDescription>
             </CardHeader>
           </Card>
@@ -810,25 +837,27 @@ export function ProfileView({
               <CardTitle>
                 {profile.stats.milestones?.length
                   ? profile.stats.milestones.join(" · ")
-                  : "First milestone ahead"}
+                  : t("First milestone ahead")}
               </CardTitle>
               <CardDescription>
-                Milestones based on your activity this year.
+                {t("Milestones based on your activity this year.")}
               </CardDescription>
             </CardHeader>
           </Card>
         </div>
       )}
       <PageSection
-        title="Account security"
-        description="Manage your active devices and connected sign-in methods."
+        title={t("Account security")}
+        description={t(
+          "Manage your active devices and connected sign-in methods."
+        )}
       >
         <div className="grid items-start gap-3 lg:grid-cols-2">
           <Card className="h-full" size="sm">
             <CardHeader>
-              <CardTitle>Sessions and devices</CardTitle>
+              <CardTitle>{t("Sessions and devices")}</CardTitle>
               <CardDescription>
-                Review devices with access to your account.
+                {t("Review devices with access to your account.")}
               </CardDescription>
               <CardAction>
                 <MonitorSmartphone
@@ -840,11 +869,12 @@ export function ProfileView({
             <CardContent>
               {accountLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Skeleton className="size-8 rounded-full" /> Loading sessions…
+                  <Skeleton className="size-8 rounded-full" />{" "}
+                  {t("Loading sessions…")}
                 </div>
               ) : sessions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No active sessions found.
+                  {t("No active sessions found.")}
                 </p>
               ) : (
                 <div className="divide-y rounded-xl bg-muted/30">
@@ -858,18 +888,18 @@ export function ProfileView({
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">
-                          {deviceLabel(session.userAgent)}
+                          {t(deviceLabel(session.userAgent))}
                           {session.current && (
                             <Badge
                               className="ml-2 align-middle"
                               variant="secondary"
                             >
-                              This device
+                              {t("This device")}
                             </Badge>
                           )}
                         </p>
                         <p className="truncate text-xs text-muted-foreground">
-                          Last active{" "}
+                          {t("Last active")}{" "}
                           {dayFormatter.format(new Date(session.lastSeenAt))}
                         </p>
                       </div>
@@ -880,7 +910,7 @@ export function ProfileView({
                           size="sm"
                           variant="ghost"
                         >
-                          Sign out
+                          {t("Sign out")}
                         </Button>
                       )}
                     </div>
@@ -891,7 +921,7 @@ export function ProfileView({
             <CardFooter className="flex-wrap justify-between gap-2 border-t">
               <Button onClick={() => void logout()} size="sm" variant="outline">
                 <LogOut data-icon="inline-start" />
-                Sign out
+                {t("Sign out")}
               </Button>
               <Button
                 disabled={busy || accountLoading || sessions.length < 2}
@@ -899,15 +929,15 @@ export function ProfileView({
                 size="sm"
                 variant="ghost"
               >
-                Sign out other devices
+                {t("Sign out other devices")}
               </Button>
             </CardFooter>
           </Card>
           <Card className="h-full" size="sm">
             <CardHeader>
-              <CardTitle>Linked sign-in methods</CardTitle>
+              <CardTitle>{t("Linked sign-in methods")}</CardTitle>
               <CardDescription>
-                Identity providers connected to your account.
+                {t("Identity providers connected to your account.")}
               </CardDescription>
               <CardAction>
                 <Link2
@@ -922,7 +952,7 @@ export function ProfileView({
               ) : identities.length === 0 ? (
                 <div className="flex items-center gap-3 rounded-xl bg-muted/30 p-3 text-sm text-muted-foreground">
                   <KeyRound aria-hidden="true" />
-                  No external identity providers are linked.
+                  {t("No external identity providers are linked.")}
                 </div>
               ) : (
                 <div className="divide-y rounded-xl bg-muted/30">
@@ -939,7 +969,7 @@ export function ProfileView({
                           {identity.provider}
                         </p>
                         <p className="truncate text-xs text-muted-foreground">
-                          Linked{" "}
+                          {t("Linked")}{" "}
                           {dayFormatter.format(new Date(identity.createdAt))}
                         </p>
                       </div>
