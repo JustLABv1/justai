@@ -2014,6 +2014,13 @@ export function ModelEndpointPicker({
           compact && "max-w-24 sm:max-w-56"
         )}
       >
+        {endpoint && endpoints.length > 1 && (
+          <EndpointBadge
+            name={endpoint.name}
+            logoUrl={endpoint.logoUrl}
+            className="size-5 shrink-0 bg-secondary text-[10px] text-secondary-foreground"
+          />
+        )}
         <span className="truncate">{modelLabel}</span>
         <ChevronDown
           className={cn(
@@ -2033,7 +2040,7 @@ export function ModelEndpointPicker({
             {endpoints.length > 1 && (
               <div
                 aria-label={t("Endpoints")}
-                className="flex max-h-80 w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1"
+                className="flex max-h-80 w-11 shrink-0 flex-col items-center gap-2 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1.5"
                 role="group"
               >
                 <TooltipProvider delay={0}>
@@ -2052,7 +2059,7 @@ export function ModelEndpointPicker({
                             className={cn(
                               "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                               item.id === endpointId
-                                ? "bg-primary text-primary-foreground ring-2 ring-primary ring-offset-2 ring-offset-muted hover:bg-primary/85"
+                                ? "bg-primary text-primary-foreground ring-2 ring-primary ring-offset-1 ring-offset-muted hover:bg-primary/85"
                                 : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
                             )}
                           />
