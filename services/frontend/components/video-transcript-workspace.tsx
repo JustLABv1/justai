@@ -84,8 +84,23 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
+import { Checkbox } from "@/components/ui/checkbox"
 import { api } from "@/lib/api"
+import { TranscriptionExportDialog } from "@/components/transcription-export-dialog"
+import {
+  SummaryTemplatePicker,
+  SummaryTemplateEditor,
+} from "@/components/transcription-summary-templates"
+import { SummaryOmissionReview } from "@/components/transcription-summary-omissions"
+import {
+  defaultSummaryStandard,
+  summaryTimeOffset,
+  resolveSummaryTemplateDefaults,
+  type SummaryStandard,
+  type SummaryTemplate,
+  type SummaryTemplateDraft,
+  type SummaryExportDraft,
+} from "@/lib/transcription-summary-standard"
 import { workflowInputNames } from "@/lib/agent-workflow-logic"
 import {
   TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT,
@@ -417,6 +432,423 @@ export function TranscriptWorkspace({
   )
   const [exportFormat, setExportFormat] = useState("pdf")
   const [includeInsightsInExport, setIncludeInsightsInExport] = useState(true)
+  const [insightsOnlyExport, setInsightsOnlyExport] = useState(false)
+  const [summaryExportOptions, setSummaryExportOptions] = useState({
+    summary: true,
+    chapters: true,
+    topics: true,
+    actionItems: true,
+    boldSpeakers: false,
+  })
+  const [summaryInstructions, setSummaryInstructions] = useState(
+    snapshot.insights?.customization?.instructions ?? ""
+  )
+  const [standardName, setStandardName] = useState("")
+  const [savedStandard, setSavedStandard] = useState<SummaryStandard | null>(
+    null
+  )
+  const [standardLoading, setStandardLoading] = useState(true)
+  const [standardSaving, setStandardSaving] = useState(false)
+  const [standardMessage, setStandardMessage] = useState("")
+  const [standardError, setStandardError] = useState("")
+  const [summarySetupOpen, setSummarySetupOpen] = useState(false)
+  const [summaryTemplates, setSummaryTemplates] = useState<SummaryTemplate[]>(
+    []
+  )
+  const [summaryTemplateId, setSummaryTemplateId] = useState(
+    snapshot.insights?.customization?.templateId ?? ""
+  )
+  const [summaryExclusionRules, setSummaryExclusionRules] = useState(
+    snapshot.insights?.customization?.exclusionRules ?? ""
+  )
+  const [restoredSummaryIds, setRestoredSummaryIds] = useState<string[]>(
+    snapshot.insights?.customization?.restoredSegmentIds ?? []
+  )
+  const [templateDraft, setTemplateDraft] =
+    useState<SummaryTemplateDraft | null>(null)
+  const [templateSaving, setTemplateSaving] = useState(false)
+  const [templateError, setTemplateError] = useState("")
+  const [templateSuggestion, setTemplateSuggestion] = useState(false)
+  const [ruleProposing, setRuleProposing] = useState(false)
+
+  const [sourceSearch, setSourceSearch] = useState("")
+  const [sourceFrom, setSourceFrom] = useState("")
+  const [sourceTo, setSourceTo] = useState("")
+  const [sourceSpeaker, setSourceSpeaker] = useState("all")
+  const sourceFromMs = summaryTimeOffset(sourceFrom)
+  const sourceToMs = summaryTimeOffset(sourceTo)
+  const sourceTimeRangeValid =
+    sourceFromMs !== null &&
+    sourceToMs !== null &&
+    (sourceFromMs === undefined ||
+      sourceToMs === undefined ||
+      sourceFromMs <= sourceToMs)
+  const matchingSourceSegments = snapshot.segments.filter(
+    (segment) =>
+      (segment.editedText ?? segment.polishedText ?? segment.text)
+        .toLocaleLowerCase()
+        .includes(sourceSearch.toLocaleLowerCase()) &&
+      (sourceSpeaker === "all" || segment.speakerId === sourceSpeaker) &&
+      sourceTimeRangeValid &&
+      (sourceFromMs === undefined ||
+        (segment.endOffsetMs || segment.startOffsetMs) >=
+          (sourceFromMs ?? 0)) &&
+      (sourceToMs === undefined || segment.startOffsetMs <= (sourceToMs ?? 0))
+  )
+
+  const sourcePassages = groupTranscriptionSegments(
+    matchingSourceSegments.map((segment) => ({
+      ...segment,
+      text: segment.editedText ?? segment.polishedText ?? segment.text,
+    })),
+    4000,
+    1200,
+    90000
+  )
+
+  const [sourceSelection, setSourceSelection] = useState<{
+    sessionId: string
+    ids: string[]
+  }>({
+    sessionId: snapshot.session.id,
+    ids: snapshot.insights?.customization?.excludedSegmentIds ?? [],
+  })
+  const sourceSegmentIds = new Set(
+    snapshot.segments.map((segment) => segment.id)
+  )
+  const excludedSourceIds =
+    sourceSelection.sessionId === snapshot.session.id
+      ? sourceSelection.ids.filter((id) => sourceSegmentIds.has(id))
+      : (snapshot.insights?.customization?.excludedSegmentIds ?? []).filter(
+          (id) => sourceSegmentIds.has(id)
+        )
+  const setExcludedSourceIds = (ids: string[]) => {
+    setSourceSelection({ sessionId: snapshot.session.id, ids })
+    setRestoredSummaryIds((current) =>
+      current.filter((id) => !ids.includes(id))
+    )
+  }
+  const [exportDraft, setExportDraft] = useState<SummaryExportDraft | null>(
+    null
+  )
+  const applySummaryExportPreferences = useCallback(
+    (standard: SummaryStandard) => {
+      setExportFormat(standard.format)
+      setSummaryExportOptions({
+        summary: standard.summary,
+        chapters: standard.chapters,
+        topics: standard.topics,
+        actionItems: standard.actionItems,
+        boldSpeakers: standard.boldSpeakers,
+      })
+    },
+    []
+  )
+  const applySummaryStandard = useCallback(
+    (standard: SummaryStandard) => {
+      setStandardName(standard.name)
+      setSummaryInstructions(standard.instructions)
+      applySummaryExportPreferences(standard)
+    },
+    [applySummaryExportPreferences]
+  )
+  const initialSummaryCustomization = useRef(
+    snapshot.insights && snapshot.insights.status !== "idle"
+      ? snapshot.insights.customization
+      : undefined
+  )
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      api.get<{ standard: SummaryStandard | null }>(
+        "/api/v1/profile/transcription-summary-standard"
+      ),
+      api.get<{ templates: SummaryTemplate[]; selectedTemplateId: string }>(
+        "/api/v1/transcription/summary-templates"
+      ),
+    ])
+      .then(([{ standard }, catalog]) => {
+        if (!active) return
+        setSavedStandard(standard)
+        setSummaryTemplates(catalog.templates)
+        const defaults = resolveSummaryTemplateDefaults(
+          catalog.templates,
+          catalog.selectedTemplateId,
+          standard,
+          initialSummaryCustomization.current
+        )
+        setSummaryTemplateId(defaults.template?.id ?? "")
+        applySummaryStandard({
+          ...defaults.exportPreferences,
+          name: defaults.template?.name ?? standard?.name ?? "",
+          instructions: defaults.instructions,
+        })
+        setSummaryExclusionRules(defaults.exclusionRules)
+      })
+      .catch((error: unknown) => {
+        if (active)
+          setStandardError(
+            error instanceof Error
+              ? error.message
+              : "Could not load summary standard."
+          )
+      })
+      .finally(() => {
+        if (active) setStandardLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [applySummaryStandard])
+  const saveSummaryStandard = async (
+    instructions = summaryInstructions,
+    writingStyleOnly = false
+  ) => {
+    setStandardSaving(true)
+    setStandardMessage("")
+    setStandardError("")
+    try {
+      const { standard } = await api.put<{ standard: SummaryStandard }>(
+        "/api/v1/profile/transcription-summary-standard",
+        writingStyleOnly
+          ? { ...(savedStandard ?? defaultSummaryStandard), instructions }
+          : {
+              ...summaryExportOptions,
+              name: standardName,
+              instructions,
+              format: exportFormat,
+            }
+      )
+      setSavedStandard(standard)
+      setStandardMessage(
+        "Your standard will apply to future summaries and exports across devices."
+      )
+      return true
+    } catch (error) {
+      setStandardError(
+        error instanceof Error
+          ? error.message
+          : "Could not save summary standard."
+      )
+      return false
+    } finally {
+      setStandardSaving(false)
+    }
+  }
+  const chooseSummaryTemplate = (id: string) => {
+    setSummaryTemplateId(id)
+    setTemplateError("")
+    const template = summaryTemplates.find((item) => item.id === id)
+    if (template) {
+      applySummaryStandard(template)
+      setSummaryExclusionRules(template.exclusionRules)
+    } else {
+      setSummaryExclusionRules("")
+      setSummaryInstructions(savedStandard?.instructions ?? "")
+    }
+    void api
+      .put("/api/v1/transcription/summary-template-choice", { templateId: id })
+      .catch((error: unknown) =>
+        setTemplateError(
+          error instanceof Error
+            ? error.message
+            : "Could not remember the selected template."
+        )
+      )
+  }
+  const saveTeamSummaryTemplate = async () => {
+    if (!templateDraft || templateSaving) return
+    setTemplateSaving(true)
+    setTemplateError("")
+    try {
+      const result = templateDraft.id
+        ? await api.put<{ template: SummaryTemplate }>(
+            `/api/v1/transcription/summary-templates/${templateDraft.id}`,
+            templateDraft
+          )
+        : await api.post<{ template: SummaryTemplate }>(
+            "/api/v1/transcription/summary-templates",
+            templateDraft
+          )
+      setSummaryTemplates((current) =>
+        [
+          ...current.filter((item) => item.id !== result.template.id),
+          result.template,
+        ].sort((a, b) => a.name.localeCompare(b.name))
+      )
+      setSummaryTemplateId(result.template.id)
+      applySummaryStandard(result.template)
+      setSummaryExclusionRules(result.template.exclusionRules)
+      try {
+        await api.put("/api/v1/transcription/summary-template-choice", {
+          templateId: result.template.id,
+        })
+      } catch (error) {
+        // The shared save already succeeded. A failed personal choice must not create another template on retry.
+        onError(
+          error instanceof Error
+            ? error.message
+            : t("Could not remember the selected template.")
+        )
+      }
+      setTemplateDraft(null)
+      setTemplateSuggestion(false)
+    } catch (error) {
+      setTemplateError(
+        error instanceof Error
+          ? error.message
+          : "Could not save the team template."
+      )
+    } finally {
+      setTemplateSaving(false)
+    }
+  }
+  const deleteTeamSummaryTemplate = async () => {
+    if (!templateDraft?.id || templateSaving) return
+    setTemplateSaving(true)
+    setTemplateError("")
+    try {
+      await api.delete(
+        `/api/v1/transcription/summary-templates/${templateDraft.id}`
+      )
+      setSummaryTemplates((current) =>
+        current.filter((item) => item.id !== templateDraft.id)
+      )
+      if (summaryTemplateId === templateDraft.id) {
+        setSummaryTemplateId("")
+        setSummaryExclusionRules("")
+      }
+      setTemplateDraft(null)
+    } catch (error) {
+      setTemplateError(
+        error instanceof Error
+          ? error.message
+          : "Could not delete the team template."
+      )
+    } finally {
+      setTemplateSaving(false)
+    }
+  }
+  const proposeSummaryRule = async (text: string) => {
+    if (ruleProposing) return
+    setRuleProposing(true)
+    setTemplateError("")
+    try {
+      const { rule } = await api.post<{ rule: string }>(
+        `/api/v1/transcription/sessions/${snapshot.session.id}/summary-rule-proposal`,
+        { text, language: locale },
+        { timeoutMs: 150000 }
+      )
+      const original = summaryTemplates.find(
+        (item) =>
+          item.id ===
+          (snapshot.insights?.customization?.templateId ?? summaryTemplateId)
+      )
+      const base = original ?? {
+        ...defaultSummaryStandard,
+        ...summaryExportOptions,
+        format: exportFormat,
+        name: t("My team's summary"),
+        instructions: summaryInstructions,
+        exclusionRules: summaryExclusionRules,
+      }
+      setTemplateDraft({
+        ...base,
+        id: original?.canEdit ? original.id : undefined,
+        revision: original?.canEdit ? original.updatedAt : undefined,
+        name:
+          original && !original.canEdit
+            ? t("{value0} (copy)", { value0: original.name })
+            : base.name,
+        exclusionRules: [base.exclusionRules, rule]
+          .filter(Boolean)
+          .join("\n\n"),
+      })
+      setTemplateSuggestion(true)
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : t("Could not suggest a rule.")
+      )
+    } finally {
+      setRuleProposing(false)
+    }
+  }
+  const summaryStandardControls = (
+    <FieldGroup>
+      <Field>
+        <FieldLabel htmlFor="summary-exclusion-rules">
+          {t("What should be left out?")}
+        </FieldLabel>
+        <Textarea
+          id="summary-exclusion-rules"
+          maxLength={6000}
+          value={summaryExclusionRules}
+          onChange={(event) => setSummaryExclusionRules(event.target.value)}
+          placeholder={t(
+            "For example: Leave out purely organizational openings and closings. Keep substantive statements, including from the chair."
+          )}
+        />
+      </Field>
+      {templateError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {t(templateError)}
+        </p>
+      ) : null}
+
+      <Field>
+        <FieldLabel htmlFor="summary-writing-style">
+          {t("How should your summary read?")}
+        </FieldLabel>
+        <Textarea
+          id="summary-writing-style"
+          maxLength={4000}
+          value={summaryInstructions}
+          onChange={(event) => setSummaryInstructions(event.target.value)}
+          placeholder={t(
+            "For example: keep it brief, focus on decisions, and leave out small talk."
+          )}
+        />
+      </Field>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={standardLoading || standardSaving}
+          onClick={() => void saveSummaryStandard(summaryInstructions, true)}
+        >
+          {t(standardSaving ? "Saving…" : "Remember writing style")}
+        </Button>
+        {savedStandard ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSummaryInstructions(savedStandard.instructions)}
+          >
+            {t("Use saved style")}
+          </Button>
+        ) : null}
+      </div>
+      {standardMessage ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          {t("Saved for your next summaries.")}
+        </p>
+      ) : null}
+      {standardError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {t(standardError)}
+        </p>
+      ) : null}
+    </FieldGroup>
+  )
+  const summaryExportQuery = () =>
+    new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(summaryExportOptions).map(([key, value]) => [
+          key,
+          String(value),
+        ])
+      )
+    )
   const [actionItemsCopied, setActionItemsCopied] = useState(false)
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false)
   const [workflowChoices, setWorkflowChoices] = useState<AgentWorkflow[]>([])
@@ -1198,7 +1630,16 @@ export function TranscriptWorkspace({
       // outlives the gateway timeout.
       const result = await api.post<{ insights: TranscriptionInsights }>(
         `/api/v1/transcription/sessions/${snapshot.session.id}/insights`,
-        { language: insightLanguage }
+        {
+          language: insightLanguage,
+          instructions: summaryInstructions,
+          excludedSegmentIds: excludedSourceIds,
+          templateId: summaryTemplateId,
+          exclusionRules: summaryExclusionRules,
+          restoredSegmentIds: restoredSummaryIds.filter((id) =>
+            sourceSegmentIds.has(id)
+          ),
+        }
       )
       const finished = await waitForInsights(result.insights)
       updateSnapshot((current) => ({ ...current, insights: finished }))
@@ -1332,41 +1773,67 @@ export function TranscriptWorkspace({
     }
   }
 
-  const exportInsights = async (
-    format: "pdf" | "docx" | "md" | "txt" | "json"
-  ) => {
-    if (!insightsReady) return
-    try {
-      const blob = await api.getBlob(
-        `/api/v1/transcription/sessions/${snapshot.session.id}/export/${format}?insightsOnly=true`
-      )
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `${snapshot.session.title || "transcript"}-insights.${format}`
-      link.click()
-      URL.revokeObjectURL(url)
-      onError("")
-    } catch (caught) {
-      onError(
-        caught instanceof Error ? caught.message : t("Insights export failed.")
+  const restoreSummaryPassages = (ids: string[]) => {
+    const customization = snapshot.insights?.customization
+    setSourceSelection({
+      sessionId: snapshot.session.id,
+      ids: excludedSourceIds.filter((id) => !ids.includes(id)),
+    })
+    setRestoredSummaryIds([...new Set([...restoredSummaryIds, ...ids])])
+    if (customization) {
+      setSummaryInstructions(customization.instructions)
+      setSummaryExclusionRules(customization.exclusionRules ?? "")
+      setSummaryTemplateId(
+        summaryTemplates.some((item) => item.id === customization.templateId)
+          ? (customization.templateId ?? "")
+          : ""
       )
     }
+    setExportOpen(false)
+    setSummarySetupOpen(true)
   }
 
-  const exportTranscript = async () => {
+  const exportHasSummaryContent =
+    (summaryExportOptions.summary &&
+      (
+        exportDraft?.summaryParagraphs ?? [snapshot.insights?.summary ?? ""]
+      ).some((text) => text.trim())) ||
+    (summaryExportOptions.chapters &&
+      (exportDraft?.chapterIndices ?? snapshot.insights?.chapters ?? [])
+        .length > 0) ||
+    (summaryExportOptions.topics &&
+      (exportDraft?.topicIndices ?? snapshot.insights?.topics ?? []).length >
+        0) ||
+    (summaryExportOptions.actionItems &&
+      (exportDraft?.actionItemIndices ?? snapshot.insights?.actionItems ?? [])
+        .length > 0)
+
+  const exportTranscript = async (remember = false) => {
     if (exporting) return
     setExporting(true)
     setExportError("")
     try {
+      if (
+        remember &&
+        !(await saveSummaryStandard(
+          savedStandard?.instructions ?? summaryInstructions
+        ))
+      )
+        return
       const includeInsights =
         exportSupportsInsights && includeInsightsInExport && insightsReady
-      const exportUrl = `/api/v1/transcription/sessions/${snapshot.session.id}/export/${exportFormat}${includeInsights ? "?includeInsights=true" : ""}`
-      const blob = await api.getBlob(exportUrl)
+      const query = summaryExportQuery()
+      if (insightsOnlyExport) query.set("insightsOnly", "true")
+      else if (includeInsights) query.set("includeInsights", "true")
+      const exportUrl = `/api/v1/transcription/sessions/${snapshot.session.id}/export/${exportFormat}?${query}`
+      const blob =
+        exportDraft && (insightsOnlyExport || includeInsights)
+          ? await api.postBlob(exportUrl, exportDraft)
+          : await api.getBlob(exportUrl)
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
-      link.download = `${snapshot.session.title || "transcript"}.${exportFormat === "markdown" ? "md" : exportFormat}`
+      link.download = `${snapshot.session.title || "transcript"}${insightsOnlyExport ? "-summary" : ""}.${exportFormat === "markdown" ? "md" : exportFormat}`
       link.click()
       URL.revokeObjectURL(url)
       setExportOpen(false)
@@ -1441,6 +1908,8 @@ export function TranscriptWorkspace({
             disabled={!snapshot.segments.length}
             onClick={() => {
               setExportError("")
+              setInsightsOnlyExport(false)
+              setExportDraft(null)
               setExportOpen(true)
             }}
             size="sm"
@@ -1449,98 +1918,362 @@ export function TranscriptWorkspace({
           </Button>
         </div>
       </div>
-      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t("Export transcript")}</DialogTitle>
+      <Dialog open={summarySetupOpen} onOpenChange={setSummarySetupOpen}>
+        <DialogContent className="flex max-h-[85dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl sm:p-0">
+          <DialogHeader className="shrink-0 px-5 pt-5 pr-12 pb-4 sm:px-6 sm:pr-12">
+            <DialogTitle>{t("Create your summary")}</DialogTitle>
             <DialogDescription>
-              {t("Choose a file format for your transcript.")}
+              {t("Choose a template. We will take care of the rest.")}
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel>{t("File format")}</FieldLabel>
-              <Select
-                items={[
-                  { value: "pdf", label: "PDF" },
-                  { value: "docx", label: "Word (.docx)" },
-                  { value: "md", label: "Markdown" },
-                  { value: "txt", label: "Plain text" },
-                  { value: "srt", label: "Subtitles (.srt)" },
-                  { value: "vtt", label: "WebVTT (.vtt)" },
-                  { value: "json", label: "JSON" },
-                ]}
-                value={exportFormat}
-                onValueChange={(value) => setExportFormat(value ?? "pdf")}
-              >
-                <SelectTrigger
-                  aria-label={t("Export format")}
-                  className="w-full"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="pdf">PDF</SelectItem>
-                    <SelectItem value="docx">Word (.docx)</SelectItem>
-                    <SelectItem value="md">Markdown</SelectItem>
-                    <SelectItem value="txt">{t("Plain text")}</SelectItem>
-                    <SelectItem value="srt">{t("Subtitles (.srt)")}</SelectItem>
-                    <SelectItem value="vtt">WebVTT (.vtt)</SelectItem>
-                    <SelectItem value="json">JSON</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-            {exportSupportsInsights ? (
-              <Field orientation="horizontal">
-                <Switch
-                  id="export-insights"
-                  checked={includeInsightsInExport}
-                  disabled={!insightsReady}
-                  onCheckedChange={setIncludeInsightsInExport}
-                />
-                <FieldLabel htmlFor="export-insights">
-                  {t("Include AI summary")}
-                </FieldLabel>
-              </Field>
-            ) : exportFormat === "json" ? (
-              <p className="text-sm text-muted-foreground">
-                {t("Includes AI insights when available.")}
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 pb-4 sm:px-6">
+            <SummaryTemplatePicker
+              templates={summaryTemplates}
+              selectedId={summaryTemplateId}
+              onSelect={chooseSummaryTemplate}
+              loading={standardLoading}
+              onEdit={(draft) => {
+                setTemplateSuggestion(false)
+                setTemplateError("")
+                setTemplateDraft(draft)
+              }}
+            />
+
+            <details className="rounded-lg bg-muted p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t("Adjust for this summary")}
+              </summary>
+              <div className="mt-4">{summaryStandardControls}</div>
+            </details>
+            {restoredSummaryIds.length ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                {t(
+                  "{value0} passages will be included even if a template rule matches. Create the summary again to apply this.",
+                  { value0: restoredSummaryIds.length }
+                )}
               </p>
             ) : null}
-            {exportSupportsInsights && !insightsReady ? (
-              <p className="text-sm text-muted-foreground">
-                {t("Generate a summary first to include it in your export.")}
+            <details className="rounded-lg bg-muted p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t("Choose specific passages")}
+                {excludedSourceIds.length ? (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {t("{value0} left out", {
+                      value0: excludedSourceIds.length,
+                    })}
+                  </span>
+                ) : null}
+              </summary>
+              <FieldGroup className="mt-4">
+                <p className="text-sm text-muted-foreground">
+                  {t(
+                    "The whole conversation is used by default. Only change this if you want to leave out a specific passage yourself."
+                  )}
+                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    {t("Use the checked passages")}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setExcludedSourceIds([])}
+                    >
+                      {t("Include all")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        setExcludedSourceIds(
+                          snapshot.segments.map((segment) => segment.id)
+                        )
+                      }
+                    >
+                      {t("Exclude all")}
+                    </Button>
+                  </div>
+                </div>
+                <details className="rounded-lg bg-muted p-3">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    {t("Find specific passages")}
+                  </summary>
+                  <div className="mt-3 flex flex-col gap-3">
+                    <Input
+                      aria-label={t("Search the conversation")}
+                      placeholder={t("Search the conversation")}
+                      value={sourceSearch}
+                      onChange={(event) => setSourceSearch(event.target.value)}
+                    />
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <Field>
+                        <FieldLabel htmlFor="summary-source-from">
+                          {t("From")}
+                        </FieldLabel>
+                        <Input
+                          id="summary-source-from"
+                          placeholder="0:00"
+                          aria-invalid={sourceFromMs === null}
+                          value={sourceFrom}
+                          onChange={(event) =>
+                            setSourceFrom(event.target.value)
+                          }
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="summary-source-to">
+                          {t("To")}
+                        </FieldLabel>
+                        <Input
+                          id="summary-source-to"
+                          placeholder="12:30"
+                          aria-invalid={sourceToMs === null}
+                          value={sourceTo}
+                          onChange={(event) => setSourceTo(event.target.value)}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel>{t("Speaker")}</FieldLabel>
+                        <Select
+                          value={sourceSpeaker}
+                          onValueChange={(value) =>
+                            setSourceSpeaker(value ?? "all")
+                          }
+                          items={[
+                            { value: "all", label: t("All speakers") },
+                            ...snapshot.speakers.map((speaker) => ({
+                              value: speaker.id,
+                              label: speaker.displayName || speaker.label,
+                            })),
+                          ]}
+                        >
+                          <SelectTrigger aria-label={t("Speaker")}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectItem value="all">
+                                {t("All speakers")}
+                              </SelectItem>
+                              {snapshot.speakers.map((speaker) => (
+                                <SelectItem key={speaker.id} value={speaker.id}>
+                                  {speaker.displayName || speaker.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={!matchingSourceSegments.length}
+                        onClick={() =>
+                          setExcludedSourceIds([
+                            ...new Set([
+                              ...excludedSourceIds,
+                              ...matchingSourceSegments.map(
+                                (segment) => segment.id
+                              ),
+                            ]),
+                          ])
+                        }
+                      >
+                        {t("Exclude matching passages")} (
+                        {matchingSourceSegments.length})
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!matchingSourceSegments.length}
+                        onClick={() => {
+                          const matching = new Set(
+                            matchingSourceSegments.map((segment) => segment.id)
+                          )
+                          setExcludedSourceIds(
+                            excludedSourceIds.filter((id) => !matching.has(id))
+                          )
+                        }}
+                      >
+                        {t("Include matching passages")}
+                      </Button>
+                      {selectedSegmentIds.length ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            setExcludedSourceIds([
+                              ...new Set([
+                                ...excludedSourceIds,
+                                ...selectedSegmentIds,
+                              ]),
+                            ])
+                          }
+                        >
+                          {t("Exclude selected transcript lines")} (
+                          {selectedSegmentIds.length})
+                        </Button>
+                      ) : null}
+                    </div>
+                    {!sourceTimeRangeValid ? (
+                      <p role="status" className="text-sm text-destructive">
+                        {t(
+                          "Enter a time like 2:30, with the end after the start."
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
+                </details>
+                <div className="flex max-h-80 flex-col gap-3 overflow-y-auto rounded-lg bg-muted p-3">
+                  {sourcePassages.map((passage) => {
+                    const includedCount = passage.segmentIds.filter(
+                      (id) => !excludedSourceIds.includes(id)
+                    ).length
+                    const speaker = snapshot.speakers.find(
+                      (item) => item.id === passage.speakerKey
+                    )
+                    const rawName = speaker?.displayName || speaker?.label || ""
+                    const genericSpeaker = /^SPEAKER[_ -]?(\d+)$/i.exec(rawName)
+                    const name = genericSpeaker
+                      ? t("Speaker {value0}", {
+                          value0: Number(genericSpeaker[1]),
+                        })
+                      : rawName || t("Speaker")
+                    return (
+                      <Field key={passage.id} orientation="horizontal">
+                        <Checkbox
+                          id={`summary-source-${passage.id}`}
+                          checked={includedCount === passage.segmentIds.length}
+                          indeterminate={
+                            includedCount > 0 &&
+                            includedCount < passage.segmentIds.length
+                          }
+                          onCheckedChange={(checked) => {
+                            const groupIds = new Set(passage.segmentIds)
+                            setExcludedSourceIds(
+                              checked
+                                ? excludedSourceIds.filter(
+                                    (id) => !groupIds.has(id)
+                                  )
+                                : [
+                                    ...new Set([
+                                      ...excludedSourceIds,
+                                      ...passage.segmentIds,
+                                    ]),
+                                  ]
+                            )
+                          }}
+                        />
+                        <FieldLabel htmlFor={`summary-source-${passage.id}`}>
+                          <span className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">
+                              {formatVideoDuration(passage.startOffsetMs)} ·{" "}
+                              {name}
+                            </span>
+                            <span className="text-sm leading-6">
+                              {passage.text}
+                            </span>
+                          </span>
+                        </FieldLabel>
+                      </Field>
+                    )
+                  })}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {t(
+                    "Generation replaces the shared summary, chapters, topics, and action items. The original transcript is preserved."
+                  )}
+                </p>
+              </FieldGroup>
+            </details>
+            {snapshot.segments.length > 0 &&
+            excludedSourceIds.length >= snapshot.segments.length ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                {t("Keep at least one passage to create a summary.")}
               </p>
             ) : null}
-          </FieldGroup>
-          {exportError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {t(exportError)}
-            </p>
-          ) : null}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setExportOpen(false)}>
+            {templateError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t(templateError)}
+              </p>
+            ) : null}
+            {standardError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t(standardError)}
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter className="shrink-0 px-5 py-4 sm:px-6">
+            <Button variant="ghost" onClick={() => setSummarySetupOpen(false)}>
               {t("Cancel")}
             </Button>
             <Button
-              disabled={exporting}
-              onClick={() => void exportTranscript()}
+              disabled={
+                standardLoading ||
+                insightsProcessing ||
+                excludedSourceIds.length >= snapshot.segments.length
+              }
+              onClick={() => {
+                setSummarySetupOpen(false)
+                void generateInsights()
+              }}
             >
-              {exporting ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
-              ) : (
-                <Download data-icon="inline-start" />
-              )}
-              {exporting ? t("Preparing…") : t("Download")}
+              {t("Generate summary")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <SummaryTemplateEditor
+        key={templateDraft?.id ?? "new"}
+        draft={templateDraft}
+        onChange={setTemplateDraft}
+        onClose={() => {
+          setTemplateDraft(null)
+          setTemplateSuggestion(false)
+          setTemplateError("")
+        }}
+        onSave={() => void saveTeamSummaryTemplate()}
+        onDelete={() => void deleteTeamSummaryTemplate()}
+        saving={templateSaving}
+        error={templateError}
+        suggested={templateSuggestion}
+      />
+      <TranscriptionExportDialog
+        key={String(exportOpen)}
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        summaryOnly={insightsOnlyExport}
+        title={snapshot.session.title}
+        speakerNames={snapshot.speakers
+          .flatMap((speaker) => [speaker.displayName, speaker.label])
+          .filter((name): name is string => Boolean(name))}
+        insights={insights}
+        format={exportFormat}
+        onFormatChange={setExportFormat}
+        options={summaryExportOptions}
+        onOptionsChange={setSummaryExportOptions}
+        includeSummary={includeInsightsInExport}
+        onIncludeSummaryChange={setIncludeInsightsInExport}
+        omissions={insights.customization?.automaticOmissions ?? []}
+        restoredIds={restoredSummaryIds}
+        onRestorePassages={restoreSummaryPassages}
+        onSuggestRule={(text) => void proposeSummaryRule(text)}
+        ruleProposing={ruleProposing}
+        onDraftChange={setExportDraft}
+        onDownload={(remember) => void exportTranscript(remember)}
+        exporting={exporting}
+        loading={standardLoading || standardSaving}
+        hasContent={exportHasSummaryContent}
+        error={exportError}
+        preferencesError={standardError}
+        hasSavedPreferences={Boolean(savedStandard)}
+        onApplyPreferences={() =>
+          applySummaryExportPreferences(savedStandard ?? defaultSummaryStandard)
+        }
+      />
 
       <div className={workspaceGridClass}>
         <Card
@@ -2228,46 +2961,34 @@ export function TranscriptWorkspace({
                     </Button>
                   ) : null}
                   {insightsReady ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={<Button size="sm" variant="outline" />}
-                      >
-                        <Download data-icon="inline-start" />{" "}
-                        {t("Export insights")}
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("pdf")}
-                        >
-                          <FileText data-icon="inline-start" /> PDF
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("docx")}
-                        >
-                          <FileText data-icon="inline-start" /> Word (.docx)
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("md")}
-                        >
-                          <FileText data-icon="inline-start" /> Markdown
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("txt")}
-                        >
-                          <FileText data-icon="inline-start" />{" "}
-                          {t("Plain text")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("json")}
-                        >
-                          <Download data-icon="inline-start" /> JSON
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={standardLoading}
+                      onClick={() => {
+                        setExportDraft(null)
+                        setInsightsOnlyExport(true)
+                        setExportError("")
+                        if (
+                          !["pdf", "docx", "md", "txt", "json"].includes(
+                            exportFormat
+                          )
+                        )
+                          setExportFormat(savedStandard?.format ?? "pdf")
+                        setExportOpen(true)
+                      }}
+                    >
+                      <Download data-icon="inline-start" />
+                      {t("Export insights")}
+                    </Button>
                   ) : null}
                   <Button
-                    disabled={insightsProcessing || !snapshot.segments.length}
-                    onClick={() => void generateInsights()}
+                    disabled={
+                      standardLoading ||
+                      insightsProcessing ||
+                      !snapshot.segments.length
+                    }
+                    onClick={() => setSummarySetupOpen(true)}
                     size="sm"
                     variant="outline"
                   >
@@ -2291,7 +3012,34 @@ export function TranscriptWorkspace({
                 {t(
                   "Summary, chapters, topics, and action items from the transcript."
                 )}
+                {snapshot.insights?.customization?.excludedSegmentIds
+                  ?.length ? (
+                  <>
+                    {" "}
+                    {t(
+                      "{value0} transcript passages excluded from this summary.",
+                      {
+                        value0:
+                          snapshot.insights.customization.excludedSegmentIds
+                            .length,
+                      }
+                    )}
+                  </>
+                ) : null}
               </CardDescription>
+              {insights.customization?.templateName ? (
+                <p className="text-xs text-muted-foreground">
+                  {t("Template: {value0}", {
+                    value0: insights.customization.templateName,
+                  })}
+                </p>
+              ) : null}
+              <SummaryOmissionReview
+                omissions={insights.customization?.automaticOmissions ?? []}
+                restoredIds={restoredSummaryIds}
+                disabled={insightsProcessing}
+                onRestore={restoreSummaryPassages}
+              />
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <span className="text-xs text-muted-foreground">
                   {t("Output language")}

@@ -540,17 +540,40 @@ type TranscriptionInsightChapter struct {
 	StartOffsetMs int64  `json:"startOffsetMs"`
 }
 
+type TranscriptionSummaryOmission struct {
+	SegmentIDs    []string `json:"segmentIds"`
+	Reason        string   `json:"reason"`
+	Text          string   `json:"text"`
+	Speaker       string   `json:"speaker"`
+	StartOffsetMs int64    `json:"startOffsetMs"`
+	EndOffsetMs   int64    `json:"endOffsetMs"`
+}
+
+type TranscriptionSummaryCustomization struct {
+	TemplateRevision       string                         `json:"templateRevision,omitempty"`
+	RulesOverridden        bool                           `json:"rulesOverridden,omitempty"`
+	InstructionsOverridden bool                           `json:"instructionsOverridden,omitempty"`
+	TemplateID             string                         `json:"templateId"`
+	TemplateName           string                         `json:"templateName,omitempty"`
+	ExclusionRules         string                         `json:"exclusionRules,omitempty"`
+	RestoredSegmentIDs     []string                       `json:"restoredSegmentIds,omitempty"`
+	AutomaticOmissions     []TranscriptionSummaryOmission `json:"automaticOmissions,omitempty"`
+	Instructions           string                         `json:"instructions"`
+	ExcludedSegmentIDs     []string                       `json:"excludedSegmentIds"`
+}
+
 type TranscriptionInsights struct {
-	SessionID   uuid.UUID                     `json:"sessionId"`
-	Status      string                        `json:"status"`
-	Language    string                        `json:"language"`
-	Summary     string                        `json:"summary,omitempty"`
-	Chapters    []TranscriptionInsightChapter `json:"chapters,omitempty"`
-	Topics      []string                      `json:"topics,omitempty"`
-	ActionItems []string                      `json:"actionItems,omitempty"`
-	Error       string                        `json:"error,omitempty"`
-	GeneratedAt *time.Time                    `json:"generatedAt,omitempty"`
-	UpdatedAt   time.Time                     `json:"updatedAt"`
+	Customization TranscriptionSummaryCustomization `json:"customization"`
+	SessionID     uuid.UUID                         `json:"sessionId"`
+	Status        string                            `json:"status"`
+	Language      string                            `json:"language"`
+	Summary       string                            `json:"summary,omitempty"`
+	Chapters      []TranscriptionInsightChapter     `json:"chapters,omitempty"`
+	Topics        []string                          `json:"topics,omitempty"`
+	ActionItems   []string                          `json:"actionItems,omitempty"`
+	Error         string                            `json:"error,omitempty"`
+	GeneratedAt   *time.Time                        `json:"generatedAt,omitempty"`
+	UpdatedAt     time.Time                         `json:"updatedAt"`
 }
 
 type TranscriptionRecording struct {

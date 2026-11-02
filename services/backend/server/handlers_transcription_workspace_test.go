@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"github.com/gin-gonic/gin"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -480,5 +482,76 @@ func TestTranscriptPDFCompactInsightsHeader(t *testing.T) {
 		if err := os.WriteFile(path, buildTranscriptPDFLocalized("Video transcript", nil, insights, "de"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestSummaryExportSpeakerEmphasis(t *testing.T) {
+	insights := &models.TranscriptionInsights{Status: "completed", Language: "en", Summary: "Anna Müller explains the proposal.\n\nUnknown speaker stays plain."}
+	options := transcriptionSummaryExportOptions{BoldSpeakers: true, Speakers: []models.TranscriptionSpeaker{{DisplayName: "Anna Müller", Label: "Speaker 1"}}}
+	markdown := transcriptionMarkdownLocalized("Meeting", nil, insights, "en", options)
+	if !strings.Contains(markdown, "**Anna Müller** explains") || strings.Contains(markdown, "**Unknown") {
+		t.Fatalf("unexpected emphasis: %s", markdown)
+	}
+	if strings.Contains(transcriptionMarkdownLocalized("Meeting", nil, insights, "en"), "**Anna Müller**") {
+		t.Fatal("speaker emphasis must be opt-in")
+	}
+	if summaryExportSpeakerPrefix("Anna Müllerin speaks", options) != "" {
+		t.Fatal("must match a complete speaker name")
+	}
+	docx := buildTranscriptDOCXLocalized("Meeting", nil, insights, "en", options)
+	archive, err := zip.NewReader(bytes.NewReader(docx), int64(len(docx)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range archive.File {
+		if file.Name != "word/document.xml" {
+			continue
+		}
+		reader, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var content bytes.Buffer
+		_, _ = content.ReadFrom(reader)
+		_ = reader.Close()
+		if !strings.Contains(content.String(), `<w:b/></w:rPr><w:t xml:space="preserve">Anna Müller</w:t>`) {
+			t.Fatal("Word speaker run is not bold")
+		}
+	}
+	pages := []transcriptPDFPage{{}}
+	y := transcriptPDFBodyTopY
+	appendTranscriptPDFInsightsLocalized(&pages, &y, insights, "en", options)
+	found := false
+	for _, page := range pages {
+		for _, line := range page.Lines {
+			if line.Text == "Anna Müller" && line.Font == "F2" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("PDF speaker name must use bold font")
+	}
+	if insights.Summary != "Anna Müller explains the proposal.\n\nUnknown speaker stays plain." {
+		t.Fatal("export changed saved summary")
+	}
+}
+
+func TestSummaryExportSectionSelection(t *testing.T) {
+	original := &models.TranscriptionInsights{Summary: "Keep summary", Topics: []string{"Omit topic"}, ActionItems: []string{"Omit action"}, Chapters: []models.TranscriptionInsightChapter{{Title: "Omit chapter"}}}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/?chapters=false&topics=false&actionItems=false", nil)
+	filtered := filterSummaryExportInsights(c, original)
+	if filtered.Summary != original.Summary || len(filtered.Chapters)+len(filtered.Topics)+len(filtered.ActionItems) != 0 {
+		t.Fatalf("unexpected selection: %+v", filtered)
+	}
+	if len(original.Chapters)+len(original.Topics)+len(original.ActionItems) != 3 {
+		t.Fatal("selection mutated original insights")
+	}
+	c, _ = gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/", nil)
+	defaults := filterSummaryExportInsights(c, original)
+	if defaults.Summary != original.Summary || len(defaults.Topics) != 1 {
+		t.Fatal("default export must retain all sections")
 	}
 }

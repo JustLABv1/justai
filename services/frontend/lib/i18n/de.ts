@@ -3784,4 +3784,201 @@ export const de = {
   runs: "Ausführungen",
   member: "Mitglied",
   members: "Mitglieder",
+  "Choose a file format and customize the exported content.":
+    "Wähle ein Dateiformat und passe den exportierten Inhalt an.",
+  "Summary export options": "Optionen für den Zusammenfassungsexport",
+  "Bold speaker names": "Sprechernamen fett darstellen",
+  "These options only affect the downloaded file. Speaker emphasis applies to names at the start of summary paragraphs.":
+    "Diese Optionen gelten nur für die heruntergeladene Datei. Sprechernamen am Anfang von Zusammenfassungsabsätzen werden hervorgehoben.",
+  "Apply saved standard": "Gespeicherten Standard anwenden",
+  "Choose which transcript passages the AI may use. Excluded passages are never sent for this summary generation.":
+    "Wähle die Transkriptpassagen, die die KI verwenden darf. Ausgeschlossene Passagen werden für diese Zusammenfassung nicht an die KI gesendet.",
+  Contribution: "Beitrag",
+  "Customize summary": "Zusammenfassung anpassen",
+  "Default file format": "Standarddateiformat",
+  "Exclude all": "Alle ausschließen",
+  "Exclude matching passages": "Gefundene Passagen ausschließen",
+  "Exclude selected transcript lines":
+    "Ausgewählte Transkriptzeilen ausschließen",
+  "Find transcript passages": "Transkriptpassagen suchen",
+  "For example: omit small talk, focus on decisions, use concise paragraphs, and preserve disagreements.":
+    "Zum Beispiel: Smalltalk weglassen, Entscheidungen hervorheben, kurze Absätze verwenden und unterschiedliche Positionen beibehalten.",
+  "From (seconds)": "Von (Sekunden)",
+  "To (seconds)": "Bis (Sekunden)",
+  "Generate summary": "Zusammenfassung erstellen",
+  "Generation replaces the shared summary, chapters, topics, and action items. The original transcript is preserved.":
+    "Die Erstellung ersetzt die gemeinsame Zusammenfassung, Kapitel, Themen und Aufgaben. Das ursprüngliche Transkript bleibt erhalten.",
+  "Include all": "Alle einschließen",
+  "Include matching passages": "Gefundene Passagen einschließen",
+  "Include at least one contribution, chapter, topic, or action item to export.":
+    "Schließe mindestens einen Beitrag, ein Kapitel, ein Thema oder eine Aufgabe für den Export ein.",
+  "Instructions apply when generating a summary. Regenerate to apply changes to an existing summary.":
+    "Anweisungen gelten bei der Erstellung. Erstelle die Zusammenfassung neu, um Änderungen auf eine bestehende Zusammenfassung anzuwenden.",
+  "My summary standard": "Mein Zusammenfassungsstandard",
+  "Remove individual contributions or edit their wording. Changes apply only to this export.":
+    "Entferne einzelne Beiträge oder bearbeite ihre Formulierung. Änderungen gelten nur für diesen Export.",
+  "Reset standard": "Standard zurücksetzen",
+  "Restore original content": "Ursprünglichen Inhalt wiederherstellen",
+  "Review and edit export content": "Exportinhalt prüfen und bearbeiten",
+  "Save instructions, sections, speaker formatting, and file format as your personal default for all transcriptions. Passage selections and content edits are specific to this transcription.":
+    "Speichere Anweisungen, Abschnitte, Sprecherformatierung und Dateiformat als persönlichen Standard für alle Transkriptionen. Passagenauswahl und Inhaltsänderungen gelten nur für diese Transkription.",
+  "Standard name": "Name des Standards",
+  "Summary instructions": "Anweisungen für die Zusammenfassung",
+  "passages included": "Passagen eingeschlossen",
+  "Save as my standard": "Als meinen Standard speichern",
+  "Your standard will apply to future summaries and exports across devices.":
+    "Dein Standard gilt geräteübergreifend für zukünftige Zusammenfassungen und Exporte.",
+  "Saved standard applied.": "Gespeicherter Standard angewendet.",
+  "Standard reset.": "Standard zurückgesetzt.",
+  "Could not load summary standard.":
+    "Der Zusammenfassungsstandard konnte nicht geladen werden.",
+  "Could not save summary standard.":
+    "Der Zusammenfassungsstandard konnte nicht gespeichert werden.",
+  "Could not reset summary standard.":
+    "Der Zusammenfassungsstandard konnte nicht zurückgesetzt werden.",
+  "{value0} transcript passages excluded from this summary.":
+    "{value0} Transkriptpassagen sind von dieser Zusammenfassung ausgeschlossen.",
+  "Download summary": "Zusammenfassung herunterladen",
+  "Download transcript": "Transkript herunterladen",
+  "Keep what matters. Edit or leave out anything before downloading.":
+    "Alles Wichtige auf einen Blick. Bearbeite den Text oder lass einzelne Stellen weg.",
+  "Download options": "Download anpassen",
+  "Add summary to transcript": "Zusammenfassung hinzufügen",
+  "Include in document": "Das kommt in die Datei",
+  "Your document": "Dein Dokument",
+  "Highlight speaker names": "Sprechernamen hervorheben",
+  "Available in PDF, Word, and Markdown.":
+    "Für PDF, Word und Markdown verfügbar.",
+  "Make it yours": "So, wie du es brauchst",
+  "Your choices can be remembered for next time.":
+    "Du kannst deine Auswahl für zukünftige Exporte speichern.",
+  "Use my saved choices": "Gespeicherte Auswahl verwenden",
+  "Remember for next time": "Für nächste Exporte merken",
+  "Keep at least one part to download.":
+    "Wähle mindestens einen Inhalt für deine Datei aus.",
+  "Your transcript is ready to download.": "Dein Transkript ist bereit.",
+  "The original text stays unchanged.":
+    "Der ursprüngliche Text bleibt erhalten.",
+  "Edit paragraph": "Absatz bearbeiten",
+  "Leave out": "Weglassen",
+  "Left out": "Weggelassen",
+  "Leave out paragraph {value0}": "Absatz {value0} weglassen",
+  "Restore paragraph {value0}": "Absatz {value0} zurückholen",
+  "Leave out {value0}": "{value0} weglassen",
+  "Restore {value0}": "{value0} zurückholen",
+  "Choose what to include above.": "Wähle oben aus, was in deine Datei soll.",
+  "{value0} items left out": "{value0} Stellen weggelassen",
+  "Text edited": "Text bearbeitet",
+  "Undo all changes": "Alle Änderungen verwerfen",
+  "How should your summary read?": "Wie soll deine Zusammenfassung klingen?",
+  "For example: keep it brief, focus on decisions, and leave out small talk.":
+    "Zum Beispiel: kurz und knapp, Entscheidungen hervorheben und Smalltalk weglassen.",
+  "Remember writing style": "Schreibstil merken",
+  "Use saved style": "Gespeicherten Stil verwenden",
+  "Saved for your next summaries.":
+    "Für deine nächsten Zusammenfassungen gespeichert.",
+  "Create your summary": "Deine Zusammenfassung erstellen",
+  "Choose what matters and leave out the rest.":
+    "Wähle aus, was wichtig ist, und lass den Rest weg.",
+  "Search the conversation": "Gespräch durchsuchen",
+  "Find specific passages": "Bestimmte Stellen finden",
+  "Enter a time like 2:30, with the end after the start.":
+    "Gib eine Zeit wie 2:30 ein. Das Ende muss nach dem Anfang liegen.",
+  "Team template": "Team-Vorlage",
+  "Without a template": "Ohne Vorlage",
+  "New template": "Neue Vorlage",
+  "Create your own": "Eigene Vorlage erstellen",
+  "Edit team template": "Team-Vorlage bearbeiten",
+  "Copy team template": "Team-Vorlage kopieren",
+  "New team template": "Neue Team-Vorlage",
+  "Review the suggested rule": "Regelvorschlag prüfen",
+  "Template name": "Name der Vorlage",
+  "For example: Plenary debate": "Zum Beispiel: Plenardebatte",
+  "What should the summary focus on?":
+    "Worauf soll die Zusammenfassung eingehen?",
+  "What should be left out?": "Was soll weggelassen werden?",
+  "For example: Leave out purely organizational openings and closings. Keep substantive statements, including from the chair.":
+    "Zum Beispiel: Rein organisatorische Eröffnungen und Abschlüsse weglassen. Inhaltliche Aussagen behalten, auch vom Sitzungsleiter.",
+  "Shared with your team. Changes below apply only to this summary.":
+    "Gemeinsam im Team nutzbar. Änderungen unten gelten nur für diese Zusammenfassung.",
+  "Start with a plenary debate, customer conversation, project meeting, or interview template.":
+    "Starte mit einer Vorlage für Plenardebatten, Kundengespräche, Projektbesprechungen oder Interviews.",
+  "Your team can reuse this template. Existing summaries stay unchanged.":
+    "Dein Team kann diese Vorlage wiederverwenden. Bestehende Zusammenfassungen bleiben unverändert.",
+  "Check the proposed rule carefully. It is only shared with the team when you save.":
+    "Prüfe den Regelvorschlag. Erst beim Speichern wird er für das Team übernommen.",
+  "File and appearance": "Datei und Darstellung",
+  "Save for team": "Für das Team speichern",
+  "Delete for the whole team?": "Für das ganze Team löschen?",
+  "{value0} (copy)": "{value0} (Kopie)",
+  "Template: {value0}": "Vorlage: {value0}",
+  "{value0} contributions left out · Review":
+    "{value0} Beiträge weggelassen · Prüfen",
+  "These passages matched the template rules. Restore a passage to include it when creating the summary again.":
+    "Diese Stellen entsprechen den Regeln der Vorlage. Hole eine Stelle zurück, um sie bei der nächsten Erstellung aufzunehmen.",
+  "Restore contribution {value0}": "Beitrag {value0} zurückholen",
+  "Include in summary": "In Zusammenfassung aufnehmen",
+  "Will be included next time": "Wird beim nächsten Mal aufgenommen",
+  "{value0} passages will be included even if a template rule matches. Create the summary again to apply this.":
+    "{value0} Stellen werden trotz passender Vorlagenregel berücksichtigt. Erstelle die Zusammenfassung dafür neu.",
+  "Leave out similar contributions in future": "Ähnliches künftig weglassen",
+  "Suggesting…": "Vorschlag wird erstellt…",
+  "My team's summary": "Zusammenfassung für mein Team",
+  "Could not suggest a rule.": "Es konnte keine Regel vorgeschlagen werden.",
+  "Could not remember the selected template.":
+    "Die gewählte Vorlage konnte nicht gemerkt werden.",
+  "Could not save the team template.":
+    "Die Team-Vorlage konnte nicht gespeichert werden.",
+  "Could not delete the team template.":
+    "Die Team-Vorlage konnte nicht gelöscht werden.",
+  "The template can leave out matching contributions. You can review them after generation.":
+    "Die Vorlage kann passende Beiträge zusätzlich weglassen. Du kannst sie danach prüfen.",
+  "Plenary debate – substantive report": "Plenardebatte – inhaltlicher Bericht",
+  "Report political positions, arguments, proposals, and disagreements neutrally and attribute them to the speakers. Preserve distinct positions and substantive contributions.":
+    "Berichte neutral über politische Positionen, Argumente, Vorschläge und Kontroversen. Ordne Aussagen den Sprechern zu und bewahre unterschiedliche Positionen sowie inhaltliche Beiträge.",
+  "Leave out purely organizational contributions: opening the sitting, greetings, speaking-time announcements, handing over the floor, procedural interruptions, adjournments, and closing the sitting. Keep all substantive statements, arguments, decisions, and disagreements, including those from the chair. Never exclude a speaker as a whole or a fixed opening or closing time range. Keep mixed or uncertain passages.":
+    "Lass rein organisatorische Beiträge weg: Sitzungseröffnung, Begrüßungen, Redezeitankündigungen, Wortübergaben, organisatorische Unterbrechungen, Vertagungen und Sitzungsschluss. Bewahre alle inhaltlichen Aussagen, Argumente, Entscheidungen und Kontroversen, auch vom Sitzungsleiter. Schließe niemals einen Sprecher pauschal oder einen festen Zeitraum am Anfang oder Ende aus. Behalte gemischte oder unklare Passagen.",
+  "Customer conversation": "Kundengespräch",
+  "Focus on customer needs, objections, commitments, and agreed next steps. Attribute statements to their speakers.":
+    "Konzentriere dich auf Kundenbedürfnisse, Einwände, Zusagen und vereinbarte nächste Schritte. Ordne Aussagen den Sprechern zu.",
+  "Leave out purely social greetings, small talk, and technical connection checks. Preserve any customer needs, objections, promises, or relevant context, including in mixed passages.":
+    "Lass rein soziale Begrüßungen, Smalltalk und technische Verbindungsprüfungen weg. Bewahre Kundenbedürfnisse, Einwände, Zusagen und relevanten Kontext, auch in gemischten Passagen.",
+  "Project meeting": "Projektbesprechung",
+  "Focus on decisions, open questions, risks, responsibilities, and next steps. Preserve disagreements and unresolved issues.":
+    "Konzentriere dich auf Entscheidungen, offene Fragen, Risiken, Verantwortlichkeiten und nächste Schritte. Bewahre unterschiedliche Standpunkte und ungeklärte Punkte.",
+  "Leave out purely social greetings and technical connection checks. Keep substantive updates, decisions, dependencies, risks, and disagreements. Keep mixed or uncertain passages.":
+    "Lass rein soziale Begrüßungen und technische Verbindungsprüfungen weg. Behalte inhaltliche Neuigkeiten, Entscheidungen, Abhängigkeiten, Risiken und unterschiedliche Standpunkte. Behalte gemischte oder unklare Passagen.",
+  Interview: "Interview",
+  "Preserve the interviewee's statements, reasoning, and relevant questions. Attribute opinions and preserve important qualifications.":
+    "Bewahre Aussagen und Begründungen der befragten Person sowie relevante Fragen. Ordne Meinungen zu und erhalte wichtige Einschränkungen.",
+  "Leave out purely organizational recording arrangements and connection checks. Preserve statements, reasoning, meaningful questions, and substantive context, including in mixed passages.":
+    "Lass rein organisatorische Aufnahmeabsprachen und Verbindungsprüfungen weg. Behalte Aussagen, Begründungen, relevante Fragen und inhaltlichen Kontext, auch in gemischten Passagen.",
+  "choose at least one summary section":
+    "Wähle mindestens einen Inhalt für die Zusammenfassung aus.",
+  "unsupported template export format":
+    "Wähle ein unterstütztes Dateiformat aus.",
+  "provide a template name (up to 120 bytes), instructions (up to 4000 bytes), and rules (up to 6000 bytes)":
+    "Gib der Vorlage einen kurzen Namen und kürze gegebenenfalls die Anweisungen oder Regeln.",
+  "reopen the template before saving changes":
+    "Öffne die Vorlage erneut, bevor du Änderungen speicherst.",
+  "the template changed or you cannot edit it; reload and try again":
+    "Die Vorlage wurde geändert oder du darfst sie nicht bearbeiten. Lade sie neu und versuche es erneut.",
+  "summary template not found": "Die Team-Vorlage wurde nicht gefunden.",
+  "the rules would leave no content; adjust the rules or restore a passage":
+    "Die Regeln würden alle Inhalte ausschließen. Passe sie an oder hole eine Stelle zurück.",
+  "Choose a template. We will take care of the rest.":
+    "Wähle eine Vorlage. Den Rest übernehmen wir.",
+  "Adjust for this summary": "Für diese Zusammenfassung anpassen",
+  "Choose specific passages": "Einzelne Stellen auswählen",
+  "{value0} left out": "{value0} weggelassen",
+  "The whole conversation is used by default. Only change this if you want to leave out a specific passage yourself.":
+    "Standardmäßig wird das ganze Gespräch berücksichtigt. Hier kannst du bei Bedarf einzelne Stellen selbst weglassen.",
+  "Use the checked passages": "Markierte Stellen berücksichtigen",
+  "Speaker {value0}": "Sprecher {value0}",
+  "Uses your team's saved choices.":
+    "Verwendet die gespeicherten Vorgaben deines Teams.",
+  "You can also create a template for your team.":
+    "Du kannst auch eine Vorlage für dein Team anlegen.",
+  "Keep at least one passage to create a summary.":
+    "Wähle mindestens eine Stelle für die Zusammenfassung aus.",
 } as const
