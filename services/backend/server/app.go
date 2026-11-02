@@ -25,6 +25,7 @@ import (
 
 type App struct {
 	videoThumbnails videoThumbnailCache
+	usageMetrics    usageMetricsCache
 	Config          config.Config
 	DB              *sql.DB
 	Tokens          *auth.TokenManager
@@ -149,6 +150,7 @@ func (a *App) Router() *gin.Engine {
 	router.GET("/api/v1/health/ready", readyHandler)
 	router.GET("/api/v1/health/workers", a.workerHealthHandler)
 	router.GET("/metrics", a.metricsHandler)
+	router.GET("/metrics/usage", a.usageMetricsHandler)
 	// Keep conventional root health paths available to load balancers while
 	// retaining the versioned paths used by the compose health checks.
 	router.GET("/health/live", liveHandler)
@@ -186,6 +188,7 @@ func (a *App) Router() *gin.Engine {
 	protected.GET("/admin/defaults", a.getGlobalAdminDefaults)
 	protected.PUT("/admin/defaults", a.putGlobalAdminDefaults)
 	protected.GET("/admin/analytics", a.getPlatformAnalytics)
+	protected.GET("/admin/analytics/insights", a.getPlatformAnalyticsInsights)
 	protected.GET("/admin/dashboard", a.getPlatformDashboard)
 	protected.GET("/admin/overview", a.getPlatformOverview)
 	protected.GET("/admin/settings", a.getPlatformSettings)
@@ -216,6 +219,8 @@ func (a *App) Router() *gin.Engine {
 	protected.POST("/admin/endpoints/preflight", a.preflightPlatformEndpoint)
 	protected.PATCH("/admin/endpoints/:id", a.updatePlatformEndpoint)
 	protected.DELETE("/admin/endpoints/:id", a.deletePlatformEndpoint)
+	protected.POST("/admin/endpoints/:id/logo", a.uploadPlatformEndpointLogo)
+	protected.DELETE("/admin/endpoints/:id/logo", a.deletePlatformEndpointLogo)
 	protected.POST("/admin/endpoints/:id/test", a.testPlatformEndpoint)
 	protected.GET("/admin/endpoints/:id/models", a.discoverPlatformEndpointModels)
 	protected.GET("/admin/mcp/servers", a.listPlatformMCPServers)
@@ -236,6 +241,9 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/endpoints/preflight", a.platformFeature("ai"), a.preflightEndpoint)
 	org.PATCH("/endpoints/:id", a.updateEndpoint)
 	org.DELETE("/endpoints/:id", a.deleteEndpoint)
+	org.POST("/endpoints/:id/logo", a.uploadEndpointLogo)
+	org.DELETE("/endpoints/:id/logo", a.deleteEndpointLogo)
+	protected.GET("/endpoints/:id/logo", a.serveEndpointLogo)
 	org.POST("/endpoints/:id/test", a.platformFeature("ai"), a.testEndpoint)
 	org.GET("/endpoints/:id/models", a.platformFeature("ai"), a.discoverEndpointModels)
 	org.POST("/stream-tickets", a.platformFeature("ai"), a.scopedRateLimit("stream-ticket", 120), a.createStreamTicket)

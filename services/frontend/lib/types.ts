@@ -17,6 +17,7 @@ export type ViewId =
   | "profile"
 
 export type SettingsTab =
+  | "lifecycle"
   | "workspace"
   | "endpoints"
   | "knowledge"
@@ -317,6 +318,7 @@ export type Endpoint = {
   endpointKind: EndpointKind
   providerType: string
   name: string
+  logoUrl?: string
   baseUrl: string
   apiPath?: string
   apiVersion?: string

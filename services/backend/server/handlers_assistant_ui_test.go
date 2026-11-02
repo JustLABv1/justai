@@ -242,6 +242,15 @@ func TestAssistantUIRequestsImageEdit(t *testing.T) {
 	if assistantUIRequestsImageEdit(&assistantUserMessage{Text: "Add a seagull"}) {
 		t.Fatal("an unrelated request without an attached image must not be routed as an edit")
 	}
+	dockerPrompt := "Bitte erstelle mir eine Anfrage bei der BDR für eine CVE Freigabe. Betroffenes Docker container image: undici:6.27.0 Als Abhängigkeit zu diesem sehr minimalen Dockerfile: ARG BASE_CONTAINER_IMAGE=cgr.dev/chainguard/wolfi-base FROM ${BASE_CONTAINER_IMAGE} RUN apk add nodejs-${NODE_VERSION} corepack"
+	if assistantUIRequestsImageEdit(&assistantUserMessage{Text: dockerPrompt}) {
+		t.Fatal("a container-image CVE request with 'apk add' must not be routed to the image editor")
+	}
+	if assistantUIRequestsImageEdit(&assistantUserMessage{Text: "Please add the container image to the report"}) == false {
+		// short text naming an image still qualifies; the handler additionally
+		// requires an editable source image before taking this path.
+		t.Fatal("short image instructions remain candidates")
+	}
 }
 
 func TestAssistantUIRequestsImageGeneration(t *testing.T) {

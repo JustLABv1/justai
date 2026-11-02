@@ -95,7 +95,10 @@ function SettingsSection({
   return (
     <section
       data-slot="settings-section"
-      className={cn("overflow-hidden rounded-2xl bg-card", className)}
+      className={cn(
+        "overflow-hidden rounded-2xl border border-border bg-card",
+        className
+      )}
       {...props}
     >
       <header className="flex flex-col gap-2 px-5 py-4">

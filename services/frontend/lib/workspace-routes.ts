@@ -34,6 +34,7 @@ export type WorkspaceRoute = {
 }
 
 const settingsTabs: SettingsTab[] = [
+  "lifecycle",
   "workspace",
   "endpoints",
   "knowledge",
@@ -357,7 +358,7 @@ export function parseWorkspaceRoute(
         ? "agents"
         : rawQueryView === "notes" || rawQueryView === "memory"
           ? "knowledge"
-        : (rawQueryView as ViewId | null)
+          : (rawQueryView as ViewId | null)
   const view = queryView && validViews.includes(queryView) ? queryView : "chat"
   const legacyRedirect =
     rawQueryView === "assistants"
@@ -368,7 +369,7 @@ export function parseWorkspaceRoute(
           ? "/knowledge?type=note"
           : rawQueryView === "memory"
             ? "/knowledge?type=memory"
-        : undefined
+            : undefined
 
   return {
     view,

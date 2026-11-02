@@ -6,7 +6,7 @@ import {
 } from "@/components/locale-provider"
 import {
   Area,
-  AreaChart,
+  ComposedChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -16,6 +16,7 @@ import {
   YAxis,
 } from "recharts"
 
+import { adminChartDays, type AnalyticsRange } from "@/lib/admin-chart-data"
 import type { AdminAnalyticsResponse } from "@/lib/types"
 import {
   Card,
@@ -71,22 +72,29 @@ function formatDay(value: string, locale: string) {
   }).format(date)
 }
 
-function chartData(analytics: AdminAnalyticsResponse, locale: string) {
-  return analytics.timeSeries.map((item) => ({
+function chartData(
+  analytics: AdminAnalyticsResponse,
+  locale: string,
+  range?: AnalyticsRange
+) {
+  return adminChartDays(analytics.timeSeries, range).map((item) => ({
     ...item,
     label: formatDay(item.date, locale),
     inputTokens: item.inputTokens ?? 0,
     outputTokens: item.outputTokens ?? 0,
-    averageLatencyMs: Math.round(item.averageLatencyMs ?? 0),
+    averageLatencyMs:
+      item.averageLatencyMs === null ? null : Math.round(item.averageLatencyMs),
   }))
 }
 
 export function AdminUsageCharts({
   analytics,
   showLatency = false,
+  range,
 }: {
   analytics: AdminAnalyticsResponse | null
   showLatency?: boolean
+  range?: AnalyticsRange
 }) {
   const requestConfig = useTranslatedConfig(requestConfigMessages)
   const tokenConfig = useTranslatedConfig(tokenConfigMessages)
@@ -110,7 +118,7 @@ export function AdminUsageCharts({
     )
   }
 
-  const data = chartData(analytics, locale)
+  const data = chartData(analytics, locale, range)
   const hasTokens = analytics.summary.totalTokens != null
 
   return (
@@ -125,7 +133,10 @@ export function AdminUsageCharts({
         <CardContent>
           <div className="h-64">
             <ChartContainer config={requestConfig}>
-              <AreaChart data={data} margin={{ left: -18, right: 8, top: 8 }}>
+              <ComposedChart
+                data={data}
+                margin={{ left: -18, right: 8, top: 8 }}
+              >
                 <defs>
                   <linearGradient
                     id="admin-success"
@@ -146,15 +157,17 @@ export function AdminUsageCharts({
                     />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <CartesianGrid stroke="var(--border)" vertical={false} />
                 <XAxis
                   dataKey="label"
+                  tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
                   minTickGap={24}
                 />
                 <YAxis
                   allowDecimals={false}
+                  tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
                   tickFormatter={(value) => compactNumber(value, locale)}
@@ -175,6 +188,7 @@ export function AdminUsageCharts({
                   stroke="var(--chart-1)"
                   strokeWidth={2}
                   fill="url(#admin-success)"
+                  isAnimationActive={false}
                 />
                 <Line
                   dataKey="failed"
@@ -182,6 +196,7 @@ export function AdminUsageCharts({
                   stroke="var(--destructive)"
                   strokeWidth={2}
                   dot={false}
+                  isAnimationActive={false}
                 />
                 <Line
                   dataKey="cancelled"
@@ -189,8 +204,9 @@ export function AdminUsageCharts({
                   stroke="var(--chart-4)"
                   strokeWidth={2}
                   dot={false}
+                  isAnimationActive={false}
                 />
-              </AreaChart>
+              </ComposedChart>
             </ChartContainer>
           </div>
         </CardContent>
@@ -208,15 +224,17 @@ export function AdminUsageCharts({
             <div className="h-64">
               <ChartContainer config={tokenConfig}>
                 <BarChart data={data} margin={{ left: -18, right: 8, top: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <CartesianGrid stroke="var(--border)" vertical={false} />
                   <XAxis
                     dataKey="label"
+                    tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                     axisLine={false}
                     tickLine={false}
                     minTickGap={24}
                   />
                   <YAxis
                     allowDecimals={false}
+                    tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(value) => compactNumber(value, locale)}
@@ -232,11 +250,15 @@ export function AdminUsageCharts({
                   />
                   <ChartLegend content={<ChartLegendContent />} />
                   <Bar
+                    stackId="tokens"
+                    isAnimationActive={false}
                     dataKey="inputTokens"
                     fill="var(--chart-2)"
                     radius={[3, 3, 0, 0]}
                   />
                   <Bar
+                    stackId="tokens"
+                    isAnimationActive={false}
                     dataKey="outputTokens"
                     fill="var(--chart-1)"
                     radius={[3, 3, 0, 0]}
@@ -264,15 +286,17 @@ export function AdminUsageCharts({
             <div className="h-64">
               <ChartContainer config={latencyConfig}>
                 <LineChart data={data} margin={{ left: -18, right: 8, top: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <CartesianGrid stroke="var(--border)" vertical={false} />
                   <XAxis
                     dataKey="label"
+                    tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                     axisLine={false}
                     tickLine={false}
                     minTickGap={24}
                   />
                   <YAxis
                     yAxisId="latency"
+                    tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(value) => `${value} ms`}
@@ -280,6 +304,7 @@ export function AdminUsageCharts({
                   <YAxis
                     yAxisId="tools"
                     orientation="right"
+                    tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(value) => compactNumber(value, locale)}
@@ -303,6 +328,7 @@ export function AdminUsageCharts({
                     stroke="var(--chart-5)"
                     strokeWidth={2}
                     dot={false}
+                    isAnimationActive={false}
                   />
                   <Line
                     dataKey="toolCalls"
@@ -311,6 +337,7 @@ export function AdminUsageCharts({
                     stroke="var(--chart-4)"
                     strokeWidth={2}
                     dot={false}
+                    isAnimationActive={false}
                   />
                 </LineChart>
               </ChartContainer>

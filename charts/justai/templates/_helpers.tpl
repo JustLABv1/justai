@@ -78,7 +78,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "justai.validateSecretRefs" -}}
 {{- $root := . -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $_ := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- end }}
 {{- end }}
@@ -112,7 +112,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $root := . -}}
 {{- $generatedName := printf "%s-secrets" (include "justai.fullname" $root) -}}
 {{- $seen := dict -}}
-{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
+{{- range $refName := list "databaseURL" "postgresqlPassword" "jwtSecret" "encryptionKey" "pyannoteHfToken" "pyannoteServiceToken" "streamRelayToken" "metricsToken" "backendHttpProxy" "backendHttpsProxy" "backendNoProxy" "pyannoteHttpProxy" "pyannoteHttpsProxy" "pyannoteNoProxy" "s3AccessKey" "s3SecretKey" -}}
 {{- $name := include "justai.secretRefName" (dict "root" $root "ref" $refName) -}}
 {{- $key := include "justai.secretRefKey" (dict "root" $root "ref" $refName) -}}
 {{- if eq $name $generatedName }}
@@ -178,5 +178,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
     items:
       - key: {{ include "justai.secretRefKey" (dict "root" . "ref" "streamRelayToken") | quote }}
         path: token
+{{- end }}
+{{- end }}
+
+{{/* Optional bearer token protecting the usage analytics endpoint /metrics/usage. */}}
+{{- define "justai.metricsEnv" -}}
+{{- if .Values.metrics.usage.enabled }}
+- name: JUSTAI_METRICS_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "justai.secretRefName" (dict "root" . "ref" "metricsToken") | quote }}
+      key: {{ include "justai.secretRefKey" (dict "root" . "ref" "metricsToken") | quote }}
 {{- end }}
 {{- end }}

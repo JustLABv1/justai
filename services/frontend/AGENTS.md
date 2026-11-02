@@ -8,11 +8,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 Use the composer-inspired neutral surface system defined in `app/globals.css` and
 `components/ui`. Build page hierarchy with background, card, muted, and popover
-surfaces, spacing, and rounded corners. Cards, navigation panels, normal inputs,
-and secondary buttons have no decorative outlines. Reserve borders/rings for
-focus, validation, selected controls, upload progress, drag targets, and subtle
-data-table separators. Use semantic theme colors; primary blue identifies actions
-and active states. Keep toolbar controls compact (32px, 14px text, 16px icons).
+surfaces, spacing, and rounded corners. Standalone cards use the ReUI-style
+subtle 1px `border border-border` contour supplied centrally by `Card` and
+`SettingsSection`. Use the existing semantic border token in both light and dark
+mode; do not add extra borders or rings at individual call sites. Rows and muted
+surfaces inside a card stay unoutlined, with subtle separators only when needed.
+Navigation panels, normal inputs, and secondary buttons have no decorative
+outlines. Reserve additional borders/rings for focus, validation, selected
+controls, upload progress, drag targets, and subtle data-table separators. Use
+semantic theme colors; primary blue identifies actions and active states. Keep toolbar controls compact (32px, 14px text, 16px icons).
 Check both light and dark mode when introducing or changing surfaces. Preserve
 readable secondary text and visible keyboard focus.
 

@@ -42,6 +42,7 @@ import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -64,7 +65,7 @@ type SettingsViewProps = {
   onOrganizationRemoved?: (organizationId: string) => void
   workspaceCreateRequest?: number
   memberCreateRequest?: number
-  section?: "workspace" | "members"
+  section?: "workspace" | "members" | "lifecycle"
 }
 
 export function SettingsView({
@@ -83,6 +84,12 @@ export function SettingsView({
   const { t, locale } = useTranslations()
 
   const [members, setMembers] = useState<OrganizationMember[]>([])
+  const [memberSearch, setMemberSearch] = useState("")
+  const [memberFilter, setMemberFilter] = useState("all")
+  const [memberPage, setMemberPage] = useState(1)
+  const [memberTotal, setMemberTotal] = useState(0)
+  const [memberFiltered, setMemberFiltered] = useState(0)
+  const memberRequest = useRef(0)
   const [membersLoading, setMembersLoading] = useState(false)
   const [membersError, setMembersError] = useState("")
   const [analyticsResult, setAnalyticsResult] = useState<{
@@ -129,33 +136,54 @@ export function SettingsView({
       setMembers([])
       return
     }
+    const request = ++memberRequest.current
     setMembersLoading(true)
     setMembersError("")
     try {
-      const result = await api.get<{ members: OrganizationMember[] }>(
-        `/api/v1/organizations/${activeOrganization.id}/members`
-      )
+      const params = new URLSearchParams({
+        page: String(memberPage),
+        search: memberSearch,
+        role: memberFilter === "all" ? "" : memberFilter,
+      })
+      const result = await api.get<{
+        members: OrganizationMember[]
+        total: number
+        filtered: number
+        page: number
+      }>(`/api/v1/organizations/${activeOrganization.id}/members?${params}`)
+      if (request !== memberRequest.current) return
       setMembers(result.members)
+      setMemberTotal(result.total)
+      setMemberFiltered(result.filtered)
+      setMemberPage(result.page)
     } catch (caught) {
+      if (request !== memberRequest.current) return
       setMembersError(
         caught instanceof Error
           ? caught.message
           : "Members could not be loaded."
       )
     } finally {
-      setMembersLoading(false)
+      if (request === memberRequest.current) setMembersLoading(false)
     }
-  }, [activeOrganization])
+  }, [activeOrganization, memberPage, memberSearch, memberFilter])
+
+  const invalidateMemberRequest = useCallback(() => {
+    memberRequest.current++
+  }, [])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadMembers()
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [loadMembers])
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      invalidateMemberRequest()
+    }
+  }, [loadMembers, invalidateMemberRequest])
 
   useEffect(() => {
-    if (isMembersSection || !activeOrganization || !canManageMembers) {
+    if (section !== "workspace" || !activeOrganization || !canManageMembers) {
       return
     }
     let cancelled = false
@@ -175,7 +203,7 @@ export function SettingsView({
     return () => {
       cancelled = true
     }
-  }, [activeOrganization, canManageMembers, isMembersSection])
+  }, [activeOrganization, canManageMembers, section])
 
   const analytics =
     analyticsResult?.organizationId === activeOrganization?.id
@@ -472,24 +500,64 @@ export function SettingsView({
         </Alert>
       )}
 
-      {activeOrganization && !isMembersSection && (
+      {activeOrganization && section === "workspace" && (
         <WorkspaceSettingsDashboard
           analytics={analytics}
           analyticsLoading={analyticsLoading}
           canManage={canManageMembers}
           endpoints={endpoints}
           mcpServers={mcpServers}
-          memberCount={members.length}
+          memberCount={memberTotal}
           membersLoading={membersLoading}
-          onArchive={() => setLifecycleAction("archive")}
-          onDelete={() => {
-            setDeleteConfirmation("")
-            setDeleteDialogOpen(true)
-          }}
-          onLeave={() => setLifecycleAction("leave")}
           onRename={openRenameDialog}
           organization={activeOrganization}
         />
+      )}
+
+      {activeOrganization && section === "lifecycle" && (
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>{t("Workspace lifecycle")}</CardTitle>
+            <CardDescription>
+              {t("Archive, leave, or permanently remove this workspace.")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <p className="max-w-2xl text-xs text-muted-foreground">
+              {t(
+                "Archiving hides the workspace without deleting its content. Permanent deletion cannot be undone."
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {activeOrganization.role !== "owner" ? (
+                <Button
+                  onClick={() => setLifecycleAction("leave")}
+                  variant="outline"
+                >
+                  {t("Leave workspace")}
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    onClick={() => setLifecycleAction("archive")}
+                    variant="outline"
+                  >
+                    {t("Archive workspace")}
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setDeleteConfirmation("")
+                      setDeleteDialogOpen(true)
+                    }}
+                    variant="destructive"
+                  >
+                    {t("Delete workspace")}
+                  </Button>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {activeOrganization && isMembersSection && (
@@ -503,12 +571,68 @@ export function SettingsView({
             </div>
             {!membersLoading && (
               <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                {members.length} {t(members.length === 1 ? "member" : "members")}
+                {memberTotal} {t(memberTotal === 1 ? "member" : "members")}
               </span>
             )}
           </CardHeader>
           <CardContent className="pt-0">
             <>
+              {(memberTotal > 20 || memberSearch || memberFilter !== "all") && (
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <Input
+                    aria-label={t("Search members")}
+                    placeholder={t("Search by name or email…")}
+                    className="w-full sm:max-w-sm"
+                    value={memberSearch}
+                    onChange={(event) => {
+                      setMemberSearch(event.target.value)
+                      setMemberPage(1)
+                      memberRequest.current++
+                      setMembersLoading(true)
+                    }}
+                  />
+                  <Select
+                    value={memberFilter}
+                    onValueChange={(value) => {
+                      if (value) {
+                        setMemberFilter(value)
+                        setMemberPage(1)
+                        memberRequest.current++
+                        setMembersLoading(true)
+                      }
+                    }}
+                  >
+                    <SelectTrigger aria-label={t("Filter by role")}>
+                      <SelectValue>
+                        {memberFilter === "all"
+                          ? t("All roles")
+                          : t(
+                              memberFilter === "owner"
+                                ? "Owner"
+                                : memberFilter === "admin"
+                                  ? "Admin"
+                                  : "Member"
+                            )}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {[
+                          ["all", "All roles"],
+                          ["owner", "Owner"],
+                          ["admin", "Admin"],
+                          ["member", "Member"],
+                        ].map(([value, label]) => (
+                          <SelectItem key={value} value={value}>
+                            {t(label)}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {membersError && (
                 <Alert className="mb-4" variant="destructive">
                   <AlertDescription>{t(membersError)}</AlertDescription>
@@ -597,15 +721,29 @@ export function SettingsView({
                             value0: member.displayName,
                           })}
                         >
-                          <SelectValue />
+                          <SelectValue>
+                            {t(
+                              member.role === "owner"
+                                ? "Owner"
+                                : member.role === "admin"
+                                  ? "Admin"
+                                  : "Member"
+                            )}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="member">{t("Member")}</SelectItem>
-                          <SelectItem value="admin">{t("Admin")}</SelectItem>
-                          {(activeOrganization.role === "owner" ||
-                            user.platformAdmin) && (
-                            <SelectItem value="owner">{t("Owner")}</SelectItem>
-                          )}
+                          <SelectGroup>
+                            <SelectItem value="member">
+                              {t("Member")}
+                            </SelectItem>
+                            <SelectItem value="admin">{t("Admin")}</SelectItem>
+                            {(activeOrganization.role === "owner" ||
+                              user.platformAdmin) && (
+                              <SelectItem value="owner">
+                                {t("Owner")}
+                              </SelectItem>
+                            )}
+                          </SelectGroup>
                         </SelectContent>
                       </Select>
                       {canManageMembers && member.role !== "owner" && (
@@ -626,6 +764,49 @@ export function SettingsView({
                     </div>
                   ))}
                 </div>
+              )}
+              {!membersError && memberFiltered > 20 && (
+                <nav
+                  aria-label={t("Member pagination")}
+                  className="mt-4 flex flex-wrap items-center justify-between gap-3"
+                >
+                  <p
+                    aria-live="polite"
+                    className="text-xs text-muted-foreground"
+                  >
+                    {t("{start}–{end} of {total}", {
+                      start: (memberPage - 1) * 20 + 1,
+                      end: Math.min(memberPage * 20, memberFiltered),
+                      total: memberFiltered,
+                    })}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={membersLoading || memberPage === 1}
+                      onClick={() => {
+                        setMemberPage(memberPage - 1)
+                        setMembersLoading(true)
+                      }}
+                    >
+                      {t("Previous page")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        membersLoading || memberPage * 20 >= memberFiltered
+                      }
+                      onClick={() => {
+                        setMemberPage(memberPage + 1)
+                        setMembersLoading(true)
+                      }}
+                    >
+                      {t("Next page")}
+                    </Button>
+                  </div>
+                </nav>
               )}
             </>
           </CardContent>

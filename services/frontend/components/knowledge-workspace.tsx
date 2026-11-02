@@ -97,7 +97,6 @@ import { Progress } from "@/components/ui/progress"
 import {
   Page,
   PageActions,
-  PageDescription,
   PageHeader,
   PageHeading,
   PageTitle,
@@ -1502,11 +1501,6 @@ export function KnowledgeWorkspace({
       <PageHeader>
         <PageHeading>
           <PageTitle>{t("Storage")}</PageTitle>
-          <PageDescription>
-            {t(
-              "Organize files, notes, and transcripts in folders that chats and agent workflows can use as live context."
-            )}
-          </PageDescription>
         </PageHeading>
         <PageActions>
           <Button
@@ -1547,14 +1541,9 @@ export function KnowledgeWorkspace({
 
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div className="min-h-0 flex-1">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">
-              {t("{value0} library items", { value0: libraryItemCount })}
-            </p>
-          </div>
           <div className="min-h-0 flex-1">
-            <Card className="min-h-0 overflow-hidden">
-              <CardHeader className="gap-3 border-b px-4 py-3">
+            <Card className="min-h-0 gap-0 overflow-visible rounded-none border-0 bg-transparent py-0 shadow-none ring-0">
+              <CardHeader className="gap-3 px-0 py-0 pb-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
                     <CardTitle className="flex items-baseline gap-2 text-sm">
@@ -1609,13 +1598,14 @@ export function KnowledgeWorkspace({
                         aria-live="polite"
                         className="shrink-0 font-normal text-muted-foreground"
                       >
-                        {libraryItemCount} items
+                        {t("{value0} items", { value0: libraryItemCount })}
                       </span>
                     </CardTitle>
-                    <CardDescription className="truncate text-xs">
-                      {selectedSpace?.description ||
-                        "Browse folders and files available to chats and agent workflows."}
-                    </CardDescription>
+                    {selectedSpace?.description && (
+                      <CardDescription className="truncate text-xs">
+                        {selectedSpace.description}
+                      </CardDescription>
+                    )}
                     {selectedSpace && (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                         <span className="rounded-full border px-2 py-0.5">
@@ -1623,7 +1613,11 @@ export function KnowledgeWorkspace({
                             ? t("Workspace")
                             : t("Private")}
                         </span>
-                        <span>{selectedSpace.itemCount} items</span>
+                        <span>
+                          {t("{value0} items", {
+                            value0: selectedSpace.itemCount,
+                          })}
+                        </span>
                         <span>·</span>
                         <span>
                           {t("Updated")}{" "}
@@ -1657,12 +1651,12 @@ export function KnowledgeWorkspace({
                   )}
                 </div>
                 <FilterBar
-                  className="-mx-4 -mb-3 border-0 px-4 sm:-mx-0 sm:px-0"
+                  className="border-0 px-0 py-0"
                   search={{
                     value: query,
                     onChange: setQuery,
-                    placeholder: "Search this folder",
-                    label: "Search this folder",
+                    placeholder: t("Search this folder"),
+                    label: t("Search this folder"),
                   }}
                   hasActiveFilters={
                     Boolean(query.trim()) ||
@@ -1824,8 +1818,8 @@ export function KnowledgeWorkspace({
                 <ContextMenuTrigger className="block min-h-96">
                   <CardContent
                     className={cn(
-                      "min-h-96 overflow-y-auto bg-muted/20 p-4 transition-colors sm:p-5",
-                      draggingFiles && "bg-muted/45"
+                      "min-h-96 overflow-y-auto bg-transparent p-0 transition-colors",
+                      draggingFiles && "rounded-xl bg-primary/5"
                     )}
                     onDragEnter={(event) => {
                       event.preventDefault()
@@ -1847,33 +1841,22 @@ export function KnowledgeWorkspace({
                       if (files.length) void uploadFiles(files)
                     }}
                   >
-                    <button
-                      className={cn(
-                        "mb-5 flex w-full items-center justify-center gap-3 rounded-xl bg-secondary/70 px-4 py-5 text-left shadow-xs transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
-                        draggingFiles && "border-primary bg-primary/5"
-                      )}
-                      disabled={busy}
-                      onClick={() => fileInputRef.current?.click()}
-                      type="button"
-                    >
-                      {busy ? (
-                        <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
-                      ) : (
-                        <UploadCloud className="size-6 text-primary" />
-                      )}
-                      <span>
-                        <span className="block text-sm font-medium">
-                          {busy
-                            ? t("Uploading files…")
-                            : t("Drop files here or click to upload")}
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {t(
-                            "PDF, Office, email, OpenDocument and text · 25 MB each"
-                          )}
-                        </span>
-                      </span>
-                    </button>
+                    {(draggingFiles || busy) && (
+                      <div
+                        aria-live="polite"
+                        className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-dashed border-primary/50 bg-primary/5 px-4 py-3 text-sm font-medium"
+                        role="status"
+                      >
+                        {busy ? (
+                          <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+                        ) : (
+                          <UploadCloud className="size-4 text-primary" />
+                        )}
+                        {busy
+                          ? t("Uploading files…")
+                          : t("Drop files here or click to upload")}
+                      </div>
+                    )}
 
                     {loading ? (
                       <div
@@ -1913,11 +1896,21 @@ export function KnowledgeWorkspace({
                               : t("This folder is empty")}
                           </EmptyTitle>
                           <EmptyDescription>
+                            {t("Drop files here or click to upload")}
+                            {" · "}
                             {t(
-                              "Upload a file, or right-click here to create a folder."
+                              "PDF, Office, email, OpenDocument and text · 25 MB each"
                             )}
                           </EmptyDescription>
                         </EmptyHeader>
+                        <Button
+                          disabled={busy}
+                          size="sm"
+                          variant="outline"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <Upload data-icon="inline-start" /> {t("Upload file")}
+                        </Button>
                       </Empty>
                     ) : (
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

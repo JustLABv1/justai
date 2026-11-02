@@ -99,7 +99,14 @@ import {
 import { createJustAIVoiceAdapter } from "@/components/assistant-ui/voice-adapter"
 import { BrandMark } from "@/components/brand-mark"
 import { ChatBrandMark } from "@/components/chat-brand-mark"
+import { EndpointBadge } from "@/components/endpoint-badge"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1574,13 +1581,88 @@ function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
   )
 }
 
+/**
+ * Outline of the conversation: one tick per question, the tick for the section
+ * currently on screen is highlighted, and hovering or focusing the rail opens a
+ * list of the questions to jump to.
+ */
 function ConversationRail() {
   const { t } = useTranslations()
 
   const messages = useAuiState((state) => state.thread.messages)
-  const [previewMessageId, setPreviewMessageId] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(null)
 
-  if (messages.length < 2) return null
+  const turns = useMemo(
+    () =>
+      messages
+        .filter((message) => message.role === "user")
+        .map((message, index) => {
+          const text = message.parts
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim()
+          return {
+            id: message.id,
+            number: index + 1,
+            excerpt:
+              text.length > 70 ? `${text.slice(0, 67).trimEnd()}…` : text,
+          }
+        }),
+    [messages]
+  )
+
+  // Re-subscribe only when the set of questions changes, not on every render.
+  const turnIds = turns.map((turn) => turn.id).join("|")
+  const turnsRef = useRef(turns)
+  useEffect(() => {
+    turnsRef.current = turns
+  })
+
+  useEffect(() => {
+    const turnList = turnIds ? turnsRef.current : []
+    if (turnList.length === 0) return
+    // The thread's scroll container is the nearest scrollable ancestor of any
+    // message element.
+    let viewport: HTMLElement | null =
+      document.querySelector<HTMLElement>("[data-message-id]")
+    while (
+      viewport &&
+      !/(auto|scroll)/.test(getComputedStyle(viewport).overflowY)
+    )
+      viewport = viewport.parentElement
+    if (!viewport) return
+    const scroller = viewport
+    let frame = 0
+    const update = () => {
+      frame = 0
+      const line =
+        scroller.getBoundingClientRect().top + scroller.clientHeight * 0.35
+      let current = turnList[0].id
+      for (const turn of turnList) {
+        const element = scroller.querySelector<HTMLElement>(
+          `[data-message-id="${CSS.escape(turn.id)}"]`
+        )
+        if (!element) continue
+        if (element.getBoundingClientRect().top <= line) current = turn.id
+        else break
+      }
+      setActiveId(current)
+    }
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(update)
+    }
+    const initial = setTimeout(update, 0)
+    scroller.addEventListener("scroll", schedule, { passive: true })
+    return () => {
+      clearTimeout(initial)
+      scroller.removeEventListener("scroll", schedule)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [turnIds])
+
+  if (messages.length < 2 || turns.length === 0) return null
 
   const jumpTo = (id: string) => {
     const target = document.querySelector<HTMLElement>(
@@ -1592,74 +1674,55 @@ function ConversationRail() {
   return (
     <nav
       aria-label={t("Conversation navigation")}
-      className="absolute inset-y-20 left-3 z-20 hidden w-5 lg:flex lg:items-center"
+      className="pointer-events-none absolute inset-y-20 left-3 z-20 hidden items-center lg:flex"
     >
-      <div className="relative h-[min(36vh,15rem)] w-full">
-        <span
-          aria-hidden="true"
-          className="absolute top-0 bottom-0 left-1/2 w-px -translate-x-1/2 bg-border"
-        />
-        {messages.map((message, index) => {
-          const position = `${((index + 0.5) / messages.length) * 100}%`
-          const assistant = message.role === "assistant"
-          const preview = message.parts
-            .filter((part) => part.type === "text")
-            .map((part) => part.text)
-            .join(" ")
-            .replace(/\s+/g, " ")
-            .trim()
-          const previewExcerpt =
-            preview.length > 140
-              ? `${preview.slice(0, 137).trimEnd()}…`
-              : preview
-          return (
-            <button
-              aria-label={t("Jump to {value0} {value1}", {
-                value0: assistant ? t("assistant response") : t("your message"),
-                value1: index + 1,
-              })}
-              aria-describedby={
-                previewMessageId === message.id
-                  ? `conversation-preview-${message.id}`
-                  : undefined
-              }
-              className="group absolute left-1/2 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              key={message.id}
-              onClick={() => jumpTo(message.id)}
-              onBlur={() => setPreviewMessageId(null)}
-              onFocus={() => setPreviewMessageId(message.id)}
-              onMouseEnter={() => setPreviewMessageId(message.id)}
-              onMouseLeave={() => setPreviewMessageId(null)}
-              style={{ top: position }}
-              type="button"
-            >
+      <div className="group/rail pointer-events-auto relative">
+        <ul className="flex max-h-[min(50vh,22rem)] flex-col gap-1.5 overflow-hidden py-1 transition-opacity group-focus-within/rail:opacity-0 group-hover/rail:opacity-0">
+          {turns.map((turn) => (
+            <li key={turn.id}>
               <span
                 aria-hidden="true"
                 className={cn(
-                  "h-px transition-colors group-hover:bg-foreground",
-                  assistant ? "w-3 bg-primary/80" : "w-2 bg-muted-foreground/60"
+                  "block h-0.5 rounded-full transition-all",
+                  turn.id === activeId
+                    ? "w-5 bg-primary"
+                    : "w-3 bg-muted-foreground/40"
                 )}
               />
-              {previewMessageId === message.id ? (
-                <span
-                  className="pointer-events-none absolute top-1/2 left-full z-30 ml-2 w-52 -translate-y-1/2 rounded-lg border border-border/80 bg-popover px-3 py-2 text-left shadow-lg"
-                  id={`conversation-preview-${message.id}`}
-                  role="tooltip"
+            </li>
+          ))}
+        </ul>
+        <div className="invisible absolute top-1/2 -left-2 w-64 -translate-y-1/2 rounded-2xl border border-border/80 bg-popover p-1 opacity-0 shadow-lg transition-opacity group-focus-within/rail:visible group-focus-within/rail:opacity-100 group-hover/rail:visible group-hover/rail:opacity-100">
+          <ol className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
+            {turns.map((turn) => (
+              <li key={turn.id}>
+                <button
+                  aria-current={turn.id === activeId ? "true" : undefined}
+                  className={cn(
+                    "flex w-full min-w-0 items-baseline gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs leading-5 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                    turn.id === activeId
+                      ? "bg-primary/15 font-medium text-foreground"
+                      : "text-muted-foreground"
+                  )}
+                  onClick={() => jumpTo(turn.id)}
+                  type="button"
                 >
-                  <span className="block text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
-                    {assistant ? "JustAI" : t("You")}
+                  <span
+                    className={cn(
+                      "shrink-0 tabular-nums",
+                      turn.id === activeId ? "text-primary" : "opacity-60"
+                    )}
+                  >
+                    {turn.number}
                   </span>
-                  <span className="mt-1 line-clamp-3 block text-xs leading-5 text-popover-foreground">
-                    {previewExcerpt ||
-                      (assistant
-                        ? t("Response with context or tools")
-                        : t("Message"))}
+                  <span className="line-clamp-2 min-w-0">
+                    {turn.excerpt || t("Message")}
                   </span>
-                </span>
-              ) : null}
-            </button>
-          )
-        })}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
     </nav>
   )
@@ -1963,6 +2026,8 @@ export function ModelEndpointPicker({
   models,
   modelId,
   modelDiscoveryLoading,
+  modelDiscoveryFailed,
+  onRetryModelDiscovery,
   onModelChange,
   compact,
 }: {
@@ -1972,6 +2037,8 @@ export function ModelEndpointPicker({
   models: DiscoveredChatModel[]
   modelId: string
   modelDiscoveryLoading?: boolean
+  modelDiscoveryFailed?: boolean
+  onRetryModelDiscovery?: () => void
   onModelChange: (id: string) => void
   compact: boolean
 }) {
@@ -2003,6 +2070,13 @@ export function ModelEndpointPicker({
           compact && "max-w-24 sm:max-w-56"
         )}
       >
+        {endpoint && endpoints.length > 1 && (
+          <EndpointBadge
+            name={endpoint.name}
+            logoUrl={endpoint.logoUrl}
+            className="size-5 shrink-0 bg-secondary text-[10px] text-secondary-foreground"
+          />
+        )}
         <span className="truncate">{modelLabel}</span>
         <ChevronDown
           className={cn(
@@ -2019,43 +2093,51 @@ export function ModelEndpointPicker({
           className="z-50"
         >
           <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] bg-popover p-1 text-popover-foreground shadow-sm outline-none">
-            <div
-              aria-label={t("Endpoints")}
-              className="flex max-h-80 w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1"
-            >
-              {endpoints.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  aria-label={item.name}
-                  aria-pressed={item.id === endpointId}
-                  title={item.name}
-                  onClick={() => {
-                    onEndpointChange(item.id)
-                    setQuery("")
-                  }}
-                  className={cn(
-                    "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                    item.id === endpointId
-                      ? "bg-primary text-primary-foreground hover:bg-primary/85"
-                      : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
-                  )}
-                >
-                  <span className="text-sm font-medium" aria-hidden="true">
-                    {item.name
-                      .trim()
-                      .split(/\s+/)
-                      .map((word) => Array.from(word)[0])
-                      .slice(0, 2)
-                      .join("")
-                      .toUpperCase()}
-                  </span>
-                </button>
-              ))}
-            </div>
+            {endpoints.length > 1 && (
+              <div
+                aria-label={t("Endpoints")}
+                className="flex max-h-80 w-11 shrink-0 flex-col items-center gap-2 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1.5"
+                role="group"
+              >
+                <TooltipProvider delay={0}>
+                  {endpoints.map((item) => (
+                    <Tooltip key={item.id}>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label={item.name}
+                            aria-pressed={item.id === endpointId}
+                            onClick={() => {
+                              onEndpointChange(item.id)
+                              setQuery("")
+                            }}
+                            className={cn(
+                              "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                              item.id === endpointId
+                                ? "bg-primary text-primary-foreground ring-2 ring-primary ring-offset-1 ring-offset-muted hover:bg-primary/85"
+                                : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
+                            )}
+                          />
+                        }
+                      >
+                        <EndpointBadge
+                          name={item.name}
+                          logoUrl={item.logoUrl}
+                          className="size-8"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent side="left" sideOffset={8}>
+                        {item.name}
+                      </TooltipContent>
+                    </Tooltip>
+                  ))}
+                </TooltipProvider>
+              </div>
+            )}
             <div className="min-w-0 flex-1 p-1.5">
               <div className="flex items-center justify-between gap-3 px-2 pt-0.5 pb-1.5">
-                <PopoverPrimitive.Title className="text-sm font-medium text-muted-foreground">
+                <PopoverPrimitive.Title className="min-w-0 truncate text-sm font-medium text-muted-foreground">
                   {t("Models")}
                 </PopoverPrimitive.Title>
                 <label className="flex max-w-40 min-w-0 items-center gap-1 text-muted-foreground">
@@ -2069,6 +2151,23 @@ export function ModelEndpointPicker({
                   <Search className="size-4 shrink-0" />
                 </label>
               </div>
+              {modelDiscoveryFailed && !modelDiscoveryLoading && (
+                <div
+                  role="status"
+                  className="mx-1 mb-1 flex items-center justify-between gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground"
+                >
+                  <span>{t("Models could not be loaded. Retrying…")}</span>
+                  {onRetryModelDiscovery && (
+                    <button
+                      type="button"
+                      onClick={onRetryModelDiscovery}
+                      className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                    >
+                      {t("Retry now")}
+                    </button>
+                  )}
+                </div>
+              )}
               <div
                 className="max-h-72 overflow-y-auto"
                 role="group"
@@ -2567,6 +2666,8 @@ function Composer({
   models,
   modelId,
   modelDiscoveryLoading,
+  modelDiscoveryFailed,
+  onRetryModelDiscovery,
   onModelChange,
   deepContext,
   onDeepContextChange,
@@ -2593,6 +2694,8 @@ function Composer({
   models: DiscoveredChatModel[]
   modelId: string
   modelDiscoveryLoading?: boolean
+  modelDiscoveryFailed?: boolean
+  onRetryModelDiscovery?: () => void
   onModelChange: (id: string) => void
   deepContext: boolean
   onDeepContextChange: (enabled: boolean) => void
@@ -3189,6 +3292,8 @@ function Composer({
                       models={models}
                       modelId={modelId}
                       modelDiscoveryLoading={modelDiscoveryLoading}
+                      modelDiscoveryFailed={modelDiscoveryFailed}
+                      onRetryModelDiscovery={onRetryModelDiscovery}
                       onModelChange={onModelChange}
                       compact={compact}
                     />
@@ -3426,6 +3531,13 @@ function AssistantChatSurface({
         }
       : {}
   )
+  const [modelDiscoveryStatus, setModelDiscoveryStatus] = useState<
+    Record<string, "ok" | "failed" | "retry">
+  >({})
+  const discoveryAttempts = useRef<Record<string, number>>({})
+  const discoveryRetryTimers = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({})
   const [modelByEndpoint, setModelByEndpoint] = useState<
     Record<string, string>
   >(() =>
@@ -3516,10 +3628,32 @@ function AssistantChatSurface({
     return activeTranscriptionEndpoint?.id ?? fallbackTranscriptionEndpoint?.id
   }, [endpoint, endpoints])
 
+  // "ok" = the endpoint's model list was really fetched. A seeded or fallback
+  // list (saved conversation model, configured model) never counts as fetched,
+  // so it is replaced as soon as discovery succeeds and discovery is retried
+  // with backoff after a failure instead of staying on the fallback forever.
+  const retryModelDiscovery = useCallback(() => {
+    if (!selectedEndpointId) return
+    setModelDiscoveryStatus((current) =>
+      current[selectedEndpointId] === "ok"
+        ? current
+        : { ...current, [selectedEndpointId]: "retry" }
+    )
+  }, [selectedEndpointId])
+
+  useEffect(() => {
+    const retryTimers = discoveryRetryTimers.current
+    return () => {
+      for (const timer of Object.values(retryTimers)) clearTimeout(timer)
+    }
+  }, [])
+
+  const discoveryStatus = modelDiscoveryStatus[selectedEndpointId]
   useEffect(() => {
     if (
       !selectedEndpointId ||
-      modelsByEndpoint[selectedEndpointId] !== undefined
+      discoveryStatus === "ok" ||
+      discoveryStatus === "failed"
     ) {
       return
     }
@@ -3532,6 +3666,7 @@ function AssistantChatSurface({
       .then((result) => {
         if (cancelled) return
         const models = (result.models ?? []).filter((model) => model.id?.trim())
+        discoveryAttempts.current[selectedEndpointId] = 0
         setModelsByEndpoint((current) => ({
           ...current,
           [selectedEndpointId]: models,
@@ -3545,27 +3680,47 @@ function AssistantChatSurface({
             endpoint?.chatModel ??
             "",
         }))
+        setModelDiscoveryStatus((current) => ({
+          ...current,
+          [selectedEndpointId]: "ok",
+        }))
       })
       .catch(() => {
         if (cancelled) return
         // Discovery is best effort. A manually configured endpoint remains
-        // usable even when its gateway does not implement /models.
+        // usable with its configured model, and discovery keeps retrying.
         setModelsByEndpoint((current) => ({
           ...current,
-          [selectedEndpointId]: endpoint?.chatModel
-            ? [{ id: endpoint.chatModel }]
-            : [],
+          [selectedEndpointId]:
+            current[selectedEndpointId] ??
+            (endpoint?.chatModel ? [{ id: endpoint.chatModel }] : []),
         }))
         setModelByEndpoint((current) => ({
           ...current,
           [selectedEndpointId]:
             current[selectedEndpointId] ?? endpoint?.chatModel ?? "",
         }))
+        setModelDiscoveryStatus((current) => ({
+          ...current,
+          [selectedEndpointId]: "failed",
+        }))
+        const attempt = discoveryAttempts.current[selectedEndpointId] ?? 0
+        discoveryAttempts.current[selectedEndpointId] = attempt + 1
+        clearTimeout(discoveryRetryTimers.current[selectedEndpointId])
+        discoveryRetryTimers.current[selectedEndpointId] = setTimeout(
+          () =>
+            setModelDiscoveryStatus((current) =>
+              current[selectedEndpointId] === "failed"
+                ? { ...current, [selectedEndpointId]: "retry" }
+                : current
+            ),
+          Math.min(2000 * 2 ** attempt, 30000)
+        )
       })
     return () => {
       cancelled = true
     }
-  }, [endpoint?.chatModel, modelsByEndpoint, selectedEndpointId])
+  }, [endpoint?.chatModel, discoveryStatus, selectedEndpointId])
 
   const resumableStorage = useMemo(
     () =>
@@ -3799,6 +3954,9 @@ function AssistantChatSurface({
           endpoints,
           models: availableModels,
           modelDiscoveryLoading,
+          modelDiscoveryFailed:
+            modelDiscoveryStatus[selectedEndpointId] === "failed",
+          onRetryModelDiscovery: retryModelDiscovery,
           modelId: selectedModel,
           deepContext,
           onDeepContextChange: setDeepContext,

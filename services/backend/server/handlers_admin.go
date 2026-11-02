@@ -380,6 +380,14 @@ func (a *App) readAnalytics(c *gin.Context, organizationID *uuid.UUID) (adminAna
 	if err != nil {
 		return adminAnalytics{}, err
 	}
+	var userID *uuid.UUID
+	if raw := strings.TrimSpace(c.Query("userId")); raw != "" {
+		parsed, parseErr := uuid.Parse(raw)
+		if parseErr != nil {
+			return adminAnalytics{}, fmt.Errorf("invalid userId")
+		}
+		userID = &parsed
+	}
 	model := strings.TrimSpace(c.Query("model"))
 	status := strings.ToLower(strings.TrimSpace(c.Query("status")))
 	if status != "" {
@@ -405,6 +413,9 @@ func (a *App) readAnalytics(c *gin.Context, organizationID *uuid.UUID) (adminAna
 	if status != "" {
 		args = append(args, status)
 	}
+	if userID != nil {
+		args = append(args, *userID)
+	}
 	whereFor := func(alias string) string {
 		prefix := ""
 		if alias != "" {
@@ -426,6 +437,10 @@ func (a *App) readAnalytics(c *gin.Context, organizationID *uuid.UUID) (adminAna
 		}
 		if status != "" {
 			parts = append(parts, prefix+fmt.Sprintf("status = $%d", position))
+			position++
+		}
+		if userID != nil {
+			parts = append(parts, prefix+fmt.Sprintf("user_id = $%d", position))
 		}
 		return strings.Join(parts, " AND ")
 	}
@@ -499,6 +514,13 @@ func analyticsRange(c *gin.Context) (time.Time, time.Time, error) {
 			return time.Time{}, time.Time{}, fmt.Errorf("days must be between 1 and 365")
 		}
 		start = now.Add(-time.Duration(days) * 24 * time.Hour)
+	}
+	if raw := strings.TrimSpace(c.Query("minutes")); raw != "" {
+		minutes, err := strconv.Atoi(raw)
+		if err != nil || minutes < 1 || minutes > 365*24*60 {
+			return time.Time{}, time.Time{}, fmt.Errorf("minutes must be between 1 and 525600")
+		}
+		start = now.Add(-time.Duration(minutes) * time.Minute)
 	}
 	if raw := strings.TrimSpace(c.Query("from")); raw != "" {
 		parsed, err := parseAnalyticsTime(raw, false)

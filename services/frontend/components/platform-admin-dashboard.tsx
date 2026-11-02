@@ -1,23 +1,11 @@
 "use client"
 
-import { useTranslations } from "@/components/locale-provider"
-import {
-  Alert02Icon,
-  CheckmarkCircle02Icon,
-  InformationCircleIcon,
-} from "@hugeicons/core-free-icons"
-import { HugeiconsIcon } from "@hugeicons/react"
+import { AlertTriangle, ArrowUpRight, CheckCircle2 } from "lucide-react"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
-import type {
-  AdminAttentionItem,
-  AdminDashboardResponse,
-  AdminTab,
-} from "@/lib/types"
-import {
-  AdminUsageCharts,
-  compactNumber,
-} from "@/components/admin-usage-charts"
-import { PlatformTranscriptionWorkers } from "@/components/platform-transcription-workers"
+import { useTranslations } from "@/components/locale-provider"
+import { compactNumber } from "@/components/admin-usage-charts"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -28,34 +16,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-
-function number(value: number | null | undefined) {
-  if (value == null) return "—"
-  return new Intl.NumberFormat("en").format(value)
-}
-
-function percentage(succeeded: number, requests: number) {
-  if (!requests) return "—"
-  return `${Math.round((succeeded / requests) * 100)}%`
-}
-
-function attentionIcon(severity: AdminAttentionItem["severity"]) {
-  if (severity === "critical" || severity === "warning") return Alert02Icon
-  return InformationCircleIcon
-}
-
-function attentionVariant(severity: AdminAttentionItem["severity"]) {
-  if (severity === "critical") return "destructive" as const
-  if (severity === "warning") return "outline" as const
-  return "secondary" as const
-}
-
-function actionLabel(action: string) {
-  return action
-    .replace(/^platform\./, "")
-    .replace(/[._]/g, " ")
-    .replace(/\b\w/g, (value) => value.toUpperCase())
-}
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart"
+import { PlatformStatCard } from "@/components/platform-stat-card"
+import { Skeleton } from "@/components/ui/skeleton"
+import { workspaceActivityDays } from "@/lib/workspace-activity"
+import type { AdminDashboardResponse, AdminTab } from "@/lib/types"
 
 export function PlatformAdminDashboard({
   dashboard,
@@ -65,326 +34,245 @@ export function PlatformAdminDashboard({
   onTabChange: (tab: AdminTab) => void
 }) {
   const { t, locale } = useTranslations()
-
-  if (!dashboard) {
+  if (!dashboard)
     return (
-      <Card>
-        <CardContent className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
-          {t("Loading platform overview…")}
-        </CardContent>
-      </Card>
+      <div
+        className="@container flex min-w-0 flex-col gap-8"
+        aria-label={t("Loading platform overview…")}
+        aria-busy="true"
+      >
+        <Skeleton className="h-12 w-64" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-72 w-full" />
+      </div>
     )
-  }
 
-  const { counts, health, usage } = dashboard
-  const summary = usage.summary
-  const stats = [
-    [t("Requests"), number(summary.requests), "Selected period"],
-    [
-      t("Success rate"),
-      percentage(summary.succeeded, summary.requests),
-      "Completed runs",
-    ],
-    [
-      "Total tokens",
-      compactNumber(summary.totalTokens, locale),
-      "Reported provider usage",
-    ],
-    [
-      "P95 latency",
-      summary.p95LatencyMs ? `${Math.round(summary.p95LatencyMs)} ms` : "—",
-      "Completed runs",
-    ],
-    [t("Users"), number(counts.users), "Platform total"],
-    [t("Workspaces"), number(counts.workspaces), "Platform total"],
-  ] as const
+  const { health, usage, attention } = dashboard
+  const operational =
+    health.database.ok &&
+    health.providers.ok &&
+    health.mcp.ok &&
+    health.agents.ok &&
+    health.workers.rag &&
+    health.workers.transcription &&
+    health.workers.agents
+  const formatNumber = (value: number) =>
+    new Intl.NumberFormat(locale).format(value)
+  const formatDay = (value: string) =>
+    new Intl.DateTimeFormat(locale, {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(`${value}T00:00:00Z`))
+  const data = workspaceActivityDays(usage.timeSeries)
+    .slice(-30)
+    .map((day) => ({ ...day, label: formatDay(day.date) }))
+  const daily = new Map(usage.timeSeries.map((day) => [day.date, day]))
+  const metrics = [
+    {
+      label: "Requests",
+      value: formatNumber(usage.summary.requests),
+      color: "#00b884",
+      points: data.map((day) => ({ value: day.requests })),
+    },
+    {
+      label: "Success rate",
+      value: usage.summary.requests
+        ? `${Math.round((usage.summary.succeeded / usage.summary.requests) * 100)}%`
+        : "—",
+      color: "#2f7bff",
+      domain: [0, 100] as [number, number],
+      points: data.map((day) => {
+        const entry = daily.get(day.date)
+        return {
+          value: entry?.requests
+            ? (entry.succeeded / entry.requests) * 100
+            : null,
+        }
+      }),
+    },
+    {
+      label: "Average latency",
+      value: usage.summary.requests
+        ? `${formatNumber(Math.round(usage.summary.averageLatencyMs))} ms`
+        : "—",
+      color: "#8b46ff",
+      points: data.map((day) => {
+        const entry = daily.get(day.date)
+        return { value: entry?.requests ? entry.averageLatencyMs : null }
+      }),
+    },
+  ]
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        {stats.map(([label, value, detail]) => (
-          <Card key={label} size="sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs text-muted-foreground">
-                {label}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-semibold tracking-tight">{value}</p>
-              <p className="mt-1 text-[11px] text-muted-foreground">{detail}</p>
-            </CardContent>
-          </Card>
+    <div className="@container flex min-w-0 flex-col gap-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+        <div className="flex items-center gap-2 text-sm">
+          {operational ? (
+            <CheckCircle2
+              className="size-4 text-muted-foreground"
+              aria-hidden="true"
+            />
+          ) : (
+            <AlertTriangle
+              className="size-4 text-destructive"
+              aria-hidden="true"
+            />
+          )}
+          <span className="font-medium">
+            {t(
+              operational
+                ? "All systems operational"
+                : "Some systems need attention"
+            )}
+          </span>
+          {attention.length > 0 && (
+            <Badge variant="secondary">
+              {t(attention.length === 1 ? "{count} item" : "{count} items", {
+                count: attention.length,
+              })}
+            </Badge>
+          )}
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => onTabChange("health")}>
+          {t("View system health")}
+          <ArrowUpRight data-icon="inline-end" />
+        </Button>
+      </div>
+
+      <div className="grid min-w-0 grid-cols-1 gap-4 @3xl:grid-cols-3">
+        {metrics.map((metric) => (
+          <PlatformStatCard
+            key={metric.label}
+            title={t(metric.label)}
+            period={t("Last 30 days")}
+            value={metric.value}
+            color={metric.color}
+            points={metric.points}
+            domain={metric.domain}
+          />
         ))}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("Attention required")}</CardTitle>
-            <CardDescription>
-              {t(
-                "Derived from current service health, failures, and platform controls."
-              )}
-            </CardDescription>
-            <CardAction>
-              <Badge
-                variant={
-                  dashboard.attention.some(
-                    (item) => item.severity === "critical"
-                  )
-                    ? "destructive"
-                    : dashboard.attention.length
-                      ? "outline"
-                      : "secondary"
-                }
-              >
-                {dashboard.attention.length
-                  ? t(
-                      dashboard.attention.length === 1
-                        ? "{count} item"
-                        : "{count} items",
-                      { count: dashboard.attention.length }
-                    )
-                  : t("Clear")}
-              </Badge>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            {dashboard.attention.length === 0 ? (
-              <div className="flex items-start gap-3 rounded-xl bg-muted/50 p-4">
-                <HugeiconsIcon
-                  icon={CheckmarkCircle02Icon}
-                  className="mt-0.5 text-primary"
-                  aria-hidden="true"
-                />
-                <div>
-                  <p className="font-medium">{t("Everything looks healthy")}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t(
-                      "No current configuration or service issues need attention."
-                    )}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {dashboard.attention.map((item) => {
-                  const Icon = attentionIcon(item.severity)
-                  return (
-                    <button
-                      className="flex min-h-14 items-start gap-3 rounded-lg border p-3 text-left transition-[background-color,border-color,transform] duration-150 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none active:scale-[0.99]"
-                      key={item.id}
-                      onClick={() => onTabChange(item.tab)}
-                      type="button"
-                    >
-                      <HugeiconsIcon
-                        icon={Icon}
-                        className="mt-0.5 shrink-0"
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{item.title}</span>
-                          <Badge variant={attentionVariant(item.severity)}>
-                            {item.severity}
-                          </Badge>
-                        </span>
-                        <span className="mt-1 block text-sm text-muted-foreground">
-                          {item.description}
-                        </span>
-                      </span>
-                      {item.metric != null && (
-                        <span className="font-mono text-xs tabular-nums">
-                          {number(item.metric)}
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("Platform health")}</CardTitle>
-            <CardDescription>
-              {t("Runtime status for the core platform dependencies.")}
-            </CardDescription>
-            <CardAction>
-              <Badge
-                variant={
-                  health.database.ok &&
-                  health.providers.ok &&
-                  health.mcp.ok &&
-                  health.agents.ok &&
-                  health.workers.rag &&
-                  health.workers.transcription &&
-                  health.workers.agents
-                    ? "default"
-                    : "destructive"
-                }
-              >
-                {health.database.ok &&
-                health.providers.ok &&
-                health.mcp.ok &&
-                health.agents.ok &&
-                health.workers.rag &&
-                health.workers.transcription &&
-                health.workers.agents
-                  ? t("Operational")
-                  : t("Degraded")}
-              </Badge>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-            {[
-              [t("Database"), health.database.ok, "Primary application store"],
-              [
-                "Model endpoints",
-                health.providers.ok,
-                t("{value0} of {value1} enabled", {
-                  value0: health.providers.enabled,
-                  value1: health.providers.total,
-                }),
-              ],
-              [
-                "MCP",
-                health.mcp.ok,
-                t("{value0} of {value1} enabled", {
-                  value0: health.mcp.enabled,
-                  value1: health.mcp.total,
-                }),
-              ],
-              [
-                t("Workers"),
-                health.workers.rag &&
-                  health.workers.transcription &&
-                  health.workers.agents,
-                "RAG, transcription, and agent heartbeats",
-              ],
-              [
-                t("Agents"),
-                health.agents.ok,
-                t("{value0} active runs · {value1} approvals", {
-                  value0: health.agents.activeRuns,
-                  value1: health.agents.pendingApprovals,
-                }),
-              ],
-            ].map(([label, ok, detail]) => (
-              <div
-                className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5"
-                key={String(label)}
-              >
-                <div>
-                  <p className="text-sm font-medium">{label}</p>
-                  <p className="text-xs text-muted-foreground">{detail}</p>
-                </div>
-                <Badge variant={ok ? "default" : "destructive"}>
-                  {ok ? t("Ready") : t("Issue")}
-                </Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      <AdminUsageCharts analytics={usage} />
-
-      <PlatformTranscriptionWorkers analytics={usage.transcriptionWorkers} />
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("Top endpoint activity")}</CardTitle>
-            <CardDescription>
-              {t("Highest request volume in the selected period.")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {usage.byEndpoint.slice(0, 5).map((item) => (
-              <div
-                className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-                key={`${item.endpointId}-${item.model}`}
-              >
+      {attention.length > 0 && (
+        <section
+          aria-label={t("Attention required")}
+          className="flex flex-col gap-2"
+        >
+          {attention.map((item) => (
+            <Alert
+              key={item.id}
+              variant={
+                item.severity === "critical"
+                  ? "destructive"
+                  : item.severity === "warning"
+                    ? "warning"
+                    : "default"
+              }
+              className="p-4"
+            >
+              <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
-                    {item.endpointName}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {item.model || "Model selected at request time"}
-                  </p>
+                  <AlertTitle className="flex items-start gap-2">
+                    <AlertTriangle
+                      className="mt-0.5 size-4 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {t(item.title)}
+                      {item.metric != null && ` · ${formatNumber(item.metric)}`}
+                    </span>
+                  </AlertTitle>
+                  <AlertDescription className="mt-1 pl-6">
+                    {t(item.description)}
+                  </AlertDescription>
                 </div>
-                <div className="shrink-0 text-right">
-                  <p className="font-mono text-sm tabular-nums">
-                    {number(item.requests)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {item.errors} errors
-                  </p>
-                </div>
-              </div>
-            ))}
-            {usage.byEndpoint.length === 0 && (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                {t("No endpoint activity yet.")}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("Recent admin activity")}</CardTitle>
-            <CardDescription>
-              {t("Latest platform mutations recorded in the audit trail.")}
-            </CardDescription>
-            <CardAction>
-              <Button
-                onClick={() => onTabChange("audit")}
-                size="sm"
-                variant="outline"
-              >
-                {t("View audit")}
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {dashboard.recentActivity.map((item) => (
-              <div
-                className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
-                key={item.id}
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
-                    {actionLabel(item.action)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {item.resourceType}
-                  </p>
-                </div>
-                <time
-                  className="shrink-0 text-xs text-muted-foreground"
-                  dateTime={item.createdAt}
+                <Button
+                  className="justify-self-start sm:justify-self-end"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onTabChange(item.tab)}
                 >
-                  {new Date(item.createdAt).toLocaleString(locale, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </time>
+                  {t("Review")}
+                  <ArrowUpRight data-icon="inline-end" />
+                </Button>
               </div>
-            ))}
-            {dashboard.recentActivity.length === 0 && (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                {t("No admin activity recorded yet.")}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            </Alert>
+          ))}
+        </section>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("Request activity")}</CardTitle>
+          <CardDescription>{t("Last 30 days")}</CardDescription>
+          <CardAction>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onTabChange("analytics")}
+            >
+              {t("View analytics")}
+              <ArrowUpRight data-icon="inline-end" />
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {usage.summary.requests > 0 ? (
+            <ChartContainer
+              style={{ height: 240 }}
+              config={{
+                requests: { label: t("Requests"), color: "var(--primary)" },
+              }}
+            >
+              <BarChart
+                accessibilityLayer
+                data={data}
+                margin={{ top: 8, right: 8, bottom: 4 }}
+              >
+                <CartesianGrid vertical={false} stroke="var(--border)" />
+                <XAxis
+                  dataKey="label"
+                  ticks={[
+                    data[0].label,
+                    data[9].label,
+                    data[19].label,
+                    data[29].label,
+                  ]}
+                  axisLine={false}
+                  tickLine={false}
+                  tickMargin={12}
+                  tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+                />
+                <YAxis
+                  width={32}
+                  allowDecimals={false}
+                  tickCount={3}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+                  tickFormatter={(value) => compactNumber(value, locale)}
+                />
+                <ChartTooltip
+                  cursor={{ fill: "var(--muted)", fillOpacity: 0.5 }}
+                  content={<ChartTooltipContent />}
+                />
+                <Bar
+                  dataKey="requests"
+                  fill="var(--primary)"
+                  radius={[3, 3, 0, 0]}
+                  maxBarSize={24}
+                  isAnimationActive={false}
+                />
+              </BarChart>
+            </ChartContainer>
+          ) : (
+            <div className="flex h-60 items-center justify-center text-sm text-muted-foreground">
+              {t("No activity for this period.")}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

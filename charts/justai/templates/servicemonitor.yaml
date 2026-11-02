@@ -1,0 +1,28 @@
+{{- if and .Values.metrics.serviceMonitor.enabled .Values.metrics.usage.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "justai.fullname" . }}-usage
+  labels:
+    {{- include "justai.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "justai.selectorLabels" . | nindent 6 }}
+      {{- if ne .Values.deploymentMode "monolith" }}
+      app.kubernetes.io/component: backend
+      {{- end }}
+  endpoints:
+    - port: backend
+      path: /metrics/usage
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "justai.secretRefName" (dict "root" . "ref" "metricsToken") | quote }}
+          key: {{ include "justai.secretRefKey" (dict "root" . "ref" "metricsToken") | quote }}
+{{- end }}

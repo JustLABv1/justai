@@ -6,14 +6,7 @@ import {
   useTranslatedConfig,
 } from "@/components/locale-provider"
 
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import {
   Activity,
   Archive,
@@ -58,17 +51,13 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { notifyError, notifySuccess } from "@/lib/feedback"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
-import {
-  AdminUsageCharts,
-  compactNumber,
-} from "@/components/admin-usage-charts"
-import { PlatformTranscriptionWorkers } from "@/components/platform-transcription-workers"
 import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAnnouncementsView } from "@/components/platform-announcements-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { avatarToneFor, initialsFor } from "@/lib/identity"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -80,20 +69,16 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Page, PageActions, PageTitle } from "@/components/ui/page"
+import { SettingsRow, SettingsSection } from "@/components/ui/settings"
 import {
-  Page,
-  PageActions,
-  PageDescription,
-  PageHeader,
-  PageHeading,
-  PageTitle,
-} from "@/components/ui/page"
-import {
-  SettingsLayout,
-  SettingsNav,
-  SettingsRow,
-  SettingsSection,
-} from "@/components/ui/settings"
+  Tabs,
+  ScrollableTabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs"
+import { AdminListFooter, useAdminList } from "@/components/admin-list-controls"
+import { PlatformAnalyticsView } from "@/components/platform-analytics-view"
 import { FilterBar } from "@/components/ui/filter-bar"
 import {
   Collapsible,
@@ -146,16 +131,6 @@ const tabsMessages: Array<{
   { id: "audit", label: "Audit", icon: KeyRound },
 ]
 
-const tabGroupsMessages: Array<{ label: string; ids: AdminTab[] }> = [
-  { label: "Overview", ids: ["overview"] },
-  { label: "Operations", ids: ["users", "workspaces", "endpoints", "mcp"] },
-  {
-    label: "Configuration",
-    ids: ["controls", "authentication", "announcements"],
-  },
-  { label: "Observability", ids: ["health", "analytics", "audit"] },
-]
-
 function settingLabel(key: string) {
   return key
     .replace(/Enabled$/, "")
@@ -205,7 +180,6 @@ export function PlatformAdminShell({
   user,
 }: PlatformAdminShellProps) {
   const tabs = useTranslatedConfig(tabsMessages)
-  const tabGroups = useTranslatedConfig(tabGroupsMessages)
 
   const { t } = useTranslations()
 
@@ -220,9 +194,10 @@ export function PlatformAdminShell({
   const [servers, setServers] = useState<any[]>([])
   const [health, setHealth] = useState<Record<string, any> | null>(null)
   const [audit, setAudit] = useState<any[]>([])
-  const [analytics, setAnalytics] = useState<AdminAnalyticsResponse | null>(
-    null
-  )
+  const [analyticsResult, setAnalyticsResult] = useState<{
+    key: string
+    data: AdminAnalyticsResponse
+  } | null>(null)
   const [query, setQuery] = useState(() => readAdminParam("query"))
   const [listStatus, setListStatus] = useState(() => readAdminParam("status"))
   const [listPage, setListPage] = useState(1)
@@ -245,10 +220,12 @@ export function PlatformAdminShell({
     from: readAdminParam("analytics_from"),
     to: readAdminParam("analytics_to"),
     organizationId: readAdminParam("analytics_organizationId"),
-    endpointId: readAdminParam("analytics_endpointId"),
-    model: readAdminParam("analytics_model"),
-    status: readAdminParam("analytics_status"),
+    userId: readAdminParam("analytics_userId"),
   }))
+  const analytics =
+    analyticsResult?.key === JSON.stringify(analyticsFilters)
+      ? analyticsResult.data
+      : null
   const [savingMaintenance, setSavingMaintenance] = useState(false)
   const [savingControl, setSavingControl] = useState<PlatformControlKey | null>(
     null
@@ -325,11 +302,10 @@ export function PlatformAdminShell({
         Object.entries(analyticsFilters).forEach(([key, value]) => {
           if (value) params.set(key, value)
         })
-        setAnalytics(
-          await api.get<AdminAnalyticsResponse>(
-            `/api/v1/admin/analytics?${params.toString()}`
-          )
+        const data = await api.get<AdminAnalyticsResponse>(
+          `/api/v1/admin/analytics?${params.toString()}`
         )
+        setAnalyticsResult({ key: JSON.stringify(analyticsFilters), data })
       } else if (activeTab === "audit") {
         const params = new URLSearchParams({
           page: String(listPage),
@@ -461,11 +437,6 @@ export function PlatformAdminShell({
     }
   }
 
-  const title = useMemo(
-    () => tabs.find((tab) => tab.id === activeTab)?.label ?? t("Overview"),
-    [activeTab, tabs, t]
-  )
-
   const pageAction =
     activeTab === "endpoints" ? (
       <Button onClick={() => setEndpointCreateRequest((value) => value + 1)}>
@@ -505,49 +476,107 @@ export function PlatformAdminShell({
     )
   }
 
-  return (
-    <Page className="max-w-7xl">
-      <PageHeader>
-        <PageHeading>
-          <PageTitle>{title}</PageTitle>
-          <PageDescription>
+  const listToolbar = (
+    <FilterBar
+      className="border-0 px-0 py-0"
+      hasActiveFilters={Boolean(query.trim() || listStatus)}
+      onClear={() => {
+        setListPage(1)
+        setQuery("")
+        setListStatus("")
+      }}
+      search={{
+        label: t("Search {value0}", { value0: activeTab }),
+        onChange: (value) => {
+          setListPage(1)
+          setQuery(value)
+        },
+        placeholder: t(
+          activeTab === "users" ? "Search users…" : "Search workspaces…"
+        ),
+        value: query,
+      }}
+    >
+      <Select
+        value={listStatus || "all"}
+        onValueChange={(value) => {
+          setListPage(1)
+          const nextValue = value ?? "all"
+          setListStatus(nextValue === "all" ? "" : nextValue)
+        }}
+      >
+        <SelectTrigger
+          aria-label={t("{value0} status", { value0: activeTab })}
+          className="h-8 min-w-36 sm:min-w-40"
+          size="sm"
+        >
+          <SelectValue>
             {t(
-              "Global controls for JustAI users, workspaces, integrations, and reliability."
+              listStatus === "active"
+                ? "Active"
+                : listStatus === "suspended"
+                  ? "Suspended"
+                  : listStatus === "archived"
+                    ? "Archived"
+                    : "All statuses"
             )}
-          </PageDescription>
-        </PageHeading>
-        <PageActions>
-          {pageAction}
-          <Button
-            aria-label={t("Refresh admin data")}
-            onClick={() => void load()}
-            variant="outline"
-            size="sm"
-          >
-            <RefreshCw data-icon="inline-start" /> {t("Refresh")}
-          </Button>
-        </PageActions>
-      </PageHeader>
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent align="start">
+          <SelectGroup>
+            <SelectItem value="all">{t("All statuses")}</SelectItem>
+            <SelectItem value="active">{t("Active")}</SelectItem>
+            {activeTab === "users" ? (
+              <SelectItem value="suspended">{t("Suspended")}</SelectItem>
+            ) : (
+              <>
+                <SelectItem value="archived">{t("Archived")}</SelectItem>
+                <SelectItem value="suspended">{t("Suspended")}</SelectItem>
+              </>
+            )}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </FilterBar>
+  )
 
-      <SettingsLayout>
-        <SettingsNav
-          activeId={activeTab}
+  return (
+    <Page>
+      <PageTitle>{t("Platform administration")}</PageTitle>
+      <PageActions>
+        {pageAction}
+        <Button
+          aria-label={t("Refresh admin data")}
+          onClick={() => void load()}
+          variant="outline"
+          size="sm"
+        >
+          <RefreshCw data-icon="inline-start" /> {t("Refresh")}
+        </Button>
+      </PageActions>
+
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setListPage(1)
+          setListStatus("")
+          onTabChange(value as AdminTab)
+        }}
+        className="gap-6"
+      >
+        <ScrollableTabsList
           aria-label={t("Platform administration")}
-          groups={tabGroups.map((group) => ({
-            label: group.label,
-            items: group.ids.flatMap((id) => {
-              const tab = tabs.find((candidate) => candidate.id === id)
-              return tab ? [tab] : []
-            }),
-          }))}
-          onSelect={(id) => {
-            setListPage(1)
-            setListStatus("")
-            onTabChange(id as AdminTab)
-          }}
-        />
+          variant="line"
+        >
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <TabsTrigger key={id} value={id}>
+              <Icon aria-hidden="true" />
+              {label}
+            </TabsTrigger>
+          ))}
+        </ScrollableTabsList>
 
-        <div className="min-w-0">
+        <TabsContent key={activeTab} value={activeTab} className="min-w-0">
           {error && (
             <Alert className="mb-4" variant="destructive">
               <AlertTriangle />
@@ -584,67 +613,9 @@ export function PlatformAdminShell({
           )}
           {(activeTab === "users" || activeTab === "workspaces") && (
             <div className="flex flex-col gap-4">
-              <FilterBar
-                hasActiveFilters={Boolean(query.trim() || listStatus)}
-                onClear={() => {
-                  setListPage(1)
-                  setQuery("")
-                  setListStatus("")
-                }}
-                resultCount={
-                  activeTab === "users" ? users.length : workspaces.length
-                }
-                resultLabel={activeTab === "users" ? "users" : "workspaces"}
-                resultTotal={listTotal || undefined}
-                search={{
-                  label: t("Search {value0}", { value0: activeTab }),
-                  onChange: (value) => {
-                    setListPage(1)
-                    setQuery(value)
-                  },
-                  placeholder: `Search ${activeTab}…`,
-                  value: query,
-                }}
-              >
-                <Select
-                  value={listStatus || "all"}
-                  onValueChange={(value) => {
-                    setListPage(1)
-                    const nextValue = value ?? "all"
-                    setListStatus(nextValue === "all" ? "" : nextValue)
-                  }}
-                >
-                  <SelectTrigger
-                    aria-label={t("{value0} status", { value0: activeTab })}
-                    className="h-8 min-w-36 sm:min-w-40"
-                    size="sm"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="start">
-                    <SelectGroup>
-                      <SelectItem value="all">{t("All statuses")}</SelectItem>
-                      <SelectItem value="active">{t("Active")}</SelectItem>
-                      {activeTab === "users" ? (
-                        <SelectItem value="suspended">
-                          {t("Suspended")}
-                        </SelectItem>
-                      ) : (
-                        <>
-                          <SelectItem value="archived">
-                            {t("Archived")}
-                          </SelectItem>
-                          <SelectItem value="suspended">
-                            {t("Suspended")}
-                          </SelectItem>
-                        </>
-                      )}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </FilterBar>
               {activeTab === "users" ? (
                 <UsersView
+                  toolbar={listToolbar}
                   users={users}
                   onUpdate={updateUser}
                   onReload={() => void load()}
@@ -655,6 +626,7 @@ export function PlatformAdminShell({
                 />
               ) : (
                 <WorkspacesView
+                  toolbar={listToolbar}
                   workspaces={workspaces}
                   onUpdate={updateWorkspace}
                   onReload={() => void load()}
@@ -689,15 +661,11 @@ export function PlatformAdminShell({
           {activeTab === "health" && <HealthView health={health} />}
           {activeTab === "analytics" && (
             <div className="flex flex-col gap-4">
-              <AnalyticsView
+              <PlatformAnalyticsView
                 analytics={analytics}
                 filters={analyticsFilters}
                 onFiltersChange={setAnalyticsFilters}
                 onRefresh={() => void load()}
-              />
-              <PlatformTranscriptionWorkers
-                analytics={analytics?.transcriptionWorkers}
-                detailed
               />
             </div>
           )}
@@ -715,8 +683,8 @@ export function PlatformAdminShell({
               onPageChange={setListPage}
             />
           )}
-        </div>
-      </SettingsLayout>
+        </TabsContent>
+      </Tabs>
     </Page>
   )
 }
@@ -772,42 +740,65 @@ function ControlsView({
   ]
   return (
     <div className="flex flex-col gap-4">
+      {[
+        {
+          title: "Access & registration",
+          description: "Control how people sign in and create accounts.",
+          keys: ["loginEnabled", "localAuthEnabled", "signupEnabled"],
+        },
+        {
+          title: "AI & processing",
+          description: "Choose which AI and processing features are available.",
+          keys: [
+            "aiEnabled",
+            "agentsEnabled",
+            "voiceEnabled",
+            "transcriptionEnabled",
+          ],
+        },
+        {
+          title: "Tools & content",
+          description:
+            "Control access to integrations, knowledge, and attachments.",
+          keys: ["mcpEnabled", "knowledgeEnabled", "attachmentsEnabled"],
+        },
+      ].map((group) => (
+        <SettingsSection
+          key={group.title}
+          description={t(group.description)}
+          title={t(group.title)}
+        >
+          {controls
+            .filter(([key]) => group.keys.includes(key))
+            .map(([key, label, description]) => (
+              <SettingsRow
+                description={t(description)}
+                htmlFor={`platform-control-${key}`}
+                key={key}
+                label={t(label)}
+              >
+                <div className="flex items-center gap-2">
+                  {savingControl === key && (
+                    <span className="text-xs text-muted-foreground">
+                      {t("Saving…")}
+                    </span>
+                  )}
+                  <Switch
+                    checked={Boolean(settings[key])}
+                    disabled={savingControl !== null}
+                    id={`platform-control-${key}`}
+                    onCheckedChange={(checked) => onToggle(key, checked)}
+                  />
+                </div>
+              </SettingsRow>
+            ))}
+        </SettingsSection>
+      ))}
       <SettingsSection
-        description={t(
-          "Switches are saved as soon as they change. Existing sessions remain valid when login is disabled."
-        )}
-        title={t("Platform controls")}
-      >
-        {controls.map(([key, label, description]) => (
-          <SettingsRow
-            description={description}
-            htmlFor={`platform-control-${key}`}
-            key={key}
-            label={label}
-          >
-            <div className="flex items-center gap-2">
-              {savingControl === key && (
-                <span className="text-xs text-muted-foreground">
-                  {t("Saving…")}
-                </span>
-              )}
-              <Switch
-                checked={Boolean(settings[key])}
-                disabled={savingControl !== null}
-                id={`platform-control-${key}`}
-                onCheckedChange={(checked) => onToggle(key, checked)}
-              />
-            </div>
-          </SettingsRow>
-        ))}
-      </SettingsSection>
-      <SettingsSection
-        description={t(
-          "Shown with a 503 response while a capability is disabled."
-        )}
+        description={t("Shown when a feature is unavailable.")}
         footer={
           <Button disabled={savingMaintenance} onClick={onSave}>
-            {savingMaintenance ? "Saving…" : "Save maintenance message"}
+            {t(savingMaintenance ? "Saving…" : "Save maintenance message")}
           </Button>
         }
         title={t("Maintenance message")}
@@ -833,11 +824,13 @@ function ControlsView({
 
 function Pagination({
   page,
+  compact = false,
   pageSize,
   total,
   onPageChange,
 }: {
   page: number
+  compact?: boolean
   pageSize: number
   total: number
   onPageChange: (page: number) => void
@@ -847,10 +840,17 @@ function Pagination({
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   if (pageCount <= 1) return null
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
-      <span className="min-w-0 flex-1">
-        {t("Page")} {page} {t("of")} {pageCount} · {total} total
-      </span>
+    <div
+      className={cn(
+        "flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground",
+        !compact && "border-t pt-3"
+      )}
+    >
+      {!compact && (
+        <span className="min-w-0 flex-1">
+          {t("Page")} {page} {t("of")} {pageCount} · {total} total
+        </span>
+      )}
       <div className="flex shrink-0 gap-1">
         <Button
           disabled={page <= 1}
@@ -858,7 +858,7 @@ function Pagination({
           size="sm"
           variant="outline"
         >
-          {t("Previous")}
+          {t("Previous page")}
         </Button>
         <Button
           disabled={page >= pageCount}
@@ -866,7 +866,7 @@ function Pagination({
           size="sm"
           variant="outline"
         >
-          {t("Next")}
+          {t("Next page")}
         </Button>
       </div>
     </div>
@@ -875,6 +875,7 @@ function Pagination({
 
 function UsersView({
   users,
+  toolbar,
   onUpdate,
   onReload,
   page,
@@ -883,6 +884,7 @@ function UsersView({
   onPageChange,
 }: {
   users: any[]
+  toolbar: ReactNode
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
   onReload: () => void
   page: number
@@ -1056,14 +1058,7 @@ function UsersView({
   return (
     <>
       <Card>
-        <CardHeader>
-          <CardTitle>{t("Users")}</CardTitle>
-          <CardDescription>
-            {t(
-              "Search, inspect, suspend, revoke sessions, and manage platform administrator access."
-            )}
-          </CardDescription>
-        </CardHeader>
+        <div className="px-4 pb-1">{toolbar}</div>
         <CardContent className="flex flex-col gap-3 overflow-x-auto">
           {actionError && (
             <Alert variant="destructive">
@@ -1085,31 +1080,44 @@ function UsersView({
                 <tr className="border-b last:border-0" key={item.id}>
                   <td className="p-2">
                     <button
-                      className="text-left hover:underline"
+                      className="flex items-center gap-3 rounded-md text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => void showDetail(item.id)}
                       type="button"
                     >
-                      <div className="font-medium">{item.displayName}</div>
-                      <div className="text-muted-foreground">{item.email}</div>
+                      <Avatar size="sm" className="size-8">
+                        <AvatarFallback className={avatarToneFor(item.id)}>
+                          {initialsFor(item.displayName || item.email)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="flex flex-col">
+                        <span className="font-medium">
+                          {item.displayName || item.email}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {item.email}
+                        </span>
+                      </span>
                     </button>
                   </td>
                   <td className="p-2">
                     <Badge
                       variant={
-                        item.status === "suspended" ? "destructive" : "default"
+                        item.status === "suspended" ? "destructive" : "success"
                       }
                     >
-                      {item.status ?? "active"}
+                      {t(item.status === "suspended" ? "Suspended" : "Active")}
                     </Badge>
                   </td>
                   <td className="p-2">
                     {item.platformAdmin ? (
-                      <Badge>
+                      <Badge variant="secondary">
                         <ShieldCheck data-icon="inline-start" />{" "}
                         {t("platform admin")}
                       </Badge>
                     ) : (
-                      <span className="text-muted-foreground">standard</span>
+                      <span className="text-muted-foreground">
+                        {t("Standard access")}
+                      </span>
                     )}
                   </td>
                   <td className="p-2">
@@ -1193,43 +1201,62 @@ function UsersView({
               {t("No users match this search.")}
             </p>
           )}
+        </CardContent>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
+          <span aria-live="polite">
+            {total === 0
+              ? t("No users match this search.")
+              : t("{start}–{end} of {total}", {
+                  start: (page - 1) * pageSize + 1,
+                  end: Math.min((page - 1) * pageSize + users.length, total),
+                  total,
+                })}
+          </span>
           <Pagination
             page={page}
             pageSize={pageSize}
             total={total}
             onPageChange={onPageChange}
+            compact
           />
-        </CardContent>
+        </div>
       </Card>
       <Dialog
         open={detail !== null}
         onOpenChange={(open) => !open && setDetail(null)}
       >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
-              {detail?.user?.displayName ?? "User details"}
+        <DialogContent className="min-w-0 sm:max-w-xl">
+          <DialogHeader className="min-w-0 pr-6">
+            <DialogTitle className="break-words">
+              {detail?.user?.displayName ?? t("User details")}
             </DialogTitle>
-            <DialogDescription>{detail?.user?.email}</DialogDescription>
+            <DialogDescription className="break-all">
+              {detail?.user?.email}
+            </DialogDescription>
           </DialogHeader>
           {loadingDetail ? (
             <p className="text-sm text-muted-foreground">
               {t("Loading user details…")}
             </p>
           ) : detail ? (
-            <div className="flex flex-col gap-4 text-sm">
+            <div className="flex min-w-0 flex-col gap-5 text-sm">
               <div className="flex flex-wrap gap-2">
                 <Badge
                   variant={
                     detail.user.status === "suspended"
                       ? "destructive"
-                      : "default"
+                      : "success"
                   }
                 >
-                  {detail.user.status ?? "active"}
+                  {t(
+                    detail.user.status === "suspended" ? "Suspended" : "Active"
+                  )}
                 </Badge>
                 {detail.user.platformAdmin && (
-                  <Badge>{t("platform admin")}</Badge>
+                  <Badge variant="secondary">
+                    <ShieldCheck data-icon="inline-start" />
+                    {t("platform admin")}
+                  </Badge>
                 )}
               </div>
               <div>
@@ -1237,12 +1264,28 @@ function UsersView({
                 <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
                   {(detail.organizations ?? []).map((organization: any) => (
                     <div
-                      className="flex items-center justify-between rounded-md border px-2 py-1.5"
+                      className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/50 p-3"
                       key={organization.id}
                     >
-                      <span>{organization.name}</span>
+                      <span className="min-w-0 font-medium break-words">
+                        {organization.name}
+                      </span>
                       <span>
-                        {organization.role} · {organization.status}
+                        {t(
+                          organization.role === "owner"
+                            ? "Owner"
+                            : organization.role === "admin"
+                              ? "Admin"
+                              : "Member"
+                        )}{" "}
+                        ·{" "}
+                        {t(
+                          organization.status === "suspended"
+                            ? "Suspended"
+                            : organization.status === "archived"
+                              ? "Archived"
+                              : "Active"
+                        )}
                       </span>
                     </div>
                   ))}
@@ -1260,19 +1303,19 @@ function UsersView({
                         (session: PlatformSession) => session.active
                       ).length
                     }{" "}
-                    active
+                    {t("Active")}
                   </span>
                 </div>
-                <div className="mt-2 flex max-h-48 flex-col gap-1 overflow-y-auto text-xs">
+                <div className="mt-2 flex max-h-64 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain text-xs">
                   {(detail.sessions ?? []).map((session: PlatformSession) => (
                     <div
-                      className="flex items-start justify-between gap-2 rounded-md border px-2 py-1.5"
+                      className="flex min-w-0 flex-wrap items-start justify-between gap-3 rounded-xl bg-muted/50 p-3"
                       key={session.id}
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1 basis-48">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Badge
-                            variant={session.active ? "default" : "secondary"}
+                            variant={session.active ? "success" : "secondary"}
                           >
                             {session.active ? t("Active") : t("Revoked")}
                           </Badge>
@@ -1283,11 +1326,19 @@ function UsersView({
                             )}
                           </span>
                         </div>
-                        <p className="mt-1 truncate text-muted-foreground">
-                          {[session.userAgent, session.ipAddress]
-                            .filter(Boolean)
-                            .join(" · ") || "No device metadata"}
-                        </p>
+                        <details className="mt-2 min-w-0 text-muted-foreground">
+                          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
+                            {t("Device details")}
+                          </summary>
+                          <p className="mt-2 break-all whitespace-normal">
+                            {session.userAgent || t("No device metadata")}
+                          </p>
+                          {session.ipAddress && (
+                            <p className="mt-1 break-all">
+                              IP: {session.ipAddress}
+                            </p>
+                          )}
+                        </details>
                       </div>
                       {session.active && (
                         <Button
@@ -1474,6 +1525,7 @@ function UsersView({
 
 function WorkspacesView({
   workspaces,
+  toolbar,
   onUpdate,
   onReload,
   page,
@@ -1482,6 +1534,7 @@ function WorkspacesView({
   onPageChange,
 }: {
   workspaces: any[]
+  toolbar: ReactNode
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
   onReload: () => void
   page: number
@@ -1509,8 +1562,7 @@ function WorkspacesView({
   function requestWorkspaceAction(item: any, patch: Record<string, unknown>) {
     const nextStatus = patch.status
     const isArchive = item.status === "archived" || nextStatus === "archived"
-    const isSuspend =
-      !isArchive && (item.status === "suspended" || nextStatus === "suspended")
+    const isSuspend = !isArchive && nextStatus === "suspended"
     const verb = isArchive
       ? item.status === "archived"
         ? t("Restore")
@@ -1566,14 +1618,7 @@ function WorkspacesView({
   return (
     <>
       <Card>
-        <CardHeader>
-          <CardTitle>{t("Workspaces")}</CardTitle>
-          <CardDescription>
-            {t(
-              "Archive, suspend, inspect, transfer, or delete organization-owned resources."
-            )}
-          </CardDescription>
-        </CardHeader>
+        <div className="px-4 pb-1">{toolbar}</div>
         <CardContent className="flex flex-col gap-3 overflow-x-auto">
           {actionError && (
             <Alert variant="destructive">
@@ -1595,12 +1640,21 @@ function WorkspacesView({
                 <tr className="border-b last:border-0" key={item.id}>
                   <td className="p-2">
                     <button
-                      className="text-left hover:underline"
+                      className="flex items-center gap-3 rounded-md text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => void showDetail(item.id)}
                       type="button"
                     >
-                      <div className="font-medium">{item.name}</div>
-                      <div className="text-muted-foreground">{item.slug}</div>
+                      <Avatar size="sm" className="size-8">
+                        <AvatarFallback className={avatarToneFor(item.id)}>
+                          {initialsFor(item.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="flex flex-col">
+                        <span className="font-medium">{item.name}</span>
+                        <span className="text-muted-foreground">
+                          {item.slug}
+                        </span>
+                      </span>
                     </button>
                   </td>
                   <td className="p-2">{item.members}</td>
@@ -1611,10 +1665,16 @@ function WorkspacesView({
                           ? "destructive"
                           : item.status === "archived"
                             ? "secondary"
-                            : "default"
+                            : "success"
                       }
                     >
-                      {item.status}
+                      {t(
+                        item.status === "suspended"
+                          ? "Suspended"
+                          : item.status === "archived"
+                            ? "Archived"
+                            : "Active"
+                      )}
                     </Badge>
                   </td>
                   <td className="p-2">
@@ -1712,31 +1772,65 @@ function WorkspacesView({
               {t("No workspaces match this search.")}
             </p>
           )}
+        </CardContent>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
+          <span aria-live="polite">
+            {total === 0
+              ? t("No workspaces match this search.")
+              : t("{start}–{end} of {total}", {
+                  start: (page - 1) * pageSize + 1,
+                  end: Math.min(
+                    (page - 1) * pageSize + workspaces.length,
+                    total
+                  ),
+                  total,
+                })}
+          </span>
           <Pagination
             page={page}
             pageSize={pageSize}
             total={total}
             onPageChange={onPageChange}
+            compact
           />
-        </CardContent>
+        </div>
       </Card>
       <Dialog
         open={detail !== null}
         onOpenChange={(open) => !open && setDetail(null)}
       >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
-              {detail?.organization?.name ?? "Workspace details"}
+        <DialogContent className="min-w-0 sm:max-w-xl">
+          <DialogHeader className="min-w-0 pr-6">
+            <DialogTitle className="break-words">
+              {detail?.organization?.name ?? t("Workspace details")}
             </DialogTitle>
-            <DialogDescription>{detail?.organization?.slug}</DialogDescription>
+            <DialogDescription className="break-all">
+              {detail?.organization?.slug}
+            </DialogDescription>
           </DialogHeader>
           {detail && (
-            <div className="flex flex-col gap-4">
+            <div className="flex min-w-0 flex-col gap-5">
               <div className="flex flex-wrap gap-2">
-                <Badge>{detail.organization.status}</Badge>
+                <Badge
+                  variant={
+                    detail.organization.status === "suspended"
+                      ? "destructive"
+                      : detail.organization.status === "archived"
+                        ? "secondary"
+                        : "success"
+                  }
+                >
+                  {t(
+                    detail.organization.status === "suspended"
+                      ? "Suspended"
+                      : detail.organization.status === "archived"
+                        ? "Archived"
+                        : "Active"
+                  )}
+                </Badge>
                 <Badge variant="outline">
-                  {detail.members?.length ?? 0} members
+                  {detail.members?.length ?? 0}{" "}
+                  {t(detail.members?.length === 1 ? "member" : "members")}
                 </Badge>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -1761,19 +1855,50 @@ function WorkspacesView({
                   value={detail.resources?.transcriptions}
                 />
               </div>
-              <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                {(detail.members ?? []).map((member: any) => (
-                  <div
-                    className="flex items-center justify-between rounded-md border px-2 py-1.5"
-                    key={member.id}
-                  >
-                    <span>
-                      {member.displayName} · {member.email}
-                    </span>
-                    <span>{member.role}</span>
-                  </div>
-                ))}
-              </div>
+              <section
+                aria-label={t("Members")}
+                className="flex min-w-0 flex-col gap-2 text-xs"
+              >
+                <h3 className="text-sm font-medium">{t("Members")}</h3>
+                <div className="flex max-h-64 min-w-0 flex-col gap-2 overflow-y-auto">
+                  {(detail.members ?? []).map((member: any) => (
+                    <div
+                      className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/50 p-3"
+                      key={member.id}
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <Avatar size="sm">
+                          <AvatarFallback className={avatarToneFor(member.id)}>
+                            {initialsFor(member.displayName || member.email)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="font-medium break-words">
+                            {member.displayName || member.email}
+                          </p>
+                          <p className="break-all text-muted-foreground">
+                            {member.email}
+                          </p>
+                        </div>
+                      </div>
+                      <Badge variant="secondary">
+                        {t(
+                          member.role === "owner"
+                            ? "Owner"
+                            : member.role === "admin"
+                              ? "Admin"
+                              : "Member"
+                        )}
+                      </Badge>
+                    </div>
+                  ))}
+                  {!detail.members?.length && (
+                    <p className="text-muted-foreground">
+                      {t("No members found.")}
+                    </p>
+                  )}
+                </div>
+              </section>
             </div>
           )}
           <DialogFooter>
@@ -1900,7 +2025,7 @@ function WorkspacesView({
 
 function ResourceCount({ label, value }: { label: string; value: unknown }) {
   return (
-    <div className="rounded-md border p-2">
+    <div className="min-w-0 rounded-xl bg-muted/50 p-3">
       <p className="text-[11px] text-muted-foreground">{label}</p>
       <p className="mt-1 text-lg font-semibold">
         {typeof value === "number" ? value : "—"}
@@ -1932,6 +2057,15 @@ function InventoryView({
   createRequest?: number
 }) {
   const { t } = useTranslations()
+  const list = useAdminList(
+    items,
+    (item, query, status) =>
+      `${item.name} ${item.endpointUrl ?? ""} ${item.providerType ?? ""}`
+        .toLocaleLowerCase()
+        .includes(query) &&
+      (status === "all" ||
+        (status === "enabled" ? item.enabled : !item.enabled))
+  )
 
   const [actionError, setActionError] = useState("")
   const [actionNotice, setActionNotice] = useState("")
@@ -2215,17 +2349,44 @@ function InventoryView({
 
   return (
     <>
-      <Card>
-        <CardHeader className="flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle>{title}</CardTitle>
-            <CardDescription>
-              {t(
-                "Shared catalog resources are visible to eligible workspaces and remain mutable here only."
-              )}
-            </CardDescription>
-          </div>
-        </CardHeader>
+      <Card aria-label={title}>
+        <div className="px-4">
+          <FilterBar
+            className="border-0 p-0"
+            search={{
+              label: t("Search MCP servers"),
+              placeholder: t("Search MCP servers…"),
+              value: list.query,
+              onChange: list.setQuery,
+            }}
+            hasActiveFilters={Boolean(list.query || list.status !== "all")}
+            onClear={list.clear}
+          >
+            <Select
+              value={list.status}
+              onValueChange={(value) => list.setStatus(value ?? "all")}
+            >
+              <SelectTrigger size="sm" aria-label={t("Status")}>
+                <SelectValue>
+                  {t(
+                    list.status === "enabled"
+                      ? "Enabled"
+                      : list.status === "disabled"
+                        ? "Disabled"
+                        : "All statuses"
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">{t("All statuses")}</SelectItem>
+                  <SelectItem value="enabled">{t("Enabled")}</SelectItem>
+                  <SelectItem value="disabled">{t("Disabled")}</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </FilterBar>
+        </div>
         <CardContent className="flex flex-col gap-3 overflow-x-auto">
           {actionError && (
             <Alert variant="destructive">
@@ -2253,7 +2414,7 @@ function InventoryView({
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => {
+              {list.pageItems.map((item) => {
                 const busy = busyId === item.id
                 const rowAction =
                   activeAction?.id === item.id ? activeAction : null
@@ -2280,13 +2441,13 @@ function InventoryView({
                             src={resolveAPIURL(item.iconUrl)}
                           />
                         ) : null}
-                        <span>{item.name}</span>
+                        <span className="break-words">{item.name}</span>
                       </div>
                     </td>
                     <td className="p-2">
                       <Badge
                         variant={
-                          item.scopeType === "global" ? "default" : "outline"
+                          item.scopeType === "global" ? "secondary" : "outline"
                         }
                       >
                         {scopeLabel}
@@ -2298,8 +2459,22 @@ function InventoryView({
                         : item.endpointUrl}
                     </td>
                     <td className="p-2">
-                      <Badge variant={item.enabled ? "default" : "destructive"}>
-                        {item.enabled ? "enabled" : "disabled"}
+                      <Badge
+                        variant={
+                          itemError
+                            ? "destructive"
+                            : item.enabled
+                              ? "success"
+                              : "secondary"
+                        }
+                      >
+                        {t(
+                          itemError
+                            ? "Check failed"
+                            : item.enabled
+                              ? "Enabled"
+                              : "Disabled"
+                        )}
                       </Badge>
                       {itemError && (
                         <p
@@ -2514,12 +2689,17 @@ function InventoryView({
               })}
             </tbody>
           </table>
-          {items.length === 0 && (
+          {list.total === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {t("No resources found.")}
             </p>
           )}
         </CardContent>
+        <AdminListFooter
+          page={list.page}
+          total={list.total}
+          onPageChange={list.setPage}
+        />
       </Card>
       <Dialog
         open={deleteCandidate !== null}
@@ -2594,10 +2774,10 @@ function InventoryView({
           }
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="min-w-0 sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {t("Add")} {kind === "endpoint" ? "endpoint" : t("MCP server")}
+              {t(kind === "endpoint" ? "Add endpoint" : "Add MCP server")}
             </DialogTitle>
             <DialogDescription>
               {t(
@@ -2605,14 +2785,14 @@ function InventoryView({
               )}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-3">
+          <div className="flex min-w-0 flex-col gap-3">
             {createError && (
               <Alert variant="destructive">
                 <AlertTriangle />
                 <AlertDescription>{t(createError)}</AlertDescription>
               </Alert>
             )}
-            <label className="grid gap-1 text-sm">
+            <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
               {t("Name")}
               <Input
                 value={createValues.name}
@@ -2627,7 +2807,7 @@ function InventoryView({
               />
             </label>
             {kind === "mcp" && (
-              <label className="grid gap-1 text-sm">
+              <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                 {t("Logo (optional)")}
                 <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
                   <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
@@ -2647,11 +2827,11 @@ function InventoryView({
                       />
                     )}
                   </div>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <Input
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <input
                       ref={createIconInputRef}
                       type="file"
-                      className="sr-only"
+                      className="hidden"
                       accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
                       onChange={(event) =>
                         chooseCreateIcon(event.target.files?.[0] ?? null)
@@ -2700,13 +2880,13 @@ function InventoryView({
                 </div>
               </label>
             )}
-            <div className="grid gap-1 text-sm">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
               <span className="font-medium">{t("Scope")}</span>
               <Select
                 items={{
-                  global: "Global",
-                  organization: "Organization",
-                  user: "User",
+                  global: t("Global"),
+                  organization: t("Workspace"),
+                  user: t("Personal"),
                 }}
                 value={createValues.scopeType}
                 onValueChange={(value) =>
@@ -2728,7 +2908,7 @@ function InventoryView({
               </Select>
             </div>
             {createValues.scopeType !== "global" && (
-              <label className="grid gap-1 text-sm">
+              <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                 {t("Scope ID")}
                 <Input
                   value={createValues.scopeId}
@@ -2741,7 +2921,7 @@ function InventoryView({
             )}
             {kind === "endpoint" ? (
               <>
-                <div className="grid gap-1 text-sm">
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   <span className="font-medium">{t("Provider")}</span>
                   <Select
                     items={{
@@ -2777,7 +2957,7 @@ function InventoryView({
                     </SelectContent>
                   </Select>
                 </div>
-                <label className="grid gap-1 text-sm">
+                <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   {t("Base URL")}
                   <Input
                     value={createValues.baseUrl}
@@ -2787,7 +2967,7 @@ function InventoryView({
                     placeholder="https://gateway.example/v1"
                   />
                 </label>
-                <label className="grid gap-1 text-sm">
+                <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   {t("Chat model")}
                   <Input
                     value={createValues.chatModel}
@@ -2797,7 +2977,7 @@ function InventoryView({
                     placeholder="model-name"
                   />
                 </label>
-                <label className="grid gap-1 text-sm">
+                <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   {t("API key or token")}
                   <Input
                     type="password"
@@ -2811,7 +2991,7 @@ function InventoryView({
               </>
             ) : (
               <>
-                <label className="grid gap-1 text-sm">
+                <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   {t("MCP endpoint URL")}
                   <Input
                     value={createValues.endpointUrl}
@@ -2821,11 +3001,11 @@ function InventoryView({
                     placeholder="https://tools.example/mcp"
                   />
                 </label>
-                <div className="grid gap-1 text-sm">
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   <span className="font-medium">{t("Authentication")}</span>
                   <Select
                     items={{
-                      none: "No auth",
+                      none: t("No auth"),
                       api_key: "Bearer token",
                       oauth: "OAuth 2.1",
                     }}
@@ -2859,7 +3039,7 @@ function InventoryView({
                   )}
                 </div>
                 {createValues.authType !== "none" && (
-                  <label className="grid gap-1 text-sm">
+                  <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                     {createValues.authType === "oauth"
                       ? t("Access token (optional)")
                       : t("Bearer token")}
@@ -2884,7 +3064,7 @@ function InventoryView({
                 )}
                 {createValues.authType === "oauth" && (
                   <>
-                    <label className="grid gap-1 text-sm">
+                    <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                       {t("OAuth client ID")}
                       <Input
                         value={createValues.oauthClientId}
@@ -2894,7 +3074,7 @@ function InventoryView({
                         placeholder={t("Client ID")}
                       />
                     </label>
-                    <label className="grid gap-1 text-sm">
+                    <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                       {t("Authorization URL (optional)")}
                       <Input
                         value={createValues.oauthAuthorizationUrl}
@@ -2907,7 +3087,7 @@ function InventoryView({
                         placeholder="https://provider.example/authorize"
                       />
                     </label>
-                    <label className="grid gap-1 text-sm">
+                    <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                       {t("Token URL (optional)")}
                       <Input
                         value={createValues.oauthTokenUrl}
@@ -2917,7 +3097,7 @@ function InventoryView({
                         placeholder="https://provider.example/token"
                       />
                     </label>
-                    <label className="grid gap-1 text-sm">
+                    <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                       {t("OAuth scopes (optional)")}
                       <Input
                         value={createValues.oauthScopes}
@@ -2957,8 +3137,9 @@ function healthState(value: any): HealthState {
   if (!value || typeof value !== "object") return "unknown"
 
   const failures = Number(value.recentFailures ?? value.failures ?? 0)
+  if (value.ok === false) return "down"
   if (failures > 0) return "warning"
-  if (typeof value.ok === "boolean") return value.ok ? "healthy" : "down"
+  if (value.ok === true) return "healthy"
 
   const signals = Object.values(value).filter(
     (item): item is boolean => typeof item === "boolean"
@@ -2986,17 +3167,14 @@ function HealthStatusBadge({ state }: { state: HealthState }) {
           : t("Unknown")
   const variant =
     state === "healthy"
-      ? "default"
+      ? "success"
       : state === "down"
         ? "destructive"
-        : "outline"
-  const className =
-    state === "warning"
-      ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-      : undefined
-
+        : state === "warning"
+          ? "warning"
+          : "secondary"
   return (
-    <Badge className={className} variant={variant}>
+    <Badge variant={variant}>
       <Icon data-icon="inline-start" />
       {label}
     </Badge>
@@ -3012,12 +3190,13 @@ function HealthMetric({
   value: string
   detail?: string
 }) {
+  const { t } = useTranslations()
   return (
-    <div className="rounded-xl bg-muted/50 px-3 py-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-base font-semibold tracking-tight">{value}</p>
+    <div className="min-w-0 py-1">
+      <p className="text-xs text-muted-foreground">{t(label)}</p>
+      <p className="mt-1 text-base font-semibold tracking-tight">{t(value)}</p>
       {detail && (
-        <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t(detail)}</p>
       )}
     </div>
   )
@@ -3165,7 +3344,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
         >
           <div className="grid gap-2 sm:grid-cols-2">
             <HealthMetric
-              detail={`${totalProviders} configured`}
+              detail={t("{count} configured", { count: totalProviders })}
               label={t("Enabled")}
               value={`${enabledProviders} / ${totalProviders}`}
             />
@@ -3184,7 +3363,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
         >
           <div className="grid gap-2 sm:grid-cols-2">
             <HealthMetric
-              detail={`${totalMcp} configured`}
+              detail={t("{count} configured", { count: totalMcp })}
               label={t("Enabled")}
               value={`${enabledMcp} / ${totalMcp}`}
             />
@@ -3235,44 +3414,46 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
                 className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5"
                 key={label}
               >
-                <span className="text-sm">{label}</span>
-                <Badge variant={value ? "default" : "destructive"}>
+                <span className="text-sm">{t(label)}</span>
+                <Badge variant={value ? "success" : "destructive"}>
                   {value ? t("Online") : t("Offline")}
                 </Badge>
               </div>
             ))}
           </div>
           {workerDetails.length > 0 && (
-            <div className="mt-3 flex flex-col gap-1.5 border-t pt-3">
-              <p className="text-xs font-medium text-muted-foreground">
+            <details className="mt-3 border-t border-border pt-3">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
                 {t("Heartbeat diagnostics")}
-              </p>
-              {workerDetails.map((worker: any) => (
-                <div
-                  className="flex flex-wrap items-center justify-between gap-2 text-xs"
-                  key={worker.name}
-                >
-                  <span className="font-medium">
-                    {String(worker.name)
-                      .replace(/[-_]/g, " ")
-                      .replace(/^./, (value) => value.toUpperCase())}
-                    {worker.instanceId
-                      ? ` · ${String(worker.instanceId).slice(0, 8)}`
-                      : ""}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {worker.heartbeatAgeSeconds >= 0
-                      ? t("{value0}s since heartbeat", {
-                          value0: worker.heartbeatAgeSeconds,
-                        })
-                      : worker.started
-                        ? t("Awaiting heartbeat")
-                        : t("Not started")}
-                    {worker.lastError ? ` · ${worker.lastError}` : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
+              </summary>
+              <div className="mt-3 flex max-h-64 flex-col gap-2 overflow-y-auto">
+                {workerDetails.map((worker: any, index: number) => (
+                  <div
+                    className="flex flex-wrap items-center justify-between gap-2 text-xs"
+                    key={`${worker.name}-${worker.instanceId ?? index}`}
+                  >
+                    <span className="font-medium">
+                      {String(worker.name)
+                        .replace(/[-_]/g, " ")
+                        .replace(/^./, (value) => value.toUpperCase())}
+                      {worker.instanceId
+                        ? ` · ${String(worker.instanceId).slice(0, 8)}`
+                        : ""}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {worker.heartbeatAgeSeconds >= 0
+                        ? t("{value0}s since heartbeat", {
+                            value0: worker.heartbeatAgeSeconds,
+                          })
+                        : worker.started
+                          ? t("Awaiting heartbeat")
+                          : t("Not started")}
+                      {worker.lastError ? ` · ${worker.lastError}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
         </HealthPanel>
       </div>
@@ -3285,234 +3466,17 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
             {providerFailures > 0 &&
               t("{value0} provider {value1} recorded in the last hour.", {
                 value0: providerFailures,
-                value1: providerFailures === 1 ? "failure" : "failures",
+                value1: t(providerFailures === 1 ? "failure" : "failures"),
               })}
             {providerFailures > 0 && mcpFailures > 0 && " "}
             {mcpFailures > 0 &&
               t("{value0} MCP {value1} reported.", {
                 value0: mcpFailures,
-                value1: mcpFailures === 1 ? "failure" : "failures",
+                value1: t(mcpFailures === 1 ? "failure" : "failures"),
               })}
           </AlertDescription>
         </Alert>
       )}
-    </div>
-  )
-}
-
-function AnalyticsView({
-  analytics,
-  filters,
-  onFiltersChange,
-  onRefresh,
-}: {
-  analytics: AdminAnalyticsResponse | null
-  filters: Record<string, string>
-  onFiltersChange: (filters: Record<string, string>) => void
-  onRefresh: () => void
-}) {
-  const { t, locale } = useTranslations()
-
-  const summary = analytics?.summary
-  const setFilter = (key: string, value: string) =>
-    onFiltersChange({ ...filters, [key]: value })
-  const timeSeries = analytics?.timeSeries ?? []
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("Analytics")}</CardTitle>
-          <CardDescription>
-            {t(
-              "Filter request volume, latency, usage, and tool calls across the platform."
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <Input
-            aria-label={t("Analytics days")}
-            onChange={(event) => setFilter("days", event.target.value)}
-            placeholder={t("Days (1–365)")}
-            value={filters.days}
-          />
-          <Input
-            aria-label={t("Analytics from")}
-            onChange={(event) => setFilter("from", event.target.value)}
-            placeholder={t("From (YYYY-MM-DD)")}
-            value={filters.from}
-          />
-          <Input
-            aria-label={t("Analytics to")}
-            onChange={(event) => setFilter("to", event.target.value)}
-            placeholder={t("To (YYYY-MM-DD)")}
-            value={filters.to}
-          />
-          <Input
-            aria-label={t("Analytics organization")}
-            onChange={(event) =>
-              setFilter("organizationId", event.target.value)
-            }
-            placeholder={t("Organization ID")}
-            value={filters.organizationId}
-          />
-          <Input
-            aria-label={t("Analytics endpoint")}
-            onChange={(event) => setFilter("endpointId", event.target.value)}
-            placeholder={t("Endpoint ID")}
-            value={filters.endpointId}
-          />
-          <Input
-            aria-label={t("Analytics model")}
-            onChange={(event) => setFilter("model", event.target.value)}
-            placeholder={t("Model")}
-            value={filters.model}
-          />
-          <Select
-            value={filters.status || "all"}
-            onValueChange={(value) => {
-              const nextValue = value ?? "all"
-              setFilter("status", nextValue === "all" ? "" : nextValue)
-            }}
-          >
-            <SelectTrigger
-              aria-label={t("Analytics status")}
-              className="w-full"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">{t("All statuses")}</SelectItem>
-                <SelectItem value="running">{t("Running")}</SelectItem>
-                <SelectItem value="requires-action">
-                  {t("Requires action")}
-                </SelectItem>
-                <SelectItem value="complete">{t("Complete")}</SelectItem>
-                <SelectItem value="error">{t("Error")}</SelectItem>
-                <SelectItem value="cancelled">{t("Cancelled")}</SelectItem>
-                <SelectItem value="incomplete">{t("Incomplete")}</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Button onClick={onRefresh}>{t("Apply filters")}</Button>
-        </CardContent>
-      </Card>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          [t("Requests"), summary?.requests],
-          [t("Success"), summary?.succeeded],
-          [t("Errors"), summary?.failed],
-          [
-            "P95 latency",
-            summary?.p95LatencyMs
-              ? `${Math.round(summary.p95LatencyMs)} ms`
-              : "—",
-          ],
-          ["Total tokens", compactNumber(summary?.totalTokens, locale)],
-          [
-            "Average TTFT",
-            summary?.averageTtftMs
-              ? `${Math.round(summary.averageTtftMs)} ms`
-              : "—",
-          ],
-          [t("Tool calls"), summary?.toolCalls],
-        ].map(([label, value]) => (
-          <Card key={String(label)}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs text-muted-foreground">
-                {label}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-semibold">{value ?? "—"}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      <AdminUsageCharts analytics={analytics} showLatency />
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("Endpoint and model breakdown")}</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full min-w-[44rem] text-left text-xs">
-            <thead>
-              <tr className="border-b text-muted-foreground">
-                <th className="p-2">{t("Endpoint")}</th>
-                <th className="p-2">{t("Model")}</th>
-                <th className="p-2">{t("Requests")}</th>
-                <th className="p-2">{t("Errors")}</th>
-                <th className="p-2">{t("Avg latency")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(analytics?.byEndpoint ?? []).map((item: any) => (
-                <tr
-                  className="border-b last:border-0"
-                  key={`${item.endpointId}-${item.model}`}
-                >
-                  <td className="p-2">{item.endpointName}</td>
-                  <td className="p-2">{item.model || "—"}</td>
-                  <td className="p-2">{item.requests}</td>
-                  <td className="p-2">{item.errors}</td>
-                  <td className="p-2">
-                    {Math.round(item.averageLatencyMs ?? 0)} ms
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!analytics?.byEndpoint?.length && (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              {t("No runs match these filters.")}
-            </p>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("Daily activity")}</CardTitle>
-          <CardDescription>
-            {t("Request volume, outcomes, latency, and tool calls by UTC day.")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full min-w-[44rem] text-left text-xs">
-            <thead>
-              <tr className="border-b text-muted-foreground">
-                <th className="p-2">{t("Date")}</th>
-                <th className="p-2">{t("Requests")}</th>
-                <th className="p-2">{t("Success")}</th>
-                <th className="p-2">{t("Errors")}</th>
-                <th className="p-2">{t("Cancelled")}</th>
-                <th className="p-2">{t("Avg latency")}</th>
-                <th className="p-2">{t("Tool calls")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {timeSeries.map((item: any) => (
-                <tr className="border-b last:border-0" key={item.date}>
-                  <td className="p-2">{item.date}</td>
-                  <td className="p-2">{item.requests}</td>
-                  <td className="p-2">{item.succeeded}</td>
-                  <td className="p-2">{item.failed}</td>
-                  <td className="p-2">{item.cancelled}</td>
-                  <td className="p-2">
-                    {Math.round(item.averageLatencyMs ?? 0)} ms
-                  </td>
-                  <td className="p-2">{item.toolCalls}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!timeSeries.length && (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              {t("No daily activity for this range.")}
-            </p>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }
@@ -3536,7 +3500,6 @@ function AuditView({
 }) {
   const { t, locale } = useTranslations()
 
-  const isMobile = useIsMobile()
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false)
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null)
   const setFilter = (key: string, value: string) =>
@@ -3549,19 +3512,11 @@ function AuditView({
   )
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("Audit trail")}</CardTitle>
-        <CardDescription>
-          {t(
-            "Administrative mutations are recorded without credentials or tokens."
-          )}
-        </CardDescription>
-      </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <Collapsible
           className="flex flex-col gap-2"
           onOpenChange={setMoreFiltersOpen}
-          open={!isMobile || moreFiltersOpen}
+          open={moreFiltersOpen}
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
@@ -3573,7 +3528,7 @@ function AuditView({
             />
             <div className="flex flex-wrap items-center gap-2">
               <CollapsibleTrigger
-                className="gap-1.5 sm:w-auto lg:hidden"
+                className="gap-1.5 sm:w-auto"
                 render={<Button size="sm" variant="outline" />}
               >
                 <SlidersHorizontal data-icon="inline-start" />
@@ -3658,17 +3613,30 @@ function AuditView({
         </Collapsible>
         {events.map((event) => (
           <button
-            className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-left text-xs transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+            className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border px-2 py-3 text-left text-xs transition-colors last:border-0 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
             key={event.id}
             onClick={() => setSelectedEvent(event)}
             type="button"
           >
-            <div>
+            <div className="min-w-0 flex-1 break-all">
               <p className="font-medium">{event.action}</p>
               <p className="text-muted-foreground">
                 {event.resourceType} · {event.resourceId ?? "—"}
               </p>
             </div>
+            <Badge
+              variant={
+                event.outcome && event.outcome !== "success"
+                  ? "destructive"
+                  : "secondary"
+              }
+            >
+              {t(
+                event.outcome && event.outcome !== "success"
+                  ? "Failed"
+                  : "Success"
+              )}
+            </Badge>
             <time className="text-muted-foreground">
               {event.createdAt
                 ? new Date(event.createdAt).toLocaleString(locale)
@@ -3681,21 +3649,35 @@ function AuditView({
             {t("No audit events found.")}
           </p>
         )}
+      </CardContent>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
+        <span aria-live="polite">
+          {total
+            ? t("{start}–{end} of {total}", {
+                start: (page - 1) * pageSize + 1,
+                end: Math.min((page - 1) * pageSize + events.length, total),
+                total,
+              })
+            : t("No audit events found.")}
+        </span>
         <Pagination
           page={page}
           pageSize={pageSize}
           total={total}
           onPageChange={onPageChange}
+          compact
         />
-      </CardContent>
+      </div>
       <Dialog
         open={selectedEvent !== null}
         onOpenChange={(open) => !open && setSelectedEvent(null)}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="min-w-0 sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{selectedEvent?.action ?? "Audit event"}</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="break-all">
+              {selectedEvent?.action ?? t("Audit event")}
+            </DialogTitle>
+            <DialogDescription className="break-all">
               {selectedEvent?.resourceType ?? "—"} ·{" "}
               {selectedEvent?.resourceId ?? "No resource ID"}
             </DialogDescription>

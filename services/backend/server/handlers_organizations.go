@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -197,7 +198,35 @@ func (a *App) listOrganizationMembers(c *gin.Context) {
 		writeError(c, http.StatusForbidden, err)
 		return
 	}
-	rows, err := a.DB.QueryContext(c, `SELECT u.id, u.email, u.display_name, om.role, om.created_at, CASE WHEN ua.user_id IS NULL THEN '' ELSE '/api/v1/organizations/' || om.organization_id::text || '/members/' || u.id::text || '/avatar' END, COALESCE(floor(extract(epoch FROM ua.updated_at) * 1000000)::text, '') FROM organization_members om JOIN users u ON u.id = om.user_id LEFT JOIN user_avatars ua ON ua.user_id = u.id WHERE om.organization_id = $1 ORDER BY CASE om.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, u.display_name`, organizationID)
+	total, filtered := 0, 0
+	query := `SELECT u.id, u.email, u.display_name, om.role, om.created_at, CASE WHEN ua.user_id IS NULL THEN '' ELSE '/api/v1/organizations/' || om.organization_id::text || '/members/' || u.id::text || '/avatar' END, COALESCE(floor(extract(epoch FROM ua.updated_at) * 1000000)::text, '') FROM organization_members om JOIN users u ON u.id = om.user_id LEFT JOIN user_avatars ua ON ua.user_id = u.id WHERE om.organization_id = $1 ORDER BY CASE om.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, u.display_name`
+	args := []any{organizationID}
+	paginated := c.Query("page") != ""
+	page := 1
+	if paginated {
+		var parseErr error
+		page, parseErr = strconv.Atoi(c.Query("page"))
+		role := c.Query("role")
+		if parseErr != nil || page < 1 || page > 1000000 || (role != "" && role != "owner" && role != "admin" && role != "member") {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid member page or role"))
+			return
+		}
+		if err := a.DB.QueryRowContext(c, `SELECT count(*) FROM organization_members WHERE organization_id = $1`, organizationID).Scan(&total); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		search := strings.TrimSpace(c.Query("search"))
+		where := ` WHERE om.organization_id = $1 AND ($2 = '' OR strpos(lower(u.display_name), lower($2)) > 0 OR strpos(lower(u.email), lower($2)) > 0) AND ($3 = '' OR om.role = $3)`
+		if err := a.DB.QueryRowContext(c, `SELECT count(*) FROM organization_members om JOIN users u ON u.id = om.user_id`+where, organizationID, search, role).Scan(&filtered); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		lastPage := max(1, (filtered+19)/20)
+		page = min(page, lastPage)
+		query = strings.Split(query, " WHERE ")[0] + where + ` ORDER BY CASE om.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, u.display_name, u.id LIMIT 20 OFFSET $4`
+		args = append(args, search, role, (page-1)*20)
+	}
+	rows, err := a.DB.QueryContext(c, query, args...)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -213,6 +242,14 @@ func (a *App) listOrganizationMembers(c *gin.Context) {
 			return
 		}
 		result = append(result, gin.H{"id": id, "email": email, "displayName": displayName, "role": role, "createdAt": createdAt, "avatarUrl": avatarURL, "avatarVersion": avatarVersion})
+	}
+	if err := rows.Err(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if paginated {
+		c.JSON(http.StatusOK, gin.H{"members": result, "total": total, "filtered": filtered, "page": page})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"members": result})
 }

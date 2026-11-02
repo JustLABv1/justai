@@ -6,7 +6,9 @@ import {
 } from "@/components/locale-provider"
 import {
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type FormEvent,
@@ -18,6 +20,7 @@ import {
   Check,
   CheckCircle2,
   CircleAlert,
+  ImagePlus,
   KeyRound,
   Layers3,
   Link2,
@@ -30,10 +33,12 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   WandSparkles,
 } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { EndpointBadge } from "@/components/endpoint-badge"
 import type { Endpoint, EndpointKind } from "@/lib/types"
 import {
   buildEndpointCapabilities,
@@ -112,6 +117,10 @@ type Props = {
   isPlatformCatalog: boolean
   saving: boolean
   notice?: string
+  logoFile: File | null
+  logoRemoved: boolean
+  onLogoChange: (file: File | null) => void
+  onLogoRemove: () => void
   onSelectProvider: (value: string | null) => void
   onSave: (event: FormEvent<HTMLFormElement>) => void | Promise<void>
   onClose: () => void
@@ -259,6 +268,10 @@ export function EndpointCreationWizard({
   isPlatformCatalog,
   saving,
   notice,
+  logoFile,
+  logoRemoved,
+  onLogoChange,
+  onLogoRemove,
   onSelectProvider,
   onSave,
   onClose,
@@ -515,6 +528,10 @@ export function EndpointCreationWizard({
         platformAdmin={platformAdmin}
         isPlatformCatalog={isPlatformCatalog}
         isEditing={isEditing}
+        existingLogoUrl={logoRemoved ? undefined : editingEndpoint?.logoUrl}
+        logoFile={logoFile}
+        onLogoChange={onLogoChange}
+        onLogoRemove={onLogoRemove}
         onSelectProvider={onSelectProvider}
       />
     ) : step === "configure" ? (
@@ -836,6 +853,10 @@ function ConnectionStep({
   platformAdmin,
   isPlatformCatalog,
   isEditing,
+  existingLogoUrl,
+  logoFile,
+  onLogoChange,
+  onLogoRemove,
   onSelectProvider,
 }: {
   form: EndpointForm
@@ -846,9 +867,33 @@ function ConnectionStep({
   platformAdmin: boolean
   isPlatformCatalog: boolean
   isEditing: boolean
+  existingLogoUrl?: string
+  logoFile: File | null
+  onLogoChange: (file: File | null) => void
+  onLogoRemove: () => void
   onSelectProvider: (value: string | null) => void
 }) {
   const { t } = useTranslations()
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  const [logoPreviews, setLogoPreviews] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!logoFile) return
+    const key = `${logoFile.name}:${logoFile.size}:${logoFile.lastModified}`
+    const reader = new FileReader()
+    reader.onload = () =>
+      setLogoPreviews((current) => ({
+        ...current,
+        [key]: String(reader.result),
+      }))
+    reader.readAsDataURL(logoFile)
+    return () => reader.abort()
+  }, [logoFile])
+  const logoPreview = logoFile
+    ? (logoPreviews[
+        `${logoFile.name}:${logoFile.size}:${logoFile.lastModified}`
+      ] ?? "")
+    : ""
+  const shownLogo = logoPreview || existingLogoUrl
 
   return (
     <div className="flex flex-col gap-5">
@@ -921,6 +966,56 @@ function ConnectionStep({
                 </FieldDescription>
               </Field>
             </div>
+            <Field>
+              <FieldLabel htmlFor="endpoint-logo">{t("Logo")}</FieldLabel>
+              <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
+                <EndpointBadge
+                  name={form.name || "?"}
+                  logoUrl={shownLogo}
+                  className="size-12 shrink-0 border bg-background"
+                />
+                <div className="min-w-0 flex-1">
+                  <input
+                    ref={logoInputRef}
+                    id="endpoint-logo"
+                    type="file"
+                    className="sr-only"
+                    accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
+                    onChange={(event) => {
+                      onLogoChange(event.target.files?.[0] ?? null)
+                      event.target.value = ""
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {t(
+                      "Shown in the model picker. Without a logo, initials are used. PNG, JPEG, GIF, WebP, or ICO · Max 2 MB"
+                    )}
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => logoInputRef.current?.click()}
+                    >
+                      <ImagePlus data-icon="inline-start" aria-hidden="true" />
+                      {shownLogo ? t("Replace logo") : t("Choose logo")}
+                    </Button>
+                    {shownLogo && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={onLogoRemove}
+                      >
+                        <Trash2 data-icon="inline-start" aria-hidden="true" />
+                        {t("Remove logo")}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </Field>
             <Field>
               <FieldLabel htmlFor="endpoint-visibility">
                 {t("Visibility")}
