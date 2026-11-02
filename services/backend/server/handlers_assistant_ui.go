@@ -14,6 +14,7 @@ import (
 	_ "image/png"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -848,7 +849,7 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		metadata["errorText"] = streamErr.Error()
 		_ = a.persistAssistantUIAssistantAtPartsStatus(c, conversationID, outputParent, assistantMessageID, response.String(), citations, errorParts, metadata, "error")
 	}
-	if assistantUIRequestsImageEdit(latestUser) {
+	if assistantUIRequestsImageEdit(latestUser) && a.assistantUIHasEditableImage(c, principal.UserID, organizationID, conversationID, latestUser) {
 		// Image edits have an unambiguous first-class path. Do not leave this to
 		// the chat model's general tool selection: text-oriented models can
 		// incorrectly choose web search even when the user attached an image and
@@ -2123,25 +2124,27 @@ func assistantUIEmptyToolFollowup(round, roundOffset int, streamErr error) bool 
 	return errors.Is(streamErr, provider.ErrNoChatContentOrToolCalls) && (round > roundOffset+1 || roundOffset > 0)
 }
 
+var (
+	imageEditVerbPattern = regexp.MustCompile(`(?i)\b(add|change|edit|remove|replace|retouch|transform|crop|place|füge|bearbeite|ändere|entferne|ersetze|verändere|mache|platziere)\b|hinzu`)
+	imageEditNounPattern = regexp.MustCompile(`(?i)\b(image|bild|photo|foto|picture)`)
+)
+
+// assistantUIRequestsImageEdit reports whether the message is an image edit
+// instruction. With an attached image the verb alone is enough. Without one it
+// must be a short instruction that names an image ("make the image bluer");
+// long pastes (Dockerfiles, CVE reports, code) mention "image" and "add" in
+// unrelated senses and must never be routed to the image editor.
 func assistantUIRequestsImageEdit(message *assistantUserMessage) bool {
 	if message == nil {
 		return false
 	}
-	text := strings.ToLower(message.Text)
 	hasAttachedImage := assistantUIMessageHasImages([]assistantUIMessage{{Role: "user", Parts: message.Parts}})
-	if !hasAttachedImage && !strings.Contains(text, "image") && !strings.Contains(text, "bild") && !strings.Contains(text, "photo") && !strings.Contains(text, "foto") && !strings.Contains(text, "picture") {
-		return false
-	}
-	for _, phrase := range []string{
-		"add ", "change ", "edit ", "remove ", "replace ", "retouch ",
-		"transform ", "crop ", "place ", "füge ", "hinzu", "bearbeite",
-		"ändere", "entferne", "ersetze", "verändere", "mache ", "platziere",
-	} {
-		if strings.Contains(text, phrase) {
-			return true
+	if !hasAttachedImage {
+		if len(message.Text) > 300 || strings.ContainsAny(message.Text, "`{}$") || !imageEditNounPattern.MatchString(message.Text) {
+			return false
 		}
 	}
-	return false
+	return imageEditVerbPattern.MatchString(message.Text)
 }
 
 func assistantUIRequestsImageGeneration(message *assistantUserMessage) bool {
@@ -2177,6 +2180,17 @@ func assistantUIRequestsImageGeneration(message *assistantUserMessage) bool {
 		}
 	}
 	return false
+}
+
+// assistantUIHasEditableImage confirms the edit has a source: an attached image
+// or an image generated earlier in the conversation. Otherwise the request is
+// left to the model instead of failing with "attach an image first".
+func (a *App) assistantUIHasEditableImage(ctx context.Context, userID, organizationID, conversationID uuid.UUID, latestUser *assistantUserMessage) bool {
+	if latestUser != nil && assistantUIMessageHasImages([]assistantUIMessage{{Role: "user", Parts: latestUser.Parts}}) {
+		return true
+	}
+	_, _, _, err := a.latestConversationGeneratedImage(ctx, userID, organizationID, conversationID)
+	return err == nil
 }
 
 func (a *App) listAssistantUIMessages(c *gin.Context) {
