@@ -1,5 +1,84 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "Audit event": "Protokolleintrag",
+  "P95 end-to-end worker time": "P95-Gesamtdauer der Verarbeitung",
+  "Average time before work starts":
+    "Durchschnittliche Wartezeit vor dem Start",
+  "Waiting before a slot opens": "Wartezeit bis ein Platz frei wird",
+  "Completed video duration": "Verarbeitete Videodauer",
+  "over {count} days": "über {count} Tage",
+  "of {count} concurrent slots": "von {count} parallelen Plätzen",
+  "Live capacity and video-processing usage over the last {count} days.":
+    "Aktuelle Kapazität und Videoverarbeitung der letzten {count} Tage.",
+  failures: "Fehler",
+  failure: "Fehler",
+  "Agent worker": "Agenten-Worker",
+  "Transcription worker": "Transkriptions-Worker",
+  "RAG worker": "RAG-Worker",
+  "{count} configured": "{count} konfiguriert",
+  "Awaiting a decision": "Warten auf eine Entscheidung",
+  "Currently active": "Aktuell aktiv",
+  "Native and remote": "Lokal und remote",
+  "Across configured servers": "Über alle konfigurierten Server",
+  "Last hour": "Letzte Stunde",
+  "Primary application store": "Zentraler Datenspeicher",
+  "Last tested": "Zuletzt getestet",
+  Information: "Information",
+  To: "Bis",
+  From: "Von",
+  "Average TTFT": "Ø Zeit bis zum ersten Token",
+  "P95 latency": "P95-Latenz",
+  "Total tokens": "Tokens gesamt",
+  "Selected period": "Ausgewählter Zeitraum",
+  "Last {count} days": "Letzte {count} Tage",
+  "Custom range": "Eigener Zeitraum",
+  "Date range": "Zeitraum",
+  "Allow file, URL, and text attachments.":
+    "Datei-, URL- und Textanhänge erlauben.",
+  "Allow source upload, indexing, and retrieval.":
+    "Hochladen, Indexieren und Abrufen von Quellen erlauben.",
+  "Allow MCP discovery, attachment, and execution.":
+    "Erkennung, Einbindung und Ausführung von MCP-Tools erlauben.",
+  "Allow rooms, capture, and processing.":
+    "Räume, Aufnahme und Verarbeitung erlauben.",
+  "Allow realtime voice and speech synthesis.":
+    "Echtzeit-Sprachgespräche und Sprachausgabe erlauben.",
+  "Allow agent runs, delegation, and workflow scheduling.":
+    "Agentenausführungen, Delegation und geplante Workflows erlauben.",
+  "Allow model requests and text chat.":
+    "Modellanfragen und Textchats erlauben.",
+  "Allow new password and OIDC provisioning.":
+    "Neue Konten per Passwort und OIDC erlauben.",
+  "Allow password login and password account creation.":
+    "Passwortanmeldung und das Erstellen von Konten mit Passwort erlauben.",
+  "Allow existing users to sign in.":
+    "Bestehenden Benutzern die Anmeldung erlauben.",
+  Attachments: "Anhänge",
+  "AI chat": "KI-Chat",
+  Signup: "Registrierung",
+  "Local password auth": "Passwortanmeldung",
+  Login: "Anmeldung",
+  "Shown when a feature is unavailable.":
+    "Wird angezeigt, wenn eine Funktion nicht verfügbar ist.",
+  "Control access to integrations, knowledge, and attachments.":
+    "Verwalte den Zugriff auf Integrationen, Wissen und Anhänge.",
+  "Choose which AI and processing features are available.":
+    "Lege fest, welche KI- und Verarbeitungsfunktionen verfügbar sind.",
+  "Control how people sign in and create accounts.":
+    "Lege fest, wie sich Personen anmelden und Konten erstellen.",
+  "Tools & content": "Tools & Inhalte",
+  "AI & processing": "KI & Verarbeitung",
+  "Access & registration": "Zugang & Registrierung",
+  "No results": "Keine Ergebnisse",
+  "Search announcements…": "Ankündigungen suchen…",
+  "Search announcements": "Ankündigungen suchen",
+  "Search identity providers…": "Identitätsanbieter suchen…",
+  "Search identity providers": "Identitätsanbieter suchen",
+  "Search MCP servers…": "MCP-Server suchen…",
+  "Search MCP servers": "MCP-Server suchen",
+  "Endpoint type": "Endpunkttyp",
+  "Model selected at request time": "Modell wird bei der Anfrage gewählt",
+  "Workspace details": "Workspace-Details",
   "User details": "Benutzerdetails",
   "No device metadata": "Keine Geräteinformationen",
   "Device details": "Gerätedetails",

@@ -16,6 +16,7 @@ import {
   YAxis,
 } from "recharts"
 
+import { adminChartDays, type AnalyticsRange } from "@/lib/admin-chart-data"
 import type { AdminAnalyticsResponse } from "@/lib/types"
 import {
   Card,
@@ -71,22 +72,29 @@ function formatDay(value: string, locale: string) {
   }).format(date)
 }
 
-function chartData(analytics: AdminAnalyticsResponse, locale: string) {
-  return analytics.timeSeries.map((item) => ({
+function chartData(
+  analytics: AdminAnalyticsResponse,
+  locale: string,
+  range?: AnalyticsRange
+) {
+  return adminChartDays(analytics.timeSeries, range).map((item) => ({
     ...item,
     label: formatDay(item.date, locale),
     inputTokens: item.inputTokens ?? 0,
     outputTokens: item.outputTokens ?? 0,
-    averageLatencyMs: Math.round(item.averageLatencyMs ?? 0),
+    averageLatencyMs:
+      item.averageLatencyMs === null ? null : Math.round(item.averageLatencyMs),
   }))
 }
 
 export function AdminUsageCharts({
   analytics,
   showLatency = false,
+  range,
 }: {
   analytics: AdminAnalyticsResponse | null
   showLatency?: boolean
+  range?: AnalyticsRange
 }) {
   const requestConfig = useTranslatedConfig(requestConfigMessages)
   const tokenConfig = useTranslatedConfig(tokenConfigMessages)
@@ -110,7 +118,7 @@ export function AdminUsageCharts({
     )
   }
 
-  const data = chartData(analytics, locale)
+  const data = chartData(analytics, locale, range)
   const hasTokens = analytics.summary.totalTokens != null
 
   return (

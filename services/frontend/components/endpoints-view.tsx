@@ -12,6 +12,7 @@ import {
   Plus,
   Radio,
   Server,
+  Search,
   Sparkles,
   Trash2,
 } from "lucide-react"
@@ -46,16 +47,18 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { SettingsSection } from "@/components/ui/settings"
+import { Card } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -657,35 +660,36 @@ function EndpointTable({
 }) {
   const { t } = useTranslations()
 
-  // Scope and status filters only earn their space once the list is long.
-  const showAdvancedFilters = endpoints.length >= 8
+  const filterKey = JSON.stringify([
+    search,
+    scopeFilter,
+    statusFilter,
+    kindFilter,
+  ])
+  const [pagination, setPagination] = useState({ key: filterKey, page: 1 })
+  const pageCount = Math.max(1, Math.ceil(visibleEndpoints.length / 20))
+  const page = Math.min(
+    pagination.key === filterKey ? pagination.page : 1,
+    pageCount
+  )
+  const pageEndpoints = visibleEndpoints.slice((page - 1) * 20, page * 20)
   return (
-    <SettingsSection
-      description={
-        hasManagedEndpoints && !isPlatformCatalog
-          ? t(
-              "Locked endpoints are managed by the platform and can only be changed in the Platform Admin catalog."
-            )
-          : t("Open the menu on a row to test, edit, or remove an endpoint.")
-      }
-      title={t("Endpoints")}
-      actions={
-        showCreateAction ? (
-          <Button size="sm" onClick={() => onCreate()}>
-            <Plus /> Add AI endpoint
-          </Button>
-        ) : undefined
-      }
-    >
-      <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-5 py-3">
-        <Input
-          aria-label={t("Search endpoints")}
-          className="h-8 min-w-48 flex-1"
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={t("Search name, provider, model…")}
-          type="search"
-          value={search}
-        />
+    <Card>
+      <div className="flex flex-wrap items-center gap-2 px-4">
+        <div className="relative min-w-48 flex-1">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            aria-label={t("Search endpoints")}
+            className="h-8 pl-8"
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder={t("Search name, provider, model…")}
+            type="search"
+            value={search}
+          />
+        </div>
         <Tabs
           value={kindFilter}
           onValueChange={(value) =>
@@ -698,200 +702,278 @@ function EndpointTable({
             <TabsTrigger value="diarization">{t("Diarization")}</TabsTrigger>
           </TabsList>
         </Tabs>
-        {showAdvancedFilters && (
-          <>
-            <Select
-              value={scopeFilter}
-              onValueChange={(value) => onScopeChange(value ?? "all")}
+        <>
+          <Select
+            value={scopeFilter}
+            onValueChange={(value) => onScopeChange(value ?? "all")}
+          >
+            <SelectTrigger
+              aria-label={t("Filter endpoint scope")}
+              className="h-8 min-w-32"
+              size="sm"
             >
-              <SelectTrigger
-                aria-label={t("Filter endpoint scope")}
-                className="h-8 min-w-32"
-                size="sm"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
+              <SelectValue>
+                {t(
+                  scopeFilter === "global"
+                    ? "Global"
+                    : scopeFilter === "organization"
+                      ? "Workspace"
+                      : scopeFilter === "user"
+                        ? "Personal"
+                        : "All scopes"
+                )}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
                 <SelectItem value="all">{t("All scopes")}</SelectItem>
                 <SelectItem value="global">{t("Global")}</SelectItem>
                 <SelectItem value="organization">{t("Workspace")}</SelectItem>
                 <SelectItem value="user">{t("Personal")}</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => onStatusChange(value ?? "all")}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(value) => onStatusChange(value ?? "all")}
+          >
+            <SelectTrigger
+              aria-label={t("Filter endpoint status")}
+              className="h-8 min-w-32"
+              size="sm"
             >
-              <SelectTrigger
-                aria-label={t("Filter endpoint status")}
-                className="h-8 min-w-32"
-                size="sm"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
+              <SelectValue>
+                {t(
+                  statusFilter === "enabled"
+                    ? "Enabled"
+                    : statusFilter === "disabled"
+                      ? "Disabled"
+                      : "All statuses"
+                )}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
                 <SelectItem value="all">{t("All statuses")}</SelectItem>
                 <SelectItem value="enabled">{t("Enabled")}</SelectItem>
                 <SelectItem value="disabled">{t("Disabled")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </>
+        {(search ||
+          scopeFilter !== "all" ||
+          statusFilter !== "all" ||
+          kindFilter !== "all") && (
+          <Button size="sm" variant="ghost" onClick={onClearFilters}>
+            {t("Clear filters")}
+          </Button>
+        )}
+        {showCreateAction && (
+          <Button size="sm" onClick={() => onCreate()}>
+            <Plus data-icon="inline-start" />
+            {t("Add endpoint")}
+          </Button>
         )}
       </div>
       {visibleEndpoints.length > 0 ? (
-        visibleEndpoints.map((endpoint) => {
-          const details =
-            providerDetails[endpoint.providerType] ??
-            providerDetails["openai-compatible"]
-          const modelLabel =
-            endpoint.chatModel ||
-            endpoint.diarizationModel ||
-            "model selected at request time"
-          const manageable = canManageEndpoint(endpoint)
-          const managed = endpoint.scopeType === "global"
-          const capabilities = Object.entries(endpoint.capabilities ?? {})
-            .filter(([, enabled]) => enabled)
-            .map(([capability]) => capability)
-          const failed = endpoint.lastTestOk === false
-          const status = !endpoint.enabled
-            ? { label: t("Disabled"), dot: "bg-muted-foreground" }
-            : failed
-              ? { label: t("Check failed"), dot: "bg-destructive" }
-              : endpoint.lastTestedAt
-                ? { label: t("Healthy"), dot: "bg-emerald-500" }
-                : { label: t("Enabled"), dot: "bg-primary" }
-          const scopeLabel =
-            endpoint.scopeType === "organization"
-              ? t("Workspace")
-              : endpoint.scopeType === "user"
-                ? t("Personal")
-                : null
-          return (
-            <div
-              className="flex items-center gap-3 border-t border-border/60 px-5 py-3"
-              key={endpoint.id}
-            >
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                <ProviderIcon provider={endpoint.providerType} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="truncate text-sm font-medium">
-                    {endpoint.name}
-                  </p>
-                  {endpoint.isDefault && (
-                    <Badge variant="outline">{t("Default")}</Badge>
-                  )}
-                  <Badge variant="secondary">
-                    {endpointKindFor(endpoint) === "diarization"
-                      ? t("Diarization")
-                      : "LLM"}
-                  </Badge>
-                </div>
-                <p
-                  className="truncate text-xs text-muted-foreground"
-                  title={[
-                    endpoint.baseUrl,
-                    capabilities.length
-                      ? t("Capabilities: {value0}", {
-                          value0: capabilities.join(", "),
-                        })
-                      : t("No capabilities configured"),
-                  ].join("\n")}
-                >
-                  {details.label} · {modelLabel}
-                  {scopeLabel ? ` · ${scopeLabel}` : ""}
-                </p>
-              </div>
-              <span
-                className="hidden shrink-0 items-center gap-2 text-sm sm:flex"
-                title={t(endpointHealthSummary(endpoint))}
-              >
-                <span className={`size-2 rounded-full ${status.dot}`} />
-                <span
-                  className={
-                    failed && endpoint.enabled
-                      ? "text-destructive"
-                      : "text-muted-foreground"
-                  }
-                >
-                  {status.label}
-                </span>
-              </span>
-              {managed && (
-                <LockKeyhole
-                  aria-label={
-                    isPlatformCatalog
-                      ? t("Platform catalog")
-                      : t("Managed by platform")
-                  }
-                  className="size-4 shrink-0 text-muted-foreground"
-                />
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={t("{value0} for {value1}", {
-                        value0: manageable ? t("Actions") : t("Test"),
-                        value1: endpoint.name,
-                      })}
-                    />
-                  }
-                >
-                  <MoreHorizontal aria-hidden="true" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    disabled={!endpoint.enabled || busyId === endpoint.id}
-                    onClick={() => void onTest(endpoint)}
+        <div className="min-w-0 overflow-x-auto px-4">
+          <table className="w-full min-w-[40rem] text-left text-xs">
+            <thead>
+              <tr className="border-b border-border text-muted-foreground">
+                <th className="p-2">{t("Endpoint")}</th>
+                <th className="p-2">{t("Endpoint type")}</th>
+                <th className="p-2">{t("Scope")}</th>
+                <th className="p-2">{t("Status")}</th>
+                <th className="p-2 text-right">{t("Actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageEndpoints.map((endpoint) => {
+                const details =
+                  providerDetails[endpoint.providerType] ??
+                  providerDetails["openai-compatible"]
+                const modelLabel =
+                  endpoint.chatModel ||
+                  endpoint.diarizationModel ||
+                  t("Model selected at request time")
+                const manageable = canManageEndpoint(endpoint)
+                const managed = endpoint.scopeType === "global"
+                const capabilities = Object.entries(endpoint.capabilities ?? {})
+                  .filter(([, enabled]) => enabled)
+                  .map(([capability]) => capability)
+                const failed = endpoint.lastTestOk === false
+                const status = !endpoint.enabled
+                  ? { label: t("Disabled"), variant: "secondary" as const }
+                  : failed
+                    ? {
+                        label: t("Check failed"),
+                        variant: "destructive" as const,
+                      }
+                    : endpoint.lastTestedAt
+                      ? { label: t("Healthy"), variant: "success" as const }
+                      : { label: t("Not tested"), variant: "outline" as const }
+                const scopeLabel = t(
+                  endpoint.scopeType === "organization"
+                    ? "Workspace"
+                    : endpoint.scopeType === "user"
+                      ? "Personal"
+                      : "Global"
+                )
+                return (
+                  <tr
+                    className="border-b border-border last:border-0"
+                    key={endpoint.id}
                   >
-                    <Radio aria-hidden="true" /> {t("Test capabilities")}
-                  </DropdownMenuItem>
-                  {manageable && (
-                    <>
-                      <DropdownMenuSeparator />
-                      {!endpoint.isDefault && (
-                        <DropdownMenuItem
-                          disabled={busyId === endpoint.id}
-                          onClick={() => onSetDefault(endpoint)}
-                        >
-                          <CheckCircle2 aria-hidden="true" /> {t("Set default")}
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuItem
-                        disabled={busyId === endpoint.id}
-                        className={
-                          endpoint.enabled
-                            ? "text-destructive focus:text-destructive"
-                            : "text-primary focus:text-primary"
-                        }
-                        onClick={() => onToggle(endpoint)}
+                    <td className="max-w-xs p-2">
+                      <div className="flex items-center gap-3">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                          <ProviderIcon provider={endpoint.providerType} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {manageable ? (
+                              <button
+                                className="truncate rounded-sm text-left text-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                                onClick={() => onEdit(endpoint)}
+                                type="button"
+                              >
+                                {endpoint.name}
+                              </button>
+                            ) : (
+                              <p className="truncate text-sm font-medium">
+                                {endpoint.name}
+                              </p>
+                            )}
+                            {endpoint.isDefault && (
+                              <Badge variant="outline">{t("Default")}</Badge>
+                            )}
+                          </div>
+                          <p
+                            className="truncate text-xs text-muted-foreground"
+                            title={[
+                              endpoint.baseUrl,
+                              capabilities.length
+                                ? t("Capabilities: {value0}", {
+                                    value0: capabilities.join(", "),
+                                  })
+                                : t("No capabilities configured"),
+                            ].join("\n")}
+                          >
+                            {details.label} · {modelLabel}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-2">
+                      <Badge variant="secondary">
+                        {endpointKindFor(endpoint) === "diarization"
+                          ? t("Diarization")
+                          : "LLM"}
+                      </Badge>
+                    </td>
+                    <td className="p-2">
+                      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                        {managed && (
+                          <LockKeyhole
+                            className="size-3.5"
+                            aria-label={
+                              isPlatformCatalog
+                                ? t("Platform catalog")
+                                : t("Managed by platform")
+                            }
+                          />
+                        )}
+                        {scopeLabel}
+                      </span>
+                    </td>
+                    <td className="p-2">
+                      <Badge
+                        variant={status.variant}
+                        title={t(endpointHealthSummary(endpoint))}
                       >
-                        {endpoint.enabled ? t("Disable") : t("Enable")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={busyId === endpoint.id}
-                        onClick={() => onEdit(endpoint)}
-                      >
-                        <Pencil aria-hidden="true" /> {t("Edit")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={busyId === endpoint.id}
-                        variant="destructive"
-                        onClick={() => onRemove(endpoint)}
-                      >
-                        <Trash2 aria-hidden="true" /> {t("Remove")}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )
-        })
+                        {status.label}
+                      </Badge>
+                    </td>
+                    <td className="p-2">
+                      <div className="flex justify-end">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={t("{value0} for {value1}", {
+                                  value0: manageable ? t("Actions") : t("Test"),
+                                  value1: endpoint.name,
+                                })}
+                              />
+                            }
+                          >
+                            <MoreHorizontal aria-hidden="true" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuGroup>
+                              <DropdownMenuItem
+                                disabled={
+                                  !endpoint.enabled || busyId === endpoint.id
+                                }
+                                onClick={() => void onTest(endpoint)}
+                              >
+                                <Radio aria-hidden="true" />{" "}
+                                {t("Test capabilities")}
+                              </DropdownMenuItem>
+                              {manageable && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  {!endpoint.isDefault && (
+                                    <DropdownMenuItem
+                                      disabled={busyId === endpoint.id}
+                                      onClick={() => onSetDefault(endpoint)}
+                                    >
+                                      <CheckCircle2 aria-hidden="true" />{" "}
+                                      {t("Set default")}
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem
+                                    disabled={busyId === endpoint.id}
+                                    className={
+                                      endpoint.enabled
+                                        ? "text-destructive focus:text-destructive"
+                                        : "text-primary focus:text-primary"
+                                    }
+                                    onClick={() => onToggle(endpoint)}
+                                  >
+                                    {endpoint.enabled
+                                      ? t("Disable")
+                                      : t("Enable")}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={busyId === endpoint.id}
+                                    onClick={() => onEdit(endpoint)}
+                                  >
+                                    <Pencil aria-hidden="true" /> {t("Edit")}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={busyId === endpoint.id}
+                                    variant="destructive"
+                                    onClick={() => onRemove(endpoint)}
+                                  >
+                                    <Trash2 aria-hidden="true" /> {t("Remove")}
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                            </DropdownMenuGroup>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="flex min-h-40 flex-col items-center justify-center gap-3 border-t border-border/60 px-4 py-8 text-center">
           <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
@@ -941,7 +1023,45 @@ function EndpointTable({
           ) : null}
         </div>
       )}
-    </SettingsSection>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
+        <span aria-live="polite">
+          {visibleEndpoints.length
+            ? t("{start}–{end} of {total}", {
+                start: (page - 1) * 20 + 1,
+                end: Math.min(page * 20, visibleEndpoints.length),
+                total: visibleEndpoints.length,
+              })
+            : t("No endpoints match these filters")}
+        </span>
+        {pageCount > 1 && (
+          <div className="flex gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page === 1}
+              onClick={() => setPagination({ key: filterKey, page: page - 1 })}
+            >
+              {t("Previous page")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page === pageCount}
+              onClick={() => setPagination({ key: filterKey, page: page + 1 })}
+            >
+              {t("Next page")}
+            </Button>
+          </div>
+        )}
+      </div>
+      {hasManagedEndpoints && !isPlatformCatalog && (
+        <p className="px-4 text-xs text-muted-foreground">
+          {t(
+            "Locked endpoints are managed by the platform and can only be changed in the Platform Admin catalog."
+          )}
+        </p>
+      )}
+    </Card>
   )
 }
 

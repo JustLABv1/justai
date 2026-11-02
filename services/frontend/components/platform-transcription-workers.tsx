@@ -48,8 +48,9 @@ function WorkerMetric({
   value: string
   detail: string
 }) {
+  const { t } = useTranslations()
   return (
-    <div className="rounded-xl bg-muted/50 p-3">
+    <div className="min-w-0 py-2">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Icon aria-hidden="true" className="size-3.5" />
         {label}
@@ -57,7 +58,7 @@ function WorkerMetric({
       <p className="mt-2 text-lg font-semibold tracking-tight tabular-nums">
         {value}
       </p>
-      <p className="mt-0.5 text-[11px] text-muted-foreground">{detail}</p>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">{t(detail)}</p>
     </div>
   )
 }
@@ -94,7 +95,7 @@ export function PlatformTranscriptionWorkers({
     : saturated
       ? t("At capacity")
       : t("Capacity available")
-  const statusVariant = hasQueue || saturated ? "outline" : "default"
+  const statusVariant = hasQueue || saturated ? "warning" : "success"
 
   return (
     <Card>
@@ -106,8 +107,10 @@ export function PlatformTranscriptionWorkers({
           <div className="min-w-0">
             <CardTitle>{t("Transcription workers")}</CardTitle>
             <CardDescription>
-              {t("Live capacity and video-processing usage over the last")}{" "}
-              {analytics.periodDays} days.
+              {t(
+                "Live capacity and video-processing usage over the last {count} days.",
+                { count: analytics.periodDays }
+              )}
             </CardDescription>
           </div>
         </div>
@@ -142,13 +145,13 @@ export function PlatformTranscriptionWorkers({
 
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <WorkerMetric
-            detail={`of ${capacity} concurrent slots`}
+            detail={t("of {count} concurrent slots", { count: capacity })}
             icon={Activity}
             label={t("Active jobs")}
             value={metricLabel(analytics.active, locale)}
           />
           <WorkerMetric
-            detail={`over ${analytics.periodDays} days`}
+            detail={t("over {count} days", { count: analytics.periodDays })}
             icon={ListOrdered}
             label={t("Completed jobs")}
             value={metricLabel(analytics.completedJobs, locale)}
@@ -167,24 +170,31 @@ export function PlatformTranscriptionWorkers({
           />
         </div>
 
-        <Alert>
-          <Info />
-          <AlertTitle>{t("What adding workers changes")}</AlertTitle>
-          <AlertDescription>
-            {t(
-              "Each additional capacity slot allows one more video to transcribe at the same time. It increases throughput and shortens queues, but also increases CPU, memory, provider requests, and potentially cost. The"
-            )}{" "}
-            {analytics.sliceWorkersPerJob}{" "}
-            {t(
-              "slice workers shown here control parallel work inside each video; capacity controls how many videos can run together. Change"
-            )}{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-              video_transcription_worker_capacity
-            </code>{" "}
-            {t("in the backend configuration to add slots.")}
-          </AlertDescription>
-        </Alert>
-
+        <details className="rounded-xl bg-muted/40 p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            {t("What adding workers changes")}
+          </summary>
+          <div className="mt-3">
+            {" "}
+            <Alert>
+              <Info />
+              <AlertTitle>{t("What adding workers changes")}</AlertTitle>
+              <AlertDescription>
+                {t(
+                  "Each additional capacity slot allows one more video to transcribe at the same time. It increases throughput and shortens queues, but also increases CPU, memory, provider requests, and potentially cost. The"
+                )}{" "}
+                {analytics.sliceWorkersPerJob}{" "}
+                {t(
+                  "slice workers shown here control parallel work inside each video; capacity controls how many videos can run together. Change"
+                )}{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                  video_transcription_worker_capacity
+                </code>{" "}
+                {t("in the backend configuration to add slots.")}
+              </AlertDescription>
+            </Alert>
+          </div>
+        </details>
         <div className="grid gap-2 sm:grid-cols-2">
           <WorkerMetric
             detail="Average time before work starts"

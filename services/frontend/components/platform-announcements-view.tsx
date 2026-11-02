@@ -2,8 +2,10 @@
 
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CalendarClock, LoaderCircle, Megaphone, Trash2 } from "lucide-react"
+import { CalendarClock, LoaderCircle, Trash2 } from "lucide-react"
 
+import { AdminListFooter, useAdminList } from "@/components/admin-list-controls"
+import { FilterBar } from "@/components/ui/filter-bar"
 import { api } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import { sortPlatformBanners } from "@/lib/platform-config-logic"
@@ -11,13 +13,7 @@ import type { PlatformBanner } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -30,6 +26,7 @@ import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -99,9 +96,9 @@ function bannerState(banner: PlatformBanner) {
 
 function badgeVariant(
   state: string
-): "default" | "secondary" | "outline" | "destructive" {
-  if (state === "Live") return "default"
-  if (state === "Expired") return "destructive"
+): "success" | "secondary" | "outline" | "destructive" {
+  if (state === "Live") return "success"
+  if (state === "Expired") return "secondary"
   if (state === "Scheduled") return "outline"
   return "secondary"
 }
@@ -148,6 +145,12 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
   }, [load])
 
   const sortedBanners = useMemo(() => sortPlatformBanners(banners), [banners])
+  const list = useAdminList(
+    sortedBanners,
+    (banner, query, status) =>
+      banner.message.toLocaleLowerCase().includes(query) &&
+      (status === "all" || bannerState(banner) === status)
+  )
 
   const openCreate = useCallback(() => {
     setEditingId(null)
@@ -257,16 +260,41 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
       )}
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Megaphone className="size-4" /> {t("Global announcements")}
-          </CardTitle>
-          <CardDescription>
-            {t(
-              "Scheduled messages appear above login, workspace, administration, and public pages. Higher priority messages appear first."
-            )}
-          </CardDescription>
-        </CardHeader>
+        <div className="px-4">
+          <FilterBar
+            className="border-0 p-0"
+            search={{
+              label: t("Search announcements"),
+              placeholder: t("Search announcements…"),
+              value: list.query,
+              onChange: list.setQuery,
+            }}
+            hasActiveFilters={Boolean(list.query || list.status !== "all")}
+            onClear={list.clear}
+          >
+            <Select
+              value={list.status}
+              onValueChange={(value) => list.setStatus(value ?? "all")}
+            >
+              <SelectTrigger size="sm" aria-label={t("Status")}>
+                <SelectValue>
+                  {t(list.status === "all" ? "All statuses" : list.status)}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {["all", "Live", "Scheduled", "Expired", "Disabled"].map(
+                    (state) => (
+                      <SelectItem key={state} value={state}>
+                        {t(state === "all" ? "All statuses" : state)}
+                      </SelectItem>
+                    )
+                  )}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </FilterBar>
+        </div>
         <CardContent className="flex flex-col gap-3">
           {loading ? (
             <div
@@ -276,22 +304,46 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               <LoaderCircle className="mr-2 size-4 animate-spin" />{" "}
               {t("Loading announcements…")}
             </div>
-          ) : sortedBanners.length === 0 ? (
+          ) : list.total === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              {t("No announcements configured.")}
+              {t(
+                sortedBanners.length
+                  ? "No results"
+                  : "No announcements configured."
+              )}
             </p>
           ) : (
-            sortedBanners.map((banner) => {
-              const state = t(bannerState(banner))
+            list.pageItems.map((banner) => {
+              const state = bannerState(banner)
               return (
                 <div
-                  className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between"
+                  className="flex min-w-0 flex-col gap-3 border-b border-border py-3 last:border-0 sm:flex-row sm:items-start sm:justify-between"
                   key={banner.id}
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={badgeVariant(state)}>{state}</Badge>
-                      <Badge variant="outline">{banner.severity}</Badge>
+                      <Badge variant={badgeVariant(state)}>{t(state)}</Badge>
+                      <Badge
+                        variant={
+                          banner.severity === "danger"
+                            ? "destructive"
+                            : banner.severity === "warning"
+                              ? "warning"
+                              : banner.severity === "success"
+                                ? "success"
+                                : "secondary"
+                        }
+                      >
+                        {t(
+                          banner.severity === "danger"
+                            ? "Error"
+                            : banner.severity === "warning"
+                              ? "Warning"
+                              : banner.severity === "success"
+                                ? "Success"
+                                : "Information"
+                        )}
+                      </Badge>
                       <Badge variant="outline">
                         {t("Priority")} {banner.priority}
                       </Badge>
@@ -299,7 +351,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                         <Badge variant="secondary">{t("Dismissible")}</Badge>
                       )}
                     </div>
-                    <p className="mt-2 text-sm whitespace-pre-wrap">
+                    <p className="mt-2 text-sm break-words whitespace-pre-wrap">
                       {banner.message}
                     </p>
                     <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -344,6 +396,13 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
             })
           )}
         </CardContent>
+        {!loading && (
+          <AdminListFooter
+            page={list.page}
+            total={list.total}
+            onPageChange={list.setPage}
+          />
+        )}
       </Card>
 
       <Dialog
@@ -352,7 +411,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
           if (!saving) setDialogOpen(open)
         }}
       >
-        <DialogContent className="max-w-xl">
+        <DialogContent className="min-w-0 sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
               {editingId ? t("Edit announcement") : t("Add announcement")}
@@ -407,13 +466,25 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                 }
               >
                 <SelectTrigger disabled={saving} id="announcement-severity">
-                  <SelectValue />
+                  <SelectValue>
+                    {t(
+                      form.severity === "danger"
+                        ? "Error"
+                        : form.severity === "warning"
+                          ? "Warning"
+                          : form.severity === "success"
+                            ? "Success"
+                            : "Information"
+                    )}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="info">{t("Info")}</SelectItem>
-                  <SelectItem value="success">{t("Success")}</SelectItem>
-                  <SelectItem value="warning">{t("Warning")}</SelectItem>
-                  <SelectItem value="danger">{t("Danger")}</SelectItem>
+                  <SelectGroup>
+                    <SelectItem value="info">{t("Info")}</SelectItem>
+                    <SelectItem value="success">{t("Success")}</SelectItem>
+                    <SelectItem value="warning">{t("Warning")}</SelectItem>
+                    <SelectItem value="danger">{t("Danger")}</SelectItem>
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </label>

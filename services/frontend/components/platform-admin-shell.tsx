@@ -51,7 +51,6 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { notifyError, notifySuccess } from "@/lib/feedback"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
 import {
   AdminUsageCharts,
@@ -74,10 +73,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Page, PageActions, PageTitle } from "@/components/ui/page"
 import { SettingsRow, SettingsSection } from "@/components/ui/settings"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { AdminListFooter, useAdminList } from "@/components/admin-list-controls"
+import { adminChartDays } from "@/lib/admin-chart-data"
+import { PlatformStatCard } from "@/components/platform-stat-card"
 import { FilterBar } from "@/components/ui/filter-bar"
 import {
   Collapsible,
@@ -475,16 +478,13 @@ export function PlatformAdminShell({
 
   const listToolbar = (
     <FilterBar
-      className={activeTab === "users" ? "border-0 px-0 py-0" : undefined}
+      className="border-0 px-0 py-0"
       hasActiveFilters={Boolean(query.trim() || listStatus)}
       onClear={() => {
         setListPage(1)
         setQuery("")
         setListStatus("")
       }}
-      resultCount={activeTab === "users" ? undefined : workspaces.length}
-      resultLabel={activeTab === "users" ? "users" : "workspaces"}
-      resultTotal={listTotal || undefined}
       search={{
         label: t("Search {value0}", { value0: activeTab }),
         onChange: (value) => {
@@ -611,7 +611,6 @@ export function PlatformAdminShell({
           )}
           {(activeTab === "users" || activeTab === "workspaces") && (
             <div className="flex flex-col gap-4">
-              {activeTab === "workspaces" && listToolbar}
               {activeTab === "users" ? (
                 <UsersView
                   toolbar={listToolbar}
@@ -625,6 +624,7 @@ export function PlatformAdminShell({
                 />
               ) : (
                 <WorkspacesView
+                  toolbar={listToolbar}
                   workspaces={workspaces}
                   onUpdate={updateWorkspace}
                   onReload={() => void load()}
@@ -742,42 +742,65 @@ function ControlsView({
   ]
   return (
     <div className="flex flex-col gap-4">
+      {[
+        {
+          title: "Access & registration",
+          description: "Control how people sign in and create accounts.",
+          keys: ["loginEnabled", "localAuthEnabled", "signupEnabled"],
+        },
+        {
+          title: "AI & processing",
+          description: "Choose which AI and processing features are available.",
+          keys: [
+            "aiEnabled",
+            "agentsEnabled",
+            "voiceEnabled",
+            "transcriptionEnabled",
+          ],
+        },
+        {
+          title: "Tools & content",
+          description:
+            "Control access to integrations, knowledge, and attachments.",
+          keys: ["mcpEnabled", "knowledgeEnabled", "attachmentsEnabled"],
+        },
+      ].map((group) => (
+        <SettingsSection
+          key={group.title}
+          description={t(group.description)}
+          title={t(group.title)}
+        >
+          {controls
+            .filter(([key]) => group.keys.includes(key))
+            .map(([key, label, description]) => (
+              <SettingsRow
+                description={t(description)}
+                htmlFor={`platform-control-${key}`}
+                key={key}
+                label={t(label)}
+              >
+                <div className="flex items-center gap-2">
+                  {savingControl === key && (
+                    <span className="text-xs text-muted-foreground">
+                      {t("Saving…")}
+                    </span>
+                  )}
+                  <Switch
+                    checked={Boolean(settings[key])}
+                    disabled={savingControl !== null}
+                    id={`platform-control-${key}`}
+                    onCheckedChange={(checked) => onToggle(key, checked)}
+                  />
+                </div>
+              </SettingsRow>
+            ))}
+        </SettingsSection>
+      ))}
       <SettingsSection
-        description={t(
-          "Switches are saved as soon as they change. Existing sessions remain valid when login is disabled."
-        )}
-        title={t("Platform controls")}
-      >
-        {controls.map(([key, label, description]) => (
-          <SettingsRow
-            description={description}
-            htmlFor={`platform-control-${key}`}
-            key={key}
-            label={label}
-          >
-            <div className="flex items-center gap-2">
-              {savingControl === key && (
-                <span className="text-xs text-muted-foreground">
-                  {t("Saving…")}
-                </span>
-              )}
-              <Switch
-                checked={Boolean(settings[key])}
-                disabled={savingControl !== null}
-                id={`platform-control-${key}`}
-                onCheckedChange={(checked) => onToggle(key, checked)}
-              />
-            </div>
-          </SettingsRow>
-        ))}
-      </SettingsSection>
-      <SettingsSection
-        description={t(
-          "Shown with a 503 response while a capability is disabled."
-        )}
+        description={t("Shown when a feature is unavailable.")}
         footer={
           <Button disabled={savingMaintenance} onClick={onSave}>
-            {savingMaintenance ? "Saving…" : "Save maintenance message"}
+            {t(savingMaintenance ? "Saving…" : "Save maintenance message")}
           </Button>
         }
         title={t("Maintenance message")}
@@ -1504,6 +1527,7 @@ function UsersView({
 
 function WorkspacesView({
   workspaces,
+  toolbar,
   onUpdate,
   onReload,
   page,
@@ -1512,6 +1536,7 @@ function WorkspacesView({
   onPageChange,
 }: {
   workspaces: any[]
+  toolbar: ReactNode
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
   onReload: () => void
   page: number
@@ -1539,8 +1564,7 @@ function WorkspacesView({
   function requestWorkspaceAction(item: any, patch: Record<string, unknown>) {
     const nextStatus = patch.status
     const isArchive = item.status === "archived" || nextStatus === "archived"
-    const isSuspend =
-      !isArchive && (item.status === "suspended" || nextStatus === "suspended")
+    const isSuspend = !isArchive && nextStatus === "suspended"
     const verb = isArchive
       ? item.status === "archived"
         ? t("Restore")
@@ -1596,14 +1620,7 @@ function WorkspacesView({
   return (
     <>
       <Card>
-        <CardHeader>
-          <CardTitle>{t("Workspaces")}</CardTitle>
-          <CardDescription>
-            {t(
-              "Archive, suspend, inspect, transfer, or delete organization-owned resources."
-            )}
-          </CardDescription>
-        </CardHeader>
+        <div className="px-4 pb-1">{toolbar}</div>
         <CardContent className="flex flex-col gap-3 overflow-x-auto">
           {actionError && (
             <Alert variant="destructive">
@@ -1625,12 +1642,21 @@ function WorkspacesView({
                 <tr className="border-b last:border-0" key={item.id}>
                   <td className="p-2">
                     <button
-                      className="text-left hover:underline"
+                      className="flex items-center gap-3 rounded-md text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => void showDetail(item.id)}
                       type="button"
                     >
-                      <div className="font-medium">{item.name}</div>
-                      <div className="text-muted-foreground">{item.slug}</div>
+                      <Avatar size="sm" className="size-8">
+                        <AvatarFallback className={avatarToneFor(item.id)}>
+                          {initialsFor(item.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="flex flex-col">
+                        <span className="font-medium">{item.name}</span>
+                        <span className="text-muted-foreground">
+                          {item.slug}
+                        </span>
+                      </span>
                     </button>
                   </td>
                   <td className="p-2">{item.members}</td>
@@ -1641,10 +1667,16 @@ function WorkspacesView({
                           ? "destructive"
                           : item.status === "archived"
                             ? "secondary"
-                            : "default"
+                            : "success"
                       }
                     >
-                      {item.status}
+                      {t(
+                        item.status === "suspended"
+                          ? "Suspended"
+                          : item.status === "archived"
+                            ? "Archived"
+                            : "Active"
+                      )}
                     </Badge>
                   </td>
                   <td className="p-2">
@@ -1742,31 +1774,65 @@ function WorkspacesView({
               {t("No workspaces match this search.")}
             </p>
           )}
+        </CardContent>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
+          <span aria-live="polite">
+            {total === 0
+              ? t("No workspaces match this search.")
+              : t("{start}–{end} of {total}", {
+                  start: (page - 1) * pageSize + 1,
+                  end: Math.min(
+                    (page - 1) * pageSize + workspaces.length,
+                    total
+                  ),
+                  total,
+                })}
+          </span>
           <Pagination
             page={page}
             pageSize={pageSize}
             total={total}
             onPageChange={onPageChange}
+            compact
           />
-        </CardContent>
+        </div>
       </Card>
       <Dialog
         open={detail !== null}
         onOpenChange={(open) => !open && setDetail(null)}
       >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
-              {detail?.organization?.name ?? "Workspace details"}
+        <DialogContent className="min-w-0 sm:max-w-xl">
+          <DialogHeader className="min-w-0 pr-6">
+            <DialogTitle className="break-words">
+              {detail?.organization?.name ?? t("Workspace details")}
             </DialogTitle>
-            <DialogDescription>{detail?.organization?.slug}</DialogDescription>
+            <DialogDescription className="break-all">
+              {detail?.organization?.slug}
+            </DialogDescription>
           </DialogHeader>
           {detail && (
-            <div className="flex flex-col gap-4">
+            <div className="flex min-w-0 flex-col gap-5">
               <div className="flex flex-wrap gap-2">
-                <Badge>{detail.organization.status}</Badge>
+                <Badge
+                  variant={
+                    detail.organization.status === "suspended"
+                      ? "destructive"
+                      : detail.organization.status === "archived"
+                        ? "secondary"
+                        : "success"
+                  }
+                >
+                  {t(
+                    detail.organization.status === "suspended"
+                      ? "Suspended"
+                      : detail.organization.status === "archived"
+                        ? "Archived"
+                        : "Active"
+                  )}
+                </Badge>
                 <Badge variant="outline">
-                  {detail.members?.length ?? 0} members
+                  {detail.members?.length ?? 0}{" "}
+                  {t(detail.members?.length === 1 ? "member" : "members")}
                 </Badge>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -1791,19 +1857,50 @@ function WorkspacesView({
                   value={detail.resources?.transcriptions}
                 />
               </div>
-              <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                {(detail.members ?? []).map((member: any) => (
-                  <div
-                    className="flex items-center justify-between rounded-md border px-2 py-1.5"
-                    key={member.id}
-                  >
-                    <span>
-                      {member.displayName} · {member.email}
-                    </span>
-                    <span>{member.role}</span>
-                  </div>
-                ))}
-              </div>
+              <section
+                aria-label={t("Members")}
+                className="flex min-w-0 flex-col gap-2 text-xs"
+              >
+                <h3 className="text-sm font-medium">{t("Members")}</h3>
+                <div className="flex max-h-64 min-w-0 flex-col gap-2 overflow-y-auto">
+                  {(detail.members ?? []).map((member: any) => (
+                    <div
+                      className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/50 p-3"
+                      key={member.id}
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <Avatar size="sm">
+                          <AvatarFallback className={avatarToneFor(member.id)}>
+                            {initialsFor(member.displayName || member.email)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="font-medium break-words">
+                            {member.displayName || member.email}
+                          </p>
+                          <p className="break-all text-muted-foreground">
+                            {member.email}
+                          </p>
+                        </div>
+                      </div>
+                      <Badge variant="secondary">
+                        {t(
+                          member.role === "owner"
+                            ? "Owner"
+                            : member.role === "admin"
+                              ? "Admin"
+                              : "Member"
+                        )}
+                      </Badge>
+                    </div>
+                  ))}
+                  {!detail.members?.length && (
+                    <p className="text-muted-foreground">
+                      {t("No members found.")}
+                    </p>
+                  )}
+                </div>
+              </section>
             </div>
           )}
           <DialogFooter>
@@ -1930,7 +2027,7 @@ function WorkspacesView({
 
 function ResourceCount({ label, value }: { label: string; value: unknown }) {
   return (
-    <div className="rounded-md border p-2">
+    <div className="min-w-0 rounded-xl bg-muted/50 p-3">
       <p className="text-[11px] text-muted-foreground">{label}</p>
       <p className="mt-1 text-lg font-semibold">
         {typeof value === "number" ? value : "—"}
@@ -1962,6 +2059,15 @@ function InventoryView({
   createRequest?: number
 }) {
   const { t } = useTranslations()
+  const list = useAdminList(
+    items,
+    (item, query, status) =>
+      `${item.name} ${item.endpointUrl ?? ""} ${item.providerType ?? ""}`
+        .toLocaleLowerCase()
+        .includes(query) &&
+      (status === "all" ||
+        (status === "enabled" ? item.enabled : !item.enabled))
+  )
 
   const [actionError, setActionError] = useState("")
   const [actionNotice, setActionNotice] = useState("")
@@ -2245,17 +2351,44 @@ function InventoryView({
 
   return (
     <>
-      <Card>
-        <CardHeader className="flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle>{title}</CardTitle>
-            <CardDescription>
-              {t(
-                "Shared catalog resources are visible to eligible workspaces and remain mutable here only."
-              )}
-            </CardDescription>
-          </div>
-        </CardHeader>
+      <Card aria-label={title}>
+        <div className="px-4">
+          <FilterBar
+            className="border-0 p-0"
+            search={{
+              label: t("Search MCP servers"),
+              placeholder: t("Search MCP servers…"),
+              value: list.query,
+              onChange: list.setQuery,
+            }}
+            hasActiveFilters={Boolean(list.query || list.status !== "all")}
+            onClear={list.clear}
+          >
+            <Select
+              value={list.status}
+              onValueChange={(value) => list.setStatus(value ?? "all")}
+            >
+              <SelectTrigger size="sm" aria-label={t("Status")}>
+                <SelectValue>
+                  {t(
+                    list.status === "enabled"
+                      ? "Enabled"
+                      : list.status === "disabled"
+                        ? "Disabled"
+                        : "All statuses"
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">{t("All statuses")}</SelectItem>
+                  <SelectItem value="enabled">{t("Enabled")}</SelectItem>
+                  <SelectItem value="disabled">{t("Disabled")}</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </FilterBar>
+        </div>
         <CardContent className="flex flex-col gap-3 overflow-x-auto">
           {actionError && (
             <Alert variant="destructive">
@@ -2283,7 +2416,7 @@ function InventoryView({
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => {
+              {list.pageItems.map((item) => {
                 const busy = busyId === item.id
                 const rowAction =
                   activeAction?.id === item.id ? activeAction : null
@@ -2310,13 +2443,13 @@ function InventoryView({
                             src={resolveAPIURL(item.iconUrl)}
                           />
                         ) : null}
-                        <span>{item.name}</span>
+                        <span className="break-words">{item.name}</span>
                       </div>
                     </td>
                     <td className="p-2">
                       <Badge
                         variant={
-                          item.scopeType === "global" ? "default" : "outline"
+                          item.scopeType === "global" ? "secondary" : "outline"
                         }
                       >
                         {scopeLabel}
@@ -2328,8 +2461,22 @@ function InventoryView({
                         : item.endpointUrl}
                     </td>
                     <td className="p-2">
-                      <Badge variant={item.enabled ? "default" : "destructive"}>
-                        {item.enabled ? "enabled" : "disabled"}
+                      <Badge
+                        variant={
+                          itemError
+                            ? "destructive"
+                            : item.enabled
+                              ? "success"
+                              : "secondary"
+                        }
+                      >
+                        {t(
+                          itemError
+                            ? "Check failed"
+                            : item.enabled
+                              ? "Enabled"
+                              : "Disabled"
+                        )}
                       </Badge>
                       {itemError && (
                         <p
@@ -2544,12 +2691,17 @@ function InventoryView({
               })}
             </tbody>
           </table>
-          {items.length === 0 && (
+          {list.total === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {t("No resources found.")}
             </p>
           )}
         </CardContent>
+        <AdminListFooter
+          page={list.page}
+          total={list.total}
+          onPageChange={list.setPage}
+        />
       </Card>
       <Dialog
         open={deleteCandidate !== null}
@@ -2624,10 +2776,10 @@ function InventoryView({
           }
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="min-w-0 sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {t("Add")} {kind === "endpoint" ? "endpoint" : t("MCP server")}
+              {t(kind === "endpoint" ? "Add endpoint" : "Add MCP server")}
             </DialogTitle>
             <DialogDescription>
               {t(
@@ -2635,14 +2787,14 @@ function InventoryView({
               )}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-3">
+          <div className="flex min-w-0 flex-col gap-3">
             {createError && (
               <Alert variant="destructive">
                 <AlertTriangle />
                 <AlertDescription>{t(createError)}</AlertDescription>
               </Alert>
             )}
-            <label className="grid gap-1 text-sm">
+            <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
               {t("Name")}
               <Input
                 value={createValues.name}
@@ -2657,7 +2809,7 @@ function InventoryView({
               />
             </label>
             {kind === "mcp" && (
-              <label className="grid gap-1 text-sm">
+              <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                 {t("Logo (optional)")}
                 <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
                   <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
@@ -2677,11 +2829,11 @@ function InventoryView({
                       />
                     )}
                   </div>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <Input
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <input
                       ref={createIconInputRef}
                       type="file"
-                      className="sr-only"
+                      className="hidden"
                       accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
                       onChange={(event) =>
                         chooseCreateIcon(event.target.files?.[0] ?? null)
@@ -2730,13 +2882,13 @@ function InventoryView({
                 </div>
               </label>
             )}
-            <div className="grid gap-1 text-sm">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
               <span className="font-medium">{t("Scope")}</span>
               <Select
                 items={{
-                  global: "Global",
-                  organization: "Organization",
-                  user: "User",
+                  global: t("Global"),
+                  organization: t("Workspace"),
+                  user: t("Personal"),
                 }}
                 value={createValues.scopeType}
                 onValueChange={(value) =>
@@ -2758,7 +2910,7 @@ function InventoryView({
               </Select>
             </div>
             {createValues.scopeType !== "global" && (
-              <label className="grid gap-1 text-sm">
+              <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                 {t("Scope ID")}
                 <Input
                   value={createValues.scopeId}
@@ -2771,7 +2923,7 @@ function InventoryView({
             )}
             {kind === "endpoint" ? (
               <>
-                <div className="grid gap-1 text-sm">
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   <span className="font-medium">{t("Provider")}</span>
                   <Select
                     items={{
@@ -2807,7 +2959,7 @@ function InventoryView({
                     </SelectContent>
                   </Select>
                 </div>
-                <label className="grid gap-1 text-sm">
+                <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   {t("Base URL")}
                   <Input
                     value={createValues.baseUrl}
@@ -2817,7 +2969,7 @@ function InventoryView({
                     placeholder="https://gateway.example/v1"
                   />
                 </label>
-                <label className="grid gap-1 text-sm">
+                <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   {t("Chat model")}
                   <Input
                     value={createValues.chatModel}
@@ -2827,7 +2979,7 @@ function InventoryView({
                     placeholder="model-name"
                   />
                 </label>
-                <label className="grid gap-1 text-sm">
+                <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   {t("API key or token")}
                   <Input
                     type="password"
@@ -2841,7 +2993,7 @@ function InventoryView({
               </>
             ) : (
               <>
-                <label className="grid gap-1 text-sm">
+                <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   {t("MCP endpoint URL")}
                   <Input
                     value={createValues.endpointUrl}
@@ -2851,11 +3003,11 @@ function InventoryView({
                     placeholder="https://tools.example/mcp"
                   />
                 </label>
-                <div className="grid gap-1 text-sm">
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                   <span className="font-medium">{t("Authentication")}</span>
                   <Select
                     items={{
-                      none: "No auth",
+                      none: t("No auth"),
                       api_key: "Bearer token",
                       oauth: "OAuth 2.1",
                     }}
@@ -2889,7 +3041,7 @@ function InventoryView({
                   )}
                 </div>
                 {createValues.authType !== "none" && (
-                  <label className="grid gap-1 text-sm">
+                  <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                     {createValues.authType === "oauth"
                       ? t("Access token (optional)")
                       : t("Bearer token")}
@@ -2914,7 +3066,7 @@ function InventoryView({
                 )}
                 {createValues.authType === "oauth" && (
                   <>
-                    <label className="grid gap-1 text-sm">
+                    <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                       {t("OAuth client ID")}
                       <Input
                         value={createValues.oauthClientId}
@@ -2924,7 +3076,7 @@ function InventoryView({
                         placeholder={t("Client ID")}
                       />
                     </label>
-                    <label className="grid gap-1 text-sm">
+                    <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                       {t("Authorization URL (optional)")}
                       <Input
                         value={createValues.oauthAuthorizationUrl}
@@ -2937,7 +3089,7 @@ function InventoryView({
                         placeholder="https://provider.example/authorize"
                       />
                     </label>
-                    <label className="grid gap-1 text-sm">
+                    <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                       {t("Token URL (optional)")}
                       <Input
                         value={createValues.oauthTokenUrl}
@@ -2947,7 +3099,7 @@ function InventoryView({
                         placeholder="https://provider.example/token"
                       />
                     </label>
-                    <label className="grid gap-1 text-sm">
+                    <label className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 text-sm">
                       {t("OAuth scopes (optional)")}
                       <Input
                         value={createValues.oauthScopes}
@@ -2987,8 +3139,9 @@ function healthState(value: any): HealthState {
   if (!value || typeof value !== "object") return "unknown"
 
   const failures = Number(value.recentFailures ?? value.failures ?? 0)
+  if (value.ok === false) return "down"
   if (failures > 0) return "warning"
-  if (typeof value.ok === "boolean") return value.ok ? "healthy" : "down"
+  if (value.ok === true) return "healthy"
 
   const signals = Object.values(value).filter(
     (item): item is boolean => typeof item === "boolean"
@@ -3016,17 +3169,14 @@ function HealthStatusBadge({ state }: { state: HealthState }) {
           : t("Unknown")
   const variant =
     state === "healthy"
-      ? "default"
+      ? "success"
       : state === "down"
         ? "destructive"
-        : "outline"
-  const className =
-    state === "warning"
-      ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-      : undefined
-
+        : state === "warning"
+          ? "warning"
+          : "secondary"
   return (
-    <Badge className={className} variant={variant}>
+    <Badge variant={variant}>
       <Icon data-icon="inline-start" />
       {label}
     </Badge>
@@ -3042,12 +3192,13 @@ function HealthMetric({
   value: string
   detail?: string
 }) {
+  const { t } = useTranslations()
   return (
-    <div className="rounded-xl bg-muted/50 px-3 py-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-base font-semibold tracking-tight">{value}</p>
+    <div className="min-w-0 py-1">
+      <p className="text-xs text-muted-foreground">{t(label)}</p>
+      <p className="mt-1 text-base font-semibold tracking-tight">{t(value)}</p>
       {detail && (
-        <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t(detail)}</p>
       )}
     </div>
   )
@@ -3195,7 +3346,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
         >
           <div className="grid gap-2 sm:grid-cols-2">
             <HealthMetric
-              detail={`${totalProviders} configured`}
+              detail={t("{count} configured", { count: totalProviders })}
               label={t("Enabled")}
               value={`${enabledProviders} / ${totalProviders}`}
             />
@@ -3214,7 +3365,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
         >
           <div className="grid gap-2 sm:grid-cols-2">
             <HealthMetric
-              detail={`${totalMcp} configured`}
+              detail={t("{count} configured", { count: totalMcp })}
               label={t("Enabled")}
               value={`${enabledMcp} / ${totalMcp}`}
             />
@@ -3265,44 +3416,46 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
                 className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5"
                 key={label}
               >
-                <span className="text-sm">{label}</span>
-                <Badge variant={value ? "default" : "destructive"}>
+                <span className="text-sm">{t(label)}</span>
+                <Badge variant={value ? "success" : "destructive"}>
                   {value ? t("Online") : t("Offline")}
                 </Badge>
               </div>
             ))}
           </div>
           {workerDetails.length > 0 && (
-            <div className="mt-3 flex flex-col gap-1.5 border-t pt-3">
-              <p className="text-xs font-medium text-muted-foreground">
+            <details className="mt-3 border-t border-border pt-3">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
                 {t("Heartbeat diagnostics")}
-              </p>
-              {workerDetails.map((worker: any) => (
-                <div
-                  className="flex flex-wrap items-center justify-between gap-2 text-xs"
-                  key={worker.name}
-                >
-                  <span className="font-medium">
-                    {String(worker.name)
-                      .replace(/[-_]/g, " ")
-                      .replace(/^./, (value) => value.toUpperCase())}
-                    {worker.instanceId
-                      ? ` · ${String(worker.instanceId).slice(0, 8)}`
-                      : ""}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {worker.heartbeatAgeSeconds >= 0
-                      ? t("{value0}s since heartbeat", {
-                          value0: worker.heartbeatAgeSeconds,
-                        })
-                      : worker.started
-                        ? t("Awaiting heartbeat")
-                        : t("Not started")}
-                    {worker.lastError ? ` · ${worker.lastError}` : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
+              </summary>
+              <div className="mt-3 flex max-h-64 flex-col gap-2 overflow-y-auto">
+                {workerDetails.map((worker: any, index: number) => (
+                  <div
+                    className="flex flex-wrap items-center justify-between gap-2 text-xs"
+                    key={`${worker.name}-${worker.instanceId ?? index}`}
+                  >
+                    <span className="font-medium">
+                      {String(worker.name)
+                        .replace(/[-_]/g, " ")
+                        .replace(/^./, (value) => value.toUpperCase())}
+                      {worker.instanceId
+                        ? ` · ${String(worker.instanceId).slice(0, 8)}`
+                        : ""}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {worker.heartbeatAgeSeconds >= 0
+                        ? t("{value0}s since heartbeat", {
+                            value0: worker.heartbeatAgeSeconds,
+                          })
+                        : worker.started
+                          ? t("Awaiting heartbeat")
+                          : t("Not started")}
+                      {worker.lastError ? ` · ${worker.lastError}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
         </HealthPanel>
       </div>
@@ -3315,13 +3468,13 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
             {providerFailures > 0 &&
               t("{value0} provider {value1} recorded in the last hour.", {
                 value0: providerFailures,
-                value1: providerFailures === 1 ? "failure" : "failures",
+                value1: t(providerFailures === 1 ? "failure" : "failures"),
               })}
             {providerFailures > 0 && mcpFailures > 0 && " "}
             {mcpFailures > 0 &&
               t("{value0} MCP {value1} reported.", {
                 value0: mcpFailures,
-                value1: mcpFailures === 1 ? "failure" : "failures",
+                value1: t(mcpFailures === 1 ? "failure" : "failures"),
               })}
           </AlertDescription>
         </Alert>
@@ -3343,122 +3496,219 @@ function AnalyticsView({
 }) {
   const { t, locale } = useTranslations()
 
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const summary = analytics?.summary
   const setFilter = (key: string, value: string) =>
     onFiltersChange({ ...filters, [key]: value })
-  const timeSeries = analytics?.timeSeries ?? []
+  const range = {
+    days: Number(filters.days) || 30,
+    from: filters.from,
+    to: filters.to,
+  }
+  const timeSeries = adminChartDays(analytics?.timeSeries ?? [], range)
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <CardHeader>
-          <CardTitle>{t("Analytics")}</CardTitle>
-          <CardDescription>
-            {t(
-              "Filter request volume, latency, usage, and tool calls across the platform."
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <Input
-            aria-label={t("Analytics days")}
-            onChange={(event) => setFilter("days", event.target.value)}
-            placeholder={t("Days (1–365)")}
-            value={filters.days}
-          />
-          <Input
-            aria-label={t("Analytics from")}
-            onChange={(event) => setFilter("from", event.target.value)}
-            placeholder={t("From (YYYY-MM-DD)")}
-            value={filters.from}
-          />
-          <Input
-            aria-label={t("Analytics to")}
-            onChange={(event) => setFilter("to", event.target.value)}
-            placeholder={t("To (YYYY-MM-DD)")}
-            value={filters.to}
-          />
-          <Input
-            aria-label={t("Analytics organization")}
-            onChange={(event) =>
-              setFilter("organizationId", event.target.value)
-            }
-            placeholder={t("Organization ID")}
-            value={filters.organizationId}
-          />
-          <Input
-            aria-label={t("Analytics endpoint")}
-            onChange={(event) => setFilter("endpointId", event.target.value)}
-            placeholder={t("Endpoint ID")}
-            value={filters.endpointId}
-          />
-          <Input
-            aria-label={t("Analytics model")}
-            onChange={(event) => setFilter("model", event.target.value)}
-            placeholder={t("Model")}
-            value={filters.model}
-          />
-          <Select
-            value={filters.status || "all"}
-            onValueChange={(value) => {
-              const nextValue = value ?? "all"
-              setFilter("status", nextValue === "all" ? "" : nextValue)
-            }}
+        <CardContent>
+          <Collapsible
+            open={advancedOpen}
+            onOpenChange={setAdvancedOpen}
+            className="flex flex-col gap-4"
           >
-            <SelectTrigger
-              aria-label={t("Analytics status")}
-              className="w-full"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">{t("All statuses")}</SelectItem>
-                <SelectItem value="running">{t("Running")}</SelectItem>
-                <SelectItem value="requires-action">
-                  {t("Requires action")}
-                </SelectItem>
-                <SelectItem value="complete">{t("Complete")}</SelectItem>
-                <SelectItem value="error">{t("Error")}</SelectItem>
-                <SelectItem value="cancelled">{t("Cancelled")}</SelectItem>
-                <SelectItem value="incomplete">{t("Incomplete")}</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Button onClick={onRefresh}>{t("Apply filters")}</Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={
+                  filters.from || filters.to ? "custom" : filters.days || "30"
+                }
+                onValueChange={(value) => {
+                  if (value === "custom") setAdvancedOpen(true)
+                  else if (value)
+                    onFiltersChange({
+                      ...filters,
+                      days: value,
+                      from: "",
+                      to: "",
+                    })
+                }}
+              >
+                <SelectTrigger size="sm" aria-label={t("Date range")}>
+                  <SelectValue>
+                    {filters.from || filters.to
+                      ? t("Custom range")
+                      : t("Last {count} days", { count: filters.days || "30" })}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {["7", "30", "90", "365"].map((days) => (
+                      <SelectItem key={days} value={days}>
+                        {t("Last {count} days", { count: days })}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="custom">{t("Custom range")}</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <CollapsibleTrigger
+                render={<Button size="sm" variant="outline" />}
+              >
+                <SlidersHorizontal data-icon="inline-start" />
+                {t(advancedOpen ? "Hide filters" : "More filters")}
+              </CollapsibleTrigger>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  onFiltersChange({
+                    days: "30",
+                    from: "",
+                    to: "",
+                    organizationId: "",
+                    endpointId: "",
+                    model: "",
+                    status: "",
+                  })
+                }
+              >
+                {t("Clear filters")}
+              </Button>
+              <Button size="sm" variant="outline" onClick={onRefresh}>
+                <RefreshCw data-icon="inline-start" />
+                {t("Refresh")}
+              </Button>
+            </div>
+            <CollapsibleContent>
+              <FieldGroup className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ["days", "Days (1–365)", "number"],
+                  ["from", "From", "date"],
+                  ["to", "To", "date"],
+                  ["organizationId", "Organization ID", "text"],
+                  ["endpointId", "Endpoint ID", "text"],
+                  ["model", "Model", "text"],
+                ].map(([key, label, type]) => (
+                  <Field key={key}>
+                    <FieldLabel htmlFor={`analytics-${key}`}>
+                      {t(label)}
+                    </FieldLabel>
+                    <Input
+                      id={`analytics-${key}`}
+                      type={type}
+                      min={type === "number" ? 1 : undefined}
+                      max={type === "number" ? 365 : undefined}
+                      value={filters[key] || ""}
+                      onChange={(event) => setFilter(key, event.target.value)}
+                    />
+                  </Field>
+                ))}
+                <Field>
+                  <FieldLabel>{t("Status")}</FieldLabel>
+                  <Select
+                    value={filters.status || "all"}
+                    onValueChange={(value) =>
+                      setFilter("status", value === "all" ? "" : value || "")
+                    }
+                  >
+                    <SelectTrigger
+                      aria-label={t("Analytics status")}
+                      className="w-full"
+                    >
+                      <SelectValue>
+                        {t(
+                          (
+                            {
+                              running: "Running",
+                              "requires-action": "Requires action",
+                              complete: "Complete",
+                              error: "Error",
+                              cancelled: "Cancelled",
+                              incomplete: "Incomplete",
+                            } as Record<string, string>
+                          )[filters.status] || "All statuses"
+                        )}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {Object.entries({
+                          all: "All statuses",
+                          running: "Running",
+                          "requires-action": "Requires action",
+                          complete: "Complete",
+                          error: "Error",
+                          cancelled: "Cancelled",
+                          incomplete: "Incomplete",
+                        }).map(([value, label]) => (
+                          <SelectItem key={value} value={value}>
+                            {t(label)}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </FieldGroup>
+            </CollapsibleContent>
+          </Collapsible>
         </CardContent>
       </Card>
-      <dl className="grid grid-cols-2 gap-6 rounded-2xl bg-muted/40 p-6 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3">
+        <PlatformStatCard
+          title={t("Requests")}
+          period={t("Selected period")}
+          value={compactNumber(summary?.requests, locale)}
+          color="#00b884"
+          points={timeSeries.map((day) => ({ value: day.requests }))}
+        />
+        <PlatformStatCard
+          title={t("Total tokens")}
+          period={t("Selected period")}
+          value={compactNumber(summary?.totalTokens, locale)}
+          color="#2f7bff"
+          points={timeSeries.map((day) => ({ value: day.totalTokens }))}
+        />
+        <PlatformStatCard
+          title={t("Average latency")}
+          period={t("Selected period")}
+          value={
+            summary?.requests
+              ? `${Math.round(summary.averageLatencyMs)} ms`
+              : "—"
+          }
+          color="#8b46ff"
+          points={timeSeries.map((day) => ({
+            value: day.requests ? day.averageLatencyMs : null,
+          }))}
+        />
+      </div>
+      <dl className="grid grid-cols-2 gap-4 px-1 md:grid-cols-5">
         {[
-          [t("Requests"), summary?.requests],
-          [t("Success"), summary?.succeeded],
-          [t("Errors"), summary?.failed],
+          ["Success", summary?.succeeded],
+          ["Errors", summary?.failed],
           [
             "P95 latency",
-            summary?.p95LatencyMs
-              ? `${Math.round(summary.p95LatencyMs)} ms`
-              : "—",
+            summary?.requests ? `${Math.round(summary.p95LatencyMs)} ms` : "—",
           ],
-          ["Total tokens", compactNumber(summary?.totalTokens, locale)],
           [
             "Average TTFT",
             summary?.averageTtftMs
               ? `${Math.round(summary.averageTtftMs)} ms`
               : "—",
           ],
-          [t("Tool calls"), summary?.toolCalls],
+          ["Tool calls", summary?.toolCalls],
         ].map(([label, value]) => (
-          <div key={String(label)} className="flex min-w-0 flex-col gap-2">
+          <div key={String(label)}>
             <dt className="text-xs text-muted-foreground">
               {t(String(label))}
             </dt>
-            <dd className="font-heading text-2xl font-medium tracking-tight tabular-nums">
+            <dd className="mt-1 text-lg font-medium tabular-nums">
               {value ?? "—"}
             </dd>
           </div>
         ))}
       </dl>
-      <AdminUsageCharts analytics={analytics} showLatency />
+      <AdminUsageCharts analytics={analytics} showLatency range={range} />
       <Card>
         <CardHeader>
           <CardTitle>{t("Endpoint and model breakdown")}</CardTitle>
@@ -3498,14 +3748,11 @@ function AnalyticsView({
           )}
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("Daily activity")}</CardTitle>
-          <CardDescription>
-            {t("Request volume, outcomes, latency, and tool calls by UTC day.")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
+      <details className="rounded-2xl border border-border bg-card p-4">
+        <summary className="cursor-pointer text-sm font-medium">
+          {t("Daily activity")}
+        </summary>
+        <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[44rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
@@ -3539,8 +3786,8 @@ function AnalyticsView({
               {t("No daily activity for this range.")}
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </details>
     </div>
   )
 }
@@ -3564,7 +3811,6 @@ function AuditView({
 }) {
   const { t, locale } = useTranslations()
 
-  const isMobile = useIsMobile()
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false)
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null)
   const setFilter = (key: string, value: string) =>
@@ -3577,19 +3823,11 @@ function AuditView({
   )
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("Audit trail")}</CardTitle>
-        <CardDescription>
-          {t(
-            "Administrative mutations are recorded without credentials or tokens."
-          )}
-        </CardDescription>
-      </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <Collapsible
           className="flex flex-col gap-2"
           onOpenChange={setMoreFiltersOpen}
-          open={!isMobile || moreFiltersOpen}
+          open={moreFiltersOpen}
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
@@ -3601,7 +3839,7 @@ function AuditView({
             />
             <div className="flex flex-wrap items-center gap-2">
               <CollapsibleTrigger
-                className="gap-1.5 sm:w-auto lg:hidden"
+                className="gap-1.5 sm:w-auto"
                 render={<Button size="sm" variant="outline" />}
               >
                 <SlidersHorizontal data-icon="inline-start" />
@@ -3686,17 +3924,30 @@ function AuditView({
         </Collapsible>
         {events.map((event) => (
           <button
-            className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-left text-xs transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+            className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border px-2 py-3 text-left text-xs transition-colors last:border-0 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
             key={event.id}
             onClick={() => setSelectedEvent(event)}
             type="button"
           >
-            <div>
+            <div className="min-w-0 flex-1 break-all">
               <p className="font-medium">{event.action}</p>
               <p className="text-muted-foreground">
                 {event.resourceType} · {event.resourceId ?? "—"}
               </p>
             </div>
+            <Badge
+              variant={
+                event.outcome && event.outcome !== "success"
+                  ? "destructive"
+                  : "secondary"
+              }
+            >
+              {t(
+                event.outcome && event.outcome !== "success"
+                  ? "Failed"
+                  : "Success"
+              )}
+            </Badge>
             <time className="text-muted-foreground">
               {event.createdAt
                 ? new Date(event.createdAt).toLocaleString(locale)
@@ -3709,21 +3960,35 @@ function AuditView({
             {t("No audit events found.")}
           </p>
         )}
+      </CardContent>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
+        <span aria-live="polite">
+          {total
+            ? t("{start}–{end} of {total}", {
+                start: (page - 1) * pageSize + 1,
+                end: Math.min((page - 1) * pageSize + events.length, total),
+                total,
+              })
+            : t("No audit events found.")}
+        </span>
         <Pagination
           page={page}
           pageSize={pageSize}
           total={total}
           onPageChange={onPageChange}
+          compact
         />
-      </CardContent>
+      </div>
       <Dialog
         open={selectedEvent !== null}
         onOpenChange={(open) => !open && setSelectedEvent(null)}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="min-w-0 sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{selectedEvent?.action ?? "Audit event"}</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="break-all">
+              {selectedEvent?.action ?? t("Audit event")}
+            </DialogTitle>
+            <DialogDescription className="break-all">
               {selectedEvent?.resourceType ?? "—"} ·{" "}
               {selectedEvent?.resourceId ?? "No resource ID"}
             </DialogDescription>

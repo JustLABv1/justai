@@ -2,30 +2,25 @@
 
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
-import {
-  ExternalLink,
-  LoaderCircle,
-  Plus,
-  RefreshCw,
-  ShieldCheck,
-  TestTube2,
-  Trash2,
-} from "lucide-react"
+import { LoaderCircle, Plus, RefreshCw, TestTube2, Trash2 } from "lucide-react"
 
+import { AdminListFooter, useAdminList } from "@/components/admin-list-controls"
+import { FilterBar } from "@/components/ui/filter-bar"
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+} from "@/components/ui/select"
 import { api } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { AdminOIDCProvider } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -73,6 +68,15 @@ export function PlatformAuthenticationView({
   const { t, locale } = useTranslations()
 
   const [providers, setProviders] = useState<AdminOIDCProvider[]>([])
+  const list = useAdminList(
+    providers,
+    (provider, query, status) =>
+      `${provider.displayName} ${provider.issuer} ${provider.slug}`
+        .toLocaleLowerCase()
+        .includes(query) &&
+      (status === "all" ||
+        (status === "enabled" ? provider.enabled : !provider.enabled))
+  )
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState("")
@@ -234,45 +238,57 @@ export function PlatformAuthenticationView({
       )}
 
       <Card>
-        <CardHeader
-          className={
-            showCreateAction ? "grid-cols-1 sm:grid-cols-[1fr_auto]" : undefined
-          }
-        >
-          <CardTitle className="flex items-center gap-2">
-            <ShieldCheck className="size-4" /> {t("OIDC providers")}
-          </CardTitle>
-          <CardDescription
-            className={showCreateAction ? "col-span-full" : undefined}
+        <div className="px-4">
+          <FilterBar
+            className="border-0 p-0"
+            search={{
+              label: t("Search identity providers"),
+              placeholder: t("Search identity providers…"),
+              value: list.query,
+              onChange: list.setQuery,
+            }}
+            hasActiveFilters={Boolean(list.query || list.status !== "all")}
+            onClear={list.clear}
           >
-            {t(
-              "Platform-wide identity providers shown on the login page. Provider secrets are encrypted and never returned to the browser."
-            )}
-          </CardDescription>
-          <CardAction
-            className={
-              showCreateAction
-                ? "col-start-1 row-span-1 row-start-3 justify-self-start sm:col-start-2 sm:row-start-1 sm:justify-self-end"
-                : undefined
-            }
-          >
-            <div className="flex gap-2">
-              {showCreateAction && (
-                <Button size="sm" onClick={openCreate}>
-                  <Plus /> {t("Add identity provider")}
-                </Button>
-              )}
-              <Button
-                aria-label={t("Refresh OIDC providers")}
-                onClick={() => void load()}
-                size="icon-sm"
-                variant="outline"
-              >
-                <RefreshCw />
+            <Select
+              value={list.status}
+              onValueChange={(value) => list.setStatus(value ?? "all")}
+            >
+              <SelectTrigger size="sm" aria-label={t("Status")}>
+                <SelectValue>
+                  {t(
+                    list.status === "enabled"
+                      ? "Enabled"
+                      : list.status === "disabled"
+                        ? "Disabled"
+                        : "All statuses"
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">{t("All statuses")}</SelectItem>
+                  <SelectItem value="enabled">{t("Enabled")}</SelectItem>
+                  <SelectItem value="disabled">{t("Disabled")}</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {showCreateAction && (
+              <Button size="sm" onClick={openCreate}>
+                <Plus data-icon="inline-start" />
+                {t("Add identity provider")}
               </Button>
-            </div>
-          </CardAction>
-        </CardHeader>
+            )}
+            <Button
+              aria-label={t("Refresh OIDC providers")}
+              onClick={() => void load()}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <RefreshCw />
+            </Button>
+          </FilterBar>
+        </div>
         <CardContent className="flex flex-col gap-3">
           {loading ? (
             <div
@@ -282,21 +298,42 @@ export function PlatformAuthenticationView({
               <LoaderCircle className="mr-2 size-4 animate-spin" />{" "}
               {t("Loading providers…")}
             </div>
-          ) : providers.length === 0 ? (
+          ) : list.total === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              {t("No OIDC providers configured.")}
+              {t(
+                providers.length
+                  ? "No results"
+                  : "No OIDC providers configured."
+              )}
             </p>
           ) : (
-            providers.map((provider) => (
+            list.pageItems.map((provider) => (
               <div
-                className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                className="flex min-w-0 flex-col gap-3 border-b border-border py-3 last:border-0 sm:flex-row sm:items-center sm:justify-between"
                 key={provider.id || provider.slug}
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">{provider.displayName}</p>
-                    <Badge variant={provider.enabled ? "default" : "secondary"}>
-                      {provider.enabled ? t("Enabled") : t("Disabled")}
+                    <button
+                      className="rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => openEdit(provider)}
+                    >
+                      {provider.displayName}
+                    </button>
+                    <Badge
+                      variant={
+                        provider.lastError
+                          ? "destructive"
+                          : provider.enabled
+                            ? "success"
+                            : "secondary"
+                      }
+                    >
+                      {provider.lastError
+                        ? t("Check failed")
+                        : provider.enabled
+                          ? t("Enabled")
+                          : t("Disabled")}
                     </Badge>
                     {provider.secretConfigured && (
                       <Badge variant="outline">{t("Secret configured")}</Badge>
@@ -305,22 +342,14 @@ export function PlatformAuthenticationView({
                   <p className="mt-1 truncate text-xs text-muted-foreground">
                     {provider.issuer}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {provider.slug} · {provider.scopes}
-                    {provider.lastTestedAt
-                      ? t(" · tested {value0}", {
-                          value0: new Date(
-                            provider.lastTestedAt
-                          ).toLocaleString(locale),
-                        })
-                      : ""}
-                  </p>
-                  <p className="mt-1 flex items-center gap-1 text-xs break-all text-muted-foreground">
-                    {provider.redirectUrl}{" "}
-                    <ExternalLink className="size-3 shrink-0" />
-                  </p>
+                  {provider.lastTestedAt && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("Last tested")}{" "}
+                      {new Date(provider.lastTestedAt).toLocaleString(locale)}
+                    </p>
+                  )}
                   {provider.lastError && (
-                    <p className="mt-1 text-xs text-destructive">
+                    <p className="mt-1 text-xs break-words text-destructive">
                       {provider.lastError}
                     </p>
                   )}
@@ -361,6 +390,13 @@ export function PlatformAuthenticationView({
             ))
           )}
         </CardContent>
+        {!loading && (
+          <AdminListFooter
+            page={list.page}
+            total={list.total}
+            onPageChange={list.setPage}
+          />
+        )}
       </Card>
 
       <Dialog
@@ -369,7 +405,7 @@ export function PlatformAuthenticationView({
           if (!saving) setDialogOpen(open)
         }}
       >
-        <DialogContent className="max-w-xl">
+        <DialogContent className="min-w-0 sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
               {editingId ? t("Edit OIDC provider") : t("Add OIDC provider")}
