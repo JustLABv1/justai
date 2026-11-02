@@ -6,6 +6,9 @@ export type VideoTranscriptionLibraryItem = {
   title: string
   fileName: string
   status:
+    | "waiting"
+    | "live"
+    | "paused"
     | "uploading"
     | "uploaded"
     | "queued"
@@ -51,19 +54,26 @@ export function videoLibraryFilter(value: string | null): VideoLibraryFilter {
 export function videoLibraryPath(
   page: number,
   query = "",
-  status: VideoLibraryFilter = "all"
+  status: VideoLibraryFilter = "all",
+  kind: "video" | "live" = "video"
 ) {
   const params = new URLSearchParams()
   if (status !== "all") params.set("status", status)
   if (page > 1) params.set("page", String(page))
   if (query.trim()) params.set("query", query.trim())
-  return `/video-transcription${params.size ? `?${params}` : ""}`
+  return `${kind === "live" ? "/transcription" : "/video-transcription"}${params.size ? `?${params}` : ""}`
 }
 
 export function videoLibraryStatus(
   status: VideoTranscriptionLibraryItem["status"]
 ) {
   switch (status) {
+    case "waiting":
+      return "Waiting to start…"
+    case "live":
+      return "Live"
+    case "paused":
+      return "Paused"
     case "completed":
       return "Ready"
     case "failed":
@@ -80,7 +90,15 @@ export function videoLibraryStatus(
 export function videoLibraryPending(
   status: VideoTranscriptionLibraryItem["status"]
 ) {
-  return ["uploading", "uploaded", "queued", "processing"].includes(status)
+  return [
+    "waiting",
+    "live",
+    "paused",
+    "uploading",
+    "uploaded",
+    "queued",
+    "processing",
+  ].includes(status)
 }
 
 export function videoLibraryDuration(durationMs: number) {
@@ -93,9 +111,13 @@ export function videoLibraryDuration(durationMs: number) {
 }
 
 export function videoLibraryStep(item: VideoTranscriptionLibraryItem) {
+  if (["waiting", "live", "paused"].includes(item.status))
+    return videoLibraryStatus(item.status)
   if (!videoLibraryPending(item.status)) return videoLibraryStatus(item.status)
   if (item.status === "uploading") return "Uploading…"
   switch (item.stage) {
+    case "recording":
+      return "Preparing your final transcript"
     case "uploaded":
     case "queued":
       return "Waiting to start…"
@@ -104,11 +126,13 @@ export function videoLibraryStep(item: VideoTranscriptionLibraryItem) {
     case "starting":
     case "extracting":
       return "Preparing recording…"
+    case "diarization":
     case "diarizing":
     case "skipping_diarization":
       return "Identifying speakers…"
     case "naming_speakers":
       return "Finding speaker names…"
+    case "grammar":
     case "polishing":
       return "Improving transcript…"
     case "finalizing":

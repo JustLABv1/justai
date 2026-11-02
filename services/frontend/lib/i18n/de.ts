@@ -1,5 +1,9 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "Start a live session to capture a conversation and create a summary.":
+    "Starte eine Live-Aufnahme, um ein Gespräch festzuhalten und zusammenzufassen.",
+  "All live sessions": "Alle Live-Aufnahmen",
+  "Your live sessions": "Deine Live-Aufnahmen",
   "Finishing up…": "Wird fertiggestellt…",
   "Improving transcript…": "Transkript überarbeiten…",
   "Finding speaker names…": "Sprechernamen ermitteln…",

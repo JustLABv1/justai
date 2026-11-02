@@ -241,6 +241,7 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/stream-tickets", a.platformFeature("ai"), a.scopedRateLimit("stream-ticket", 120), a.createStreamTicket)
 	org.POST("/voice/speech", a.platformFeature("voice"), a.synthesizeVoiceSpeech)
 	org.GET("/transcription/sessions", a.platformFeature("transcription"), a.listTranscriptionSessions)
+	org.GET("/transcription/live-library", a.platformFeature("transcription"), a.listLiveTranscriptionLibrary)
 	org.GET("/transcription/videos", a.platformFeature("transcription"), a.listVideoTranscriptionLibrary)
 	org.GET("/transcription/video-uploads/:id/thumbnail", a.platformFeature("transcription"), a.videoTranscriptionThumbnail)
 	org.POST("/transcription/sessions", a.platformFeature("transcription"), a.createTranscriptionSession)

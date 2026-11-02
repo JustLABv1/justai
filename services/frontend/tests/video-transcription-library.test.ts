@@ -62,3 +62,24 @@ test("filters persist in URLs and terminal states take precedence over processin
     "Waiting to start…"
   )
 })
+
+test("live sessions keep their own routes and expose capture and post-processing states", () => {
+  assert.equal(
+    videoLibraryPath(2, "Team", "pending", "live"),
+    "/transcription?status=pending&page=2&query=Team"
+  )
+  const item = {
+    status: "live",
+    stage: "recording",
+  } as VideoTranscriptionLibraryItem
+  assert.equal(videoLibraryStep(item), "Live")
+  assert.equal(videoLibraryStep({ ...item, status: "paused" }), "Paused")
+  assert.equal(
+    videoLibraryStep({ ...item, status: "processing", stage: "diarization" }),
+    "Identifying speakers…"
+  )
+  assert.equal(
+    videoLibraryStep({ ...item, status: "processing", stage: "grammar" }),
+    "Improving transcript…"
+  )
+})

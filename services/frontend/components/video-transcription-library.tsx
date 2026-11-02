@@ -4,6 +4,8 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import {
+  AudioLines,
+  Mic,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -51,16 +53,25 @@ export function VideoTranscriptionLibrary({
   onCreate,
   ownerId,
   revision = "",
+  kind = "video",
 }: {
   onCreate: () => void
   ownerId: string
   revision?: string
+  kind?: "video" | "live"
 }) {
   const { t, locale } = useTranslations()
   const router = useRouter()
   const params = useSearchParams()
   const page = videoLibraryPage(params.get("page"))
-  const filter = videoLibraryFilter(params.get("status"))
+  const requestedFilter = videoLibraryFilter(params.get("status"))
+  const filter =
+    kind === "live" && requestedFilter === "cancelled" ? "all" : requestedFilter
+  const libraryPath = (
+    page: number,
+    query = "",
+    status: typeof filter = "all"
+  ) => videoLibraryPath(page, query, status, kind)
   const query = (params.get("query") ?? "").slice(0, 200).trim()
   const [search, setSearch] = useState({ basis: query, text: query })
   const searchText = search.basis === query ? search.text : query
@@ -68,6 +79,7 @@ export function VideoTranscriptionLibrary({
   const scope = `${ownerId}:${api.getOrganizationId() ?? ""}`
   const requestKey = JSON.stringify([
     scope,
+    kind,
     page,
     query,
     filter,
@@ -88,13 +100,13 @@ export function VideoTranscriptionLibrary({
     if (searchText.trim() === query) return
     const timer = window.setTimeout(
       () =>
-        router.replace(videoLibraryPath(1, searchText, filter), {
+        router.replace(videoLibraryPath(1, searchText, filter, kind), {
           scroll: false,
         }),
       300
     )
     return () => window.clearTimeout(timer)
-  }, [searchText, query, filter, router])
+  }, [searchText, query, filter, kind, router])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -109,12 +121,12 @@ export function VideoTranscriptionLibrary({
           status: filter,
         })
         const result = await api.get<VideoTranscriptionLibraryPage>(
-          `/api/v1/transcription/videos?${searchParams}`,
+          `/api/v1/transcription/${kind === "live" ? "live-library" : "videos"}?${searchParams}`,
           { signal: controller.signal }
         )
         if (!active) return
         if (result.page !== page) {
-          router.replace(videoLibraryPath(result.page, query, filter), {
+          router.replace(videoLibraryPath(result.page, query, filter, kind), {
             scroll: false,
           })
           return
@@ -140,10 +152,10 @@ export function VideoTranscriptionLibrary({
       controller.abort()
       if (timer) clearTimeout(timer)
     }
-  }, [page, query, filter, requestKey, router])
+  }, [page, query, filter, kind, requestKey, router])
 
   const changePage = (next: number) => {
-    router.push(videoLibraryPath(next, query, filter), { scroll: false })
+    router.push(libraryPath(next, query, filter), { scroll: false })
     rootRef.current?.scrollIntoView({ block: "start" })
   }
   const pageCount = data
@@ -167,15 +179,19 @@ export function VideoTranscriptionLibrary({
             id="video-library-title"
             className="text-xl font-semibold tracking-tight"
           >
-            {t("Your recordings")}
+            {t(kind === "live" ? "Your live sessions" : "Your recordings")}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {t("Pick up where you left off, or add a new recording.")}
           </p>
         </div>
         <Button onClick={onCreate}>
-          <Upload data-icon="inline-start" />
-          {t("Add recording")}
+          {kind === "live" ? (
+            <Mic data-icon="inline-start" />
+          ) : (
+            <Upload data-icon="inline-start" />
+          )}
+          {t(kind === "live" ? "New live session" : "Add recording")}
         </Button>
       </header>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -202,7 +218,7 @@ export function VideoTranscriptionLibrary({
               variant="ghost"
               className="text-destructive hover:text-destructive"
               onClick={() =>
-                router.push(videoLibraryPath(1, searchText, "failed"), {
+                router.push(libraryPath(1, searchText, "failed"), {
                   scroll: false,
                 })
               }
@@ -216,7 +232,7 @@ export function VideoTranscriptionLibrary({
             onValueChange={(value) => {
               if (value)
                 router.push(
-                  videoLibraryPath(1, searchText, videoLibraryFilter(value)),
+                  libraryPath(1, searchText, videoLibraryFilter(value)),
                   { scroll: false }
                 )
             }}
@@ -238,7 +254,9 @@ export function VideoTranscriptionLibrary({
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {VIDEO_LIBRARY_FILTERS.map((value) => (
+              {VIDEO_LIBRARY_FILTERS.filter(
+                (value) => kind !== "live" || value !== "cancelled"
+              ).map((value) => (
                 <SelectItem key={value} value={value}>
                   {t(
                     {
@@ -301,21 +319,33 @@ export function VideoTranscriptionLibrary({
             {data.items.map((item) => (
               <Link
                 key={item.id}
-                href={workspacePath("video-transcription", null, item.id)}
+                href={workspacePath(
+                  kind === "live" ? "transcription" : "video-transcription",
+                  null,
+                  item.id
+                )}
                 prefetch={false}
                 className="group w-full rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Card className="h-full gap-0 p-0">
-                  <VideoTranscriptionThumbnail
-                    url={item.thumbnailUrl}
-                    scope={scope}
-                  />
+                  {kind === "live" ? (
+                    <div className="flex aspect-video items-center justify-center bg-muted text-muted-foreground">
+                      <AudioLines aria-hidden="true" className="size-12" />
+                    </div>
+                  ) : (
+                    <VideoTranscriptionThumbnail
+                      url={item.thumbnailUrl}
+                      scope={scope}
+                    />
+                  )}
                   <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
                     <h2
                       className="line-clamp-2 text-base leading-6 font-medium group-hover:underline"
                       title={item.fileName}
                     >
-                      {item.title.trim() || item.fileName}
+                      {item.title.trim() ||
+                        item.fileName ||
+                        t("Live transcription")}
                     </h2>
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                       <time dateTime={item.createdAt}>
@@ -337,7 +367,8 @@ export function VideoTranscriptionLibrary({
                           item.status === "failed" ? "destructive" : "secondary"
                         }
                       >
-                        {videoLibraryPending(item.status) ? (
+                        {videoLibraryPending(item.status) &&
+                        !["live", "paused", "waiting"].includes(item.status) ? (
                           <LoaderCircle className="size-3 animate-spin" />
                         ) : null}
                         {t(videoLibraryStep(item))}
@@ -415,7 +446,9 @@ export function VideoTranscriptionLibrary({
               {t(
                 query || filter !== "all"
                   ? "Try a different name or clear the search."
-                  : "Add a video to turn it into text and a summary you can share."
+                  : kind === "live"
+                    ? "Start a live session to capture a conversation and create a summary."
+                    : "Add a video to turn it into text and a summary you can share."
               )}
             </EmptyDescription>
           </EmptyHeader>
@@ -424,14 +457,14 @@ export function VideoTranscriptionLibrary({
               variant="secondary"
               onClick={() => {
                 setSearch({ basis: query, text: "" })
-                router.replace(videoLibraryPath(1), { scroll: false })
+                router.replace(libraryPath(1), { scroll: false })
               }}
             >
               {t("Clear filters")}
             </Button>
           ) : (
             <Button variant="secondary" onClick={onCreate}>
-              {t("Add recording")}
+              {t(kind === "live" ? "New live session" : "Add recording")}
             </Button>
           )}
         </Empty>
