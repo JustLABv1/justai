@@ -77,7 +77,12 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Page, PageActions, PageTitle } from "@/components/ui/page"
 import { SettingsRow, SettingsSection } from "@/components/ui/settings"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import {
+  Tabs,
+  ScrollableTabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs"
 import { AdminListFooter, useAdminList } from "@/components/admin-list-controls"
 import { adminChartDays } from "@/lib/admin-chart-data"
 import { PlatformStatCard } from "@/components/platform-stat-card"
@@ -564,16 +569,18 @@ export function PlatformAdminShell({
         }}
         className="gap-6"
       >
-        <div className="min-w-0 overflow-x-auto pb-1">
-          <TabsList aria-label={t("Platform administration")} variant="line">
-            {tabs.map(({ id, label, icon: Icon }) => (
-              <TabsTrigger key={id} value={id}>
-                <Icon aria-hidden="true" />
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
+        <ScrollableTabsList
+          aria-label={t("Platform administration")}
+          variant="line"
+        >
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <TabsTrigger key={id} value={id}>
+              <Icon aria-hidden="true" />
+              {label}
+            </TabsTrigger>
+          ))}
+        </ScrollableTabsList>
+
         <TabsContent key={activeTab} value={activeTab} className="min-w-0">
           {error && (
             <Alert className="mb-4" variant="destructive">

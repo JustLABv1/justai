@@ -1,5 +1,6 @@
 "use client"
 
+import { useLayoutEffect, useRef } from "react"
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
 import { cva, type VariantProps } from "class-variance-authority"
 
@@ -53,6 +54,64 @@ function TabsList({
   )
 }
 
+/** Scroll just the tab strip, preserving the page's vertical scroll position. */
+function ScrollableTabsList(props: React.ComponentProps<typeof TabsList>) {
+  const viewportRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    let frame = 0
+    const revealActiveTab = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const active = viewport.querySelector<HTMLElement>(
+          '[role="tab"][aria-selected="true"]'
+        )
+        if (!active) return
+        const bounds = viewport.getBoundingClientRect()
+        const tab = active.getBoundingClientRect()
+        const padding = 8
+        const offset =
+          tab.left < bounds.left + padding
+            ? tab.left - bounds.left - padding
+            : tab.right > bounds.right - padding
+              ? tab.right - bounds.right + padding
+              : 0
+        if (offset) viewport.scrollBy({ left: offset, behavior: "instant" })
+      })
+    }
+    const mutations = new MutationObserver(revealActiveTab)
+    mutations.observe(viewport, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["aria-selected"],
+    })
+    const resize = new ResizeObserver(revealActiveTab)
+    resize.observe(viewport)
+    if (viewport.firstElementChild) resize.observe(viewport.firstElementChild)
+    viewport.addEventListener("click", revealActiveTab)
+    revealActiveTab()
+    return () => {
+      cancelAnimationFrame(frame)
+      mutations.disconnect()
+      resize.disconnect()
+      viewport.removeEventListener("click", revealActiveTab)
+    }
+  }, [])
+
+  return (
+    <div
+      ref={viewportRef}
+      className="min-w-0 overflow-x-auto pb-1"
+      data-slot="tabs-scroll-viewport"
+    >
+      <TabsList {...props} />
+    </div>
+  )
+}
+
 function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
   return (
     <TabsPrimitive.Tab
@@ -79,4 +138,11 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   )
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants }
+export {
+  Tabs,
+  TabsList,
+  ScrollableTabsList,
+  TabsTrigger,
+  TabsContent,
+  tabsListVariants,
+}

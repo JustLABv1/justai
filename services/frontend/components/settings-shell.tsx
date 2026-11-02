@@ -19,7 +19,12 @@ import { PrivacyView } from "@/components/privacy-view"
 import { SettingsView } from "@/components/settings-view"
 import { Button } from "@/components/ui/button"
 import { Page, PageActions, PageTitle } from "@/components/ui/page"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import {
+  Tabs,
+  ScrollableTabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs"
 import type {
   Endpoint,
   MCPServer,
@@ -179,19 +184,18 @@ export function SettingsShell({
         onValueChange={(value) => onTabChange(value as SettingsTab)}
         className="gap-6"
       >
-        <div className="min-w-0 overflow-x-auto pb-1">
-          <TabsList
-            aria-label={t("Workspace settings sections")}
-            variant="line"
-          >
-            {visibleTabs.map(({ id, label, icon: Icon }) => (
-              <TabsTrigger key={id} value={id}>
-                <Icon aria-hidden="true" />
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
+        <ScrollableTabsList
+          aria-label={t("Workspace settings sections")}
+          variant="line"
+        >
+          {visibleTabs.map(({ id, label, icon: Icon }) => (
+            <TabsTrigger key={id} value={id}>
+              <Icon aria-hidden="true" />
+              {label}
+            </TabsTrigger>
+          ))}
+        </ScrollableTabsList>
+
         <TabsContent key={activeTab} value={activeTab} className="min-w-0">
           {activeTab !== "lifecycle" && (
             <div className="mb-4 px-1">
