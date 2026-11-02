@@ -52,11 +52,6 @@ import type {
 import { cn } from "@/lib/utils"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
-import {
-  AdminUsageCharts,
-  compactNumber,
-} from "@/components/admin-usage-charts"
-import { PlatformTranscriptionWorkers } from "@/components/platform-transcription-workers"
 import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAnnouncementsView } from "@/components/platform-announcements-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
@@ -73,7 +68,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Page, PageActions, PageTitle } from "@/components/ui/page"
 import { SettingsRow, SettingsSection } from "@/components/ui/settings"
@@ -84,8 +78,7 @@ import {
   TabsContent,
 } from "@/components/ui/tabs"
 import { AdminListFooter, useAdminList } from "@/components/admin-list-controls"
-import { adminChartDays } from "@/lib/admin-chart-data"
-import { PlatformStatCard } from "@/components/platform-stat-card"
+import { PlatformAnalyticsView } from "@/components/platform-analytics-view"
 import { FilterBar } from "@/components/ui/filter-bar"
 import {
   Collapsible,
@@ -201,9 +194,10 @@ export function PlatformAdminShell({
   const [servers, setServers] = useState<any[]>([])
   const [health, setHealth] = useState<Record<string, any> | null>(null)
   const [audit, setAudit] = useState<any[]>([])
-  const [analytics, setAnalytics] = useState<AdminAnalyticsResponse | null>(
-    null
-  )
+  const [analyticsResult, setAnalyticsResult] = useState<{
+    key: string
+    data: AdminAnalyticsResponse
+  } | null>(null)
   const [query, setQuery] = useState(() => readAdminParam("query"))
   const [listStatus, setListStatus] = useState(() => readAdminParam("status"))
   const [listPage, setListPage] = useState(1)
@@ -226,10 +220,12 @@ export function PlatformAdminShell({
     from: readAdminParam("analytics_from"),
     to: readAdminParam("analytics_to"),
     organizationId: readAdminParam("analytics_organizationId"),
-    endpointId: readAdminParam("analytics_endpointId"),
-    model: readAdminParam("analytics_model"),
-    status: readAdminParam("analytics_status"),
+    userId: readAdminParam("analytics_userId"),
   }))
+  const analytics =
+    analyticsResult?.key === JSON.stringify(analyticsFilters)
+      ? analyticsResult.data
+      : null
   const [savingMaintenance, setSavingMaintenance] = useState(false)
   const [savingControl, setSavingControl] = useState<PlatformControlKey | null>(
     null
@@ -306,11 +302,10 @@ export function PlatformAdminShell({
         Object.entries(analyticsFilters).forEach(([key, value]) => {
           if (value) params.set(key, value)
         })
-        setAnalytics(
-          await api.get<AdminAnalyticsResponse>(
-            `/api/v1/admin/analytics?${params.toString()}`
-          )
+        const data = await api.get<AdminAnalyticsResponse>(
+          `/api/v1/admin/analytics?${params.toString()}`
         )
+        setAnalyticsResult({ key: JSON.stringify(analyticsFilters), data })
       } else if (activeTab === "audit") {
         const params = new URLSearchParams({
           page: String(listPage),
@@ -666,15 +661,11 @@ export function PlatformAdminShell({
           {activeTab === "health" && <HealthView health={health} />}
           {activeTab === "analytics" && (
             <div className="flex flex-col gap-4">
-              <AnalyticsView
+              <PlatformAnalyticsView
                 analytics={analytics}
                 filters={analyticsFilters}
                 onFiltersChange={setAnalyticsFilters}
                 onRefresh={() => void load()}
-              />
-              <PlatformTranscriptionWorkers
-                analytics={analytics?.transcriptionWorkers}
-                detailed
               />
             </div>
           )}
@@ -3486,315 +3477,6 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
           </AlertDescription>
         </Alert>
       )}
-    </div>
-  )
-}
-
-function AnalyticsView({
-  analytics,
-  filters,
-  onFiltersChange,
-  onRefresh,
-}: {
-  analytics: AdminAnalyticsResponse | null
-  filters: Record<string, string>
-  onFiltersChange: (filters: Record<string, string>) => void
-  onRefresh: () => void
-}) {
-  const { t, locale } = useTranslations()
-
-  const [advancedOpen, setAdvancedOpen] = useState(false)
-  const summary = analytics?.summary
-  const setFilter = (key: string, value: string) =>
-    onFiltersChange({ ...filters, [key]: value })
-  const range = {
-    days: Number(filters.days) || 30,
-    from: filters.from,
-    to: filters.to,
-  }
-  const timeSeries = adminChartDays(analytics?.timeSeries ?? [], range)
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardContent>
-          <Collapsible
-            open={advancedOpen}
-            onOpenChange={setAdvancedOpen}
-            className="flex flex-col gap-4"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <Select
-                value={
-                  filters.from || filters.to ? "custom" : filters.days || "30"
-                }
-                onValueChange={(value) => {
-                  if (value === "custom") setAdvancedOpen(true)
-                  else if (value)
-                    onFiltersChange({
-                      ...filters,
-                      days: value,
-                      from: "",
-                      to: "",
-                    })
-                }}
-              >
-                <SelectTrigger size="sm" aria-label={t("Date range")}>
-                  <SelectValue>
-                    {filters.from || filters.to
-                      ? t("Custom range")
-                      : t("Last {count} days", { count: filters.days || "30" })}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {["7", "30", "90", "365"].map((days) => (
-                      <SelectItem key={days} value={days}>
-                        {t("Last {count} days", { count: days })}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="custom">{t("Custom range")}</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <CollapsibleTrigger
-                render={<Button size="sm" variant="outline" />}
-              >
-                <SlidersHorizontal data-icon="inline-start" />
-                {t(advancedOpen ? "Hide filters" : "More filters")}
-              </CollapsibleTrigger>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  onFiltersChange({
-                    days: "30",
-                    from: "",
-                    to: "",
-                    organizationId: "",
-                    endpointId: "",
-                    model: "",
-                    status: "",
-                  })
-                }
-              >
-                {t("Clear filters")}
-              </Button>
-              <Button size="sm" variant="outline" onClick={onRefresh}>
-                <RefreshCw data-icon="inline-start" />
-                {t("Refresh")}
-              </Button>
-            </div>
-            <CollapsibleContent>
-              <FieldGroup className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {[
-                  ["days", "Days (1–365)", "number"],
-                  ["from", "From", "date"],
-                  ["to", "To", "date"],
-                  ["organizationId", "Organization ID", "text"],
-                  ["endpointId", "Endpoint ID", "text"],
-                  ["model", "Model", "text"],
-                ].map(([key, label, type]) => (
-                  <Field key={key}>
-                    <FieldLabel htmlFor={`analytics-${key}`}>
-                      {t(label)}
-                    </FieldLabel>
-                    <Input
-                      id={`analytics-${key}`}
-                      type={type}
-                      min={type === "number" ? 1 : undefined}
-                      max={type === "number" ? 365 : undefined}
-                      value={filters[key] || ""}
-                      onChange={(event) => setFilter(key, event.target.value)}
-                    />
-                  </Field>
-                ))}
-                <Field>
-                  <FieldLabel>{t("Status")}</FieldLabel>
-                  <Select
-                    value={filters.status || "all"}
-                    onValueChange={(value) =>
-                      setFilter("status", value === "all" ? "" : value || "")
-                    }
-                  >
-                    <SelectTrigger
-                      aria-label={t("Analytics status")}
-                      className="w-full"
-                    >
-                      <SelectValue>
-                        {t(
-                          (
-                            {
-                              running: "Running",
-                              "requires-action": "Requires action",
-                              complete: "Complete",
-                              error: "Error",
-                              cancelled: "Cancelled",
-                              incomplete: "Incomplete",
-                            } as Record<string, string>
-                          )[filters.status] || "All statuses"
-                        )}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {Object.entries({
-                          all: "All statuses",
-                          running: "Running",
-                          "requires-action": "Requires action",
-                          complete: "Complete",
-                          error: "Error",
-                          cancelled: "Cancelled",
-                          incomplete: "Incomplete",
-                        }).map(([value, label]) => (
-                          <SelectItem key={value} value={value}>
-                            {t(label)}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </FieldGroup>
-            </CollapsibleContent>
-          </Collapsible>
-        </CardContent>
-      </Card>
-      <div className="grid gap-4 md:grid-cols-3">
-        <PlatformStatCard
-          title={t("Requests")}
-          period={t("Selected period")}
-          value={compactNumber(summary?.requests, locale)}
-          color="#00b884"
-          points={timeSeries.map((day) => ({ value: day.requests }))}
-        />
-        <PlatformStatCard
-          title={t("Total tokens")}
-          period={t("Selected period")}
-          value={compactNumber(summary?.totalTokens, locale)}
-          color="#2f7bff"
-          points={timeSeries.map((day) => ({ value: day.totalTokens }))}
-        />
-        <PlatformStatCard
-          title={t("Average latency")}
-          period={t("Selected period")}
-          value={
-            summary?.requests
-              ? `${Math.round(summary.averageLatencyMs)} ms`
-              : "—"
-          }
-          color="#8b46ff"
-          points={timeSeries.map((day) => ({
-            value: day.requests ? day.averageLatencyMs : null,
-          }))}
-        />
-      </div>
-      <dl className="grid grid-cols-2 gap-4 px-1 md:grid-cols-5">
-        {[
-          ["Success", summary?.succeeded],
-          ["Errors", summary?.failed],
-          [
-            "P95 latency",
-            summary?.requests ? `${Math.round(summary.p95LatencyMs)} ms` : "—",
-          ],
-          [
-            "Average TTFT",
-            summary?.averageTtftMs
-              ? `${Math.round(summary.averageTtftMs)} ms`
-              : "—",
-          ],
-          ["Tool calls", summary?.toolCalls],
-        ].map(([label, value]) => (
-          <div key={String(label)}>
-            <dt className="text-xs text-muted-foreground">
-              {t(String(label))}
-            </dt>
-            <dd className="mt-1 text-lg font-medium tabular-nums">
-              {value ?? "—"}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      <AdminUsageCharts analytics={analytics} showLatency range={range} />
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("Endpoint and model breakdown")}</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full min-w-[44rem] text-left text-xs">
-            <thead>
-              <tr className="border-b text-muted-foreground">
-                <th className="p-2">{t("Endpoint")}</th>
-                <th className="p-2">{t("Model")}</th>
-                <th className="p-2">{t("Requests")}</th>
-                <th className="p-2">{t("Errors")}</th>
-                <th className="p-2">{t("Avg latency")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(analytics?.byEndpoint ?? []).map((item: any) => (
-                <tr
-                  className="border-b last:border-0"
-                  key={`${item.endpointId}-${item.model}`}
-                >
-                  <td className="p-2">{item.endpointName}</td>
-                  <td className="p-2">{item.model || "—"}</td>
-                  <td className="p-2">{item.requests}</td>
-                  <td className="p-2">{item.errors}</td>
-                  <td className="p-2">
-                    {Math.round(item.averageLatencyMs ?? 0)} ms
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!analytics?.byEndpoint?.length && (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              {t("No runs match these filters.")}
-            </p>
-          )}
-        </CardContent>
-      </Card>
-      <details className="rounded-2xl border border-border bg-card p-4">
-        <summary className="cursor-pointer text-sm font-medium">
-          {t("Daily activity")}
-        </summary>
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[44rem] text-left text-xs">
-            <thead>
-              <tr className="border-b text-muted-foreground">
-                <th className="p-2">{t("Date")}</th>
-                <th className="p-2">{t("Requests")}</th>
-                <th className="p-2">{t("Success")}</th>
-                <th className="p-2">{t("Errors")}</th>
-                <th className="p-2">{t("Cancelled")}</th>
-                <th className="p-2">{t("Avg latency")}</th>
-                <th className="p-2">{t("Tool calls")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {timeSeries.map((item: any) => (
-                <tr className="border-b last:border-0" key={item.date}>
-                  <td className="p-2">{item.date}</td>
-                  <td className="p-2">{item.requests}</td>
-                  <td className="p-2">{item.succeeded}</td>
-                  <td className="p-2">{item.failed}</td>
-                  <td className="p-2">{item.cancelled}</td>
-                  <td className="p-2">
-                    {Math.round(item.averageLatencyMs ?? 0)} ms
-                  </td>
-                  <td className="p-2">{item.toolCalls}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!timeSeries.length && (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              {t("No daily activity for this range.")}
-            </p>
-          )}
-        </div>
-      </details>
     </div>
   )
 }
