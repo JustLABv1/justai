@@ -1,5 +1,13 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "Finishing up…": "Wird fertiggestellt…",
+  "Improving transcript…": "Transkript überarbeiten…",
+  "Finding speaker names…": "Sprechernamen ermitteln…",
+  "Identifying speakers…": "Sprecher erkennen…",
+  "Preparing recording…": "Aufnahme vorbereiten…",
+  "Trying again…": "Wird erneut versucht…",
+  "Waiting to start…": "Wartet auf den Start…",
+  "Filter recordings": "Aufnahmen filtern",
   Language: "Sprache",
   "Choose language": "Sprache wählen",
   Successful: "Erfolgreich",
@@ -4026,4 +4034,30 @@ export const de = {
     "Du kannst das Gespräch trotzdem lesen, bearbeiten und herunterladen.",
   "Recording {value0}": "Aufnahme {value0}",
   "Copy link to this moment": "Link zu dieser Stelle kopieren",
+  "Your recordings": "Deine Aufnahmen",
+  "Pick up where you left off, or add a new recording.":
+    "Öffne eine Aufnahme oder füge eine neue hinzu.",
+  "Search recordings": "Aufnahmen durchsuchen",
+  "{value0} recordings": "{value0} Aufnahmen",
+  "1 recording": "1 Aufnahme",
+  "Your recordings could not be loaded.":
+    "Deine Aufnahmen konnten nicht geladen werden.",
+  "Loading recordings…": "Aufnahmen werden geladen…",
+  "Transcribing…": "Wird transkribiert…",
+  "With summary": "Mit Zusammenfassung",
+  "View recording": "Aufnahme öffnen",
+  "Recording pages": "Seiten der Aufnahmen",
+  "{value0}–{value1} of {value2}": "{value0}–{value1} von {value2}",
+  "Page {value0} of {value1}": "Seite {value0} von {value1}",
+  "No recordings found": "Keine Aufnahmen gefunden",
+  "Your first recording starts here": "Hier beginnt deine erste Aufnahme",
+  "Try a different name or clear the search.":
+    "Versuche einen anderen Namen oder lösche die Suche.",
+  "Add a video to turn it into text and a summary you can share.":
+    "Lade ein Video hoch und erhalte den Text und eine Zusammenfassung zum Weitergeben.",
+  "Back to recordings": "Zurück zu den Aufnahmen",
+  "Opening recording…": "Aufnahme wird geöffnet…",
+  "All recordings": "Alle Aufnahmen",
+  "search is limited to 200 characters":
+    "Die Suche darf höchstens 200 Zeichen enthalten.",
 } as const

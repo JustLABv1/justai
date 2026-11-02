@@ -1313,6 +1313,10 @@ export function Workspace({
                 <FeatureDisabledPanel label={t("Video transcription")} />
               ) : (
                 <VideoTranscriptionView
+                  libraryRevision={transcriptionSessions
+                    .filter((session) => session.kind === "video")
+                    .map((session) => `${session.id}:${session.updatedAt}`)
+                    .join("|")}
                   endpoints={endpoints}
                   onStartChat={startChatWithTranscription}
                   onSessionCreated={(session) =>

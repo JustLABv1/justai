@@ -780,7 +780,12 @@ export function FocusWorkspaceSidebar({
                               <SidebarMenuSubItem>
                                 <SidebarMenuSubButton
                                   render={<button type="button" />}
-                                  onClick={() => setHistoryDialogOpen(true)}
+                                  onClick={() => {
+                                    if (activeView === "video-transcription") {
+                                      setOpenMobile(false)
+                                      onNavigate("video-transcription")
+                                    } else setHistoryDialogOpen(true)
+                                  }}
                                   className="text-muted-foreground hover:text-sidebar-accent-foreground"
                                 >
                                   <span>{t("View all…")}</span>
@@ -991,7 +996,10 @@ export function FocusWorkspaceSidebar({
         <SidebarRail />
       </Sidebar>
 
-      <Dialog onOpenChange={setHistoryDialogOpen} open={historyDialogOpen}>
+      <Dialog
+        onOpenChange={setHistoryDialogOpen}
+        open={historyDialogOpen && activeView !== "video-transcription"}
+      >
         <DialogContent className="flex h-[min(44rem,calc(100dvh-2rem))] flex-col overflow-hidden sm:max-w-xl">
           <DialogHeader className="shrink-0 flex-row items-center justify-between gap-3 pr-7">
             <DialogTitle>{historyTitle}</DialogTitle>

@@ -24,12 +24,13 @@ import (
 )
 
 type App struct {
-	Config  config.Config
-	DB      *sql.DB
-	Tokens  *auth.TokenManager
-	Secrets *security.SecretBox
-	RAG     *rag.Worker
-	Live    *TranscriptionManager
+	videoThumbnails videoThumbnailCache
+	Config          config.Config
+	DB              *sql.DB
+	Tokens          *auth.TokenManager
+	Secrets         *security.SecretBox
+	RAG             *rag.Worker
+	Live            *TranscriptionManager
 	// AgentWorker owns durable workflow execution and scheduling. Keeping the
 	// engine on App lets HTTP handlers, chat delegation, and the lifecycle all
 	// share the same leases, snapshots, and executor adapters.
@@ -240,6 +241,8 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/stream-tickets", a.platformFeature("ai"), a.scopedRateLimit("stream-ticket", 120), a.createStreamTicket)
 	org.POST("/voice/speech", a.platformFeature("voice"), a.synthesizeVoiceSpeech)
 	org.GET("/transcription/sessions", a.platformFeature("transcription"), a.listTranscriptionSessions)
+	org.GET("/transcription/videos", a.platformFeature("transcription"), a.listVideoTranscriptionLibrary)
+	org.GET("/transcription/video-uploads/:id/thumbnail", a.platformFeature("transcription"), a.videoTranscriptionThumbnail)
 	org.POST("/transcription/sessions", a.platformFeature("transcription"), a.createTranscriptionSession)
 	org.GET("/transcription/sessions/:id", a.platformFeature("transcription"), a.getTranscriptionSession)
 	org.PATCH("/transcription/sessions/:id", a.platformFeature("transcription"), a.updateTranscriptionSession)
