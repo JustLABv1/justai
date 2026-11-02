@@ -24,12 +24,13 @@ import (
 )
 
 type App struct {
-	Config  config.Config
-	DB      *sql.DB
-	Tokens  *auth.TokenManager
-	Secrets *security.SecretBox
-	RAG     *rag.Worker
-	Live    *TranscriptionManager
+	videoThumbnails videoThumbnailCache
+	Config          config.Config
+	DB              *sql.DB
+	Tokens          *auth.TokenManager
+	Secrets         *security.SecretBox
+	RAG             *rag.Worker
+	Live            *TranscriptionManager
 	// AgentWorker owns durable workflow execution and scheduling. Keeping the
 	// engine on App lets HTTP handlers, chat delegation, and the lifecycle all
 	// share the same leases, snapshots, and executor adapters.
@@ -167,6 +168,9 @@ func (a *App) Router() *gin.Engine {
 	protected.PUT("/onboarding", a.updateOnboarding)
 	protected.PATCH("/profile", a.updateProfile)
 	protected.GET("/profile", a.getProfile)
+	protected.GET("/profile/transcription-summary-standard", a.getTranscriptionSummaryStandard)
+	protected.PUT("/profile/transcription-summary-standard", a.saveTranscriptionSummaryStandard)
+	protected.DELETE("/profile/transcription-summary-standard", a.deleteTranscriptionSummaryStandard)
 	protected.GET("/profile/avatar", a.serveProfileAvatar)
 	protected.POST("/profile/avatar", a.uploadProfileAvatar)
 	protected.DELETE("/profile/avatar", a.deleteProfileAvatar)
@@ -237,6 +241,9 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/stream-tickets", a.platformFeature("ai"), a.scopedRateLimit("stream-ticket", 120), a.createStreamTicket)
 	org.POST("/voice/speech", a.platformFeature("voice"), a.synthesizeVoiceSpeech)
 	org.GET("/transcription/sessions", a.platformFeature("transcription"), a.listTranscriptionSessions)
+	org.GET("/transcription/live-library", a.platformFeature("transcription"), a.listLiveTranscriptionLibrary)
+	org.GET("/transcription/videos", a.platformFeature("transcription"), a.listVideoTranscriptionLibrary)
+	org.GET("/transcription/video-uploads/:id/thumbnail", a.platformFeature("transcription"), a.videoTranscriptionThumbnail)
 	org.POST("/transcription/sessions", a.platformFeature("transcription"), a.createTranscriptionSession)
 	org.GET("/transcription/sessions/:id", a.platformFeature("transcription"), a.getTranscriptionSession)
 	org.PATCH("/transcription/sessions/:id", a.platformFeature("transcription"), a.updateTranscriptionSession)
@@ -268,10 +275,17 @@ func (a *App) Router() *gin.Engine {
 	org.POST("/transcription/sessions/:id/annotations", a.platformFeature("transcription"), a.createTranscriptionAnnotation)
 	org.PATCH("/transcription/sessions/:id/annotations/:annotationId", a.platformFeature("transcription"), a.updateTranscriptionAnnotation)
 	org.DELETE("/transcription/sessions/:id/annotations/:annotationId", a.platformFeature("transcription"), a.deleteTranscriptionAnnotation)
+	org.GET("/transcription/summary-templates", a.platformFeature("transcription"), a.listTranscriptionSummaryTemplates)
+	org.POST("/transcription/summary-templates", a.platformFeature("transcription"), a.saveTranscriptionSummaryTemplate)
+	org.PUT("/transcription/summary-templates/:templateId", a.platformFeature("transcription"), a.saveTranscriptionSummaryTemplate)
+	org.DELETE("/transcription/summary-templates/:templateId", a.platformFeature("transcription"), a.deleteTranscriptionSummaryTemplate)
+	org.PUT("/transcription/summary-template-choice", a.platformFeature("transcription"), a.chooseTranscriptionSummaryTemplate)
+	org.POST("/transcription/sessions/:id/summary-rule-proposal", a.platformFeature("transcription"), a.proposeTranscriptionSummaryRule)
 	org.GET("/transcription/sessions/:id/insights", a.platformFeature("transcription"), a.getTranscriptionInsights)
 	org.POST("/transcription/sessions/:id/insights", a.platformFeature("transcription"), a.generateTranscriptionInsights)
 	org.POST("/transcription/sessions/:id/polish", a.platformFeature("transcription"), a.polishTranscriptionSession)
 	org.GET("/transcription/sessions/:id/export/:format", a.platformFeature("transcription"), a.exportTranscription)
+	org.POST("/transcription/sessions/:id/export/:format", a.platformFeature("transcription"), a.exportTranscription)
 	org.POST("/transcription/sessions/:id/join-code", a.platformFeature("transcription"), a.rotateTranscriptionJoinCode)
 	org.GET("/transcription/sessions/:id/join-requests", a.platformFeature("transcription"), a.listTranscriptionJoinRequests)
 	org.POST("/transcription/join-requests/:id/approve", a.platformFeature("transcription"), a.approveTranscriptionJoinRequest)

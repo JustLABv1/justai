@@ -32,6 +32,7 @@ import {
   Sparkles,
   Trash2,
   Users,
+  X,
 } from "lucide-react"
 import {
   useCallback,
@@ -72,6 +73,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -84,8 +88,24 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
+import { Checkbox } from "@/components/ui/checkbox"
 import { api } from "@/lib/api"
+import { TranscriptionExportDialog } from "@/components/transcription-export-dialog"
+import {
+  SummaryTemplatePicker,
+  SummaryTemplateEditor,
+} from "@/components/transcription-summary-templates"
+import { SummaryOmissionReview } from "@/components/transcription-summary-omissions"
+import { TranscriptionSummaryReadingView } from "@/components/transcription-summary-reading-view"
+import {
+  defaultSummaryStandard,
+  summaryTimeOffset,
+  resolveSummaryTemplateDefaults,
+  type SummaryStandard,
+  type SummaryTemplate,
+  type SummaryTemplateDraft,
+  type SummaryExportDraft,
+} from "@/lib/transcription-summary-standard"
 import { workflowInputNames } from "@/lib/agent-workflow-logic"
 import {
   TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT,
@@ -221,8 +241,17 @@ function speakerInitials(value: string) {
   return initials || "S"
 }
 
-function speakerDisplayName(speaker: TranscriptionSpeaker | undefined) {
-  return speaker?.displayName || speaker?.label || "Unassigned"
+function speakerDisplayName(
+  speaker: TranscriptionSpeaker | undefined,
+  translate?: ReturnType<typeof useTranslations>["t"]
+) {
+  const name = speaker?.displayName || speaker?.label || ""
+  const generic = /^SPEAKER[_ -]?(\d+)$/i.exec(name)
+  if (generic)
+    return translate
+      ? translate("Speaker {value0}", { value0: Number(generic[1]) })
+      : `Speaker ${Number(generic[1])}`
+  return name || (translate ? translate("Unknown speaker") : "Unknown speaker")
 }
 
 function qualityIssues(segment: TranscriptionSegment) {
@@ -308,7 +337,8 @@ function transcriptMatches(
   query: string,
   speakerFilter: string,
   speakerById: Map<string, TranscriptionSpeaker>,
-  onlyQuality: boolean
+  onlyQuality: boolean,
+  translate: ReturnType<typeof useTranslations>["t"]
 ) {
   if (speakerFilter !== "all" && segment.speakerId !== speakerFilter) {
     return false
@@ -317,9 +347,13 @@ function transcriptMatches(
   const normalizedQuery = query.trim().toLocaleLowerCase()
   if (!normalizedQuery) return true
   const speaker = speakerDisplayName(
-    segment.speakerId ? speakerById.get(segment.speakerId) : undefined
+    segment.speakerId ? speakerById.get(segment.speakerId) : undefined,
+    translate
   )
-  return `${speaker} ${segment.text}`
+  const originalLabel = segment.speakerId
+    ? (speakerById.get(segment.speakerId)?.label ?? "")
+    : ""
+  return `${speaker} ${originalLabel} ${segment.text}`
     .toLocaleLowerCase()
     .includes(normalizedQuery)
 }
@@ -365,10 +399,18 @@ export function TranscriptWorkspace({
   )
 
   const { t, locale } = useTranslations()
+  const speakerName = (speaker: TranscriptionSpeaker | undefined) =>
+    speakerDisplayName(speaker, t)
 
-  const [transcriptMode, setTranscriptMode] =
-    useState<TranscriptMode>("verbatim")
+  const [transcriptMode, setTranscriptMode] = useState<TranscriptMode>(() =>
+    snapshot.segments.some((segment) => segment.editedText != null)
+      ? "edited"
+      : snapshot.segments.some((segment) => segment.polishedText?.trim())
+        ? "polished"
+        : "verbatim"
+  )
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("review")
+  const [summaryRecordingOpen, setSummaryRecordingOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -417,6 +459,447 @@ export function TranscriptWorkspace({
   )
   const [exportFormat, setExportFormat] = useState("pdf")
   const [includeInsightsInExport, setIncludeInsightsInExport] = useState(true)
+  const [insightsOnlyExport, setInsightsOnlyExport] = useState(false)
+  const [summaryExportOptions, setSummaryExportOptions] = useState({
+    summary: true,
+    chapters: true,
+    topics: true,
+    actionItems: true,
+    boldSpeakers: false,
+  })
+  const [summaryInstructions, setSummaryInstructions] = useState(
+    snapshot.insights?.customization?.instructions ?? ""
+  )
+  const [standardName, setStandardName] = useState("")
+  const [savedStandard, setSavedStandard] = useState<SummaryStandard | null>(
+    null
+  )
+  const [standardLoading, setStandardLoading] = useState(true)
+  const [standardSaving, setStandardSaving] = useState(false)
+  const [standardMessage, setStandardMessage] = useState("")
+  const [standardError, setStandardError] = useState("")
+  const [summarySetupOpen, setSummarySetupOpen] = useState(false)
+  const [summaryTemplates, setSummaryTemplates] = useState<SummaryTemplate[]>(
+    []
+  )
+  const [summaryTemplateId, setSummaryTemplateId] = useState(
+    snapshot.insights?.customization?.templateId ?? ""
+  )
+  const [summaryExclusionRules, setSummaryExclusionRules] = useState(
+    snapshot.insights?.customization?.exclusionRules ?? ""
+  )
+  const [restoredSummaryIds, setRestoredSummaryIds] = useState<string[]>(
+    snapshot.insights?.customization?.restoredSegmentIds ?? []
+  )
+  const [templateDraft, setTemplateDraft] =
+    useState<SummaryTemplateDraft | null>(null)
+  const [templateSaving, setTemplateSaving] = useState(false)
+  const [templateError, setTemplateError] = useState("")
+  const [templateSuggestion, setTemplateSuggestion] = useState(false)
+  const [ruleProposing, setRuleProposing] = useState(false)
+
+  const [sourceSearch, setSourceSearch] = useState("")
+  const [sourceFrom, setSourceFrom] = useState("")
+  const [sourceTo, setSourceTo] = useState("")
+  const [sourceSpeaker, setSourceSpeaker] = useState("all")
+  const sourceFromMs = summaryTimeOffset(sourceFrom)
+  const sourceToMs = summaryTimeOffset(sourceTo)
+  const sourceTimeRangeValid =
+    sourceFromMs !== null &&
+    sourceToMs !== null &&
+    (sourceFromMs === undefined ||
+      sourceToMs === undefined ||
+      sourceFromMs <= sourceToMs)
+  const matchingSourceSegments = snapshot.segments.filter(
+    (segment) =>
+      (segment.editedText ?? segment.polishedText ?? segment.text)
+        .toLocaleLowerCase()
+        .includes(sourceSearch.toLocaleLowerCase()) &&
+      (sourceSpeaker === "all" || segment.speakerId === sourceSpeaker) &&
+      sourceTimeRangeValid &&
+      (sourceFromMs === undefined ||
+        (segment.endOffsetMs || segment.startOffsetMs) >=
+          (sourceFromMs ?? 0)) &&
+      (sourceToMs === undefined || segment.startOffsetMs <= (sourceToMs ?? 0))
+  )
+
+  const sourcePassages = groupTranscriptionSegments(
+    matchingSourceSegments.map((segment) => ({
+      ...segment,
+      text: segment.editedText ?? segment.polishedText ?? segment.text,
+    })),
+    4000,
+    1200,
+    90000
+  )
+
+  const [sourceSelection, setSourceSelection] = useState<{
+    sessionId: string
+    ids: string[]
+  }>({
+    sessionId: snapshot.session.id,
+    ids: snapshot.insights?.customization?.excludedSegmentIds ?? [],
+  })
+  const sourceSegmentIds = new Set(
+    snapshot.segments.map((segment) => segment.id)
+  )
+  const excludedSourceIds =
+    sourceSelection.sessionId === snapshot.session.id
+      ? sourceSelection.ids.filter((id) => sourceSegmentIds.has(id))
+      : (snapshot.insights?.customization?.excludedSegmentIds ?? []).filter(
+          (id) => sourceSegmentIds.has(id)
+        )
+  const setExcludedSourceIds = (ids: string[]) => {
+    setSourceSelection({ sessionId: snapshot.session.id, ids })
+    setRestoredSummaryIds((current) =>
+      current.filter((id) => !ids.includes(id))
+    )
+  }
+  const [exportDraft, setExportDraft] = useState<SummaryExportDraft | null>(
+    null
+  )
+  const applySummaryExportPreferences = useCallback(
+    (standard: SummaryStandard) => {
+      setExportFormat(standard.format)
+      setSummaryExportOptions({
+        summary: standard.summary,
+        chapters: standard.chapters,
+        topics: standard.topics,
+        actionItems: standard.actionItems,
+        boldSpeakers: standard.boldSpeakers,
+      })
+    },
+    []
+  )
+  const applySummaryStandard = useCallback(
+    (standard: SummaryStandard) => {
+      setStandardName(standard.name)
+      setSummaryInstructions(standard.instructions)
+      applySummaryExportPreferences(standard)
+    },
+    [applySummaryExportPreferences]
+  )
+  const initialSummaryCustomization = useRef(
+    snapshot.insights && snapshot.insights.status !== "idle"
+      ? snapshot.insights.customization
+      : undefined
+  )
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      api.get<{ standard: SummaryStandard | null }>(
+        "/api/v1/profile/transcription-summary-standard"
+      ),
+      api.get<{ templates: SummaryTemplate[]; selectedTemplateId: string }>(
+        "/api/v1/transcription/summary-templates"
+      ),
+    ])
+      .then(([{ standard }, catalog]) => {
+        if (!active) return
+        setSavedStandard(standard)
+        setSummaryTemplates(catalog.templates)
+        const defaults = resolveSummaryTemplateDefaults(
+          catalog.templates,
+          catalog.selectedTemplateId,
+          standard,
+          initialSummaryCustomization.current
+        )
+        setSummaryTemplateId(defaults.template?.id ?? "")
+        applySummaryStandard({
+          ...defaults.exportPreferences,
+          name: defaults.template?.name ?? standard?.name ?? "",
+          instructions: defaults.instructions,
+        })
+        setSummaryExclusionRules(defaults.exclusionRules)
+      })
+      .catch((error: unknown) => {
+        if (active)
+          setStandardError(
+            error instanceof Error
+              ? error.message
+              : "Could not load summary standard."
+          )
+      })
+      .finally(() => {
+        if (active) setStandardLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [applySummaryStandard])
+  const saveSummaryStandard = async (
+    instructions = summaryInstructions,
+    writingStyleOnly = false
+  ) => {
+    setStandardSaving(true)
+    setStandardMessage("")
+    setStandardError("")
+    try {
+      const { standard } = await api.put<{ standard: SummaryStandard }>(
+        "/api/v1/profile/transcription-summary-standard",
+        writingStyleOnly
+          ? { ...(savedStandard ?? defaultSummaryStandard), instructions }
+          : {
+              ...summaryExportOptions,
+              name: standardName,
+              instructions,
+              format: exportFormat,
+            }
+      )
+      setSavedStandard(standard)
+      setStandardMessage(
+        "Your standard will apply to future summaries and exports across devices."
+      )
+      return true
+    } catch (error) {
+      setStandardError(
+        error instanceof Error
+          ? error.message
+          : "Could not save summary standard."
+      )
+      return false
+    } finally {
+      setStandardSaving(false)
+    }
+  }
+  const chooseSummaryTemplate = (id: string) => {
+    setSummaryTemplateId(id)
+    setTemplateError("")
+    const template = summaryTemplates.find((item) => item.id === id)
+    if (template) {
+      applySummaryStandard(template)
+      setSummaryExclusionRules(template.exclusionRules)
+    } else {
+      setSummaryExclusionRules("")
+      setSummaryInstructions(savedStandard?.instructions ?? "")
+    }
+    void api
+      .put("/api/v1/transcription/summary-template-choice", { templateId: id })
+      .catch((error: unknown) =>
+        setTemplateError(
+          error instanceof Error
+            ? error.message
+            : "Could not remember the selected template."
+        )
+      )
+  }
+  const saveTeamSummaryTemplate = async () => {
+    if (!templateDraft || templateSaving) return
+    setTemplateSaving(true)
+    setTemplateError("")
+    try {
+      const result = templateDraft.id
+        ? await api.put<{ template: SummaryTemplate }>(
+            `/api/v1/transcription/summary-templates/${templateDraft.id}`,
+            templateDraft
+          )
+        : await api.post<{ template: SummaryTemplate }>(
+            "/api/v1/transcription/summary-templates",
+            templateDraft
+          )
+      setSummaryTemplates((current) =>
+        [
+          ...current.filter((item) => item.id !== result.template.id),
+          result.template,
+        ].sort((a, b) => a.name.localeCompare(b.name))
+      )
+      setSummaryTemplateId(result.template.id)
+      applySummaryStandard(result.template)
+      setSummaryExclusionRules(result.template.exclusionRules)
+      try {
+        await api.put("/api/v1/transcription/summary-template-choice", {
+          templateId: result.template.id,
+        })
+      } catch (error) {
+        // The shared save already succeeded. A failed personal choice must not create another template on retry.
+        onError(
+          error instanceof Error
+            ? error.message
+            : t("Could not remember the selected template.")
+        )
+      }
+      setTemplateDraft(null)
+      setTemplateSuggestion(false)
+    } catch (error) {
+      setTemplateError(
+        error instanceof Error
+          ? error.message
+          : "Could not save the team template."
+      )
+    } finally {
+      setTemplateSaving(false)
+    }
+  }
+  const deleteTeamSummaryTemplate = async () => {
+    if (!templateDraft?.id || templateSaving) return
+    setTemplateSaving(true)
+    setTemplateError("")
+    try {
+      await api.delete(
+        `/api/v1/transcription/summary-templates/${templateDraft.id}`
+      )
+      setSummaryTemplates((current) =>
+        current.filter((item) => item.id !== templateDraft.id)
+      )
+      if (summaryTemplateId === templateDraft.id) {
+        setSummaryTemplateId("")
+        setSummaryExclusionRules("")
+      }
+      setTemplateDraft(null)
+    } catch (error) {
+      setTemplateError(
+        error instanceof Error
+          ? error.message
+          : "Could not delete the team template."
+      )
+    } finally {
+      setTemplateSaving(false)
+    }
+  }
+  const proposeSummaryRule = async (text: string) => {
+    if (ruleProposing) return
+    setRuleProposing(true)
+    setTemplateError("")
+    try {
+      const { rule } = await api.post<{ rule: string }>(
+        `/api/v1/transcription/sessions/${snapshot.session.id}/summary-rule-proposal`,
+        { text, language: locale },
+        { timeoutMs: 150000 }
+      )
+      const original = summaryTemplates.find(
+        (item) =>
+          item.id ===
+          (snapshot.insights?.customization?.templateId ?? summaryTemplateId)
+      )
+      const base = original ?? {
+        ...defaultSummaryStandard,
+        ...summaryExportOptions,
+        format: exportFormat,
+        name: t("My team's summary"),
+        instructions: summaryInstructions,
+        exclusionRules: summaryExclusionRules,
+      }
+      setTemplateDraft({
+        ...base,
+        id: original?.canEdit ? original.id : undefined,
+        revision: original?.canEdit ? original.updatedAt : undefined,
+        name:
+          original && !original.canEdit
+            ? t("{value0} (copy)", { value0: original.name })
+            : base.name,
+        exclusionRules: [base.exclusionRules, rule]
+          .filter(Boolean)
+          .join("\n\n"),
+      })
+      setTemplateSuggestion(true)
+    } catch (error) {
+      onError(
+        error instanceof Error ? error.message : t("Could not suggest a rule.")
+      )
+    } finally {
+      setRuleProposing(false)
+    }
+  }
+  const summaryStandardControls = (
+    <FieldGroup>
+      <Field>
+        <FieldLabel>{t("Language")}</FieldLabel>
+        <Select
+          disabled={
+            insightsGenerating || snapshot.insights?.status === "processing"
+          }
+          items={insightLanguageOptions}
+          value={insightLanguage}
+          onValueChange={(value) => setInsightLanguage(value ?? "auto")}
+        >
+          <SelectTrigger aria-label={t("AI insight output language")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {insightLanguageOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="summary-exclusion-rules">
+          {t("What should be left out?")}
+        </FieldLabel>
+        <Textarea
+          id="summary-exclusion-rules"
+          maxLength={6000}
+          value={summaryExclusionRules}
+          onChange={(event) => setSummaryExclusionRules(event.target.value)}
+          placeholder={t(
+            "For example: Leave out purely organizational openings and closings. Keep substantive statements, including from the chair."
+          )}
+        />
+      </Field>
+      {templateError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {t(templateError)}
+        </p>
+      ) : null}
+
+      <Field>
+        <FieldLabel htmlFor="summary-writing-style">
+          {t("How should your summary read?")}
+        </FieldLabel>
+        <Textarea
+          id="summary-writing-style"
+          maxLength={4000}
+          value={summaryInstructions}
+          onChange={(event) => setSummaryInstructions(event.target.value)}
+          placeholder={t(
+            "For example: keep it brief, focus on decisions, and leave out small talk."
+          )}
+        />
+      </Field>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={standardLoading || standardSaving}
+          onClick={() => void saveSummaryStandard(summaryInstructions, true)}
+        >
+          {t(standardSaving ? "Saving…" : "Remember writing style")}
+        </Button>
+        {savedStandard ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSummaryInstructions(savedStandard.instructions)}
+          >
+            {t("Use saved style")}
+          </Button>
+        ) : null}
+      </div>
+      {standardMessage ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          {t("Saved for your next summaries.")}
+        </p>
+      ) : null}
+      {standardError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {t(standardError)}
+        </p>
+      ) : null}
+    </FieldGroup>
+  )
+  const summaryExportQuery = () =>
+    new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(summaryExportOptions).map(([key, value]) => [
+          key,
+          String(value),
+        ])
+      )
+    )
   const [actionItemsCopied, setActionItemsCopied] = useState(false)
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false)
   const [workflowChoices, setWorkflowChoices] = useState<AgentWorkflow[]>([])
@@ -550,8 +1033,8 @@ export function TranscriptWorkspace({
   const polishedAvailable = snapshot.segments.some((segment) =>
     segment.polishedText?.trim()
   )
-  const editedAvailable = snapshot.segments.some((segment) =>
-    segment.editedText?.trim()
+  const editedAvailable = snapshot.segments.some(
+    (segment) => segment.editedText != null
   )
   const filteredTranscript = useMemo(
     () =>
@@ -565,7 +1048,8 @@ export function TranscriptWorkspace({
               transcriptQuery,
               speakerFilter,
               speakerById,
-              qualityOnly
+              qualityOnly,
+              t
             )
           )
         })
@@ -577,6 +1061,7 @@ export function TranscriptWorkspace({
       speakerFilter,
       transcript,
       transcriptQuery,
+      t,
     ]
   )
   const filteredSegments = useMemo(
@@ -587,10 +1072,18 @@ export function TranscriptWorkspace({
           transcriptQuery,
           speakerFilter,
           speakerById,
-          qualityOnly
+          qualityOnly,
+          t
         )
       ),
-    [displaySegments, qualityOnly, speakerById, speakerFilter, transcriptQuery]
+    [
+      displaySegments,
+      qualityOnly,
+      speakerById,
+      speakerFilter,
+      transcriptQuery,
+      t,
+    ]
   )
   const editParagraphs = useMemo(
     () =>
@@ -643,6 +1136,8 @@ export function TranscriptWorkspace({
     actionItems: [],
     updatedAt: "",
   }
+  const summaryLanguage =
+    insights.language === "auto" ? snapshot.session.language : insights.language
   const selectedWorkflow = workflowChoices.find(
     (item) => item.id === workflowId
   )
@@ -1198,7 +1693,16 @@ export function TranscriptWorkspace({
       // outlives the gateway timeout.
       const result = await api.post<{ insights: TranscriptionInsights }>(
         `/api/v1/transcription/sessions/${snapshot.session.id}/insights`,
-        { language: insightLanguage }
+        {
+          language: insightLanguage,
+          instructions: summaryInstructions,
+          excludedSegmentIds: excludedSourceIds,
+          templateId: summaryTemplateId,
+          exclusionRules: summaryExclusionRules,
+          restoredSegmentIds: restoredSummaryIds.filter((id) =>
+            sourceSegmentIds.has(id)
+          ),
+        }
       )
       const finished = await waitForInsights(result.insights)
       updateSnapshot((current) => ({ ...current, insights: finished }))
@@ -1332,41 +1836,67 @@ export function TranscriptWorkspace({
     }
   }
 
-  const exportInsights = async (
-    format: "pdf" | "docx" | "md" | "txt" | "json"
-  ) => {
-    if (!insightsReady) return
-    try {
-      const blob = await api.getBlob(
-        `/api/v1/transcription/sessions/${snapshot.session.id}/export/${format}?insightsOnly=true`
-      )
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `${snapshot.session.title || "transcript"}-insights.${format}`
-      link.click()
-      URL.revokeObjectURL(url)
-      onError("")
-    } catch (caught) {
-      onError(
-        caught instanceof Error ? caught.message : t("Insights export failed.")
+  const restoreSummaryPassages = (ids: string[]) => {
+    const customization = snapshot.insights?.customization
+    setSourceSelection({
+      sessionId: snapshot.session.id,
+      ids: excludedSourceIds.filter((id) => !ids.includes(id)),
+    })
+    setRestoredSummaryIds([...new Set([...restoredSummaryIds, ...ids])])
+    if (customization) {
+      setSummaryInstructions(customization.instructions)
+      setSummaryExclusionRules(customization.exclusionRules ?? "")
+      setSummaryTemplateId(
+        summaryTemplates.some((item) => item.id === customization.templateId)
+          ? (customization.templateId ?? "")
+          : ""
       )
     }
+    setExportOpen(false)
+    setSummarySetupOpen(true)
   }
 
-  const exportTranscript = async () => {
+  const exportHasSummaryContent =
+    (summaryExportOptions.summary &&
+      (
+        exportDraft?.summaryParagraphs ?? [snapshot.insights?.summary ?? ""]
+      ).some((text) => text.trim())) ||
+    (summaryExportOptions.chapters &&
+      (exportDraft?.chapterIndices ?? snapshot.insights?.chapters ?? [])
+        .length > 0) ||
+    (summaryExportOptions.topics &&
+      (exportDraft?.topicIndices ?? snapshot.insights?.topics ?? []).length >
+        0) ||
+    (summaryExportOptions.actionItems &&
+      (exportDraft?.actionItemIndices ?? snapshot.insights?.actionItems ?? [])
+        .length > 0)
+
+  const exportTranscript = async (remember = false) => {
     if (exporting) return
     setExporting(true)
     setExportError("")
     try {
+      if (
+        remember &&
+        !(await saveSummaryStandard(
+          savedStandard?.instructions ?? summaryInstructions
+        ))
+      )
+        return
       const includeInsights =
         exportSupportsInsights && includeInsightsInExport && insightsReady
-      const exportUrl = `/api/v1/transcription/sessions/${snapshot.session.id}/export/${exportFormat}${includeInsights ? "?includeInsights=true" : ""}`
-      const blob = await api.getBlob(exportUrl)
+      const query = summaryExportQuery()
+      if (insightsOnlyExport) query.set("insightsOnly", "true")
+      else if (includeInsights) query.set("includeInsights", "true")
+      const exportUrl = `/api/v1/transcription/sessions/${snapshot.session.id}/export/${exportFormat}?${query}`
+      const blob =
+        exportDraft && (insightsOnlyExport || includeInsights)
+          ? await api.postBlob(exportUrl, exportDraft)
+          : await api.getBlob(exportUrl)
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
-      link.download = `${snapshot.session.title || "transcript"}.${exportFormat === "markdown" ? "md" : exportFormat}`
+      link.download = `${snapshot.session.title || "transcript"}${insightsOnlyExport ? "-summary" : ""}.${exportFormat === "markdown" ? "md" : exportFormat}`
       link.click()
       URL.revokeObjectURL(url)
       setExportOpen(false)
@@ -1385,13 +1915,17 @@ export function TranscriptWorkspace({
   const workspaceGridClass = cn(
     "grid gap-4",
     workspaceView === "review" ? "lg:items-stretch" : "lg:items-start",
-    workspaceView === "details"
+    workspaceView === "details" ||
+      (workspaceView === "insights" && !summaryRecordingOpen) ||
+      (mediaKind === "none" &&
+        (workspaceView === "speakers" ||
+          (workspaceView === "review" && annotations.length === 0)))
       ? "lg:grid-cols-1"
       : "lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1.6fr)_minmax(19rem,0.7fr)]"
   )
 
   return (
-    <div className="min-w-0 space-y-3">
+    <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <Tabs
           aria-label={t("Transcript workspace sections")}
@@ -1400,8 +1934,11 @@ export function TranscriptWorkspace({
               value === "review" ||
               value === "insights" ||
               value === "speakers"
-            )
+            ) {
+              if (value === "insights" && mediaPlaying)
+                setSummaryRecordingOpen(true)
               setWorkspaceView(value)
+            }
           }}
           value={workspaceView !== "details" ? workspaceView : null}
         >
@@ -1423,14 +1960,58 @@ export function TranscriptWorkspace({
             ) : (
               <MessageSquarePlus data-icon="inline-start" />
             )}
-            {chatStarting ? t("Starting chat…") : t("Chat")}
+            {chatStarting ? t("Starting chat…") : t("Ask about this")}
           </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
-              <MoreHorizontal data-icon="inline-start" /> {t("More")}
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  aria-label={t("More actions")}
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              <MoreHorizontal />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuGroup>
+                {workspaceView === "insights" ? (
+                  <DropdownMenuItem
+                    disabled={
+                      standardLoading ||
+                      insightsProcessing ||
+                      !snapshot.segments.length
+                    }
+                    onClick={() => setSummarySetupOpen(true)}
+                  >
+                    <Pencil data-icon="inline-start" />
+                    {t(insightsReady ? "Adjust summary" : "Generate summary")}
+                  </DropdownMenuItem>
+                ) : null}
+                {insightsReady ? (
+                  <DropdownMenuItem onClick={() => void openWorkflowDialog()}>
+                    <GitBranch data-icon="inline-start" />
+                    {t("Use in workflow")}
+                  </DropdownMenuItem>
+                ) : null}
+                {workspaceView === "insights" && mediaKind !== "none" ? (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (summaryRecordingOpen)
+                        (mediaKind === "audio"
+                          ? audioRef.current
+                          : videoRef.current
+                        )?.pause()
+                      setSummaryRecordingOpen((current) => !current)
+                    }}
+                  >
+                    <Play data-icon="inline-start" />
+                    {t(
+                      summaryRecordingOpen ? "Hide recording" : "Show recording"
+                    )}
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem onClick={() => setWorkspaceView("details")}>
                   <Clock3 data-icon="inline-start" /> {t("Transcript details")}
                 </DropdownMenuItem>
@@ -1438,109 +2019,385 @@ export function TranscriptWorkspace({
             </DropdownMenuContent>
           </DropdownMenu>
           <Button
-            disabled={!snapshot.segments.length}
+            disabled={
+              !snapshot.segments.length ||
+              (workspaceView === "insights" &&
+                (!insightsReady || standardLoading))
+            }
             onClick={() => {
               setExportError("")
+              const summaryOnly = workspaceView === "insights"
+              setInsightsOnlyExport(summaryOnly)
+              if (
+                summaryOnly &&
+                !["pdf", "docx", "md", "txt", "json"].includes(exportFormat)
+              )
+                setExportFormat(savedStandard?.format ?? "pdf")
+              setExportDraft(null)
               setExportOpen(true)
             }}
             size="sm"
           >
-            <Download data-icon="inline-start" /> {t("Export")}
+            <Download data-icon="inline-start" /> {t("Download")}
           </Button>
         </div>
       </div>
-      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t("Export transcript")}</DialogTitle>
+      <Dialog open={summarySetupOpen} onOpenChange={setSummarySetupOpen}>
+        <DialogContent className="flex max-h-[85dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl sm:p-0">
+          <DialogHeader className="shrink-0 px-5 pt-5 pr-12 pb-4 sm:px-6 sm:pr-12">
+            <DialogTitle>{t("Create your summary")}</DialogTitle>
             <DialogDescription>
-              {t("Choose a file format for your transcript.")}
+              {t("Choose a template. We will take care of the rest.")}
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel>{t("File format")}</FieldLabel>
-              <Select
-                items={[
-                  { value: "pdf", label: "PDF" },
-                  { value: "docx", label: "Word (.docx)" },
-                  { value: "md", label: "Markdown" },
-                  { value: "txt", label: "Plain text" },
-                  { value: "srt", label: "Subtitles (.srt)" },
-                  { value: "vtt", label: "WebVTT (.vtt)" },
-                  { value: "json", label: "JSON" },
-                ]}
-                value={exportFormat}
-                onValueChange={(value) => setExportFormat(value ?? "pdf")}
-              >
-                <SelectTrigger
-                  aria-label={t("Export format")}
-                  className="w-full"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="pdf">PDF</SelectItem>
-                    <SelectItem value="docx">Word (.docx)</SelectItem>
-                    <SelectItem value="md">Markdown</SelectItem>
-                    <SelectItem value="txt">{t("Plain text")}</SelectItem>
-                    <SelectItem value="srt">{t("Subtitles (.srt)")}</SelectItem>
-                    <SelectItem value="vtt">WebVTT (.vtt)</SelectItem>
-                    <SelectItem value="json">JSON</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-            {exportSupportsInsights ? (
-              <Field orientation="horizontal">
-                <Switch
-                  id="export-insights"
-                  checked={includeInsightsInExport}
-                  disabled={!insightsReady}
-                  onCheckedChange={setIncludeInsightsInExport}
-                />
-                <FieldLabel htmlFor="export-insights">
-                  {t("Include AI summary")}
-                </FieldLabel>
-              </Field>
-            ) : exportFormat === "json" ? (
-              <p className="text-sm text-muted-foreground">
-                {t("Includes AI insights when available.")}
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 pb-4 sm:px-6">
+            <SummaryTemplatePicker
+              templates={summaryTemplates}
+              selectedId={summaryTemplateId}
+              onSelect={chooseSummaryTemplate}
+              loading={standardLoading}
+              onEdit={(draft) => {
+                setTemplateSuggestion(false)
+                setTemplateError("")
+                setTemplateDraft(draft)
+              }}
+            />
+
+            <details className="rounded-lg bg-muted p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t("Adjust for this summary")}
+              </summary>
+              <div className="mt-4">{summaryStandardControls}</div>
+            </details>
+            {restoredSummaryIds.length ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                {t(
+                  "{value0} passages will be included even if a template rule matches. Create the summary again to apply this.",
+                  { value0: restoredSummaryIds.length }
+                )}
               </p>
             ) : null}
-            {exportSupportsInsights && !insightsReady ? (
-              <p className="text-sm text-muted-foreground">
-                {t("Generate a summary first to include it in your export.")}
+            <details className="rounded-lg bg-muted p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t("Choose specific passages")}
+                {excludedSourceIds.length ? (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {t("{value0} left out", {
+                      value0: excludedSourceIds.length,
+                    })}
+                  </span>
+                ) : null}
+              </summary>
+              <FieldGroup className="mt-4">
+                <p className="text-sm text-muted-foreground">
+                  {t(
+                    "The whole conversation is used by default. Only change this if you want to leave out a specific passage yourself."
+                  )}
+                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    {t("Use the checked passages")}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setExcludedSourceIds([])}
+                    >
+                      {t("Include all")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        setExcludedSourceIds(
+                          snapshot.segments.map((segment) => segment.id)
+                        )
+                      }
+                    >
+                      {t("Exclude all")}
+                    </Button>
+                  </div>
+                </div>
+                <details className="rounded-lg bg-muted p-3">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    {t("Find specific passages")}
+                  </summary>
+                  <div className="mt-3 flex flex-col gap-3">
+                    <Input
+                      aria-label={t("Search the conversation")}
+                      placeholder={t("Search the conversation")}
+                      value={sourceSearch}
+                      onChange={(event) => setSourceSearch(event.target.value)}
+                    />
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <Field>
+                        <FieldLabel htmlFor="summary-source-from">
+                          {t("From")}
+                        </FieldLabel>
+                        <Input
+                          id="summary-source-from"
+                          placeholder="0:00"
+                          aria-invalid={sourceFromMs === null}
+                          value={sourceFrom}
+                          onChange={(event) =>
+                            setSourceFrom(event.target.value)
+                          }
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="summary-source-to">
+                          {t("To")}
+                        </FieldLabel>
+                        <Input
+                          id="summary-source-to"
+                          placeholder="12:30"
+                          aria-invalid={sourceToMs === null}
+                          value={sourceTo}
+                          onChange={(event) => setSourceTo(event.target.value)}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel>{t("Speaker")}</FieldLabel>
+                        <Select
+                          value={sourceSpeaker}
+                          onValueChange={(value) =>
+                            setSourceSpeaker(value ?? "all")
+                          }
+                          items={[
+                            { value: "all", label: t("All speakers") },
+                            ...snapshot.speakers.map((speaker) => ({
+                              value: speaker.id,
+                              label: speaker.displayName || speaker.label,
+                            })),
+                          ]}
+                        >
+                          <SelectTrigger aria-label={t("Speaker")}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectItem value="all">
+                                {t("All speakers")}
+                              </SelectItem>
+                              {snapshot.speakers.map((speaker) => (
+                                <SelectItem key={speaker.id} value={speaker.id}>
+                                  {speaker.displayName || speaker.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={!matchingSourceSegments.length}
+                        onClick={() =>
+                          setExcludedSourceIds([
+                            ...new Set([
+                              ...excludedSourceIds,
+                              ...matchingSourceSegments.map(
+                                (segment) => segment.id
+                              ),
+                            ]),
+                          ])
+                        }
+                      >
+                        {t("Exclude matching passages")} (
+                        {matchingSourceSegments.length})
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!matchingSourceSegments.length}
+                        onClick={() => {
+                          const matching = new Set(
+                            matchingSourceSegments.map((segment) => segment.id)
+                          )
+                          setExcludedSourceIds(
+                            excludedSourceIds.filter((id) => !matching.has(id))
+                          )
+                        }}
+                      >
+                        {t("Include matching passages")}
+                      </Button>
+                      {selectedSegmentIds.length ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            setExcludedSourceIds([
+                              ...new Set([
+                                ...excludedSourceIds,
+                                ...selectedSegmentIds,
+                              ]),
+                            ])
+                          }
+                        >
+                          {t("Exclude selected transcript lines")} (
+                          {selectedSegmentIds.length})
+                        </Button>
+                      ) : null}
+                    </div>
+                    {!sourceTimeRangeValid ? (
+                      <p role="status" className="text-sm text-destructive">
+                        {t(
+                          "Enter a time like 2:30, with the end after the start."
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
+                </details>
+                <div className="flex max-h-80 flex-col gap-3 overflow-y-auto rounded-lg bg-muted p-3">
+                  {sourcePassages.map((passage) => {
+                    const includedCount = passage.segmentIds.filter(
+                      (id) => !excludedSourceIds.includes(id)
+                    ).length
+                    const speaker = snapshot.speakers.find(
+                      (item) => item.id === passage.speakerKey
+                    )
+                    const rawName = speaker?.displayName || speaker?.label || ""
+                    const genericSpeaker = /^SPEAKER[_ -]?(\d+)$/i.exec(rawName)
+                    const name = genericSpeaker
+                      ? t("Speaker {value0}", {
+                          value0: Number(genericSpeaker[1]),
+                        })
+                      : rawName || t("Speaker")
+                    return (
+                      <Field key={passage.id} orientation="horizontal">
+                        <Checkbox
+                          id={`summary-source-${passage.id}`}
+                          checked={includedCount === passage.segmentIds.length}
+                          indeterminate={
+                            includedCount > 0 &&
+                            includedCount < passage.segmentIds.length
+                          }
+                          onCheckedChange={(checked) => {
+                            const groupIds = new Set(passage.segmentIds)
+                            setExcludedSourceIds(
+                              checked
+                                ? excludedSourceIds.filter(
+                                    (id) => !groupIds.has(id)
+                                  )
+                                : [
+                                    ...new Set([
+                                      ...excludedSourceIds,
+                                      ...passage.segmentIds,
+                                    ]),
+                                  ]
+                            )
+                          }}
+                        />
+                        <FieldLabel htmlFor={`summary-source-${passage.id}`}>
+                          <span className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">
+                              {formatVideoDuration(passage.startOffsetMs)} ·{" "}
+                              {name}
+                            </span>
+                            <span className="text-sm leading-6">
+                              {passage.text}
+                            </span>
+                          </span>
+                        </FieldLabel>
+                      </Field>
+                    )
+                  })}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {t(
+                    "Generation replaces the shared summary, chapters, topics, and action items. The original transcript is preserved."
+                  )}
+                </p>
+              </FieldGroup>
+            </details>
+            {snapshot.segments.length > 0 &&
+            excludedSourceIds.length >= snapshot.segments.length ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                {t("Keep at least one passage to create a summary.")}
               </p>
             ) : null}
-          </FieldGroup>
-          {exportError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {t(exportError)}
-            </p>
-          ) : null}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setExportOpen(false)}>
+            {templateError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t(templateError)}
+              </p>
+            ) : null}
+            {standardError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t(standardError)}
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter className="shrink-0 px-5 py-4 sm:px-6">
+            <Button variant="ghost" onClick={() => setSummarySetupOpen(false)}>
               {t("Cancel")}
             </Button>
             <Button
-              disabled={exporting}
-              onClick={() => void exportTranscript()}
+              disabled={
+                standardLoading ||
+                insightsProcessing ||
+                excludedSourceIds.length >= snapshot.segments.length
+              }
+              onClick={() => {
+                setSummarySetupOpen(false)
+                void generateInsights()
+              }}
             >
-              {exporting ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
-              ) : (
-                <Download data-icon="inline-start" />
-              )}
-              {exporting ? t("Preparing…") : t("Download")}
+              {t("Generate summary")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <SummaryTemplateEditor
+        key={templateDraft?.id ?? "new"}
+        draft={templateDraft}
+        onChange={setTemplateDraft}
+        onClose={() => {
+          setTemplateDraft(null)
+          setTemplateSuggestion(false)
+          setTemplateError("")
+        }}
+        onSave={() => void saveTeamSummaryTemplate()}
+        onDelete={() => void deleteTeamSummaryTemplate()}
+        saving={templateSaving}
+        error={templateError}
+        suggested={templateSuggestion}
+      />
+      <TranscriptionExportDialog
+        key={String(exportOpen)}
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        summaryOnly={insightsOnlyExport}
+        title={snapshot.session.title}
+        speakerNames={snapshot.speakers
+          .flatMap((speaker) => [speaker.displayName, speaker.label])
+          .filter((name): name is string => Boolean(name))}
+        insights={insights}
+        format={exportFormat}
+        onFormatChange={setExportFormat}
+        options={summaryExportOptions}
+        onOptionsChange={setSummaryExportOptions}
+        includeSummary={includeInsightsInExport}
+        onIncludeSummaryChange={setIncludeInsightsInExport}
+        omissions={insights.customization?.automaticOmissions ?? []}
+        restoredIds={restoredSummaryIds}
+        onRestorePassages={restoreSummaryPassages}
+        onSuggestRule={(text) => void proposeSummaryRule(text)}
+        ruleProposing={ruleProposing}
+        onDraftChange={setExportDraft}
+        onDownload={(remember) => void exportTranscript(remember)}
+        exporting={exporting}
+        loading={standardLoading || standardSaving}
+        hasContent={exportHasSummaryContent}
+        error={exportError}
+        preferencesError={standardError}
+        hasSavedPreferences={Boolean(savedStandard)}
+        onApplyPreferences={() =>
+          applySummaryExportPreferences(savedStandard ?? defaultSummaryStandard)
+        }
+      />
 
       <div className={workspaceGridClass}>
         <Card
@@ -1549,27 +2406,20 @@ export function TranscriptWorkspace({
             workspaceView !== "review" && "hidden"
           )}
         >
-          <CardHeader className="shrink-0 gap-3 border-b border-border px-4 py-4 sm:px-5">
+          <CardHeader className="shrink-0 gap-3 px-4 py-4 sm:px-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <FileText aria-hidden="true" className="size-4 shrink-0" />
                   {t("Transcript")}
                 </CardTitle>
-                <CardDescription>
-                  {transcript.length} {t("messages ·")}{" "}
-                  {snapshot.segments.length} {t("segments")}
-                  {preview.length > 0
-                    ? t(" · {value0} live preview lines", {
-                        value0: preview.length,
-                      })
-                    : ""}
-                  {transcriptQuery
-                    ? t(" · {value0} matches", {
-                        value0: filteredTranscript.length,
-                      })
-                    : ""}
-                </CardDescription>
+                {transcriptQuery ? (
+                  <CardDescription>
+                    {t("{value0} matches", {
+                      value0: filteredTranscript.length,
+                    })}
+                  </CardDescription>
+                ) : null}
                 {mediaPlaying && !hasActiveFilter ? (
                   <span className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-primary">
                     <span
@@ -1581,44 +2431,6 @@ export function TranscriptWorkspace({
                 ) : null}
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <Select
-                  items={[
-                    { value: "verbatim", label: "Original" },
-                    { value: "polished", label: "Polished" },
-                    { value: "edited", label: "Edited" },
-                  ]}
-                  value={transcriptMode}
-                  disabled={editorOpen}
-                  onValueChange={(value) => {
-                    if (
-                      value === "verbatim" ||
-                      value === "polished" ||
-                      value === "edited"
-                    )
-                      setTranscriptMode(value)
-                  }}
-                >
-                  <SelectTrigger aria-label={t("Transcript version")} size="sm">
-                    <span className="text-muted-foreground">
-                      {t("Version:")}
-                    </span>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="verbatim">{t("Original")}</SelectItem>
-                      <SelectItem
-                        value="polished"
-                        disabled={!polishedAvailable}
-                      >
-                        {t("Polished")}
-                      </SelectItem>
-                      <SelectItem value="edited" disabled={!editedAvailable}>
-                        {t("Edited")}
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
                 <Button
                   disabled={!snapshot.segments.length}
                   onClick={() => {
@@ -1651,6 +2463,37 @@ export function TranscriptWorkspace({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-52">
                     <DropdownMenuGroup>
+                      <DropdownMenuLabel>{t("Text version")}</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={transcriptMode}
+                        onValueChange={(value) => {
+                          if (
+                            value === "verbatim" ||
+                            value === "polished" ||
+                            value === "edited"
+                          )
+                            setTranscriptMode(value)
+                        }}
+                      >
+                        <DropdownMenuRadioItem
+                          value="verbatim"
+                          disabled={editorOpen}
+                        >
+                          {t("As spoken")}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem
+                          value="polished"
+                          disabled={editorOpen || !polishedAvailable}
+                        >
+                          {t("Cleaned up")}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem
+                          value="edited"
+                          disabled={editorOpen || !editedAvailable}
+                        >
+                          {t("My edits")}
+                        </DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
                       <DropdownMenuItem
                         onClick={() => setFiltersOpen((current) => !current)}
                       >
@@ -1696,7 +2539,7 @@ export function TranscriptWorkspace({
                       { value: "all", label: "All speakers" },
                       ...snapshot.speakers.map((speaker) => ({
                         value: speaker.id,
-                        label: speakerDisplayName(speaker),
+                        label: speakerName(speaker),
                       })),
                     ]}
                     onValueChange={(value) => setSpeakerFilter(value ?? "all")}
@@ -1712,7 +2555,7 @@ export function TranscriptWorkspace({
                       <SelectItem value="all">{t("All speakers")}</SelectItem>
                       {snapshot.speakers.map((speaker) => (
                         <SelectItem key={speaker.id} value={speaker.id}>
-                          {speakerDisplayName(speaker)}
+                          {speakerName(speaker)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1777,7 +2620,7 @@ export function TranscriptWorkspace({
                 <Select
                   items={snapshot.speakers.map((speaker) => ({
                     value: speaker.id,
-                    label: speakerDisplayName(speaker),
+                    label: speakerName(speaker),
                   }))}
                   onValueChange={(value) => setAssignmentSpeakerId(value ?? "")}
                   value={assignmentSpeakerId}
@@ -1788,7 +2631,7 @@ export function TranscriptWorkspace({
                   <SelectContent>
                     {snapshot.speakers.map((speaker) => (
                       <SelectItem key={speaker.id} value={speaker.id}>
-                        {speakerDisplayName(speaker)}
+                        {speakerName(speaker)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1815,9 +2658,7 @@ export function TranscriptWorkspace({
               editParagraphs.length > 0 ? (
                 <div className="flex flex-col gap-4">
                   <p className="text-xs text-muted-foreground">
-                    {t(
-                      "Edit a paragraph at a time. Timestamps and speaker assignments stay with the original audio segments."
-                    )}
+                    {t("Edit the text below. Your recording stays unchanged.")}
                   </p>
                   {editParagraphs.map((message) => {
                     const segments = message.segmentIds
@@ -1873,10 +2714,7 @@ export function TranscriptWorkspace({
                             {formatVideoTimestamp(message.startOffsetMs)}
                           </button>
                           <span className="text-xs text-muted-foreground">
-                            {speakerDisplayName(
-                              speakerById.get(message.speakerKey)
-                            )}{" "}
-                            · {segments.length} {t("segments")}
+                            {speakerName(speakerById.get(message.speakerKey))}
                           </span>
                           <Button
                             className="ml-auto"
@@ -1990,7 +2828,7 @@ export function TranscriptWorkspace({
                           {speaker ? (
                             <Button
                               aria-label={t("Rename {value0}", {
-                                value0: speakerDisplayName(speaker),
+                                value0: speakerName(speaker),
                               })}
                               className="group/speaker-name h-auto max-w-full justify-start p-0 hover:bg-transparent"
                               onClick={() => onRenameSpeaker(speaker)}
@@ -2002,7 +2840,7 @@ export function TranscriptWorkspace({
                                 className="max-w-full truncate"
                                 variant="outline"
                               >
-                                {speakerDisplayName(speaker)}
+                                {speakerName(speaker)}
                               </Badge>
                               <Pencil
                                 aria-hidden="true"
@@ -2011,16 +2849,18 @@ export function TranscriptWorkspace({
                               />
                             </Button>
                           ) : null}
-                          {issues.map((issue) => (
-                            <Badge
-                              className="text-[10px]"
-                              key={issue}
-                              variant="destructive"
-                            >
-                              {issue}
-                            </Badge>
-                          ))}
-                          <div className="ml-auto flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                          {filtersOpen || qualityOnly
+                            ? issues.map((issue) => (
+                                <Badge
+                                  className="text-[10px]"
+                                  key={issue}
+                                  variant="destructive"
+                                >
+                                  {issue}
+                                </Badge>
+                              ))
+                            : null}
+                          <div className="ml-auto flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
                             <Button
                               aria-label={t("Add bookmark")}
                               onClick={() => {
@@ -2100,11 +2940,9 @@ export function TranscriptWorkspace({
             ) : isVideoProcessing ? (
               <Empty className="min-h-48 border-0 p-4">
                 <EmptyHeader>
-                  <EmptyTitle>{t("Waiting for the first slice")}</EmptyTitle>
+                  <EmptyTitle>{t("Your transcript is on its way")}</EmptyTitle>
                   <EmptyDescription>
-                    {t(
-                      "Workers are transcribing in parallel. Preview lines will appear as output arrives."
-                    )}
+                    {t("Text appears here as the recording is transcribed.")}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
@@ -2133,25 +2971,22 @@ export function TranscriptWorkspace({
           <Card
             className={cn(
               "min-h-0 flex-1 shadow-none",
-              workspaceView !== "review" && "hidden",
+              (workspaceView !== "review" || annotations.length === 0) &&
+                "hidden",
               workspaceView === "review" && "order-last"
             )}
           >
             <CardHeader className="gap-1 px-4 py-4">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <Bookmark className="size-4 text-primary" />{" "}
-                {t("Bookmarks & comments")}
+                <Bookmark className="size-4 text-primary" /> {t("Notes")}
               </CardTitle>
-              <CardDescription>
-                {t("Keep review notes attached to exact transcript moments.")}
-              </CardDescription>
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col px-4 pb-4">
               {annotations.length > 0 ? (
                 <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                   {annotations.map((annotation) => (
                     <div
-                      className="rounded-lg border border-border/80 p-2.5"
+                      className="rounded-lg bg-muted/40 p-2.5"
                       key={annotation.id}
                     >
                       <div className="flex items-start gap-2">
@@ -2170,6 +3005,7 @@ export function TranscriptWorkspace({
                         </Badge>
                         <Button
                           className="ml-auto"
+                          aria-label={t("Delete note")}
                           onClick={() => void deleteAnnotation(annotation)}
                           size="icon-sm"
                           variant="ghost"
@@ -2191,7 +3027,7 @@ export function TranscriptWorkspace({
                         variant="ghost"
                       >
                         <Copy data-icon="inline-start" />{" "}
-                        {t("Copy timestamp link")}
+                        {t("Copy link to this moment")}
                       </Button>
                     </div>
                   ))}
@@ -2206,228 +3042,60 @@ export function TranscriptWorkspace({
 
           <Card
             className={cn(
-              "shrink-0 shadow-none",
+              "min-w-0 gap-0 py-0 shadow-none",
               workspaceView !== "insights" && "hidden"
             )}
           >
-            <CardHeader className="gap-1 px-4 py-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Sparkles className="size-4 text-primary" />{" "}
-                  {t("AI insights")}
-                </CardTitle>
-                <div className="flex flex-wrap items-center gap-2">
-                  {insightsReady ? (
-                    <Button
-                      onClick={() => void openWorkflowDialog()}
-                      size="sm"
-                      variant="outline"
-                    >
-                      <GitBranch data-icon="inline-start" />{" "}
-                      {t("Use in workflow")}
-                    </Button>
-                  ) : null}
-                  {insightsReady ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={<Button size="sm" variant="outline" />}
-                      >
-                        <Download data-icon="inline-start" />{" "}
-                        {t("Export insights")}
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("pdf")}
-                        >
-                          <FileText data-icon="inline-start" /> PDF
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("docx")}
-                        >
-                          <FileText data-icon="inline-start" /> Word (.docx)
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("md")}
-                        >
-                          <FileText data-icon="inline-start" /> Markdown
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("txt")}
-                        >
-                          <FileText data-icon="inline-start" />{" "}
-                          {t("Plain text")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void exportInsights("json")}
-                        >
-                          <Download data-icon="inline-start" /> JSON
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : null}
-                  <Button
-                    disabled={insightsProcessing || !snapshot.segments.length}
-                    onClick={() => void generateInsights()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {insightsProcessing ? (
-                      <LoaderCircle
-                        className="motion-safe:animate-spin motion-reduce:animate-none"
-                        data-icon="inline-start"
-                      />
-                    ) : (
-                      <Sparkles data-icon="inline-start" />
-                    )}{" "}
-                    {insightsProcessing
-                      ? t("Writing…")
-                      : insights.status === "completed"
-                        ? t("Regenerate")
-                        : t("Generate")}
-                  </Button>
-                </div>
-              </div>
-              <CardDescription>
-                {t(
-                  "Summary, chapters, topics, and action items from the transcript."
-                )}
-              </CardDescription>
-              <div className="flex flex-wrap items-center gap-2 pt-2">
-                <span className="text-xs text-muted-foreground">
-                  {t("Output language")}
-                </span>
-                <Select
-                  disabled={insightsProcessing}
-                  items={insightLanguageOptions.map((option) => ({
-                    value: option.value,
-                    label: option.label,
-                  }))}
-                  onValueChange={(value) => setInsightLanguage(value ?? "auto")}
-                  value={insightLanguage}
-                >
-                  <SelectTrigger
-                    aria-label={t("AI insight output language")}
-                    className="min-w-48"
-                    size="sm"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {insightLanguageOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {insights.status === "completed" &&
-                insights.language !== insightLanguage ? (
-                  <span className="text-xs text-muted-foreground">
-                    {t("Regenerate to apply")}
-                  </span>
-                ) : null}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 px-4 pb-4 text-xs">
-              {insightsProcessing ? <AiWritingIndicator /> : null}
-              {insights.error ? (
-                <p className="text-destructive">{insights.error}</p>
-              ) : null}
-              {insights.summary ? (
-                <p className="text-sm leading-6 whitespace-pre-line text-muted-foreground">
-                  {insights.summary}
-                </p>
-              ) : null}
-              {hiddenInsightChapterCount > 0 ? (
-                <p className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-300">
-                  <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
-                  <span>
-                    {hiddenInsightChapterCount} {t("chapter timestamp")}
-                    {hiddenInsightChapterCount === 1 ? " was" : "s were"}{" "}
-                    {t("hidden because it fell outside the video duration.")}
-                  </span>
-                </p>
-              ) : null}
-              {validInsightChapters.length > 0 ? (
-                <div>
-                  <p className="mb-1 font-medium text-foreground">
-                    {t("Chapters")}
-                  </p>
-                  <div className="space-y-1">
-                    {validInsightChapters.map((chapter) => (
-                      <button
-                        className="flex w-full items-start gap-2 rounded-md p-1 text-left hover:bg-muted"
-                        disabled={!canSeek}
-                        key={`${chapter.startOffsetMs}-${chapter.title}`}
-                        onClick={() => seekTo(chapter.startOffsetMs)}
-                        type="button"
-                      >
-                        <span className="font-mono text-primary">
-                          {formatVideoTimestamp(chapter.startOffsetMs)}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block font-medium text-foreground">
-                            {chapter.title}
-                          </span>
-                          {chapter.summary ? (
-                            <span className="block text-muted-foreground">
-                              {chapter.summary}
-                            </span>
-                          ) : null}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              {(insights.topics?.length ?? 0) > 0 ? (
-                <div>
-                  <p className="mb-1 font-medium text-foreground">
-                    {t("Topics")}
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {insights.topics?.map((topic) => (
-                      <Badge key={topic} variant="secondary">
-                        {topic}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              {(insights.actionItems?.length ?? 0) > 0 ? (
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <p className="font-medium text-foreground">
-                      {t("Action items")}
+            <TranscriptionSummaryReadingView
+              insights={insights}
+              processing={insightsProcessing}
+              chapters={validInsightChapters}
+              hiddenChapterCount={hiddenInsightChapterCount}
+              canSeek={canSeek}
+              onSeek={(offsetMs) => {
+                setSummaryRecordingOpen(true)
+                seekTo(offsetMs)
+              }}
+              onCreate={() => setSummarySetupOpen(true)}
+              createDisabled={
+                standardLoading ||
+                insightsProcessing ||
+                !snapshot.segments.length
+              }
+              onCopyActions={() => void copyActionItems()}
+              actionsCopied={actionItemsCopied}
+              speakerNames={snapshot.speakers
+                .flatMap((speaker) => [speaker.displayName, speaker.label])
+                .filter((name): name is string => Boolean(name))}
+              languageLabel={
+                summaryLanguage === "auto"
+                  ? ""
+                  : (insightLanguageOptions.find(
+                      (option) => option.value === summaryLanguage
+                    )?.label ?? summaryLanguage)
+              }
+              review={
+                <>
+                  {(insights.customization?.excludedSegmentIds?.length ?? 0) >
+                  0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {t("{value0} passages left out by you", {
+                        value0:
+                          insights.customization?.excludedSegmentIds?.length ??
+                          0,
+                      })}
                     </p>
-                    <Button
-                      aria-label={t("Copy action items")}
-                      onClick={() => void copyActionItems()}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      {actionItemsCopied ? (
-                        <Check data-icon="inline-start" />
-                      ) : (
-                        <Copy data-icon="inline-start" />
-                      )}
-                      {actionItemsCopied ? t("Copied") : t("Copy")}
-                    </Button>
-                  </div>
-                  <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
-                    {insights.actionItems?.map((item, index) => (
-                      <li key={`${item}-${index}`}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-              {insights.status === "idle" ? (
-                <p className="text-muted-foreground">
-                  {t("Generate insights when the transcript is ready.")}
-                </p>
-              ) : null}
-            </CardContent>
+                  ) : null}
+                  <SummaryOmissionReview
+                    compact
+                    omissions={insights.customization?.automaticOmissions ?? []}
+                    restoredIds={restoredSummaryIds}
+                    disabled={insightsProcessing}
+                    onRestore={restoreSummaryPassages}
+                  />
+                </>
+              }
+            />
           </Card>
 
           {speakerSummaries.length > 0 ? (
@@ -2440,8 +3108,7 @@ export function TranscriptWorkspace({
               <CardHeader className="gap-1 px-4 py-4">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="flex items-center gap-2 text-sm">
-                    <Users className="size-4 text-primary" />{" "}
-                    {t("Speaker summary")}
+                    <Users className="size-4 text-primary" /> {t("Speakers")}
                   </CardTitle>
                   <div className="flex items-center gap-1">
                     <Button
@@ -2474,14 +3141,9 @@ export function TranscriptWorkspace({
                   </div>
                 </div>
                 <CardDescription>
-                  {speakerSummaries.length === 1
-                    ? t("1 speaker")
-                    : t("{value0} speakers", {
-                        value0: speakerSummaries.length,
-                      })}{" "}
-                  {t(
-                    "detected. Rename speakers, play samples, or merge duplicate labels."
-                  )}
+                  {t("{value0} voices in this recording", {
+                    value0: speakerSummaries.length,
+                  })}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-2 px-4 pb-4">
@@ -2502,7 +3164,7 @@ export function TranscriptWorkspace({
                 ) : null}
                 <div className="space-y-2">
                   {speakerSummaries.map((summary) => {
-                    const name = speakerDisplayName(summary.speaker)
+                    const name = speakerName(summary.speaker)
                     const playing =
                       speakerSample?.speakerId === summary.speaker.id
                     const canPlay =
@@ -2511,7 +3173,7 @@ export function TranscriptWorkspace({
                       summary.sampleEndMs !== null
                     return (
                       <div
-                        className="rounded-xl border border-border/80 bg-muted/20 p-3"
+                        className="rounded-xl bg-muted/30 p-3"
                         key={summary.speaker.id}
                       >
                         <div className="flex min-w-0 items-start gap-2.5">
@@ -2523,12 +3185,7 @@ export function TranscriptWorkspace({
                               <span className="min-w-0 truncate text-xs font-medium text-foreground">
                                 {name}
                               </span>
-                              <Badge
-                                className="shrink-0 text-[9px]"
-                                variant="outline"
-                              >
-                                {summary.speaker.label}
-                              </Badge>
+
                               {summary.speaker.nameSource === "ai" ? (
                                 <Badge
                                   className="shrink-0 text-[9px]"
@@ -2538,7 +3195,8 @@ export function TranscriptWorkspace({
                                   }
                                   variant="secondary"
                                 >
-                                  <Sparkles className="size-2.5" /> AI
+                                  <Sparkles className="size-2.5" />{" "}
+                                  {t("Suggested")}
                                 </Badge>
                               ) : null}
                             </div>
@@ -2546,15 +3204,8 @@ export function TranscriptWorkspace({
                               <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2">
                                 <div className="min-w-0 flex-1 text-[11px]">
                                   <p className="truncate font-medium">
-                                    {t("Maybe")} {summary.speaker.suggestedName}{" "}
-                                    <span className="font-normal text-muted-foreground">
-                                      (
-                                      {Math.round(
-                                        (summary.speaker.suggestionConfidence ??
-                                          0) * 100
-                                      )}
-                                      %)
-                                    </span>
+                                    {t("Maybe")}{" "}
+                                    {summary.speaker.suggestedName}{" "}
                                   </p>
                                   {summary.speaker.suggestionEvidence ? (
                                     <p className="line-clamp-2 text-muted-foreground">
@@ -2593,12 +3244,9 @@ export function TranscriptWorkspace({
                               </div>
                             ) : null}
                             <p className="mt-1 text-[11px] text-muted-foreground">
-                              {summary.segmentCount}{" "}
-                              {summary.segmentCount === 1
-                                ? t("segment")
-                                : t("segments")}{" "}
-                              · {formatVideoDuration(summary.speakingMs)}{" "}
-                              speaking
+                              {t("{value0} speaking time", {
+                                value0: formatVideoDuration(summary.speakingMs),
+                              })}
                             </p>
                             {summary.sampleText ? (
                               <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
@@ -2640,29 +3288,20 @@ export function TranscriptWorkspace({
                     )
                   })}
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                  {t(
-                    "Speaker assignment changes are preserved separately from the original transcript text."
-                  )}
-                </p>
               </CardContent>
             </Card>
           ) : workspaceView === "speakers" ? (
             <Card className="shrink-0 shadow-none">
               <CardHeader className="gap-1 px-4 py-4">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Users className="size-4 text-primary" /> {t("Speaker tools")}
+                  <Users className="size-4 text-primary" /> {t("Speakers")}
                 </CardTitle>
                 <CardDescription>
-                  {t(
-                    "Speaker separation has not produced any labels for this transcript."
-                  )}
+                  {t("There are no speaker names yet.")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="px-4 pb-4 text-xs text-muted-foreground">
-                {t(
-                  "You can still review, edit, and export the transcript without speaker assignments."
-                )}
+                {t("You can still read, edit, and download the conversation.")}
               </CardContent>
             </Card>
           ) : null}
@@ -2670,8 +3309,12 @@ export function TranscriptWorkspace({
           <Card
             className={cn(
               "shrink-0 shadow-none lg:sticky lg:top-4",
-              workspaceView === "details" && "hidden",
-              workspaceView === "review" && "order-first"
+              (mediaKind === "none" ||
+                workspaceView === "details" ||
+                (workspaceView === "insights" && !summaryRecordingOpen)) &&
+                "hidden",
+              workspaceView === "review" && "order-first",
+              workspaceView === "insights" && "order-first lg:order-none"
             )}
           >
             <CardHeader className="gap-2 px-4 py-4">
@@ -2684,25 +3327,33 @@ export function TranscriptWorkspace({
                   <FileText className="size-4" />
                 )}{" "}
                 {mediaKind === "video"
-                  ? t("Source video")
+                  ? t("Recording")
                   : mediaKind === "audio"
-                    ? t("Source audio")
-                    : t("Transcript only")}
+                    ? t("Recording")
+                    : t("Transcript")}
+                {workspaceView === "insights" ? (
+                  <Button
+                    className="ml-auto"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={t("Hide recording")}
+                    onClick={() => {
+                      ;(mediaKind === "audio"
+                        ? audioRef.current
+                        : videoRef.current
+                      )?.pause()
+                      setSummaryRecordingOpen(false)
+                    }}
+                  >
+                    <X />
+                  </Button>
+                ) : null}
               </CardTitle>
-              <CardDescription className="truncate">
-                {mediaKind === "video"
-                  ? (snapshot.videoUpload?.fileName ?? "Video upload")
-                  : mediaKind === "audio"
-                    ? selectedRecording
-                      ? t("Recorded source audio")
-                      : t("No recording attached")
-                    : t("No source media attached")}
-              </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3 px-4 pb-4">
               {mediaKind === "video" ? (
                 <>
-                  <div className="overflow-hidden rounded-xl border border-border bg-muted">
+                  <div className="overflow-hidden rounded-xl bg-muted">
                     {snapshot.videoUpload?.playbackUrl ? (
                       <video
                         className="block aspect-video w-full bg-muted object-contain"
@@ -2755,18 +3406,7 @@ export function TranscriptWorkspace({
                       </div>
                     )}
                   </div>
-                  {snapshot.videoUpload?.playbackUrl ? (
-                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1.5">
-                        <Clock3 className="size-3.5" />
-                        {formatVideoTimestamp(currentTimeMs)}
-                        {displayDurationMs
-                          ? ` / ${formatVideoTimestamp(displayDurationMs)}`
-                          : ""}
-                      </span>
-                      <span>{t("Click a transcript line to seek")}</span>
-                    </div>
-                  ) : null}
+
                   {videoPlaybackError ? (
                     <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
                       <p className="font-medium">{t("Playback unavailable")}</p>
@@ -2789,7 +3429,7 @@ export function TranscriptWorkspace({
                     <Select
                       items={recordings.map((recording, index) => ({
                         value: recording.id,
-                        label: `Source ${index + 1}`,
+                        label: t("Recording {value0}", { value0: index + 1 }),
                       }))}
                       onValueChange={(value) =>
                         setSelectedRecordingId(value ?? "")
@@ -2802,13 +3442,13 @@ export function TranscriptWorkspace({
                       <SelectContent>
                         {recordings.map((recording, index) => (
                           <SelectItem key={recording.id} value={recording.id}>
-                            {t("Source")} {index + 1}
+                            {t("Recording {value0}", { value0: index + 1 })}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   ) : null}
-                  <div className="rounded-xl border border-border bg-muted/40 p-3">
+                  <div className="rounded-xl bg-muted/40 p-3">
                     {audioSourceURL ? (
                       <audio
                         className="w-full"
@@ -2865,18 +3505,6 @@ export function TranscriptWorkspace({
                       </div>
                     )}
                   </div>
-                  {audioSourceURL ? (
-                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1.5">
-                        <Clock3 className="size-3.5" />
-                        {formatVideoTimestamp(currentTimeMs)}
-                        {displayDurationMs
-                          ? ` / ${formatVideoTimestamp(displayDurationMs)}`
-                          : ""}
-                      </span>
-                      <span>{t("Click a transcript line to seek")}</span>
-                    </div>
-                  ) : null}
                 </>
               ) : (
                 <div className="flex min-h-20 items-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 px-4 text-xs text-muted-foreground">
@@ -2904,6 +3532,17 @@ export function TranscriptWorkspace({
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-2 px-4 pb-4 text-xs text-muted-foreground">
+              {snapshot.videoUpload?.fileName ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span>{t("File")}</span>
+                  <span
+                    className="max-w-48 truncate font-medium text-foreground"
+                    title={snapshot.videoUpload.fileName}
+                  >
+                    {snapshot.videoUpload.fileName}
+                  </span>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-3">
                 <span>{t("Language")}</span>
                 <span className="font-medium text-foreground">
@@ -3265,7 +3904,7 @@ export function TranscriptWorkspace({
                   .filter((speaker) => speaker.id !== mergeTargetId)
                   .map((speaker) => ({
                     value: speaker.id,
-                    label: speakerDisplayName(speaker),
+                    label: speakerName(speaker),
                   }))}
                 onValueChange={(value) => setMergeSourceId(value ?? "")}
                 value={mergeSourceId}
@@ -3278,7 +3917,7 @@ export function TranscriptWorkspace({
                     .filter((speaker) => speaker.id !== mergeTargetId)
                     .map((speaker) => (
                       <SelectItem key={speaker.id} value={speaker.id}>
-                        {speakerDisplayName(speaker)}
+                        {speakerName(speaker)}
                       </SelectItem>
                     ))}
                 </SelectContent>
@@ -3293,7 +3932,7 @@ export function TranscriptWorkspace({
                   .filter((speaker) => speaker.id !== mergeSourceId)
                   .map((speaker) => ({
                     value: speaker.id,
-                    label: speakerDisplayName(speaker),
+                    label: speakerName(speaker),
                   }))}
                 onValueChange={(value) => setMergeTargetId(value ?? "")}
                 value={mergeTargetId}
@@ -3306,7 +3945,7 @@ export function TranscriptWorkspace({
                     .filter((speaker) => speaker.id !== mergeSourceId)
                     .map((speaker) => (
                       <SelectItem key={speaker.id} value={speaker.id}>
-                        {speakerDisplayName(speaker)}
+                        {speakerName(speaker)}
                       </SelectItem>
                     ))}
                 </SelectContent>
@@ -3351,57 +3990,6 @@ export function VideoTranscriptWorkspace(props: VideoTranscriptWorkspaceProps) {
   return <TranscriptWorkspace {...props} mediaKind="video" />
 }
 
-function AiWritingIndicator() {
-  const { t } = useTranslations()
-
-  return (
-    <div
-      aria-busy="true"
-      aria-live="polite"
-      className="animate-in rounded-xl border border-primary/20 bg-primary/5 p-3 duration-200 ease-out fade-in-0 slide-in-from-top-1 motion-reduce:animate-none"
-      role="status"
-    >
-      <div className="flex items-center gap-2.5">
-        <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <span
-            aria-hidden="true"
-            className="absolute inset-0 rounded-full border border-primary/30 motion-safe:animate-ping motion-reduce:animate-none"
-          />
-          <Sparkles aria-hidden="true" className="size-4" />
-        </span>
-        <div className="min-w-0">
-          <p className="font-medium text-foreground">
-            {t("Writing AI insights")}
-            <span
-              aria-hidden="true"
-              className="inline-block w-5 text-primary motion-safe:animate-pulse motion-reduce:animate-none"
-            >
-              …
-            </span>
-          </p>
-          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
-            {t("Reading the full transcript and organizing the key moments.")}
-          </p>
-        </div>
-      </div>
-      <div aria-hidden="true" className="mt-3 space-y-1.5">
-        <span
-          className="block h-1.5 w-[84%] rounded-full bg-primary/20 motion-safe:animate-pulse motion-reduce:animate-none"
-          style={{ animationDelay: "0ms" }}
-        />
-        <span
-          className="block h-1.5 w-[62%] rounded-full bg-primary/15 motion-safe:animate-pulse motion-reduce:animate-none"
-          style={{ animationDelay: "120ms" }}
-        />
-        <span
-          className="block h-1.5 w-[72%] rounded-full bg-primary/15 motion-safe:animate-pulse motion-reduce:animate-none"
-          style={{ animationDelay: "240ms" }}
-        />
-      </div>
-    </div>
-  )
-}
-
 function LiveTranscriptPreview({
   segments,
 }: {
@@ -3412,9 +4000,7 @@ function LiveTranscriptPreview({
   return (
     <div className="flex flex-col gap-2">
       <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
-        {t(
-          "Live preview · lines may be refined when overlapping slices are fused."
-        )}
+        {t("Text is appearing live. Small corrections may follow.")}
       </div>
       {segments.map((segment) => (
         <div

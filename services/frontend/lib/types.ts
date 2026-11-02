@@ -939,6 +939,18 @@ export type TranscriptionInsightChapter = {
 }
 
 export type TranscriptionInsights = {
+  customization?: {
+    instructions: string
+    excludedSegmentIds: string[] | null
+    templateId?: string
+    templateName?: string
+    templateRevision?: string
+    rulesOverridden?: boolean
+    instructionsOverridden?: boolean
+    exclusionRules?: string
+    restoredSegmentIds?: string[]
+    automaticOmissions?: import("./transcription-summary-standard").SummaryOmission[]
+  }
   sessionId: string
   status: "idle" | "processing" | "completed" | "failed"
   language: string

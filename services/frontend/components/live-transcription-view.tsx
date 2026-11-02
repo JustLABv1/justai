@@ -18,13 +18,14 @@ import {
   Mic,
   MonitorUp,
   Play,
-  Radio,
   ShieldCheck,
   Tv,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import Link from "next/link"
+import { VideoTranscriptionLibrary } from "@/components/video-transcription-library"
 import { LiveProcessingSettings } from "@/components/live-processing-settings"
 import { LiveTranscriptProcessingPanel } from "@/components/live-transcript-processing-panel"
 import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
@@ -43,12 +44,6 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty"
 import {
   Field,
   FieldDescription,
@@ -2186,31 +2181,45 @@ export function LiveTranscriptionView({
     <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
       {error && !dialogOpen ? <DialogError message={error} /> : null}
 
-      {!snapshot && !createOpen ? (
-        <>
-          <h1 className="sr-only">{t("Live transcription")}</h1>
-          <Empty className="min-h-[calc(100svh-14rem)] border-0">
-            <EmptyHeader>
-              <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                <Radio aria-hidden="true" />
-              </div>
-              <EmptyTitle>{t("Listen to the room")}</EmptyTitle>
-              <EmptyDescription>
-                {sessions.length > 0
-                  ? t("Select a session from the sidebar, or start a new room.")
-                  : t(
-                      "Start a named session, capture browser audio, or connect an external stream or meeting bot."
-                    )}
-              </EmptyDescription>
-            </EmptyHeader>
-            <Button onClick={openCreateWizard}>
-              <Play data-icon="inline-start" />
-              {t("New live session")}
-            </Button>
-          </Empty>
-        </>
+      {!sessionId && !createOpen ? (
+        <VideoTranscriptionLibrary
+          kind="live"
+          ownerId={user.id}
+          revision={sessions
+            .map((session) => `${session.id}:${session.updatedAt}`)
+            .join("|")}
+          onCreate={openCreateWizard}
+        />
+      ) : !snapshot && !createOpen ? (
+        <div
+          className="flex min-h-64 items-center justify-center gap-3 text-muted-foreground"
+          role="status"
+        >
+          {error ? (
+            <Link
+              href="/transcription"
+              className="rounded-md text-sm hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t("All live sessions")}
+            </Link>
+          ) : (
+            <>
+              <LoaderCircle
+                className="size-5 animate-spin"
+                aria-hidden="true"
+              />
+              {t("Opening recording…")}
+            </>
+          )}
+        </div>
       ) : snapshot && !createOpen && snapshot.session.status === "completed" ? (
         <>
+          <Link
+            href="/transcription"
+            className="self-start rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t("All live sessions")}
+          </Link>
           {snapshot.liveProcessing ? (
             <LiveTranscriptProcessingPanel
               snapshot={snapshot}

@@ -30,6 +30,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { TranscriptionCreationFlow } from "@/components/transcription-creation-flow"
+import { VideoTranscriptionLibrary } from "@/components/video-transcription-library"
+import Link from "next/link"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -172,6 +174,7 @@ export function VideoTranscriptionView({
   onSessionsChanged,
   onStartChat,
   createSessionRequested = false,
+  libraryRevision = "",
   onCreateSessionRequestHandled,
 }: {
   sessionId: string | null
@@ -180,6 +183,7 @@ export function VideoTranscriptionView({
   onSessionCreated: (session: TranscriptionSession) => void
   onSessionsChanged: () => void
   onStartChat: (sessionId: string) => Promise<void>
+  libraryRevision?: string
   createSessionRequested?: boolean
   onCreateSessionRequestHandled?: () => void
 }) {
@@ -188,7 +192,9 @@ export function VideoTranscriptionView({
   const [snapshotState, setSnapshot] = useState<VideoSnapshot | null>(null)
   // The rendered workspace is guarded below; this non-null view keeps the
   // legacy branch type-safe while it is retained as a migration reference.
-  const snapshot = snapshotState as VideoSnapshot & {
+  const snapshot = (
+    snapshotState?.session.id === sessionId ? snapshotState : null
+  ) as VideoSnapshot & {
     videoUpload: TranscriptionVideoUpload
   }
   const [partialTranscriptSession, setPartialTranscriptSession] = useState<
@@ -712,7 +718,7 @@ export function VideoTranscriptionView({
         }
       )
       setSnapshot((current) =>
-        current
+        current?.session.id === createdSession.id
           ? {
               ...current,
               session: { ...current.session, status: "processing" },
@@ -1225,32 +1231,33 @@ export function VideoTranscriptionView({
         </Alert>
       )}
 
-      {!snapshot && !createOpen ? (
-        <>
-          <h1 className="sr-only">{t("Video transcription")}</h1>
-          <Empty className="min-h-0 flex-1 border-0">
-            <EmptyHeader>
-              <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                <FileVideo aria-hidden="true" />
-              </div>
-              <EmptyTitle>{t("Transcribe a video")}</EmptyTitle>
-              <EmptyDescription>
-                {t(
-                  "Upload a prerecorded video and receive a timestamped transcript. Processing continues in the background."
-                )}
-              </EmptyDescription>
-            </EmptyHeader>
+      {!sessionId && !snapshot && !createOpen ? (
+        <VideoTranscriptionLibrary
+          ownerId={user.id}
+          revision={libraryRevision}
+          onCreate={() => {
+            setCreateStep(0)
+            setCreateOpen(true)
+          }}
+        />
+      ) : sessionId && !snapshot && !createOpen ? (
+        <div className="flex min-h-64 flex-col items-center justify-center gap-4">
+          {error ? (
             <Button
-              onClick={() => {
-                setCreateStep(0)
-                setCreateOpen(true)
-              }}
+              render={<Link href="/video-transcription" />}
+              variant="secondary"
             >
-              <Upload data-icon="inline-start" />
-              {t("New video transcription")}
+              {t("Back to recordings")}
             </Button>
-          </Empty>
-        </>
+          ) : (
+            <>
+              <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+              <p role="status" className="text-sm text-muted-foreground">
+                {t("Opening recording…")}
+              </p>
+            </>
+          )}
+        </div>
       ) : !createOpen ? (
         <>
           <WorkspaceDetailHeader
@@ -1279,22 +1286,38 @@ export function VideoTranscriptionView({
                   variant="outline"
                 >
                   <Upload data-icon="inline-start" />
-                  <span>New video</span>
+                  <span>{t("Add recording")}</span>
                 </Button>
               </>
             }
             eyebrow={
+              <Link
+                href="/video-transcription"
+                className="inline-flex items-center gap-1 hover:underline"
+              >
+                <ArrowLeft className="size-3.5" />
+                {t("All recordings")}
+              </Link>
+            }
+            meta={
               <>
-                <span>Video transcription</span>
-                <span aria-hidden="true">/</span>
+                {displayDurationMs > 0 ? (
+                  <span>{formatVideoDuration(displayDurationMs)}</span>
+                ) : null}
+                {snapshot.session.language !== "auto" ? (
+                  <span>
+                    {t(
+                      languageItemsFor(snapshot.session.language).find(
+                        (item) => item.value === snapshot.session.language
+                      )?.label ?? snapshot.session.language
+                    )}
+                  </span>
+                ) : null}
                 <span>
-                  {snapshot.session.language === "auto"
-                    ? "Automatic language"
-                    : snapshot.session.language}
+                  {t("Uploaded by {value0}", { value0: user.displayName })}
                 </span>
               </>
             }
-            meta={<span>Uploaded by {user.displayName}</span>}
             title={snapshot.session.title}
           />
 

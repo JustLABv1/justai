@@ -59,11 +59,12 @@ type transcriptionAnnotationRequest struct {
 }
 
 type transcriptionExportRow struct {
-	SegmentID     uuid.UUID `json:"segmentId"`
-	Speaker       string    `json:"speaker,omitempty"`
-	Text          string    `json:"text"`
-	StartOffsetMs int64     `json:"startOffsetMs"`
-	EndOffsetMs   int64     `json:"endOffsetMs"`
+	SummaryRequired bool      `json:"-"`
+	SegmentID       uuid.UUID `json:"segmentId"`
+	Speaker         string    `json:"speaker,omitempty"`
+	Text            string    `json:"text"`
+	StartOffsetMs   int64     `json:"startOffsetMs"`
+	EndOffsetMs     int64     `json:"endOffsetMs"`
 }
 
 type transcriptionInsightResponse struct {
@@ -74,7 +75,12 @@ type transcriptionInsightResponse struct {
 }
 
 type transcriptionInsightRequest struct {
-	Language string `json:"language"`
+	TemplateID         string   `json:"templateId"`
+	ExclusionRules     *string  `json:"exclusionRules"`
+	RestoredSegmentIDs []string `json:"restoredSegmentIds"`
+	Language           string   `json:"language"`
+	Instructions       string   `json:"instructions"`
+	ExcludedSegmentIDs []string `json:"excludedSegmentIds"`
 }
 
 const (
@@ -593,6 +599,9 @@ func buildTranscriptionInsightChunkInput(title, language string, chunk transcrip
 	}
 	fmt.Fprintf(&input, "Title: %s\nLanguage: %s\nVideo duration: %s\nWindow: %d of %d (%s–%s)\nTranscript window (timestamps are absolute):\n", title, language, duration, chunkIndex, chunkCount, formatTranscriptTimestamp(chunk.StartOffsetMs), formatTranscriptTimestamp(chunk.EndOffsetMs))
 	for _, row := range chunk.Rows {
+		if row.SummaryRequired {
+			input.WriteString("[EXPLICITLY RESTORED: include this contribution] ")
+		}
 		input.WriteString(transcriptionInsightTranscriptLine(row))
 	}
 	return input.String()
@@ -810,6 +819,43 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 	if c.Request.ContentLength != 0 && !decodeJSON(c, &request) {
 		return
 	}
+	if len(request.Instructions) > 4000 || len(request.ExcludedSegmentIDs) > 100000 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("summary customization exceeds the allowed size"))
+		return
+	}
+	customization := models.TranscriptionSummaryCustomization{Instructions: request.Instructions, ExcludedSegmentIDs: request.ExcludedSegmentIDs, RestoredSegmentIDs: request.RestoredSegmentIDs}
+	if len(request.RestoredSegmentIDs) > 100000 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("too many restored passages"))
+		return
+	}
+	if request.TemplateID != "" {
+		templateID, parseErr := uuid.Parse(request.TemplateID)
+		if parseErr != nil {
+			writeError(c, http.StatusBadRequest, fmt.Errorf("invalid summary template"))
+			return
+		}
+		template, loadErr := a.loadSummaryTemplate(c, templateID)
+		if loadErr != nil {
+			writeError(c, http.StatusNotFound, fmt.Errorf("summary template not found"))
+			return
+		}
+		customization.TemplateID = template.ID.String()
+		customization.TemplateName = template.Name
+		customization.TemplateRevision = template.UpdatedAt.Format(time.RFC3339Nano)
+		customization.InstructionsOverridden = request.Instructions != "" && strings.TrimSpace(request.Instructions) != strings.TrimSpace(template.Instructions)
+		customization.RulesOverridden = request.ExclusionRules != nil && strings.TrimSpace(*request.ExclusionRules) != strings.TrimSpace(template.ExclusionRules)
+		customization.ExclusionRules = template.ExclusionRules
+		if customization.Instructions == "" {
+			customization.Instructions = template.Instructions
+		}
+	}
+	if request.ExclusionRules != nil {
+		customization.ExclusionRules = strings.TrimSpace(*request.ExclusionRules)
+	}
+	if len(customization.ExclusionRules) > 6000 {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("summary exclusion rules are too long"))
+		return
+	}
 	requestedLanguage, validLanguage := normalizeTranscriptionInsightLanguage(request.Language)
 	if !validLanguage {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported insight language %q", request.Language))
@@ -851,7 +897,16 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, err)
 		return
 	}
+	segments, err = excludeSummarySourceSegments(segments, request.ExcludedSegmentIDs)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
 	rows := transcriptionExportRows(segments, speakers)
+	if _, err = validateSummaryRestorations(rows, request.RestoredSegmentIDs); err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
 	chunks := splitTranscriptionInsightRows(rows)
 	if len(chunks) == 0 {
 		writeError(c, http.StatusBadRequest, fmt.Errorf("generate insights after transcript output is available"))
@@ -859,7 +914,12 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 	}
 	// Claim the job atomically so repeated clicks or other tabs do not start a
 	// second generation while one is still running.
-	claim, err := a.DB.ExecContext(c, `INSERT INTO transcription_insights (session_id, language, status, error_message, updated_at) VALUES ($1, $2, 'processing', NULL, now()) ON CONFLICT (session_id) DO UPDATE SET language = $2, status = 'processing', error_message = NULL, updated_at = now() WHERE transcription_insights.status <> 'processing' OR transcription_insights.updated_at < now() - make_interval(secs => $3)`, sessionID, requestedLanguage, transcriptionInsightStaleAfter.Seconds())
+	customizationJSON, err := json.Marshal(customization)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err)
+		return
+	}
+	claim, err := a.DB.ExecContext(c, `INSERT INTO transcription_insights (session_id, language, status, error_message, updated_at, customization) VALUES ($1, $2, 'processing', NULL, now(), $4) ON CONFLICT (session_id) DO UPDATE SET language = $2, status = 'processing', error_message = NULL, updated_at = now(), customization = $4 WHERE transcription_insights.status <> 'processing' OR transcription_insights.updated_at < now() - make_interval(secs => $3)`, sessionID, requestedLanguage, transcriptionInsightStaleAfter.Seconds(), string(customizationJSON))
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
@@ -878,7 +938,7 @@ func (a *App) generateTranscriptionInsights(c *gin.Context) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), transcriptionInsightJobTimeout)
 		defer cancel()
-		a.runTranscriptionInsights(ctx, sessionID, endpoint, title, language, requestedLanguage, durationMs, chunks)
+		a.runTranscriptionInsights(ctx, sessionID, endpoint, title, language, requestedLanguage, durationMs, chunks, customization)
 	}()
 	insights, err := loadTranscriptionInsights(c, a.DB, sessionID)
 	if err != nil {
@@ -908,16 +968,40 @@ func (a *App) getTranscriptionInsights(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"insights": insights})
 }
 
-func (a *App) runTranscriptionInsights(ctx context.Context, sessionID uuid.UUID, endpoint provider.Endpoint, title, language, requestedLanguage string, durationMs int64, chunks []transcriptionInsightChunk) {
+func (a *App) runTranscriptionInsights(ctx context.Context, sessionID uuid.UUID, endpoint provider.Endpoint, title, language, requestedLanguage string, durationMs int64, chunks []transcriptionInsightChunk, customization models.TranscriptionSummaryCustomization) {
 	markFailed := func(cause error) {
 		_, _ = a.DB.ExecContext(context.WithoutCancel(ctx), `UPDATE transcription_insights SET status = 'failed', error_message = $2, updated_at = now() WHERE session_id = $1`, sessionID, cause.Error())
+	}
+	outputLanguage := requestedLanguage
+	if outputLanguage == "auto" {
+		outputLanguage = language
+	}
+	filteredChunks, omissions, scopeErr := classifySummarySource(ctx, endpoint, chunks, customization, transcriptionInsightLanguageLabel(outputLanguage))
+	if scopeErr != nil {
+		markFailed(scopeErr)
+		return
+	}
+	chunks = filteredChunks
+	customization.AutomaticOmissions = omissions
+	customizationJSON, marshalErr := json.Marshal(customization)
+	if marshalErr != nil {
+		markFailed(marshalErr)
+		return
+	}
+	if _, err := a.DB.ExecContext(ctx, `UPDATE transcription_insights SET customization=$2 WHERE session_id=$1`, sessionID, string(customizationJSON)); err != nil {
+		markFailed(err)
+		return
+	}
+	customInstructions := []string{customization.Instructions}
+	if len(customization.RestoredSegmentIDs) > 0 {
+		customInstructions[0] += "\nExplicitly restored passages marked in the source must be represented in the summary, including organizational contributions. Do not omit them because of their role or category."
 	}
 	analyses := make([]transcriptionInsightChunkAnalysis, 0, len(chunks))
 	for index, chunk := range chunks {
 		response, chunkErr := requestTranscriptionInsight(
 			ctx,
 			endpoint,
-			transcriptionInsightChunkSystemPrompt(requestedLanguage, language, index+1, len(chunks)),
+			transcriptionInsightChunkSystemPrompt(requestedLanguage, language, index+1, len(chunks))+summaryCustomInstructions(customInstructions),
 			buildTranscriptionInsightChunkInput(title, language, chunk, index+1, len(chunks), durationMs),
 		)
 		if chunkErr != nil {
@@ -937,7 +1021,7 @@ func (a *App) runTranscriptionInsights(ctx context.Context, sessionID uuid.UUID,
 		reduced, reduceErr := requestTranscriptionInsight(
 			ctx,
 			endpoint,
-			transcriptionInsightReduceSystemPrompt(requestedLanguage, language),
+			transcriptionInsightReduceSystemPrompt(requestedLanguage, language)+summaryCustomInstructions(customInstructions),
 			buildTranscriptionInsightReduceInput(title, language, analyses),
 		)
 		if reduceErr == nil {
@@ -1028,6 +1112,20 @@ func (a *App) exportTranscription(c *gin.Context) {
 	if exportInsights != nil && exportInsights.Language == "auto" && language != "auto" {
 		exportInsights.Language = language
 	}
+	options := transcriptionSummaryExportOptions{BoldSpeakers: strings.EqualFold(c.Query("boldSpeakers"), "true"), Speakers: speakers}
+	if c.Request.Method == http.MethodPost {
+		var draft transcriptionSummaryExportDraft
+		if !decodeJSON(c, &draft) {
+			return
+		}
+		var draftErr error
+		exportInsights, draftErr = applySummaryExportDraft(exportInsights, draft)
+		if draftErr != nil {
+			writeError(c, http.StatusConflict, draftErr)
+			return
+		}
+	}
+	exportInsights = filterSummaryExportInsights(c, exportInsights)
 	baseName := safeTranscriptExportName(session.Title)
 	var data []byte
 	contentType := "text/plain; charset=utf-8"
@@ -1038,7 +1136,7 @@ func (a *App) exportTranscription(c *gin.Context) {
 	case "md", "markdown":
 		extension = "md"
 		contentType = "text/markdown; charset=utf-8"
-		data = []byte(transcriptionMarkdownLocalized(session.Title, rows, exportInsights, language))
+		data = []byte(transcriptionMarkdownLocalized(session.Title, rows, exportInsights, language, options))
 	case "srt":
 		extension = "srt"
 		contentType = "application/x-subrip; charset=utf-8"
@@ -1067,11 +1165,11 @@ func (a *App) exportTranscription(c *gin.Context) {
 	case "docx":
 		extension = "docx"
 		contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-		data = buildTranscriptDOCXLocalized(session.Title, rows, exportInsights, language)
+		data = buildTranscriptDOCXLocalized(session.Title, rows, exportInsights, language, options)
 	case "pdf":
 		extension = "pdf"
 		contentType = "application/pdf"
-		data = buildTranscriptPDFLocalized(session.Title, rows, exportInsights, language)
+		data = buildTranscriptPDFLocalized(session.Title, rows, exportInsights, language, options)
 	default:
 		writeError(c, http.StatusBadRequest, fmt.Errorf("unsupported export format %q", format))
 		return
@@ -1129,13 +1227,16 @@ func loadTranscriptionInsights(ctx context.Context, db *sql.DB, sessionID uuid.U
 	if err != nil {
 		return item, err
 	}
-	var chaptersJSON, topicsJSON, actionItemsJSON []byte
+	var chaptersJSON, topicsJSON, actionItemsJSON, customizationJSON []byte
 	var errorMessage sql.NullString
-	err = db.QueryRowContext(ctx, `SELECT language, status, summary, chapters, topics, action_items, error_message, generated_at, updated_at FROM transcription_insights WHERE session_id = $1`, sessionID).Scan(&item.Language, &item.Status, &item.Summary, &chaptersJSON, &topicsJSON, &actionItemsJSON, &errorMessage, &item.GeneratedAt, &item.UpdatedAt)
+	err = db.QueryRowContext(ctx, `SELECT language, status, summary, chapters, topics, action_items, error_message, generated_at, updated_at, customization FROM transcription_insights WHERE session_id = $1`, sessionID).Scan(&item.Language, &item.Status, &item.Summary, &chaptersJSON, &topicsJSON, &actionItemsJSON, &errorMessage, &item.GeneratedAt, &item.UpdatedAt, &customizationJSON)
 	if err == sql.ErrNoRows {
 		return item, nil
 	}
 	if err != nil {
+		return item, err
+	}
+	if err := json.Unmarshal(customizationJSON, &item.Customization); err != nil {
 		return item, err
 	}
 	item.Error = errorMessage.String
@@ -1279,7 +1380,7 @@ func transcriptionMarkdown(title string, rows []transcriptionExportRow, insights
 	return transcriptionMarkdownLocalized(title, rows, insights, "en")
 }
 
-func transcriptionMarkdownLocalized(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string) string {
+func transcriptionMarkdownLocalized(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string, options ...transcriptionSummaryExportOptions) string {
 	var output strings.Builder
 	fmt.Fprintf(&output, "# %s\n\n", title)
 	for _, row := range rows {
@@ -1289,7 +1390,7 @@ func transcriptionMarkdownLocalized(title string, rows []transcriptionExportRow,
 		}
 		fmt.Fprintf(&output, " — %s\n", strings.ReplaceAll(row.Text, "\n", " "))
 	}
-	appendTranscriptionMarkdownInsightsLocalized(&output, insights, language)
+	appendTranscriptionMarkdownInsightsLocalized(&output, insights, language, options...)
 	return output.String()
 }
 
@@ -1297,7 +1398,7 @@ func appendTranscriptionMarkdownInsights(output *strings.Builder, insights *mode
 	appendTranscriptionMarkdownInsightsLocalized(output, insights, "en")
 }
 
-func appendTranscriptionMarkdownInsightsLocalized(output *strings.Builder, insights *models.TranscriptionInsights, language string) {
+func appendTranscriptionMarkdownInsightsLocalized(output *strings.Builder, insights *models.TranscriptionInsights, language string, options ...transcriptionSummaryExportOptions) {
 	if insights == nil {
 		return
 	}
@@ -1311,7 +1412,7 @@ func appendTranscriptionMarkdownInsightsLocalized(output *strings.Builder, insig
 		return
 	}
 	if strings.TrimSpace(insights.Summary) != "" {
-		fmt.Fprintf(output, "### %s\n\n%s\n\n", transcriptionExportLabel(language, "summary"), strings.TrimSpace(insights.Summary))
+		fmt.Fprintf(output, "### %s\n\n%s\n\n", transcriptionExportLabel(language, "summary"), summaryExportMarkdown(insights.Summary, options...))
 	}
 	if len(insights.Chapters) > 0 {
 		fmt.Fprintf(output, "### %s\n\n", transcriptionExportLabel(language, "chapters"))
@@ -1408,7 +1509,7 @@ func buildTranscriptDOCX(title string, rows []transcriptionExportRow, insights *
 	return buildTranscriptDOCXLocalized(title, rows, insights, "en")
 }
 
-func buildTranscriptDOCXLocalized(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string) []byte {
+func buildTranscriptDOCXLocalized(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string, options ...transcriptionSummaryExportOptions) []byte {
 	var document strings.Builder
 	documentKind := transcriptionExportLabel(language, "transcript")
 	if len(rows) == 0 && insights != nil {
@@ -1437,7 +1538,12 @@ func buildTranscriptDOCXLocalized(title string, rows []transcriptionExportRow, i
 			if strings.TrimSpace(insights.Summary) != "" {
 				document.WriteString(`<w:p><w:r><w:rPr><w:b/><w:color w:val="2161E3"/></w:rPr><w:t>` + html.EscapeString(transcriptionExportLabel(language, "summary")) + `</w:t></w:r></w:p>`)
 				for _, paragraph := range transcriptionSummaryParagraphs(insights.Summary) {
-					document.WriteString(`<w:p><w:pPr><w:spacing w:after="160"/></w:pPr><w:r><w:t xml:space="preserve">` + html.EscapeString(paragraph) + `</w:t></w:r></w:p>`)
+					prefix := summaryExportSpeakerPrefix(paragraph, options...)
+					document.WriteString(`<w:p><w:pPr><w:spacing w:after="160"/></w:pPr>`)
+					if prefix != "" {
+						document.WriteString(`<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">` + html.EscapeString(prefix) + `</w:t></w:r>`)
+					}
+					document.WriteString(`<w:r><w:t xml:space="preserve">` + html.EscapeString(strings.TrimPrefix(paragraph, prefix)) + `</w:t></w:r></w:p>`)
 				}
 			}
 			if len(insights.Chapters) > 0 {
@@ -1588,7 +1694,7 @@ func buildTranscriptPDF(title string, rows []transcriptionExportRow, insights *m
 	return buildTranscriptPDFLocalized(title, rows, insights, "en")
 }
 
-func buildTranscriptPDFLocalized(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string) []byte {
+func buildTranscriptPDFLocalized(title string, rows []transcriptionExportRow, insights *models.TranscriptionInsights, language string, options ...transcriptionSummaryExportOptions) []byte {
 	blocks := transcriptionPDFBlocks(rows)
 	insightsOnly := len(rows) == 0 && insights != nil
 	pages := []transcriptPDFPage{{Lines: make([]transcriptPDFTextLine, 0)}}
@@ -1632,7 +1738,7 @@ func buildTranscriptPDFLocalized(title string, rows []transcriptionExportRow, in
 		pages = append(pages, transcriptPDFPage{Lines: make([]transcriptPDFTextLine, 0)})
 		currentY = transcriptPDFBodyTopY
 	}
-	appendTranscriptPDFInsightsLocalized(&pages, &currentY, insights, language)
+	appendTranscriptPDFInsightsLocalized(&pages, &currentY, insights, language, options...)
 
 	if len(blocks) == 0 && insights == nil {
 		pages[0].Lines = append(pages[0].Lines, transcriptPDFTextLine{Text: "No transcript text available.", X: transcriptPDFTextX, Y: currentY, Font: "F1", Size: transcriptPDFBodyFontSize, Color: transcriptPDFBrandMuted})
@@ -1645,7 +1751,7 @@ func appendTranscriptPDFInsights(pages *[]transcriptPDFPage, currentY *float64, 
 	appendTranscriptPDFInsightsLocalized(pages, currentY, insights, "en")
 }
 
-func appendTranscriptPDFInsightsLocalized(pages *[]transcriptPDFPage, currentY *float64, insights *models.TranscriptionInsights, language string) {
+func appendTranscriptPDFInsightsLocalized(pages *[]transcriptPDFPage, currentY *float64, insights *models.TranscriptionInsights, language string, options ...transcriptionSummaryExportOptions) {
 	if insights == nil {
 		return
 	}
@@ -1666,6 +1772,11 @@ func appendTranscriptPDFInsightsLocalized(pages *[]transcriptPDFPage, currentY *
 		for index, paragraph := range transcriptionSummaryParagraphs(insights.Summary) {
 			if index > 0 {
 				*currentY -= 8
+			}
+			prefix := summaryExportSpeakerPrefix(paragraph, options...)
+			if prefix != "" {
+				appendTranscriptPDFWrappedFlow(pages, currentY, prefix, transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F2", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
+				paragraph = strings.TrimSpace(strings.TrimPrefix(paragraph, prefix))
 			}
 			appendTranscriptPDFWrappedFlow(pages, currentY, paragraph, transcriptPDFLeftMargin, transcriptPDFBodyLineCharMax, "F1", transcriptPDFBodyFontSize, transcriptPDFBrandDark)
 		}
@@ -1892,4 +2003,60 @@ func decodeTranscriptionInsightOutput(value string) (transcriptionInsightRespons
 		result.ActionItems = []string{}
 	}
 	return result, nil
+}
+
+// Export styling never changes the stored generated summary.
+type transcriptionSummaryExportOptions struct {
+	BoldSpeakers bool
+	Speakers     []models.TranscriptionSpeaker
+}
+
+func summaryExportSpeakerPrefix(paragraph string, options ...transcriptionSummaryExportOptions) string {
+	if len(options) == 0 || !options[0].BoldSpeakers {
+		return ""
+	}
+	best := ""
+	for _, speaker := range options[0].Speakers {
+		for _, name := range []string{speaker.DisplayName, speaker.Label} {
+			name = strings.TrimSpace(name)
+			if name == "" || len(name) <= len(best) || !strings.HasPrefix(paragraph, name) {
+				continue
+			}
+			rest := strings.TrimPrefix(paragraph, name)
+			if rest == "" || strings.HasPrefix(rest, " ") || strings.HasPrefix(rest, ":") || strings.HasPrefix(rest, ",") {
+				best = name
+			}
+		}
+	}
+	return best
+}
+
+func summaryExportMarkdown(summary string, options ...transcriptionSummaryExportOptions) string {
+	paragraphs := transcriptionSummaryParagraphs(summary)
+	for i, paragraph := range paragraphs {
+		if prefix := summaryExportSpeakerPrefix(paragraph, options...); prefix != "" {
+			paragraphs[i] = "**" + prefix + "**" + strings.TrimPrefix(paragraph, prefix)
+		}
+	}
+	return strings.Join(paragraphs, "\n\n")
+}
+
+func filterSummaryExportInsights(c *gin.Context, insights *models.TranscriptionInsights) *models.TranscriptionInsights {
+	if insights != nil {
+		filtered := *insights
+		if c.Query("summary") == "false" {
+			filtered.Summary = ""
+		}
+		if c.Query("chapters") == "false" {
+			filtered.Chapters = nil
+		}
+		if c.Query("topics") == "false" {
+			filtered.Topics = nil
+		}
+		if c.Query("actionItems") == "false" {
+			filtered.ActionItems = nil
+		}
+		return &filtered
+	}
+	return nil
 }
