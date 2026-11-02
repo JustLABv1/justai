@@ -140,8 +140,8 @@ func (a *App) createMCPServer(c *gin.Context) {
 	if request.AuthType == "" {
 		request.AuthType = "none"
 	}
-	if request.AuthType != "none" && request.AuthType != "api_key" && request.AuthType != "oauth" {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("authType must be none, api_key, or oauth"))
+	if request.AuthType != "none" && request.AuthType != "api_key" && request.AuthType != "litellm" && request.AuthType != "oauth" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("authType must be none, api_key, litellm, or oauth"))
 		return
 	}
 	if request.AuthType == "oauth" {
@@ -220,8 +220,8 @@ func (a *App) updateMCPServer(c *gin.Context) {
 			return
 		}
 	}
-	if request.AuthType != "" && request.AuthType != "none" && request.AuthType != "api_key" && request.AuthType != "oauth" {
-		writeError(c, http.StatusBadRequest, fmt.Errorf("authType must be none, api_key, or oauth"))
+	if request.AuthType != "" && request.AuthType != "none" && request.AuthType != "api_key" && request.AuthType != "litellm" && request.AuthType != "oauth" {
+		writeError(c, http.StatusBadRequest, fmt.Errorf("authType must be none, api_key, litellm, or oauth"))
 		return
 	}
 	if request.AuthType == "oauth" {
