@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useRef } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import type {
@@ -29,6 +30,8 @@ export function VideoProcessingOutput({
   speakers: TranscriptionSpeaker[]
   error?: string
 }) {
+  const { t } = useTranslations()
+
   const viewport = useRef<HTMLDivElement>(null)
   const following = useRef(true)
   const parallel = upload.pipeline?.find(
@@ -65,52 +68,58 @@ export function VideoProcessingOutput({
   }, [step, blocks.length, lastBlock?.text])
   const heading =
     upload.status === "queued"
-      ? "Waiting to start"
+      ? t("Waiting to start")
       : step === "upload"
-        ? "Uploading your recording"
+        ? t("Uploading your recording")
         : step === "transcription"
-          ? "Incoming transcript"
+          ? t("Incoming transcript")
           : step === "diarization"
-            ? "Detected speakers"
+            ? t("Detected speakers")
             : step === "grammar"
-              ? "Corrected transcript"
-              : "Preparing the result"
+              ? t("Corrected transcript")
+              : t("Preparing the result")
   return (
     <section
-      aria-label="Current step output"
+      aria-label={t("Current step output")}
       className="flex flex-col gap-3 rounded-xl bg-muted/40 p-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium">{heading}</h3>
         <span role="status" className="text-xs text-muted-foreground">
           {step === "transcription" && parallel?.sliceCount
-            ? `${parallel.completedSlices ?? 0} / ${parallel.sliceCount} blocks processed`
+            ? t("{value0} / {value1} blocks processed", {
+                value0: parallel.completedSlices ?? 0,
+                value1: parallel.sliceCount,
+              })
             : step === "diarization" && speakers.length
-              ? `${speakers.length} speakers`
+              ? t("{value0} speakers", { value0: speakers.length })
               : (step === "transcription" || step === "grammar") &&
                   blocks.length
-                ? `${blocks.length} text blocks`
+                ? t("{value0} text blocks", { value0: blocks.length })
                 : null}
         </span>
       </div>
       {error ? (
         <Alert variant="destructive">
-          <AlertTitle>Processing needs attention</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertTitle>{t("Processing needs attention")}</AlertTitle>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       ) : null}
       {upload.status === "queued" ? (
         <p className="text-sm text-muted-foreground">
           {upload.workerStatus?.queuePosition
-            ? `Position ${upload.workerStatus.queuePosition} in the queue. Processing starts when a worker is available.`
-            : "Your video is queued. Processing will start automatically."}
+            ? t(
+                "Position {value0} in the queue. Processing starts when a worker is available.",
+                { value0: upload.workerStatus.queuePosition }
+              )
+            : t("Your video is queued. Processing will start automatically.")}
         </p>
       ) : step === "upload" ? (
         <div className="flex flex-col gap-2 text-sm">
           <p className="truncate">{upload.fileName}</p>
           <p className="text-muted-foreground">
             {(upload.bytes / 1048576).toFixed(1)} /{" "}
-            {(upload.expectedBytes / 1048576).toFixed(1)} MB uploaded
+            {(upload.expectedBytes / 1048576).toFixed(1)} {t("MB uploaded")}
           </p>
         </div>
       ) : step === "transcription" || step === "grammar" ? (
@@ -139,8 +148,8 @@ export function VideoProcessingOutput({
         ) : (
           <p className="text-sm text-muted-foreground">
             {step === "grammar"
-              ? "Corrected paragraphs will appear when they are available."
-              : "Text blocks will appear here as they arrive."}
+              ? t("Corrected paragraphs will appear when they are available.")
+              : t("Text blocks will appear here as they arrive.")}
           </p>
         )
       ) : step === "diarization" ? (
@@ -155,19 +164,21 @@ export function VideoProcessingOutput({
         ) : (
           <p className="text-sm text-muted-foreground">
             {error
-              ? "No speaker assignments are available. Retry or continue without speaker separation."
-              : "Speaker assignments will appear when recognition finishes."}
+              ? t(
+                  "No speaker assignments are available. Retry or continue without speaker separation."
+                )
+              : t("Speaker assignments will appear when recognition finishes.")}
           </p>
         )
       ) : (
         <p className="text-sm text-muted-foreground">
-          {segments.length} transcript segments and {speakers.length} speakers.
-          Saving the transcript for review and export.
+          {segments.length} {t("transcript segments and")} {speakers.length}{" "}
+          {t("speakers. Saving the transcript for review and export.")}
         </p>
       )}
       {(step === "transcription" || step === "grammar") && blocks.length > 0 ? (
         <p className="text-xs text-muted-foreground">
-          Preview · text and speaker assignments may still change.
+          {t("Preview · text and speaker assignments may still change.")}
         </p>
       ) : null}
     </section>

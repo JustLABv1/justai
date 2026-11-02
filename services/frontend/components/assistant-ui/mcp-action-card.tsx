@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import type { ReactNode } from "react"
 import {
   Check,
@@ -35,17 +36,19 @@ export function MCPActionCard({
   call: ToolCallEntry
   children?: ReactNode
 }) {
+  const { t } = useTranslations()
+
   const notExecuted =
     call.approval?.approved === false || call.status === "cancelled"
   const status = notExecuted
-    ? "Not executed"
+    ? t("Not executed")
     : call.status === "waiting"
-      ? "Waiting for approval"
+      ? t("Waiting for approval")
       : call.status === "running"
-        ? "Running…"
+        ? t("Running…")
         : call.status === "failed"
-          ? "Failed"
-          : "Completed"
+          ? t("Failed")
+          : t("Completed")
   const Icon = notExecuted
     ? X
     : call.status === "waiting"
@@ -107,15 +110,15 @@ export function MCPActionCard({
                   </dt>
                   <dd
                     className="truncate text-foreground"
-                    title={parameterValue(value)}
+                    title={t(parameterValue(value))}
                   >
-                    {parameterValue(value)}
+                    {t(parameterValue(value))}
                   </dd>
                 </div>
               ))}
               {parameters.length > 4 && (
                 <div className="text-muted-foreground">
-                  +{parameters.length - 4} more in details
+                  +{parameters.length - 4} {t("more in details")}
                 </div>
               )}
             </dl>
@@ -131,15 +134,15 @@ export function MCPActionCard({
                 aria-hidden="true"
                 className="size-3.5 group-open/details:rotate-90"
               />
-              Details
+              {t("Details")}
             </summary>
             <div className="mt-2 space-y-3 text-xs">
               <p className="break-all text-muted-foreground">
-                Tool: {call.tool_name}
+                {t("Tool:")} {call.tool_name}
               </p>
               {parameters.length > 0 && (
                 <div>
-                  <p className="mb-1 font-medium">Parameters</p>
+                  <p className="mb-1 font-medium">{t("Parameters")}</p>
                   <pre className="max-h-60 overflow-auto rounded-lg bg-muted p-3 break-all whitespace-pre-wrap">
                     {JSON.stringify(call.inputs, null, 2)}
                   </pre>
@@ -150,12 +153,12 @@ export function MCPActionCard({
               )}
               {call.approval?.resolution === "expired" && (
                 <p className="text-muted-foreground">
-                  The approval request expired.
+                  {t("The approval request expired.")}
                 </p>
               )}
               {call.output && (
                 <div className="min-w-0">
-                  <p className="mb-1 font-medium">Result</p>
+                  <p className="mb-1 font-medium">{t("Result")}</p>
                   {children}
                 </div>
               )}

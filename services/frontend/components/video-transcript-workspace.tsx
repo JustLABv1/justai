@@ -1,5 +1,9 @@
 "use client"
 
+import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
 import Link from "next/link"
 import { SpeakerVideoCaptions } from "@/components/speaker-video-captions"
 
@@ -169,7 +173,7 @@ type SpeakerSummary = {
   sampleText: string
 }
 
-const insightLanguageOptions = [
+const insightLanguageOptionsMessages = [
   { value: "auto", label: "Auto (transcript language)" },
   { value: "en", label: "English" },
   { value: "de", label: "German" },
@@ -356,6 +360,12 @@ export function TranscriptWorkspace({
   onError,
   mediaKind = "video",
 }: VideoTranscriptWorkspaceProps) {
+  const insightLanguageOptions = useTranslatedConfig(
+    insightLanguageOptionsMessages
+  )
+
+  const { t, locale } = useTranslations()
+
   const [transcriptMode, setTranscriptMode] =
     useState<TranscriptMode>("verbatim")
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("review")
@@ -871,7 +881,7 @@ export function TranscriptWorkspace({
       onError(
         caught instanceof Error
           ? caught.message
-          : "The paragraph could not be saved."
+          : t("The paragraph could not be saved.")
       )
     } finally {
       setSavingSegmentId(null)
@@ -897,7 +907,9 @@ export function TranscriptWorkspace({
       onError("")
     } catch (caught) {
       onError(
-        caught instanceof Error ? caught.message : "Speaker assignment failed."
+        caught instanceof Error
+          ? caught.message
+          : t("Speaker assignment failed.")
       )
     }
   }
@@ -934,7 +946,7 @@ export function TranscriptWorkspace({
       onError(
         caught instanceof Error
           ? caught.message
-          : "The annotation could not be saved."
+          : t("The annotation could not be saved.")
       )
     } finally {
       setAnnotationSaving(false)
@@ -956,7 +968,7 @@ export function TranscriptWorkspace({
       onError(
         caught instanceof Error
           ? caught.message
-          : "The annotation could not be deleted."
+          : t("The annotation could not be deleted.")
       )
     }
   }
@@ -994,7 +1006,7 @@ export function TranscriptWorkspace({
       onError(
         caught instanceof Error
           ? caught.message
-          : "The speakers could not be identified."
+          : t("The speakers could not be identified.")
       )
     } finally {
       setIdentifyRunning(false)
@@ -1034,7 +1046,7 @@ export function TranscriptWorkspace({
       onError(
         caught instanceof Error
           ? caught.message
-          : "The suggestion could not be saved."
+          : t("The suggestion could not be saved.")
       )
     }
   }
@@ -1065,7 +1077,7 @@ export function TranscriptWorkspace({
       onError(
         caught instanceof Error
           ? caught.message
-          : "The speakers could not be merged."
+          : t("The speakers could not be merged.")
       )
     } finally {
       setMergeSaving(false)
@@ -1094,7 +1106,7 @@ export function TranscriptWorkspace({
       onError(
         caught instanceof Error
           ? caught.message
-          : "Grammar polish could not be generated."
+          : t("Grammar polish could not be generated.")
       )
       updateSnapshot((current) => ({
         ...current,
@@ -1119,7 +1131,9 @@ export function TranscriptWorkspace({
       ).insights
     }
     if (insights.status === "failed") {
-      throw new Error(insights.error || "AI insights could not be generated.")
+      throw new Error(
+        insights.error || t("AI insights could not be generated.")
+      )
     }
     return insights
   }
@@ -1193,7 +1207,7 @@ export function TranscriptWorkspace({
       onError(
         caught instanceof Error
           ? caught.message
-          : "AI insights could not be generated."
+          : t("AI insights could not be generated.")
       )
       updateSnapshot((current) => ({
         ...current,
@@ -1311,7 +1325,7 @@ export function TranscriptWorkspace({
       onError(
         caught instanceof Error
           ? caught.message
-          : "A chat could not be started from this transcript."
+          : t("A chat could not be started from this transcript.")
       )
     } finally {
       setChatStarting(false)
@@ -1335,7 +1349,7 @@ export function TranscriptWorkspace({
       onError("")
     } catch (caught) {
       onError(
-        caught instanceof Error ? caught.message : "Insights export failed."
+        caught instanceof Error ? caught.message : t("Insights export failed.")
       )
     }
   }
@@ -1380,7 +1394,7 @@ export function TranscriptWorkspace({
     <div className="min-w-0 space-y-3">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <Tabs
-          aria-label="Transcript workspace sections"
+          aria-label={t("Transcript workspace sections")}
           onValueChange={(value) => {
             if (
               value === "review" ||
@@ -1392,9 +1406,9 @@ export function TranscriptWorkspace({
           value={workspaceView !== "details" ? workspaceView : null}
         >
           <TabsList>
-            <TabsTrigger value="review">Transcript</TabsTrigger>
-            <TabsTrigger value="insights">Summary</TabsTrigger>
-            <TabsTrigger value="speakers">Speakers</TabsTrigger>
+            <TabsTrigger value="review">{t("Transcript")}</TabsTrigger>
+            <TabsTrigger value="insights">{t("Summary")}</TabsTrigger>
+            <TabsTrigger value="speakers">{t("Speakers")}</TabsTrigger>
           </TabsList>
         </Tabs>
         <div className="flex flex-wrap items-center gap-2">
@@ -1409,16 +1423,16 @@ export function TranscriptWorkspace({
             ) : (
               <MessageSquarePlus data-icon="inline-start" />
             )}
-            {chatStarting ? "Starting chat…" : "Chat"}
+            {chatStarting ? t("Starting chat…") : t("Chat")}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
-              <MoreHorizontal data-icon="inline-start" /> More
+              <MoreHorizontal data-icon="inline-start" /> {t("More")}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={() => setWorkspaceView("details")}>
-                  <Clock3 data-icon="inline-start" /> Transcript details
+                  <Clock3 data-icon="inline-start" /> {t("Transcript details")}
                 </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
@@ -1431,21 +1445,21 @@ export function TranscriptWorkspace({
             }}
             size="sm"
           >
-            <Download data-icon="inline-start" /> Export
+            <Download data-icon="inline-start" /> {t("Export")}
           </Button>
         </div>
       </div>
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Export transcript</DialogTitle>
+            <DialogTitle>{t("Export transcript")}</DialogTitle>
             <DialogDescription>
-              Choose a file format for your transcript.
+              {t("Choose a file format for your transcript.")}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
-              <FieldLabel>File format</FieldLabel>
+              <FieldLabel>{t("File format")}</FieldLabel>
               <Select
                 items={[
                   { value: "pdf", label: "PDF" },
@@ -1459,7 +1473,10 @@ export function TranscriptWorkspace({
                 value={exportFormat}
                 onValueChange={(value) => setExportFormat(value ?? "pdf")}
               >
-                <SelectTrigger aria-label="Export format" className="w-full">
+                <SelectTrigger
+                  aria-label={t("Export format")}
+                  className="w-full"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1467,8 +1484,8 @@ export function TranscriptWorkspace({
                     <SelectItem value="pdf">PDF</SelectItem>
                     <SelectItem value="docx">Word (.docx)</SelectItem>
                     <SelectItem value="md">Markdown</SelectItem>
-                    <SelectItem value="txt">Plain text</SelectItem>
-                    <SelectItem value="srt">Subtitles (.srt)</SelectItem>
+                    <SelectItem value="txt">{t("Plain text")}</SelectItem>
+                    <SelectItem value="srt">{t("Subtitles (.srt)")}</SelectItem>
                     <SelectItem value="vtt">WebVTT (.vtt)</SelectItem>
                     <SelectItem value="json">JSON</SelectItem>
                   </SelectGroup>
@@ -1484,28 +1501,28 @@ export function TranscriptWorkspace({
                   onCheckedChange={setIncludeInsightsInExport}
                 />
                 <FieldLabel htmlFor="export-insights">
-                  Include AI summary
+                  {t("Include AI summary")}
                 </FieldLabel>
               </Field>
             ) : exportFormat === "json" ? (
               <p className="text-sm text-muted-foreground">
-                Includes AI insights when available.
+                {t("Includes AI insights when available.")}
               </p>
             ) : null}
             {exportSupportsInsights && !insightsReady ? (
               <p className="text-sm text-muted-foreground">
-                Generate a summary first to include it in your export.
+                {t("Generate a summary first to include it in your export.")}
               </p>
             ) : null}
           </FieldGroup>
           {exportError ? (
             <p role="alert" className="text-sm text-destructive">
-              {exportError}
+              {t(exportError)}
             </p>
           ) : null}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setExportOpen(false)}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={exporting}
@@ -1519,7 +1536,7 @@ export function TranscriptWorkspace({
               ) : (
                 <Download data-icon="inline-start" />
               )}
-              {exporting ? "Preparing…" : "Download"}
+              {exporting ? t("Preparing…") : t("Download")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1537,16 +1554,20 @@ export function TranscriptWorkspace({
               <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <FileText aria-hidden="true" className="size-4 shrink-0" />
-                  Transcript
+                  {t("Transcript")}
                 </CardTitle>
                 <CardDescription>
-                  {transcript.length} messages · {snapshot.segments.length}{" "}
-                  segments
+                  {transcript.length} {t("messages ·")}{" "}
+                  {snapshot.segments.length} {t("segments")}
                   {preview.length > 0
-                    ? ` · ${preview.length} live preview lines`
+                    ? t(" · {value0} live preview lines", {
+                        value0: preview.length,
+                      })
                     : ""}
                   {transcriptQuery
-                    ? ` · ${filteredTranscript.length} matches`
+                    ? t(" · {value0} matches", {
+                        value0: filteredTranscript.length,
+                      })
                     : ""}
                 </CardDescription>
                 {mediaPlaying && !hasActiveFilter ? (
@@ -1555,7 +1576,7 @@ export function TranscriptWorkspace({
                       aria-hidden="true"
                       className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse motion-reduce:animate-none"
                     />
-                    Following playback
+                    {t("Following playback")}
                   </span>
                 ) : null}
               </div>
@@ -1577,21 +1598,23 @@ export function TranscriptWorkspace({
                       setTranscriptMode(value)
                   }}
                 >
-                  <SelectTrigger aria-label="Transcript version" size="sm">
-                    <span className="text-muted-foreground">Version:</span>
+                  <SelectTrigger aria-label={t("Transcript version")} size="sm">
+                    <span className="text-muted-foreground">
+                      {t("Version:")}
+                    </span>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectItem value="verbatim">Original</SelectItem>
+                      <SelectItem value="verbatim">{t("Original")}</SelectItem>
                       <SelectItem
                         value="polished"
                         disabled={!polishedAvailable}
                       >
-                        Polished
+                        {t("Polished")}
                       </SelectItem>
                       <SelectItem value="edited" disabled={!editedAvailable}>
-                        Edited
+                        {t("Edited")}
                       </SelectItem>
                     </SelectGroup>
                   </SelectContent>
@@ -1612,13 +1635,13 @@ export function TranscriptWorkspace({
                   ) : (
                     <Pencil data-icon="inline-start" />
                   )}
-                  {editorOpen ? "Done editing" : "Edit"}
+                  {editorOpen ? t("Done editing") : t("Edit")}
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
                       <Button
-                        aria-label="Transcript tools"
+                        aria-label={t("Transcript tools")}
                         size="icon-sm"
                         variant="ghost"
                       />
@@ -1632,7 +1655,7 @@ export function TranscriptWorkspace({
                         onClick={() => setFiltersOpen((current) => !current)}
                       >
                         <CircleAlert data-icon="inline-start" />{" "}
-                        {filtersOpen ? "Hide filters" : "Show filters"}
+                        {filtersOpen ? t("Hide filters") : t("Show filters")}
                       </DropdownMenuItem>
                       {canPolishTranscript ? (
                         <DropdownMenuItem
@@ -1641,10 +1664,10 @@ export function TranscriptWorkspace({
                         >
                           <Sparkles data-icon="inline-start" />
                           {polishProcessing
-                            ? "Polishing…"
+                            ? t("Polishing…")
                             : polishedAvailable
-                              ? "Re-polish transcript"
-                              : "Polish transcript"}
+                              ? t("Re-polish transcript")
+                              : t("Polish transcript")}
                         </DropdownMenuItem>
                       ) : null}
                     </DropdownMenuGroup>
@@ -1659,10 +1682,10 @@ export function TranscriptWorkspace({
                   className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
                 />
                 <Input
-                  aria-label="Search transcript"
+                  aria-label={t("Search transcript")}
                   className="h-9 pl-9"
                   onChange={(event) => setTranscriptQuery(event.target.value)}
-                  placeholder="Search transcript"
+                  placeholder={t("Search transcript")}
                   value={transcriptQuery}
                 />
               </div>
@@ -1680,13 +1703,13 @@ export function TranscriptWorkspace({
                     value={speakerFilter}
                   >
                     <SelectTrigger
-                      aria-label="Filter by speaker"
+                      aria-label={t("Filter by speaker")}
                       className="h-9 w-40 text-xs"
                     >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All speakers</SelectItem>
+                      <SelectItem value="all">{t("All speakers")}</SelectItem>
                       {snapshot.speakers.map((speaker) => (
                         <SelectItem key={speaker.id} value={speaker.id}>
                           {speakerDisplayName(speaker)}
@@ -1700,12 +1723,12 @@ export function TranscriptWorkspace({
                     size="sm"
                     variant={qualityOnly ? "default" : "outline"}
                   >
-                    <CircleAlert data-icon="inline-start" /> Review flags
+                    <CircleAlert data-icon="inline-start" /> {t("Review flags")}
                   </Button>
                 </>
               ) : hasActiveFilter ? (
                 <Badge className="h-7" variant="outline">
-                  Filters active
+                  {t("Filters active")}
                 </Badge>
               ) : null}
               {filteredTranscript.length > 0 &&
@@ -1713,7 +1736,7 @@ export function TranscriptWorkspace({
               hasActiveFilter ? (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Button
-                    aria-label="Previous search match"
+                    aria-label={t("Previous search match")}
                     disabled={filteredTranscript.length < 2}
                     onClick={() =>
                       setMatchIndex(
@@ -1731,7 +1754,7 @@ export function TranscriptWorkspace({
                     {activeMatchIndex + 1} / {filteredTranscript.length}
                   </span>
                   <Button
-                    aria-label="Next search match"
+                    aria-label={t("Next search match")}
                     disabled={filteredTranscript.length < 2}
                     onClick={() =>
                       setMatchIndex(
@@ -1749,7 +1772,7 @@ export function TranscriptWorkspace({
             {editorOpen && selectedSegmentIds.length > 0 ? (
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-2 text-xs">
                 <span className="text-muted-foreground">
-                  {selectedSegmentIds.length} lines selected
+                  {selectedSegmentIds.length} {t("lines selected")}
                 </span>
                 <Select
                   items={snapshot.speakers.map((speaker) => ({
@@ -1760,7 +1783,7 @@ export function TranscriptWorkspace({
                   value={assignmentSpeakerId}
                 >
                   <SelectTrigger className="h-8 w-40 text-xs">
-                    <SelectValue placeholder="Assign speaker" />
+                    <SelectValue placeholder={t("Assign speaker")} />
                   </SelectTrigger>
                   <SelectContent>
                     {snapshot.speakers.map((speaker) => (
@@ -1775,14 +1798,14 @@ export function TranscriptWorkspace({
                   onClick={() => void assignSelectedSpeaker()}
                   size="sm"
                 >
-                  <Users data-icon="inline-start" /> Assign speaker
+                  <Users data-icon="inline-start" /> {t("Assign speaker")}
                 </Button>
                 <Button
                   onClick={() => setSelectedSegmentIds([])}
                   size="sm"
                   variant="ghost"
                 >
-                  Clear
+                  {t("Clear")}
                 </Button>
               </div>
             ) : null}
@@ -1792,8 +1815,9 @@ export function TranscriptWorkspace({
               editParagraphs.length > 0 ? (
                 <div className="flex flex-col gap-4">
                   <p className="text-xs text-muted-foreground">
-                    Edit a paragraph at a time. Timestamps and speaker
-                    assignments stay with the original audio segments.
+                    {t(
+                      "Edit a paragraph at a time. Timestamps and speaker assignments stay with the original audio segments."
+                    )}
                   </p>
                   {editParagraphs.map((message) => {
                     const segments = message.segmentIds
@@ -1814,7 +1838,11 @@ export function TranscriptWorkspace({
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <input
-                            aria-label={`Select paragraph at ${formatVideoTimestamp(message.startOffsetMs)}`}
+                            aria-label={t("Select paragraph at {value0}", {
+                              value0: formatVideoTimestamp(
+                                message.startOffsetMs
+                              ),
+                            })}
                             checked={
                               segments.length > 0 &&
                               selectedCount === segments.length
@@ -1848,7 +1876,7 @@ export function TranscriptWorkspace({
                             {speakerDisplayName(
                               speakerById.get(message.speakerKey)
                             )}{" "}
-                            · {segments.length} segments
+                            · {segments.length} {t("segments")}
                           </span>
                           <Button
                             className="ml-auto"
@@ -1868,11 +1896,13 @@ export function TranscriptWorkspace({
                             ) : (
                               <Check data-icon="inline-start" />
                             )}
-                            Save paragraph
+                            {t("Save paragraph")}
                           </Button>
                         </div>
                         <Textarea
-                          aria-label={`Edit paragraph at ${formatVideoTimestamp(message.startOffsetMs)}`}
+                          aria-label={t("Edit paragraph at {value0}", {
+                            value0: formatVideoTimestamp(message.startOffsetMs),
+                          })}
                           className="mt-3 min-h-32 resize-y bg-background text-sm leading-6"
                           onChange={(event) =>
                             setParagraphDrafts((current) => ({
@@ -1889,9 +1919,9 @@ export function TranscriptWorkspace({
               ) : (
                 <Empty className="min-h-48 border-0 p-4">
                   <EmptyHeader>
-                    <EmptyTitle>No lines need review</EmptyTitle>
+                    <EmptyTitle>{t("No lines need review")}</EmptyTitle>
                     <EmptyDescription>
-                      Try clearing a filter or turn off Review flags.
+                      {t("Try clearing a filter or turn off Review flags.")}
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -1936,7 +1966,9 @@ export function TranscriptWorkspace({
                     >
                       <button
                         aria-current={active ? "true" : undefined}
-                        aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
+                        aria-label={t("Jump to {value0}", {
+                          value0: formatVideoTimestamp(message.startOffsetMs),
+                        })}
                         disabled={!canSeek}
                         className={cn(
                           "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums",
@@ -1957,11 +1989,13 @@ export function TranscriptWorkspace({
                         <div className="flex flex-wrap items-center gap-1.5">
                           {speaker ? (
                             <Button
-                              aria-label={`Rename ${speakerDisplayName(speaker)}`}
+                              aria-label={t("Rename {value0}", {
+                                value0: speakerDisplayName(speaker),
+                              })}
                               className="group/speaker-name h-auto max-w-full justify-start p-0 hover:bg-transparent"
                               onClick={() => onRenameSpeaker(speaker)}
                               size="sm"
-                              title="Rename speaker"
+                              title={t("Rename speaker")}
                               variant="ghost"
                             >
                               <Badge
@@ -1988,7 +2022,7 @@ export function TranscriptWorkspace({
                           ))}
                           <div className="ml-auto flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                             <Button
-                              aria-label="Add bookmark"
+                              aria-label={t("Add bookmark")}
                               onClick={() => {
                                 setAnnotationKind("bookmark")
                                 setAnnotationNote("")
@@ -2000,13 +2034,13 @@ export function TranscriptWorkspace({
                                 })
                               }}
                               size="icon-sm"
-                              title="Add bookmark"
+                              title={t("Add bookmark")}
                               variant="ghost"
                             >
                               <Bookmark />
                             </Button>
                             <Button
-                              aria-label="Add comment"
+                              aria-label={t("Add comment")}
                               onClick={() => {
                                 setAnnotationKind("comment")
                                 setAnnotationNote("")
@@ -2018,7 +2052,7 @@ export function TranscriptWorkspace({
                                 })
                               }}
                               size="icon-sm"
-                              title="Add comment"
+                              title={t("Add comment")}
                               variant="ghost"
                             >
                               <MessageSquarePlus />
@@ -2048,9 +2082,9 @@ export function TranscriptWorkspace({
             ) : transcript.length > 0 && transcriptQuery ? (
               <Empty className="min-h-48 border-0 p-4">
                 <EmptyHeader>
-                  <EmptyTitle>No matching lines</EmptyTitle>
+                  <EmptyTitle>{t("No matching lines")}</EmptyTitle>
                   <EmptyDescription>
-                    Try another word or clear the transcript search.
+                    {t("Try another word or clear the transcript search.")}
                   </EmptyDescription>
                 </EmptyHeader>
                 <Button
@@ -2058,7 +2092,7 @@ export function TranscriptWorkspace({
                   size="sm"
                   variant="outline"
                 >
-                  Clear search
+                  {t("Clear search")}
                 </Button>
               </Empty>
             ) : preview.length > 0 ? (
@@ -2066,20 +2100,22 @@ export function TranscriptWorkspace({
             ) : isVideoProcessing ? (
               <Empty className="min-h-48 border-0 p-4">
                 <EmptyHeader>
-                  <EmptyTitle>Waiting for the first slice</EmptyTitle>
+                  <EmptyTitle>{t("Waiting for the first slice")}</EmptyTitle>
                   <EmptyDescription>
-                    Workers are transcribing in parallel. Preview lines will
-                    appear as output arrives.
+                    {t(
+                      "Workers are transcribing in parallel. Preview lines will appear as output arrives."
+                    )}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
             ) : (
               <Empty className="min-h-48 border-0 p-4">
                 <EmptyHeader>
-                  <EmptyTitle>No transcript yet</EmptyTitle>
+                  <EmptyTitle>{t("No transcript yet")}</EmptyTitle>
                   <EmptyDescription>
-                    The transcript will appear here after video processing
-                    starts.
+                    {t(
+                      "The transcript will appear here after video processing starts."
+                    )}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
@@ -2103,11 +2139,11 @@ export function TranscriptWorkspace({
           >
             <CardHeader className="gap-1 px-4 py-4">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <Bookmark className="size-4 text-primary" /> Bookmarks &
-                comments
+                <Bookmark className="size-4 text-primary" />{" "}
+                {t("Bookmarks & comments")}
               </CardTitle>
               <CardDescription>
-                Keep review notes attached to exact transcript moments.
+                {t("Keep review notes attached to exact transcript moments.")}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col px-4 pb-4">
@@ -2129,8 +2165,8 @@ export function TranscriptWorkspace({
                         </button>
                         <Badge variant="outline">
                           {annotation.kind === "bookmark"
-                            ? "Bookmark"
-                            : "Comment"}
+                            ? t("Bookmark")
+                            : t("Comment")}
                         </Badge>
                         <Button
                           className="ml-auto"
@@ -2154,14 +2190,15 @@ export function TranscriptWorkspace({
                         size="sm"
                         variant="ghost"
                       >
-                        <Copy data-icon="inline-start" /> Copy timestamp link
+                        <Copy data-icon="inline-start" />{" "}
+                        {t("Copy timestamp link")}
                       </Button>
                     </div>
                   ))}
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Bookmark a line or add a comment while reviewing.
+                  {t("Bookmark a line or add a comment while reviewing.")}
                 </p>
               )}
             </CardContent>
@@ -2176,7 +2213,8 @@ export function TranscriptWorkspace({
             <CardHeader className="gap-1 px-4 py-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Sparkles className="size-4 text-primary" /> AI insights
+                  <Sparkles className="size-4 text-primary" />{" "}
+                  {t("AI insights")}
                 </CardTitle>
                 <div className="flex flex-wrap items-center gap-2">
                   {insightsReady ? (
@@ -2185,7 +2223,8 @@ export function TranscriptWorkspace({
                       size="sm"
                       variant="outline"
                     >
-                      <GitBranch data-icon="inline-start" /> Use in workflow
+                      <GitBranch data-icon="inline-start" />{" "}
+                      {t("Use in workflow")}
                     </Button>
                   ) : null}
                   {insightsReady ? (
@@ -2193,7 +2232,8 @@ export function TranscriptWorkspace({
                       <DropdownMenuTrigger
                         render={<Button size="sm" variant="outline" />}
                       >
-                        <Download data-icon="inline-start" /> Export insights
+                        <Download data-icon="inline-start" />{" "}
+                        {t("Export insights")}
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem
@@ -2214,7 +2254,8 @@ export function TranscriptWorkspace({
                         <DropdownMenuItem
                           onClick={() => void exportInsights("txt")}
                         >
-                          <FileText data-icon="inline-start" /> Plain text
+                          <FileText data-icon="inline-start" />{" "}
+                          {t("Plain text")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => void exportInsights("json")}
@@ -2239,19 +2280,21 @@ export function TranscriptWorkspace({
                       <Sparkles data-icon="inline-start" />
                     )}{" "}
                     {insightsProcessing
-                      ? "Writing…"
+                      ? t("Writing…")
                       : insights.status === "completed"
-                        ? "Regenerate"
-                        : "Generate"}
+                        ? t("Regenerate")
+                        : t("Generate")}
                   </Button>
                 </div>
               </div>
               <CardDescription>
-                Summary, chapters, topics, and action items from the transcript.
+                {t(
+                  "Summary, chapters, topics, and action items from the transcript."
+                )}
               </CardDescription>
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <span className="text-xs text-muted-foreground">
-                  Output language
+                  {t("Output language")}
                 </span>
                 <Select
                   disabled={insightsProcessing}
@@ -2263,7 +2306,7 @@ export function TranscriptWorkspace({
                   value={insightLanguage}
                 >
                   <SelectTrigger
-                    aria-label="AI insight output language"
+                    aria-label={t("AI insight output language")}
                     className="min-w-48"
                     size="sm"
                   >
@@ -2280,7 +2323,7 @@ export function TranscriptWorkspace({
                 {insights.status === "completed" &&
                 insights.language !== insightLanguage ? (
                   <span className="text-xs text-muted-foreground">
-                    Regenerate to apply
+                    {t("Regenerate to apply")}
                   </span>
                 ) : null}
               </div>
@@ -2299,15 +2342,17 @@ export function TranscriptWorkspace({
                 <p className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-300">
                   <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
                   <span>
-                    {hiddenInsightChapterCount} chapter timestamp
-                    {hiddenInsightChapterCount === 1 ? " was" : "s were"} hidden
-                    because it fell outside the video duration.
+                    {hiddenInsightChapterCount} {t("chapter timestamp")}
+                    {hiddenInsightChapterCount === 1 ? " was" : "s were"}{" "}
+                    {t("hidden because it fell outside the video duration.")}
                   </span>
                 </p>
               ) : null}
               {validInsightChapters.length > 0 ? (
                 <div>
-                  <p className="mb-1 font-medium text-foreground">Chapters</p>
+                  <p className="mb-1 font-medium text-foreground">
+                    {t("Chapters")}
+                  </p>
                   <div className="space-y-1">
                     {validInsightChapters.map((chapter) => (
                       <button
@@ -2337,7 +2382,9 @@ export function TranscriptWorkspace({
               ) : null}
               {(insights.topics?.length ?? 0) > 0 ? (
                 <div>
-                  <p className="mb-1 font-medium text-foreground">Topics</p>
+                  <p className="mb-1 font-medium text-foreground">
+                    {t("Topics")}
+                  </p>
                   <div className="flex flex-wrap gap-1">
                     {insights.topics?.map((topic) => (
                       <Badge key={topic} variant="secondary">
@@ -2350,9 +2397,11 @@ export function TranscriptWorkspace({
               {(insights.actionItems?.length ?? 0) > 0 ? (
                 <div>
                   <div className="mb-1 flex items-center justify-between gap-2">
-                    <p className="font-medium text-foreground">Action items</p>
+                    <p className="font-medium text-foreground">
+                      {t("Action items")}
+                    </p>
                     <Button
-                      aria-label="Copy action items"
+                      aria-label={t("Copy action items")}
                       onClick={() => void copyActionItems()}
                       size="sm"
                       type="button"
@@ -2363,7 +2412,7 @@ export function TranscriptWorkspace({
                       ) : (
                         <Copy data-icon="inline-start" />
                       )}
-                      {actionItemsCopied ? "Copied" : "Copy"}
+                      {actionItemsCopied ? t("Copied") : t("Copy")}
                     </Button>
                   </div>
                   <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
@@ -2375,7 +2424,7 @@ export function TranscriptWorkspace({
               ) : null}
               {insights.status === "idle" ? (
                 <p className="text-muted-foreground">
-                  Generate insights when the transcript is ready.
+                  {t("Generate insights when the transcript is ready.")}
                 </p>
               ) : null}
             </CardContent>
@@ -2391,7 +2440,8 @@ export function TranscriptWorkspace({
               <CardHeader className="gap-1 px-4 py-4">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="flex items-center gap-2 text-sm">
-                    <Users className="size-4 text-primary" /> Speaker summary
+                    <Users className="size-4 text-primary" />{" "}
+                    {t("Speaker summary")}
                   </CardTitle>
                   <div className="flex items-center gap-1">
                     <Button
@@ -2400,8 +2450,10 @@ export function TranscriptWorkspace({
                       size="icon-sm"
                       title={
                         snapshot.session.grammarEndpointId
-                          ? "Identify speaker names with AI"
-                          : "Configure a grammar/chat endpoint to identify speakers"
+                          ? t("Identify speaker names with AI")
+                          : t(
+                              "Configure a grammar/chat endpoint to identify speakers"
+                            )
                       }
                       variant="outline"
                     >
@@ -2414,7 +2466,7 @@ export function TranscriptWorkspace({
                         setMergeOpen(true)
                       }}
                       size="icon-sm"
-                      title="Merge speakers"
+                      title={t("Merge speakers")}
                       variant="outline"
                     >
                       <GitMerge />
@@ -2423,10 +2475,13 @@ export function TranscriptWorkspace({
                 </div>
                 <CardDescription>
                   {speakerSummaries.length === 1
-                    ? "1 speaker"
-                    : `${speakerSummaries.length} speakers`}{" "}
-                  detected. Rename speakers, play samples, or merge duplicate
-                  labels.
+                    ? t("1 speaker")
+                    : t("{value0} speakers", {
+                        value0: speakerSummaries.length,
+                      })}{" "}
+                  {t(
+                    "detected. Rename speakers, play samples, or merge duplicate labels."
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-2 px-4 pb-4">
@@ -2491,7 +2546,7 @@ export function TranscriptWorkspace({
                               <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2">
                                 <div className="min-w-0 flex-1 text-[11px]">
                                   <p className="truncate font-medium">
-                                    Maybe {summary.speaker.suggestedName}{" "}
+                                    {t("Maybe")} {summary.speaker.suggestedName}{" "}
                                     <span className="font-normal text-muted-foreground">
                                       (
                                       {Math.round(
@@ -2508,7 +2563,9 @@ export function TranscriptWorkspace({
                                   ) : null}
                                 </div>
                                 <Button
-                                  aria-label={`Accept name ${summary.speaker.suggestedName}`}
+                                  aria-label={t("Accept name {value0}", {
+                                    value0: summary.speaker.suggestedName,
+                                  })}
                                   onClick={() =>
                                     void resolveSpeakerSuggestion(
                                       summary.speaker,
@@ -2521,7 +2578,7 @@ export function TranscriptWorkspace({
                                   <Check />
                                 </Button>
                                 <Button
-                                  aria-label="Dismiss suggestion"
+                                  aria-label={t("Dismiss suggestion")}
                                   onClick={() =>
                                     void resolveSpeakerSuggestion(
                                       summary.speaker,
@@ -2538,8 +2595,8 @@ export function TranscriptWorkspace({
                             <p className="mt-1 text-[11px] text-muted-foreground">
                               {summary.segmentCount}{" "}
                               {summary.segmentCount === 1
-                                ? "segment"
-                                : "segments"}{" "}
+                                ? t("segment")
+                                : t("segments")}{" "}
                               · {formatVideoDuration(summary.speakingMs)}{" "}
                               speaking
                             </p>
@@ -2553,8 +2610,12 @@ export function TranscriptWorkspace({
                             <Button
                               aria-label={
                                 playing
-                                  ? `Stop sample for ${name}`
-                                  : `Play sample for ${name}`
+                                  ? t("Stop sample for {value0}", {
+                                      value0: name,
+                                    })
+                                  : t("Play sample for {value0}", {
+                                      value0: name,
+                                    })
                               }
                               disabled={!canPlay}
                               onClick={() => playSpeakerSample(summary)}
@@ -2564,7 +2625,9 @@ export function TranscriptWorkspace({
                               {playing ? <Pause /> : <Play />}
                             </Button>
                             <Button
-                              aria-label={`Rename ${name}`}
+                              aria-label={t("Rename {value0}", {
+                                value0: name,
+                              })}
                               onClick={() => onRenameSpeaker(summary.speaker)}
                               size="icon-sm"
                               variant="ghost"
@@ -2578,8 +2641,9 @@ export function TranscriptWorkspace({
                   })}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Speaker assignment changes are preserved separately from the
-                  original transcript text.
+                  {t(
+                    "Speaker assignment changes are preserved separately from the original transcript text."
+                  )}
                 </p>
               </CardContent>
             </Card>
@@ -2587,16 +2651,18 @@ export function TranscriptWorkspace({
             <Card className="shrink-0 shadow-none">
               <CardHeader className="gap-1 px-4 py-4">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Users className="size-4 text-primary" /> Speaker tools
+                  <Users className="size-4 text-primary" /> {t("Speaker tools")}
                 </CardTitle>
                 <CardDescription>
-                  Speaker separation has not produced any labels for this
-                  transcript.
+                  {t(
+                    "Speaker separation has not produced any labels for this transcript."
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="px-4 pb-4 text-xs text-muted-foreground">
-                You can still review, edit, and export the transcript without
-                speaker assignments.
+                {t(
+                  "You can still review, edit, and export the transcript without speaker assignments."
+                )}
               </CardContent>
             </Card>
           ) : null}
@@ -2618,19 +2684,19 @@ export function TranscriptWorkspace({
                   <FileText className="size-4" />
                 )}{" "}
                 {mediaKind === "video"
-                  ? "Source video"
+                  ? t("Source video")
                   : mediaKind === "audio"
-                    ? "Source audio"
-                    : "Transcript only"}
+                    ? t("Source audio")
+                    : t("Transcript only")}
               </CardTitle>
               <CardDescription className="truncate">
                 {mediaKind === "video"
                   ? (snapshot.videoUpload?.fileName ?? "Video upload")
                   : mediaKind === "audio"
                     ? selectedRecording
-                      ? "Recorded source audio"
-                      : "No recording attached"
-                    : "No source media attached"}
+                      ? t("Recorded source audio")
+                      : t("No recording attached")
+                    : t("No source media attached")}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3 px-4 pb-4">
@@ -2682,8 +2748,9 @@ export function TranscriptWorkspace({
                       <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
                         <FileVideo aria-hidden="true" />
                         <p className="text-xs">
-                          The video will be available here once the upload has
-                          finished.
+                          {t(
+                            "The video will be available here once the upload has finished."
+                          )}
                         </p>
                       </div>
                     )}
@@ -2697,20 +2764,21 @@ export function TranscriptWorkspace({
                           ? ` / ${formatVideoTimestamp(displayDurationMs)}`
                           : ""}
                       </span>
-                      <span>Click a transcript line to seek</span>
+                      <span>{t("Click a transcript line to seek")}</span>
                     </div>
                   ) : null}
                   {videoPlaybackError ? (
                     <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-                      <p className="font-medium">Playback unavailable</p>
-                      <p className="mt-1">{videoPlaybackError}</p>
+                      <p className="font-medium">{t("Playback unavailable")}</p>
+                      <p className="mt-1">{t(videoPlaybackError)}</p>
                       <Button
                         className="mt-2"
                         onClick={() => void onRefreshPlayback()}
                         size="sm"
                         variant="outline"
                       >
-                        <RefreshCw data-icon="inline-start" /> Refresh link
+                        <RefreshCw data-icon="inline-start" />{" "}
+                        {t("Refresh link")}
                       </Button>
                     </div>
                   ) : null}
@@ -2728,13 +2796,13 @@ export function TranscriptWorkspace({
                       }
                       value={selectedRecordingId}
                     >
-                      <SelectTrigger aria-label="Select source recording">
-                        <SelectValue placeholder="Select recording" />
+                      <SelectTrigger aria-label={t("Select source recording")}>
+                        <SelectValue placeholder={t("Select recording")} />
                       </SelectTrigger>
                       <SelectContent>
                         {recordings.map((recording, index) => (
                           <SelectItem key={recording.id} value={recording.id}>
-                            Source {index + 1}
+                            {t("Source")} {index + 1}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -2792,8 +2860,8 @@ export function TranscriptWorkspace({
                       <div className="flex min-h-20 items-center justify-center text-center text-xs text-muted-foreground">
                         {audioPlaybackError ||
                           (selectedRecording
-                            ? "Loading the recording…"
-                            : "Record source audio to enable playback.")}
+                            ? t("Loading the recording…")
+                            : t("Record source audio to enable playback."))}
                       </div>
                     )}
                   </div>
@@ -2806,7 +2874,7 @@ export function TranscriptWorkspace({
                           ? ` / ${formatVideoTimestamp(displayDurationMs)}`
                           : ""}
                       </span>
-                      <span>Click a transcript line to seek</span>
+                      <span>{t("Click a transcript line to seek")}</span>
                     </div>
                   ) : null}
                 </>
@@ -2814,8 +2882,9 @@ export function TranscriptWorkspace({
                 <div className="flex min-h-20 items-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 px-4 text-xs text-muted-foreground">
                   <FileText aria-hidden="true" className="size-4 shrink-0" />
                   <p>
-                    This session has no recording. The transcript remains fully
-                    editable and exportable.
+                    {t(
+                      "This session has no recording. The transcript remains fully editable and exportable."
+                    )}
                   </p>
                 </div>
               )}
@@ -2829,47 +2898,47 @@ export function TranscriptWorkspace({
             )}
           >
             <CardHeader className="gap-1 px-4 py-4">
-              <CardTitle className="text-sm">At a glance</CardTitle>
+              <CardTitle className="text-sm">{t("At a glance")}</CardTitle>
               <CardDescription>
-                Transcript settings and coverage
+                {t("Transcript settings and coverage")}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-2 px-4 pb-4 text-xs text-muted-foreground">
               <div className="flex items-center justify-between gap-3">
-                <span>Language</span>
+                <span>{t("Language")}</span>
                 <span className="font-medium text-foreground">
                   {snapshot.session.language}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span>Messages</span>
+                <span>{t("Messages")}</span>
                 <span className="font-medium text-foreground">
                   {transcript.length}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="flex items-center gap-1.5">
-                  <Users className="size-3.5" /> Speakers
+                  <Users className="size-3.5" /> {t("Speakers")}
                 </span>
                 <span className="font-medium text-foreground">
                   {snapshot.speakers.length || "Not separated"}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span>Grammar</span>
+                <span>{t("Grammar")}</span>
                 <span className="font-medium text-foreground">
                   {snapshot.session.polishStatus === "completed"
-                    ? "Available"
+                    ? t("Available")
                     : snapshot.session.polishStatus === "failed"
-                      ? "Failed"
+                      ? t("Failed")
                       : snapshot.session.polishStatus === "processing"
-                        ? "Processing"
-                        : "Not requested"}
+                        ? t("Processing")
+                        : t("Not requested")}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="flex items-center gap-1.5">
-                  <Clock3 className="size-3.5" /> Duration
+                  <Clock3 className="size-3.5" /> {t("Duration")}
                 </span>
                 <span className="font-medium text-foreground tabular-nums">
                   {displayDurationMs
@@ -2885,23 +2954,28 @@ export function TranscriptWorkspace({
       <Dialog open={workflowDialogOpen} onOpenChange={setWorkflowDialogOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Use transcript insights in a workflow</DialogTitle>
+            <DialogTitle>
+              {t("Use transcript insights in a workflow")}
+            </DialogTitle>
             <DialogDescription>
-              Choose a saved workflow and review its inputs. The run receives
-              this transcript, its summary, topics, chapters, and action items.
+              {t(
+                "Choose a saved workflow and review its inputs. The run receives this transcript, its summary, topics, chapters, and action items."
+              )}
             </DialogDescription>
           </DialogHeader>
           {workflowLoading ? (
-            <p className="text-sm text-muted-foreground">Loading workflows…</p>
+            <p className="text-sm text-muted-foreground">
+              {t("Loading workflows…")}
+            </p>
           ) : workflowChoices.length === 0 ? (
             workflowError ? null : (
               <p className="text-sm text-muted-foreground">
-                No saved workflows are available. Create one in{" "}
+                {t("No saved workflows are available. Create one in")}{" "}
                 <Link
                   className="text-primary underline"
                   href="/agents?tab=workflows"
                 >
-                  Agent workflows
+                  {t("Agent workflows")}
                 </Link>
                 .
               </p>
@@ -2926,8 +3000,8 @@ export function TranscriptWorkspace({
                 }}
                 value={workflowId}
               >
-                <SelectTrigger aria-label="Workflow" className="w-full">
-                  <SelectValue placeholder="Choose a workflow" />
+                <SelectTrigger aria-label={t("Workflow")} className="w-full">
+                  <SelectValue placeholder={t("Choose a workflow")} />
                 </SelectTrigger>
                 <SelectContent>
                   {workflowChoices.map((item) => (
@@ -2959,40 +3033,46 @@ export function TranscriptWorkspace({
               ))}
               {workflowInputFields.length === 0 ? (
                 <p className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
-                  This workflow has no named input fields. It receives the
-                  structured transcript context directly.
+                  {t(
+                    "This workflow has no named input fields. It receives the structured transcript context directly."
+                  )}
                 </p>
               ) : null}
               {workflowTranscriptTruncated ? (
                 <p className="text-xs text-amber-600 dark:text-amber-300">
-                  The transcript exceeds{" "}
-                  {TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT.toLocaleString()}{" "}
-                  characters. The run includes the opening excerpt and all
-                  generated insights.
+                  {t("The transcript exceeds")}{" "}
+                  {TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT.toLocaleString(
+                    locale
+                  )}{" "}
+                  {t(
+                    "characters. The run includes the opening excerpt and all generated insights."
+                  )}
                 </p>
               ) : null}
               {selectedWorkflow?.visibility === "workspace" ? (
                 <p className="text-xs text-muted-foreground">
-                  Workspace members can inspect this workflow run and its input.
+                  {t(
+                    "Workspace members can inspect this workflow run and its input."
+                  )}
                 </p>
               ) : null}
             </div>
           )}
           {workflowError ? (
             <p className="text-sm text-destructive" role="alert">
-              {workflowError}
+              {t(workflowError)}
             </p>
           ) : null}
           {workflowRunId ? (
             <p className="text-sm" role="status">
-              Workflow started.{" "}
+              {t("Workflow started.")}{" "}
               <Link
                 className="text-primary underline"
                 href={
                   "/agents?tab=runs&run=" + encodeURIComponent(workflowRunId)
                 }
               >
-                Open run
+                {t("Open run")}
               </Link>
             </p>
           ) : null}
@@ -3001,7 +3081,7 @@ export function TranscriptWorkspace({
               onClick={() => setWorkflowDialogOpen(false)}
               variant="outline"
             >
-              {workflowRunId ? "Done" : "Cancel"}
+              {workflowRunId ? t("Done") : t("Cancel")}
             </Button>
             {!workflowRunId && workflowChoices.length > 0 ? (
               <Button
@@ -3016,7 +3096,7 @@ export function TranscriptWorkspace({
                 ) : (
                   <GitBranch data-icon="inline-start" />
                 )}{" "}
-                Start workflow
+                {t("Start workflow")}
               </Button>
             ) : null}
           </DialogFooter>
@@ -3032,14 +3112,16 @@ export function TranscriptWorkspace({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {annotationKind === "bookmark" ? "Add bookmark" : "Add comment"}
+              {annotationKind === "bookmark"
+                ? t("Add bookmark")
+                : t("Add comment")}
             </DialogTitle>
             <DialogDescription>
-              This note stays linked to{" "}
+              {t("This note stays linked to")}{" "}
               {annotationTarget
                 ? formatVideoTimestamp(annotationTarget.startOffsetMs)
-                : "the selected moment"}{" "}
-              in the {mediaKind === "video" ? "video" : "transcript"}.
+                : t("the selected moment")}{" "}
+              {t("in the")} {mediaKind === "video" ? "video" : "transcript"}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -3059,8 +3141,8 @@ export function TranscriptWorkspace({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="comment">Comment</SelectItem>
-                <SelectItem value="bookmark">Bookmark</SelectItem>
+                <SelectItem value="comment">{t("Comment")}</SelectItem>
+                <SelectItem value="bookmark">{t("Bookmark")}</SelectItem>
               </SelectContent>
             </Select>
             <Textarea
@@ -3068,8 +3150,8 @@ export function TranscriptWorkspace({
               onChange={(event) => setAnnotationNote(event.target.value)}
               placeholder={
                 annotationKind === "bookmark"
-                  ? "Optional note"
-                  : "What should be reviewed here?"
+                  ? t("Optional note")
+                  : t("What should be reviewed here?")
               }
               value={annotationNote}
             />
@@ -3080,7 +3162,7 @@ export function TranscriptWorkspace({
               onClick={() => setAnnotationTarget(null)}
               variant="outline"
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={
@@ -3097,7 +3179,7 @@ export function TranscriptWorkspace({
               ) : (
                 <Bookmark data-icon="inline-start" />
               )}{" "}
-              Save
+              {t("Save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3111,15 +3193,15 @@ export function TranscriptWorkspace({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Identify speaker names</DialogTitle>
+            <DialogTitle>{t("Identify speaker names")}</DialogTitle>
             <DialogDescription>
-              The AI looks for introductions and direct address in the
-              transcript. Confident names are applied, uncertain ones are shown
-              as suggestions. Names you set yourself are never changed.
+              {t(
+                "The AI looks for introductions and direct address in the transcript. Confident names are applied, uncertain ones are shown as suggestions. Names you set yourself are never changed."
+              )}
             </DialogDescription>
           </DialogHeader>
           <Field>
-            <FieldLabel>Participants (optional)</FieldLabel>
+            <FieldLabel>{t("Participants (optional)")}</FieldLabel>
             <Textarea
               onChange={(event) => setIdentifyParticipants(event.target.value)}
               placeholder={"Anna Schmidt, Project lead\nBen Weber, Developer"}
@@ -3127,8 +3209,9 @@ export function TranscriptWorkspace({
               value={identifyParticipants}
             />
             <p className="text-[11px] text-muted-foreground">
-              One person per line, optionally followed by a comma and a role.
-              Without a list only names spoken in the transcript are used.
+              {t(
+                "One person per line, optionally followed by a comma and a role. Without a list only names spoken in the transcript are used."
+              )}
             </p>
           </Field>
           <DialogFooter>
@@ -3137,7 +3220,7 @@ export function TranscriptWorkspace({
               onClick={() => setIdentifyOpen(false)}
               variant="outline"
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={identifyRunning}
@@ -3151,7 +3234,7 @@ export function TranscriptWorkspace({
               ) : (
                 <Sparkles data-icon="inline-start" />
               )}{" "}
-              Identify
+              {t("Identify")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3165,15 +3248,18 @@ export function TranscriptWorkspace({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Merge speakers</DialogTitle>
+            <DialogTitle>{t("Merge speakers")}</DialogTitle>
             <DialogDescription>
-              All lines assigned to the source speaker will be moved to the
-              target. Their transcript text is unchanged.
+              {t(
+                "All lines assigned to the source speaker will be moved to the target. Their transcript text is unchanged."
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <p className="mb-1 text-xs font-medium">Merge this speaker</p>
+              <p className="mb-1 text-xs font-medium">
+                {t("Merge this speaker")}
+              </p>
               <Select
                 items={snapshot.speakers
                   .filter((speaker) => speaker.id !== mergeTargetId)
@@ -3185,7 +3271,7 @@ export function TranscriptWorkspace({
                 value={mergeSourceId}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Source" />
+                  <SelectValue placeholder={t("Source")} />
                 </SelectTrigger>
                 <SelectContent>
                   {snapshot.speakers
@@ -3199,7 +3285,9 @@ export function TranscriptWorkspace({
               </Select>
             </div>
             <div>
-              <p className="mb-1 text-xs font-medium">Keep this speaker</p>
+              <p className="mb-1 text-xs font-medium">
+                {t("Keep this speaker")}
+              </p>
               <Select
                 items={snapshot.speakers
                   .filter((speaker) => speaker.id !== mergeSourceId)
@@ -3211,7 +3299,7 @@ export function TranscriptWorkspace({
                 value={mergeTargetId}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Target" />
+                  <SelectValue placeholder={t("Target")} />
                 </SelectTrigger>
                 <SelectContent>
                   {snapshot.speakers
@@ -3231,7 +3319,7 @@ export function TranscriptWorkspace({
               onClick={() => setMergeOpen(false)}
               variant="outline"
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={
@@ -3250,7 +3338,7 @@ export function TranscriptWorkspace({
               ) : (
                 <GitMerge data-icon="inline-start" />
               )}{" "}
-              Merge speakers
+              {t("Merge speakers")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3264,6 +3352,8 @@ export function VideoTranscriptWorkspace(props: VideoTranscriptWorkspaceProps) {
 }
 
 function AiWritingIndicator() {
+  const { t } = useTranslations()
+
   return (
     <div
       aria-busy="true"
@@ -3281,7 +3371,7 @@ function AiWritingIndicator() {
         </span>
         <div className="min-w-0">
           <p className="font-medium text-foreground">
-            Writing AI insights
+            {t("Writing AI insights")}
             <span
               aria-hidden="true"
               className="inline-block w-5 text-primary motion-safe:animate-pulse motion-reduce:animate-none"
@@ -3290,7 +3380,7 @@ function AiWritingIndicator() {
             </span>
           </p>
           <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
-            Reading the full transcript and organizing the key moments.
+            {t("Reading the full transcript and organizing the key moments.")}
           </p>
         </div>
       </div>
@@ -3317,10 +3407,14 @@ function LiveTranscriptPreview({
 }: {
   segments: TranscriptionVideoPreviewSegment[]
 }) {
+  const { t } = useTranslations()
+
   return (
     <div className="flex flex-col gap-2">
       <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
-        Live preview · lines may be refined when overlapping slices are fused.
+        {t(
+          "Live preview · lines may be refined when overlapping slices are fused."
+        )}
       </div>
       {segments.map((segment) => (
         <div

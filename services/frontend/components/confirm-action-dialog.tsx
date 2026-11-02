@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { Spinner } from "@/components/ui/spinner"
 import {
   AlertDialog,
@@ -33,6 +34,8 @@ export function ConfirmActionDialog({
   onOpenChange,
   onConfirm,
 }: ConfirmActionDialogProps) {
+  const { t } = useTranslations()
+
   return (
     <AlertDialog
       open={open}
@@ -46,14 +49,16 @@ export function ConfirmActionDialog({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>
+            {t("Cancel")}
+          </AlertDialogCancel>
           <AlertDialogAction
             disabled={pending}
             variant={destructive ? "destructive" : "default"}
             onClick={() => void onConfirm()}
           >
             {pending && <Spinner data-icon="inline-start" />}
-            {pending ? "Working…" : confirmLabel}
+            {pending ? t("Working…") : confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
@@ -50,6 +51,8 @@ function DialogContent({
   showCloseButton?: boolean
   overlayClassName?: string
 }) {
+  const { t } = useTranslations()
+
   return (
     <DialogPortal>
       <DialogOverlay className={overlayClassName} />
@@ -74,7 +77,7 @@ function DialogContent({
             }
           >
             <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("Close")}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
@@ -100,6 +103,8 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
 }) {
+  const { t } = useTranslations()
+
   return (
     <div
       data-slot="dialog-footer"
@@ -112,7 +117,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          Close
+          {t("Close")}
         </DialogPrimitive.Close>
       )}
     </div>

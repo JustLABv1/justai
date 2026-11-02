@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   CheckCircle2,
@@ -109,6 +110,8 @@ export function EndpointsView({
   resourceError,
   onRetryResource,
 }: Props) {
+  const { t } = useTranslations()
+
   const [open, setOpen] = useState(false)
   const [editingEndpoint, setEditingEndpoint] = useState<Endpoint | null>(null)
   const [form, setForm] = useState<EndpointForm>(defaults)
@@ -492,17 +495,19 @@ export function EndpointsView({
           className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
           role="alert"
         >
-          <span>Endpoints could not be loaded. {resourceError}</span>
+          <span>
+            {t("Endpoints could not be loaded.")} {t(resourceError)}
+          </span>
           {onRetryResource && (
             <Button size="sm" variant="outline" onClick={onRetryResource}>
-              Retry
+              {t("Retry")}
             </Button>
           )}
         </div>
       )}
       {notice && (
         <div className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-          {notice}
+          {t(notice)}
         </div>
       )}
 
@@ -510,7 +515,9 @@ export function EndpointsView({
         endpoints={endpoints}
         visibleEndpoints={visibleEndpoints}
         isPlatformCatalog={isPlatformCatalog}
-        hasManagedEndpoints={endpoints.some((item) => item.scopeType === "global")}
+        hasManagedEndpoints={endpoints.some(
+          (item) => item.scopeType === "global"
+        )}
         busyId={busyId}
         search={search}
         scopeFilter={scopeFilter}
@@ -566,15 +573,18 @@ export function EndpointsView({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove endpoint?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Remove endpoint?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Remove “{removeTarget?.name}”? Existing conversations keep their
-              stored messages, but new requests will no longer route here.
+              {t("Remove “")}
+              {removeTarget?.name}
+              {t(
+                "”? Existing conversations keep their stored messages, but new requests will no longer route here."
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={Boolean(busyId)}>
-              Cancel
+              {t("Cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={!removeTarget || Boolean(busyId)}
@@ -585,7 +595,7 @@ export function EndpointsView({
                 if (target) void removeEndpoint(target)
               }}
             >
-              Remove endpoint
+              {t("Remove endpoint")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -645,26 +655,34 @@ function EndpointTable({
   resourceError?: string
   onRetryResource?: () => void
 }) {
+  const { t } = useTranslations()
+
   // Scope and status filters only earn their space once the list is long.
   const showAdvancedFilters = endpoints.length >= 8
   return (
     <SettingsSection
       description={
         hasManagedEndpoints && !isPlatformCatalog
-          ? "Locked endpoints are managed by the platform and can only be changed in the Platform Admin catalog."
-          : "Open the menu on a row to test, edit, or remove an endpoint."
+          ? t(
+              "Locked endpoints are managed by the platform and can only be changed in the Platform Admin catalog."
+            )
+          : t("Open the menu on a row to test, edit, or remove an endpoint.")
       }
-      title="Endpoints"
-      actions={showCreateAction ? (
-        <Button size="sm" onClick={() => onCreate()}><Plus /> Add AI endpoint</Button>
-      ) : undefined}
+      title={t("Endpoints")}
+      actions={
+        showCreateAction ? (
+          <Button size="sm" onClick={() => onCreate()}>
+            <Plus /> Add AI endpoint
+          </Button>
+        ) : undefined
+      }
     >
       <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-5 py-3">
         <Input
-          aria-label="Search endpoints"
+          aria-label={t("Search endpoints")}
           className="h-8 min-w-48 flex-1"
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search name, provider, model…"
+          placeholder={t("Search name, provider, model…")}
           type="search"
           value={search}
         />
@@ -674,10 +692,10 @@ function EndpointTable({
             onKindChange((value as "all" | EndpointKind) ?? "all")
           }
         >
-          <TabsList aria-label="Filter endpoint type">
-            <TabsTrigger value="all">All</TabsTrigger>
+          <TabsList aria-label={t("Filter endpoint type")}>
+            <TabsTrigger value="all">{t("All")}</TabsTrigger>
             <TabsTrigger value="llm">LLM</TabsTrigger>
-            <TabsTrigger value="diarization">Diarization</TabsTrigger>
+            <TabsTrigger value="diarization">{t("Diarization")}</TabsTrigger>
           </TabsList>
         </Tabs>
         {showAdvancedFilters && (
@@ -687,17 +705,17 @@ function EndpointTable({
               onValueChange={(value) => onScopeChange(value ?? "all")}
             >
               <SelectTrigger
-                aria-label="Filter endpoint scope"
+                aria-label={t("Filter endpoint scope")}
                 className="h-8 min-w-32"
                 size="sm"
               >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All scopes</SelectItem>
-                <SelectItem value="global">Global</SelectItem>
-                <SelectItem value="organization">Workspace</SelectItem>
-                <SelectItem value="user">Personal</SelectItem>
+                <SelectItem value="all">{t("All scopes")}</SelectItem>
+                <SelectItem value="global">{t("Global")}</SelectItem>
+                <SelectItem value="organization">{t("Workspace")}</SelectItem>
+                <SelectItem value="user">{t("Personal")}</SelectItem>
               </SelectContent>
             </Select>
             <Select
@@ -705,16 +723,16 @@ function EndpointTable({
               onValueChange={(value) => onStatusChange(value ?? "all")}
             >
               <SelectTrigger
-                aria-label="Filter endpoint status"
+                aria-label={t("Filter endpoint status")}
                 className="h-8 min-w-32"
                 size="sm"
               >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="enabled">Enabled</SelectItem>
-                <SelectItem value="disabled">Disabled</SelectItem>
+                <SelectItem value="all">{t("All statuses")}</SelectItem>
+                <SelectItem value="enabled">{t("Enabled")}</SelectItem>
+                <SelectItem value="disabled">{t("Disabled")}</SelectItem>
               </SelectContent>
             </Select>
           </>
@@ -736,17 +754,17 @@ function EndpointTable({
             .map(([capability]) => capability)
           const failed = endpoint.lastTestOk === false
           const status = !endpoint.enabled
-            ? { label: "Disabled", dot: "bg-muted-foreground" }
+            ? { label: t("Disabled"), dot: "bg-muted-foreground" }
             : failed
-              ? { label: "Check failed", dot: "bg-destructive" }
+              ? { label: t("Check failed"), dot: "bg-destructive" }
               : endpoint.lastTestedAt
-                ? { label: "Healthy", dot: "bg-emerald-500" }
-                : { label: "Enabled", dot: "bg-primary" }
+                ? { label: t("Healthy"), dot: "bg-emerald-500" }
+                : { label: t("Enabled"), dot: "bg-primary" }
           const scopeLabel =
             endpoint.scopeType === "organization"
-              ? "Workspace"
+              ? t("Workspace")
               : endpoint.scopeType === "user"
-                ? "Personal"
+                ? t("Personal")
                 : null
           return (
             <div
@@ -758,11 +776,15 @@ function EndpointTable({
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="truncate text-sm font-medium">{endpoint.name}</p>
-                  {endpoint.isDefault && <Badge variant="outline">Default</Badge>}
+                  <p className="truncate text-sm font-medium">
+                    {endpoint.name}
+                  </p>
+                  {endpoint.isDefault && (
+                    <Badge variant="outline">{t("Default")}</Badge>
+                  )}
                   <Badge variant="secondary">
                     {endpointKindFor(endpoint) === "diarization"
-                      ? "Diarization"
+                      ? t("Diarization")
                       : "LLM"}
                   </Badge>
                 </div>
@@ -771,8 +793,10 @@ function EndpointTable({
                   title={[
                     endpoint.baseUrl,
                     capabilities.length
-                      ? `Capabilities: ${capabilities.join(", ")}`
-                      : "No capabilities configured",
+                      ? t("Capabilities: {value0}", {
+                          value0: capabilities.join(", "),
+                        })
+                      : t("No capabilities configured"),
                   ].join("\n")}
                 >
                   {details.label} · {modelLabel}
@@ -781,11 +805,15 @@ function EndpointTable({
               </div>
               <span
                 className="hidden shrink-0 items-center gap-2 text-sm sm:flex"
-                title={endpointHealthSummary(endpoint)}
+                title={t(endpointHealthSummary(endpoint))}
               >
                 <span className={`size-2 rounded-full ${status.dot}`} />
                 <span
-                  className={failed && endpoint.enabled ? "text-destructive" : "text-muted-foreground"}
+                  className={
+                    failed && endpoint.enabled
+                      ? "text-destructive"
+                      : "text-muted-foreground"
+                  }
                 >
                   {status.label}
                 </span>
@@ -793,7 +821,9 @@ function EndpointTable({
               {managed && (
                 <LockKeyhole
                   aria-label={
-                    isPlatformCatalog ? "Platform catalog" : "Managed by platform"
+                    isPlatformCatalog
+                      ? t("Platform catalog")
+                      : t("Managed by platform")
                   }
                   className="size-4 shrink-0 text-muted-foreground"
                 />
@@ -804,7 +834,10 @@ function EndpointTable({
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`${manageable ? "Actions" : "Test"} for ${endpoint.name}`}
+                      aria-label={t("{value0} for {value1}", {
+                        value0: manageable ? t("Actions") : t("Test"),
+                        value1: endpoint.name,
+                      })}
                     />
                   }
                 >
@@ -815,7 +848,7 @@ function EndpointTable({
                     disabled={!endpoint.enabled || busyId === endpoint.id}
                     onClick={() => void onTest(endpoint)}
                   >
-                    <Radio aria-hidden="true" /> Test capabilities
+                    <Radio aria-hidden="true" /> {t("Test capabilities")}
                   </DropdownMenuItem>
                   {manageable && (
                     <>
@@ -825,7 +858,7 @@ function EndpointTable({
                           disabled={busyId === endpoint.id}
                           onClick={() => onSetDefault(endpoint)}
                         >
-                          <CheckCircle2 aria-hidden="true" /> Set default
+                          <CheckCircle2 aria-hidden="true" /> {t("Set default")}
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem
@@ -837,20 +870,20 @@ function EndpointTable({
                         }
                         onClick={() => onToggle(endpoint)}
                       >
-                        {endpoint.enabled ? "Disable" : "Enable"}
+                        {endpoint.enabled ? t("Disable") : t("Enable")}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         disabled={busyId === endpoint.id}
                         onClick={() => onEdit(endpoint)}
                       >
-                        <Pencil aria-hidden="true" /> Edit
+                        <Pencil aria-hidden="true" /> {t("Edit")}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         disabled={busyId === endpoint.id}
                         variant="destructive"
                         onClick={() => onRemove(endpoint)}
                       >
-                        <Trash2 aria-hidden="true" /> Remove
+                        <Trash2 aria-hidden="true" /> {t("Remove")}
                       </DropdownMenuItem>
                     </>
                   )}
@@ -867,22 +900,26 @@ function EndpointTable({
           <div>
             <p className="font-medium">
               {resourceError && endpoints.length === 0
-                ? "Endpoint inventory unavailable"
+                ? t("Endpoint inventory unavailable")
                 : endpoints.length === 0
-                  ? "No endpoints yet"
-                  : "No endpoints match these filters"}
+                  ? t("No endpoints yet")
+                  : t("No endpoints match these filters")}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {resourceError && endpoints.length === 0
-                ? "JustAI could not load the endpoint catalog. Retry to check again."
+                ? t(
+                    "JustAI could not load the endpoint catalog. Retry to check again."
+                  )
                 : endpoints.length === 0
-                  ? "Connect a provider to make it available for model routing."
-                  : "Try a different search or clear the filters."}
+                  ? t(
+                      "Connect a provider to make it available for model routing."
+                    )
+                  : t("Try a different search or clear the filters.")}
             </p>
           </div>
           {resourceError && endpoints.length === 0 && onRetryResource ? (
             <Button variant="outline" size="sm" onClick={onRetryResource}>
-              Retry
+              {t("Retry")}
             </Button>
           ) : endpoints.length === 0 && !resourceError ? (
             <Button
@@ -892,14 +929,14 @@ function EndpointTable({
                 onCreate(kindFilter === "all" ? undefined : kindFilter)
               }
             >
-              Add your first{" "}
+              {t("Add your first")}{" "}
               {kindFilter === "diarization"
-                ? "diarization service"
-                : "model endpoint"}
+                ? t("diarization service")
+                : t("model endpoint")}
             </Button>
           ) : endpoints.length > 0 ? (
             <Button variant="outline" size="sm" onClick={onClearFilters}>
-              Clear filters
+              {t("Clear filters")}
             </Button>
           ) : null}
         </div>

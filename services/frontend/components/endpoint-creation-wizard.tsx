@@ -1,6 +1,10 @@
 "use client"
 
 import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
+import {
   useCallback,
   useMemo,
   useState,
@@ -113,7 +117,7 @@ type Props = {
   onClose: () => void
 }
 
-const steps: Array<{
+const stepsMessages: Array<{
   id: WizardStep
   label: string
   description: string
@@ -152,7 +156,7 @@ const steps: Array<{
 ]
 
 const stepIndex = (step: WizardStep) =>
-  steps.findIndex((item) => item.id === step)
+  stepsMessages.findIndex((item) => item.id === step)
 
 function displayProvider(provider: SupportedProvider) {
   return provider.name ?? providerDetails[provider.id]?.label ?? provider.id
@@ -259,6 +263,10 @@ export function EndpointCreationWizard({
   onSave,
   onClose,
 }: Props) {
+  const steps = useTranslatedConfig(stepsMessages)
+
+  const { t } = useTranslations()
+
   const [step, setStep] = useState<WizardStep>(
     editingEndpoint ? "connection" : "type"
   )
@@ -445,7 +453,7 @@ export function EndpointCreationWizard({
         setVerifiedSignature(signature)
         setPreflightMessage(
           result.checks?.connection?.message ??
-            "The provider could not be verified."
+            t("The provider could not be verified.")
         )
       }
     } catch (caught) {
@@ -453,7 +461,7 @@ export function EndpointCreationWizard({
       setPreflightMessage(
         caught instanceof Error
           ? caught.message
-          : "The provider could not be verified."
+          : t("The provider could not be verified.")
       )
     }
   }
@@ -472,8 +480,10 @@ export function EndpointCreationWizard({
       event.preventDefault()
       setPreflightMessage(
         preflightState === "failed"
-          ? "Verification failed. Review the connection or explicitly continue without verification."
-          : "Check the connection before saving this endpoint."
+          ? t(
+              "Verification failed. Review the connection or explicitly continue without verification."
+            )
+          : t("Check the connection before saving this endpoint.")
       )
       return
     }
@@ -552,27 +562,34 @@ export function EndpointCreationWizard({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <DialogTitle>
-                  {isEditing ? "Edit endpoint" : "Add an endpoint"}
+                  {isEditing ? t("Edit endpoint") : t("Add an endpoint")}
                 </DialogTitle>
                 <Badge variant={isEditing ? "outline" : "secondary"}>
-                  {isEditing ? "Editing existing" : "New endpoint"}
+                  {isEditing ? t("Editing existing") : t("New endpoint")}
                 </Badge>
               </div>
               <DialogDescription>
                 {isEditing
-                  ? "Update the connection, model mappings, runtime behavior, or defaults. The endpoint lane and visibility stay fixed."
-                  : "Follow the setup from connection to verification. Every endpoint option is visible in the step where it belongs."}
+                  ? t(
+                      "Update the connection, model mappings, runtime behavior, or defaults. The endpoint lane and visibility stay fixed."
+                    )
+                  : t(
+                      "Follow the setup from connection to verification. Every endpoint option is visible in the step where it belongs."
+                    )}
               </DialogDescription>
             </div>
           </div>
           <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
             <Progress
-              aria-label={`Endpoint setup progress: step ${currentIndex + 1} of ${steps.length}`}
+              aria-label={t(
+                "Endpoint setup progress: step {value0} of {value1}",
+                { value0: currentIndex + 1, value1: steps.length }
+              )}
               value={((currentIndex + 1) / steps.length) * 100}
             />
             <p className="text-xs text-muted-foreground sm:text-right">
               <span className="font-medium text-foreground">
-                Step {currentIndex + 1} of {steps.length}
+                {t("Step")} {currentIndex + 1} {t("of")} {steps.length}
               </span>
               <span className="mx-1.5" aria-hidden="true">
                 ·
@@ -588,7 +605,7 @@ export function EndpointCreationWizard({
           onSubmit={handleSubmit}
         >
           <nav
-            aria-label="Endpoint setup steps"
+            aria-label={t("Endpoint setup steps")}
             className="border-b bg-muted/20 px-4 py-3 md:border-r md:border-b-0 md:px-3 md:py-5"
           >
             <div className="flex gap-1 overflow-x-auto md:flex-col md:gap-1.5">
@@ -645,7 +662,7 @@ export function EndpointCreationWizard({
               {validationMessage && step !== "review" && (
                 <Alert variant="destructive" className="mb-5">
                   <CircleAlert aria-hidden="true" />
-                  <AlertTitle>Check this step</AlertTitle>
+                  <AlertTitle>{t("Check this step")}</AlertTitle>
                   <AlertDescription>{validationMessage}</AlertDescription>
                 </Alert>
               )}
@@ -656,12 +673,12 @@ export function EndpointCreationWizard({
 
         <DialogFooter className="border-t px-5 py-3 sm:px-6">
           <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           {currentIndex > 0 && (
             <Button type="button" variant="ghost" onClick={previousStep}>
               <ArrowLeft data-icon="inline-start" aria-hidden="true" />
-              Back
+              {t("Back")}
             </Button>
           )}
           {step !== "review" ? (
@@ -673,7 +690,7 @@ export function EndpointCreationWizard({
                 if (validateBeforeNext()) nextStep()
               }}
             >
-              Continue
+              {t("Continue")}
               <ArrowRight data-icon="inline-end" aria-hidden="true" />
             </Button>
           ) : (
@@ -683,10 +700,10 @@ export function EndpointCreationWizard({
               disabled={saving || !canSave}
             >
               {saving
-                ? "Saving…"
+                ? t("Saving…")
                 : isEditing
-                  ? "Save changes"
-                  : "Save endpoint"}
+                  ? t("Save changes")
+                  : t("Save endpoint")}
             </Button>
           )}
         </DialogFooter>
@@ -704,13 +721,16 @@ function TypeStep({
   locked: boolean
   onSelect: (kind: EndpointKind) => void
 }) {
+  const { t } = useTranslations()
+
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <p className="text-sm font-medium">What are you connecting?</p>
+        <p className="text-sm font-medium">{t("What are you connecting?")}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Pick the primary job for this endpoint. The same provider can be saved
-          in both lanes when it serves both jobs.
+          {t(
+            "Pick the primary job for this endpoint. The same provider can be saved in both lanes when it serves both jobs."
+          )}
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -719,30 +739,36 @@ function TypeStep({
           disabled={locked}
           icon={<MessageSquare aria-hidden="true" />}
           title="LLM"
-          description="Chat, vision, embeddings, image generation, transcription, TTS, and optional diarization."
+          description={t(
+            "Chat, vision, embeddings, image generation, transcription, TTS, and optional diarization."
+          )}
           onClick={() => onSelect("llm")}
         />
         <TypeCard
           active={endpointKind === "diarization"}
           disabled={locked}
           icon={<Mic2 aria-hidden="true" />}
-          title="Diarization"
-          description="Speaker identification for transcription pipelines, with optional chat on providers that support it."
+          title={t("Diarization")}
+          description={t(
+            "Speaker identification for transcription pipelines, with optional chat on providers that support it."
+          )}
           onClick={() => onSelect("diarization")}
         />
       </div>
       <Alert>
         <Layers3 aria-hidden="true" />
-        <AlertTitle>Capabilities stay flexible</AlertTitle>
+        <AlertTitle>{t("Capabilities stay flexible")}</AlertTitle>
         <AlertDescription>
-          This label controls setup and inventory. Runtime routing still follows
-          the capabilities you enable, so one endpoint can appear in both views.
+          {t(
+            "This label controls setup and inventory. Runtime routing still follows the capabilities you enable, so one endpoint can appear in both views."
+          )}
         </AlertDescription>
       </Alert>
       {locked && (
         <p className="text-xs text-muted-foreground">
-          Endpoint type is fixed after creation so existing routing remains
-          predictable.
+          {t(
+            "Endpoint type is fixed after creation so existing routing remains predictable."
+          )}
         </p>
       )}
     </div>
@@ -822,43 +848,50 @@ function ConnectionStep({
   isEditing: boolean
   onSelectProvider: (value: string | null) => void
 }) {
+  const { t } = useTranslations()
+
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <p className="text-sm font-medium">Connect the provider</p>
+        <p className="text-sm font-medium">{t("Connect the provider")}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Add the service address, authentication, and visibility. Route
-          overrides are shown explicitly below for gateways and versioned APIs.
+          {t(
+            "Add the service address, authentication, and visibility. Route overrides are shown explicitly below for gateways and versioned APIs."
+          )}
         </p>
       </div>
       <Card size="sm">
         <CardHeader>
-          <CardTitle>Connection details</CardTitle>
+          <CardTitle>{t("Connection details")}</CardTitle>
           <CardDescription>
             {form.endpointKind === "diarization"
-              ? "This service will be used for speaker labeling."
-              : "This provider will be used for model-backed AI features."}
+              ? t("This service will be used for speaker labeling.")
+              : t("This provider will be used for model-backed AI features.")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <FieldGroup>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field>
-                <FieldLabel htmlFor="endpoint-name">Display name</FieldLabel>
+                <FieldLabel htmlFor="endpoint-name">
+                  {t("Display name")}
+                </FieldLabel>
                 <Input
                   id="endpoint-name"
                   value={form.name}
                   onChange={(event) => update("name", event.target.value)}
                   placeholder={
                     form.endpointKind === "diarization"
-                      ? "Speaker service"
-                      : "Team GPT"
+                      ? t("Speaker service")
+                      : t("Team GPT")
                   }
                   required
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="endpoint-provider">Provider</FieldLabel>
+                <FieldLabel htmlFor="endpoint-provider">
+                  {t("Provider")}
+                </FieldLabel>
                 <Select
                   value={form.providerType}
                   onValueChange={onSelectProvider}
@@ -879,13 +912,19 @@ function ConnectionStep({
                   {providers.find(
                     (provider) => provider.id === form.providerType
                   )?.examples?.length
-                    ? ` Examples: ${providers.find((provider) => provider.id === form.providerType)?.examples?.join(", ")}.`
+                    ? t(" Examples: {value0}.", {
+                        value0: providers
+                          .find((provider) => provider.id === form.providerType)
+                          ?.examples?.join(", "),
+                      })
                     : ""}
                 </FieldDescription>
               </Field>
             </div>
             <Field>
-              <FieldLabel htmlFor="endpoint-visibility">Visibility</FieldLabel>
+              <FieldLabel htmlFor="endpoint-visibility">
+                {t("Visibility")}
+              </FieldLabel>
               <Select
                 disabled={isEditing}
                 value={form.scopeType}
@@ -901,41 +940,48 @@ function ConnectionStep({
                 </SelectTrigger>
                 <SelectContent>
                   {canManageOrganization && (
-                    <SelectItem value="organization">Workspace</SelectItem>
+                    <SelectItem value="organization">
+                      {t("Workspace")}
+                    </SelectItem>
                   )}
-                  <SelectItem value="user">Only me</SelectItem>
+                  <SelectItem value="user">{t("Only me")}</SelectItem>
                   {platformAdmin && isPlatformCatalog && (
                     <SelectItem value="global">
-                      Global (platform admin)
+                      {t("Global (platform admin)")}
                     </SelectItem>
                   )}
                 </SelectContent>
               </Select>
               <FieldDescription>
-                Choose who can use this endpoint. Its scope cannot be changed
-                after creation.
+                {t(
+                  "Choose who can use this endpoint. Its scope cannot be changed after creation."
+                )}
               </FieldDescription>
             </Field>
             {platformAdmin && form.scopeType !== "global" && (
               <Field>
-                <FieldLabel htmlFor="endpoint-scope-id">Scope ID</FieldLabel>
+                <FieldLabel htmlFor="endpoint-scope-id">
+                  {t("Scope ID")}
+                </FieldLabel>
                 <Input
                   id="endpoint-scope-id"
                   value={form.scopeId}
                   onChange={(event) => update("scopeId", event.target.value)}
-                  placeholder="Organization or user UUID"
+                  placeholder={t("Organization or user UUID")}
                   required
                   readOnly={isEditing}
                 />
                 <FieldDescription>
                   {isEditing
-                    ? "An endpoint&apos;s scope is fixed after creation."
-                    : "Platform administrators can assign this endpoint to a specific organization or user."}
+                    ? t("An endpoint's scope is fixed after creation.")
+                    : t(
+                        "Platform administrators can assign this endpoint to a specific organization or user."
+                      )}
                 </FieldDescription>
               </Field>
             )}
             <Field>
-              <FieldLabel htmlFor="endpoint-url">Base URL</FieldLabel>
+              <FieldLabel htmlFor="endpoint-url">{t("Base URL")}</FieldLabel>
               <Input
                 id="endpoint-url"
                 value={form.baseUrl}
@@ -944,12 +990,16 @@ function ConnectionStep({
                 required
               />
               <FieldDescription>
-                {selectedProvider.baseUrl} is the suggested default; local
-                services and gateways can use their own URL.
+                {selectedProvider.baseUrl}{" "}
+                {t(
+                  "is the suggested default; local services and gateways can use their own URL."
+                )}
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="endpoint-key">API key or token</FieldLabel>
+              <FieldLabel htmlFor="endpoint-key">
+                {t("API key or token")}
+              </FieldLabel>
               <div className="relative">
                 <KeyRound
                   className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -961,13 +1011,14 @@ function ConnectionStep({
                   type="password"
                   value={form.credential}
                   onChange={(event) => update("credential", event.target.value)}
-                  placeholder="Stored encrypted by JustAI"
+                  placeholder={t("Stored encrypted by JustAI")}
                   autoComplete="off"
                 />
               </div>
               <FieldDescription>
-                Leave empty for local runtimes. When editing, an empty field
-                keeps the stored credential.
+                {t(
+                  "Leave empty for local runtimes. When editing, an empty field keeps the stored credential."
+                )}
               </FieldDescription>
             </Field>
           </FieldGroup>
@@ -977,18 +1028,19 @@ function ConnectionStep({
       <Card size="sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Server aria-hidden="true" /> API routing
+            <Server aria-hidden="true" /> {t("API routing")}
           </CardTitle>
           <CardDescription>
-            Optional overrides for custom gateways, proxy paths, and providers
-            that require an API version.
+            {t(
+              "Optional overrides for custom gateways, proxy paths, and providers that require an API version."
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="endpoint-api-path">
-                API path (optional)
+                {t("API path (optional)")}
               </FieldLabel>
               <Input
                 id="endpoint-api-path"
@@ -997,12 +1049,12 @@ function ConnectionStep({
                 placeholder="/v1"
               />
               <FieldDescription>
-                Override the provider&apos;s default route.
+                {t("Override the provider's default route.")}
               </FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="endpoint-api-version">
-                API version (optional)
+                {t("API version (optional)")}
               </FieldLabel>
               <Input
                 id="endpoint-api-version"
@@ -1011,7 +1063,7 @@ function ConnectionStep({
                 placeholder="2024-06-20"
               />
               <FieldDescription>
-                Sent to providers that require a version header.
+                {t("Sent to providers that require a version header.")}
               </FieldDescription>
             </Field>
           </div>
@@ -1036,6 +1088,8 @@ function ConfigureStep({
   preflightModels: DiscoveredChatModel[]
   options: DiscoveredChatModel[]
 }) {
+  const { t } = useTranslations()
+
   const chatAvailable = form.endpointKind === "llm" || form.useForChat
   const transcriptionAvailable =
     supports(form.providerType, "realtime-transcription") ||
@@ -1053,13 +1107,17 @@ function ConfigureStep({
       <div>
         <p className="text-sm font-medium">
           {form.endpointKind === "diarization"
-            ? "Configure the diarization service"
-            : "Configure models and capabilities"}
+            ? t("Configure the diarization service")
+            : t("Configure models and capabilities")}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           {form.endpointKind === "diarization"
-            ? "Choose the speaker-labeling model and decide whether this same endpoint should also handle chat."
-            : "Chat is the primary LLM capability. Add optional model mappings only when this provider will serve those jobs."}
+            ? t(
+                "Choose the speaker-labeling model and decide whether this same endpoint should also handle chat."
+              )
+            : t(
+                "Chat is the primary LLM capability. Add optional model mappings only when this provider will serve those jobs."
+              )}
         </p>
       </div>
 
@@ -1067,17 +1125,19 @@ function ConfigureStep({
         <Card size="sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Mic2 aria-hidden="true" /> Diarization model
+              <Mic2 aria-hidden="true" /> {t("Diarization model")}
             </CardTitle>
             <CardDescription>
-              Used to identify anonymous speakers in transcription workflows.
+              {t(
+                "Used to identify anonymous speakers in transcription workflows."
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="endpoint-diarization-model">
-                  Model or service identifier
+                  {t("Model or service identifier")}
                 </FieldLabel>
                 <Input
                   id="endpoint-diarization-model"
@@ -1092,14 +1152,17 @@ function ConfigureStep({
                   }
                 />
                 <FieldDescription>
-                  Pyannote services can leave this empty when the service
-                  selects its own loaded pipeline.
+                  {t(
+                    "Pyannote services can leave this empty when the service selects its own loaded pipeline."
+                  )}
                 </FieldDescription>
               </Field>
               {supports(form.providerType, "chat") && (
                 <CapabilitySwitch
-                  label="Also use this endpoint for chat"
-                  description="Save it in both the diarization and LLM inventory views."
+                  label={t("Also use this endpoint for chat")}
+                  description={t(
+                    "Save it in both the diarization and LLM inventory views."
+                  )}
                   checked={form.useForChat}
                   onCheckedChange={(checked) =>
                     setForm((current) => ({
@@ -1113,11 +1176,13 @@ function ConfigureStep({
               {chatAvailable && (
                 <ModelField
                   id="endpoint-diarization-chat-model"
-                  label="Chat model (optional)"
+                  label={t("Chat model (optional)")}
                   value={form.chatModel}
                   onChange={(value) => update("chatModel", value)}
                   options={options}
-                  description="Optional chat capability for a dual-purpose endpoint."
+                  description={t(
+                    "Optional chat capability for a dual-purpose endpoint."
+                  )}
                   placeholder="e.g. gpt-4o-mini"
                 />
               )}
@@ -1128,25 +1193,27 @@ function ConfigureStep({
         <Card size="sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <MessageSquare aria-hidden="true" /> Chat model
+              <MessageSquare aria-hidden="true" /> {t("Chat model")}
             </CardTitle>
             <CardDescription>
-              This is the model JustAI uses for chat by default. You can enter
-              it manually or choose from the provider catalog after
-              verification.
+              {t(
+                "This is the model JustAI uses for chat by default. You can enter it manually or choose from the provider catalog after verification."
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <ModelField
               id="endpoint-chat-model"
-              label="Default chat model"
+              label={t("Default chat model")}
               value={form.chatModel}
               onChange={(value) => update("chatModel", value)}
               options={options}
               description={
                 preflightModels.length > 0
-                  ? `${preflightModels.length} models available from the latest check.`
-                  : "Model discovery happens in the final verification step."
+                  ? t("{value0} models available from the latest check.", {
+                      value0: preflightModels.length,
+                    })
+                  : t("Model discovery happens in the final verification step.")
               }
               placeholder="e.g. gpt-4o-mini or gemma-3-27b-it"
             />
@@ -1157,10 +1224,11 @@ function ConfigureStep({
       {form.endpointKind === "llm" && hasOptionalModels && (
         <Card size="sm">
           <CardHeader>
-            <CardTitle>Optional capabilities</CardTitle>
+            <CardTitle>{t("Optional capabilities")}</CardTitle>
             <CardDescription>
-              These stay off until you map a model or explicitly enable the
-              capability.
+              {t(
+                "These stay off until you map a model or explicitly enable the capability."
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -1168,14 +1236,16 @@ function ConfigureStep({
               {supports(form.providerType, "vision") && (
                 <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
                   <CapabilitySwitch
-                    label="Vision / image input"
-                    description="Allow image messages for a vision-capable model."
+                    label={t("Vision / image input")}
+                    description={t(
+                      "Allow image messages for a vision-capable model."
+                    )}
                     checked={form.vision}
                     onCheckedChange={(checked) => update("vision", checked)}
                   />
                   <Field>
                     <FieldLabel htmlFor="endpoint-vision-model">
-                      Vision model (optional)
+                      {t("Vision model (optional)")}
                     </FieldLabel>
                     <Input
                       id="endpoint-vision-model"
@@ -1184,7 +1254,7 @@ function ConfigureStep({
                       onChange={(event) =>
                         update("visionModel", event.target.value)
                       }
-                      placeholder="Reuse chat model"
+                      placeholder={t("Reuse chat model")}
                     />
                   </Field>
                 </div>
@@ -1192,7 +1262,7 @@ function ConfigureStep({
               {supports(form.providerType, "embeddings") && (
                 <Field>
                   <FieldLabel htmlFor="endpoint-embedding-model">
-                    Embedding model
+                    {t("Embedding model")}
                   </FieldLabel>
                   <Input
                     id="endpoint-embedding-model"
@@ -1203,14 +1273,16 @@ function ConfigureStep({
                     placeholder="text-embedding-3-small"
                   />
                   <FieldDescription>
-                    Needed when this endpoint should power knowledge search.
+                    {t(
+                      "Needed when this endpoint should power knowledge search."
+                    )}
                   </FieldDescription>
                 </Field>
               )}
               {supports(form.providerType, "image-generation") && (
                 <Field>
                   <FieldLabel htmlFor="endpoint-image-model">
-                    Image generation model
+                    {t("Image generation model")}
                   </FieldLabel>
                   <Input
                     id="endpoint-image-model"
@@ -1221,7 +1293,7 @@ function ConfigureStep({
                     placeholder="gpt-image-1"
                   />
                   <FieldDescription>
-                    Used by Image Studio for generation and editing.
+                    {t("Used by Image Studio for generation and editing.")}
                   </FieldDescription>
                 </Field>
               )}
@@ -1229,7 +1301,7 @@ function ConfigureStep({
                 <div className="grid gap-3 rounded-lg border p-3">
                   <Field>
                     <FieldLabel htmlFor="endpoint-transcription-model">
-                      Transcription model
+                      {t("Transcription model")}
                     </FieldLabel>
                     <Input
                       id="endpoint-transcription-model"
@@ -1257,8 +1329,8 @@ function ConfigureStep({
                   <div className="grid gap-3 sm:grid-cols-2">
                     {supports(form.providerType, "realtime-transcription") && (
                       <CapabilitySwitch
-                        label="Realtime transcription"
-                        description="Native provider WebSocket."
+                        label={t("Realtime transcription")}
+                        description={t("Native provider WebSocket.")}
                         checked={form.realtimeTranscription}
                         onCheckedChange={(checked) =>
                           setForm((current) => ({
@@ -1273,8 +1345,8 @@ function ConfigureStep({
                     )}
                     {supports(form.providerType, "chunked-transcription") && (
                       <CapabilitySwitch
-                        label="Chunked HTTP transcription"
-                        description="Rolling Whisper windows."
+                        label={t("Chunked HTTP transcription")}
+                        description={t("Rolling Whisper windows.")}
                         checked={form.chunkedTranscription}
                         onCheckedChange={(checked) =>
                           setForm((current) => ({
@@ -1293,8 +1365,10 @@ function ConfigureStep({
               {supports(form.providerType, "diarization") && (
                 <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
                   <CapabilitySwitch
-                    label="Speaker diarization"
-                    description="Identify anonymous speakers alongside transcription."
+                    label={t("Speaker diarization")}
+                    description={t(
+                      "Identify anonymous speakers alongside transcription."
+                    )}
                     checked={form.diarization}
                     onCheckedChange={(checked) =>
                       update("diarization", checked)
@@ -1302,7 +1376,7 @@ function ConfigureStep({
                   />
                   <Field>
                     <FieldLabel htmlFor="endpoint-llm-diarization-model">
-                      Diarization model
+                      {t("Diarization model")}
                     </FieldLabel>
                     <Input
                       id="endpoint-llm-diarization-model"
@@ -1318,7 +1392,7 @@ function ConfigureStep({
               {supports(form.providerType, "tts") && (
                 <Field>
                   <FieldLabel htmlFor="endpoint-speech-model">
-                    Speech model
+                    {t("Speech model")}
                   </FieldLabel>
                   <Input
                     id="endpoint-speech-model"
@@ -1332,8 +1406,10 @@ function ConfigureStep({
               )}
               {supports(form.providerType, "tool-calling") && (
                 <CapabilitySwitch
-                  label="Tool calling"
-                  description="Allow approved MCP actions for chat requests."
+                  label={t("Tool calling")}
+                  description={t(
+                    "Allow approved MCP actions for chat requests."
+                  )}
                   checked={form.toolCalling}
                   onCheckedChange={(checked) => update("toolCalling", checked)}
                 />
@@ -1345,10 +1421,11 @@ function ConfigureStep({
       {form.endpointKind === "llm" && !hasOptionalModels && (
         <Alert>
           <Sparkles aria-hidden="true" />
-          <AlertTitle>No optional capabilities available</AlertTitle>
+          <AlertTitle>{t("No optional capabilities available")}</AlertTitle>
           <AlertDescription>
-            This provider exposes chat only. You can still verify and save the
-            endpoint with its primary chat model.
+            {t(
+              "This provider exposes chat only. You can still verify and save the endpoint with its primary chat model."
+            )}
           </AlertDescription>
         </Alert>
       )}
@@ -1363,26 +1440,30 @@ function BehaviorStep({
   form: EndpointForm
   update: <K extends keyof EndpointForm>(key: K, value: EndpointForm[K]) => void
 }) {
+  const { t } = useTranslations()
+
   const chatAvailable = form.endpointKind === "llm" || form.useForChat
 
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <p className="text-sm font-medium">Set runtime behavior</p>
+        <p className="text-sm font-medium">{t("Set runtime behavior")}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Decide how long JustAI should wait, how chat requests behave, and
-          whether this endpoint participates in routing.
+          {t(
+            "Decide how long JustAI should wait, how chat requests behave, and whether this endpoint participates in routing."
+          )}
         </p>
       </div>
 
       <Card size="sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <SlidersHorizontal aria-hidden="true" /> Runtime limits
+            <SlidersHorizontal aria-hidden="true" /> {t("Runtime limits")}
           </CardTitle>
           <CardDescription>
-            These values apply whenever JustAI routes a request to this
-            endpoint.
+            {t(
+              "These values apply whenever JustAI routes a request to this endpoint."
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1390,7 +1471,7 @@ function BehaviorStep({
             <div className="grid gap-4 sm:grid-cols-3">
               <Field>
                 <FieldLabel htmlFor="endpoint-timeout">
-                  Timeout (seconds)
+                  {t("Timeout (seconds)")}
                 </FieldLabel>
                 <Input
                   id="endpoint-timeout"
@@ -1404,13 +1485,15 @@ function BehaviorStep({
                 />
                 <FieldDescription>
                   {form.providerType === "pyannote"
-                    ? "Maximum wait for one full-video diarization. 1,800 seconds is the default."
-                    : "Maximum wait for a single provider request."}
+                    ? t(
+                        "Maximum wait for one full-video diarization. 1,800 seconds is the default."
+                      )
+                    : t("Maximum wait for a single provider request.")}
                 </FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="endpoint-max-tokens">
-                  Max output tokens
+                  {t("Max output tokens")}
                 </FieldLabel>
                 <Input
                   id="endpoint-max-tokens"
@@ -1423,12 +1506,12 @@ function BehaviorStep({
                   }
                 />
                 <FieldDescription>
-                  Upper limit for generated chat output.
+                  {t("Upper limit for generated chat output.")}
                 </FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="endpoint-temperature">
-                  Temperature
+                  {t("Temperature")}
                 </FieldLabel>
                 <Input
                   id="endpoint-temperature"
@@ -1442,7 +1525,7 @@ function BehaviorStep({
                   }
                 />
                 <FieldDescription>
-                  Lower values make chat responses more predictable.
+                  {t("Lower values make chat responses more predictable.")}
                 </FieldDescription>
               </Field>
             </div>
@@ -1452,19 +1535,21 @@ function BehaviorStep({
 
       <Card size="sm">
         <CardHeader>
-          <CardTitle>Availability and defaults</CardTitle>
+          <CardTitle>{t("Availability and defaults")}</CardTitle>
           <CardDescription>
-            Control whether routing can use this endpoint and which chat
-            endpoint new sessions select by default. If no enabled chat endpoint
-            exists in this scope, JustAI promotes the first one automatically.
+            {t(
+              "Control whether routing can use this endpoint and which chat endpoint new sessions select by default. If no enabled chat endpoint exists in this scope, JustAI promotes the first one automatically."
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <FieldGroup>
             <div className="grid gap-3 sm:grid-cols-2">
               <CapabilitySwitch
-                label="Enabled"
-                description="Allow this endpoint to be selected by routing."
+                label={t("Enabled")}
+                description={t(
+                  "Allow this endpoint to be selected by routing."
+                )}
                 checked={form.enabled}
                 onCheckedChange={(checked) => {
                   update("enabled", checked)
@@ -1472,13 +1557,15 @@ function BehaviorStep({
                 }}
               />
               <CapabilitySwitch
-                label="Default chat endpoint"
+                label={t("Default chat endpoint")}
                 description={
                   !form.enabled
-                    ? "Enable this endpoint before making it the default."
+                    ? t("Enable this endpoint before making it the default.")
                     : chatAvailable
-                      ? "Use for new chat sessions."
-                      : "Enable chat in the previous step before making this the default."
+                      ? t("Use for new chat sessions.")
+                      : t(
+                          "Enable chat in the previous step before making this the default."
+                        )
                 }
                 checked={form.isDefault}
                 disabled={!chatAvailable || !form.enabled}
@@ -1488,10 +1575,11 @@ function BehaviorStep({
             {!chatAvailable && (
               <Alert>
                 <MessageSquare aria-hidden="true" />
-                <AlertTitle>Chat is not enabled</AlertTitle>
+                <AlertTitle>{t("Chat is not enabled")}</AlertTitle>
                 <AlertDescription>
-                  This endpoint can still serve its selected capabilities, but
-                  it will not be used for new chat sessions.
+                  {t(
+                    "This endpoint can still serve its selected capabilities, but it will not be used for new chat sessions."
+                  )}
                 </AlertDescription>
               </Alert>
             )}
@@ -1574,6 +1662,8 @@ function ReviewStep({
   onCheck: () => void
   onContinueWithoutVerification: () => void
 }) {
+  const { t } = useTranslations()
+
   const enabledCapabilities = Object.entries(capabilities)
     .filter(([, enabled]) => enabled)
     .map(([capability]) => capability)
@@ -1584,34 +1674,35 @@ function ReviewStep({
       : form.chatModel || "Selected at request time"
   const credentialLabel = form.credential.trim()
     ? isEditing
-      ? "Replace stored credential"
-      : "New credential entered"
+      ? t("Replace stored credential")
+      : t("New credential entered")
     : isEditing
-      ? "Keep stored credential"
-      : "No credential (local or no auth)"
+      ? t("Keep stored credential")
+      : t("No credential (local or no auth)")
 
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <p className="text-sm font-medium">Verify and review</p>
+        <p className="text-sm font-medium">{t("Verify and review")}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          JustAI will run a safe provider check without saving the endpoint or
-          its credential.
+          {t(
+            "JustAI will run a safe provider check without saving the endpoint or its credential."
+          )}
         </p>
       </div>
 
       {notice && (
         <Alert variant="destructive">
           <CircleAlert aria-hidden="true" />
-          <AlertTitle>Endpoint could not be saved</AlertTitle>
-          <AlertDescription>{notice}</AlertDescription>
+          <AlertTitle>{t("Endpoint could not be saved")}</AlertTitle>
+          <AlertDescription>{t(notice)}</AlertDescription>
         </Alert>
       )}
 
       {validationMessage && (
         <Alert variant="destructive">
           <CircleAlert aria-hidden="true" />
-          <AlertTitle>Setup needs attention</AlertTitle>
+          <AlertTitle>{t("Setup needs attention")}</AlertTitle>
           <AlertDescription>{validationMessage}</AlertDescription>
         </Alert>
       )}
@@ -1619,40 +1710,40 @@ function ReviewStep({
       <Card size="sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <ListChecks aria-hidden="true" /> Setup summary
+            <ListChecks aria-hidden="true" /> {t("Setup summary")}
           </CardTitle>
           <CardDescription>
-            Confirm the values that will be saved.
+            {t("Confirm the values that will be saved.")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4">
             <div>
-              <p className="mb-3 text-xs font-medium">Connection</p>
+              <p className="mb-3 text-xs font-medium">{t("Connection")}</p>
               <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                 <SummaryItem
-                  label="Lane"
+                  label={t("Lane")}
                   value={endpointKind === "diarization" ? "Diarization" : "LLM"}
                 />
-                <SummaryItem label="Provider" value={providerLabel} />
+                <SummaryItem label={t("Provider")} value={providerLabel} />
                 <SummaryItem
-                  label="Name"
+                  label={t("Name")}
                   value={form.name || "Unnamed endpoint"}
                 />
                 <SummaryItem
-                  label="Visibility"
+                  label={t("Visibility")}
                   value={scopeLabel(form.scopeType)}
                 />
-                <SummaryItem label="Base URL" value={form.baseUrl} wide />
+                <SummaryItem label={t("Base URL")} value={form.baseUrl} wide />
                 <SummaryItem
-                  label="API path"
+                  label={t("API path")}
                   value={form.apiPath || "Provider default"}
                 />
                 <SummaryItem
-                  label="API version"
+                  label={t("API version")}
                   value={form.apiVersion || "Provider default"}
                 />
-                <SummaryItem label="Credential" value={credentialLabel} />
+                <SummaryItem label={t("Credential")} value={credentialLabel} />
               </dl>
             </div>
 
@@ -1660,42 +1751,42 @@ function ReviewStep({
 
             <div>
               <p className="mb-3 text-xs font-medium">
-                Models and capabilities
+                {t("Models and capabilities")}
               </p>
               <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                <SummaryItem label="Primary model" value={modelLabel} />
+                <SummaryItem label={t("Primary model")} value={modelLabel} />
                 <SummaryItem
-                  label="Chat model"
+                  label={t("Chat model")}
                   value={form.chatModel || "Not configured"}
                 />
                 <SummaryItem
-                  label="Vision model"
+                  label={t("Vision model")}
                   value={form.visionModel || "Not configured"}
                 />
                 <SummaryItem
-                  label="Embedding model"
+                  label={t("Embedding model")}
                   value={form.embeddingModel || "Not configured"}
                 />
                 <SummaryItem
-                  label="Image model"
+                  label={t("Image model")}
                   value={form.imageModel || "Not configured"}
                 />
                 <SummaryItem
-                  label="Transcription model"
+                  label={t("Transcription model")}
                   value={form.transcriptionModel || "Not configured"}
                 />
                 <SummaryItem
-                  label="Diarization model"
+                  label={t("Diarization model")}
                   value={form.diarizationModel || "Service-selected pipeline"}
                 />
                 <SummaryItem
-                  label="Speech model"
+                  label={t("Speech model")}
                   value={form.speechModel || "Not configured"}
                 />
               </dl>
               <div className="mt-4">
                 <p className="mb-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                  Enabled capabilities
+                  {t("Enabled capabilities")}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {enabledCapabilities.length > 0 ? (
@@ -1706,7 +1797,7 @@ function ReviewStep({
                     ))
                   ) : (
                     <span className="text-xs text-muted-foreground">
-                      No capabilities selected.
+                      {t("No capabilities selected.")}
                     </span>
                   )}
                 </div>
@@ -1716,26 +1807,28 @@ function ReviewStep({
             <Separator />
 
             <div>
-              <p className="mb-3 text-xs font-medium">Runtime and routing</p>
+              <p className="mb-3 text-xs font-medium">
+                {t("Runtime and routing")}
+              </p>
               <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                 <SummaryItem
-                  label="Timeout"
+                  label={t("Timeout")}
                   value={`${form.timeoutSeconds} seconds`}
                 />
                 <SummaryItem
-                  label="Max output"
+                  label={t("Max output")}
                   value={`${form.maxOutputTokens} tokens`}
                 />
                 <SummaryItem
-                  label="Temperature"
+                  label={t("Temperature")}
                   value={String(form.temperature)}
                 />
                 <SummaryItem
-                  label="Status"
+                  label={t("Status")}
                   value={form.enabled ? "Enabled" : "Disabled"}
                 />
                 <SummaryItem
-                  label="Default chat endpoint"
+                  label={t("Default chat endpoint")}
                   value={
                     form.isDefault
                       ? "Yes"
@@ -1762,19 +1855,26 @@ function ReviewStep({
             ) : (
               <ShieldCheck aria-hidden="true" />
             )}
-            Connection check
+            {t("Connection check")}
           </CardTitle>
           <CardDescription>
             {modelCount > 0
-              ? `${modelCount} model${modelCount === 1 ? "" : "s"} discovered from the provider.`
-              : "Model discovery is attempted where the provider exposes a safe catalog."}
+              ? t(
+                  modelCount === 1
+                    ? "{count} model discovered from the provider."
+                    : "{count} models discovered from the provider.",
+                  { count: modelCount }
+                )
+              : t(
+                  "Model discovery is attempted where the provider exposes a safe catalog."
+                )}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {preflightState === "passed" && verificationIsCurrent && (
             <Alert>
               <CheckCircle2 aria-hidden="true" />
-              <AlertTitle>Provider verified</AlertTitle>
+              <AlertTitle>{t("Provider verified")}</AlertTitle>
               <AlertDescription>
                 {preflightMessage || "Provider is reachable."}
               </AlertDescription>
@@ -1783,17 +1883,18 @@ function ReviewStep({
           {preflightState === "passed" && !verificationIsCurrent && (
             <Alert>
               <CircleAlert aria-hidden="true" />
-              <AlertTitle>Setup changed after verification</AlertTitle>
+              <AlertTitle>{t("Setup changed after verification")}</AlertTitle>
               <AlertDescription>
-                Check the connection again to verify the updated provider or
-                model settings.
+                {t(
+                  "Check the connection again to verify the updated provider or model settings."
+                )}
               </AlertDescription>
             </Alert>
           )}
           {preflightState === "failed" && (
             <Alert variant="destructive">
               <CircleAlert aria-hidden="true" />
-              <AlertTitle>Verification needs attention</AlertTitle>
+              <AlertTitle>{t("Verification needs attention")}</AlertTitle>
               <AlertDescription>
                 {preflightMessage || "The provider could not be reached."}
               </AlertDescription>
@@ -1801,14 +1902,15 @@ function ReviewStep({
           )}
           {preflightState === "checking" && (
             <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-              <Spinner aria-hidden="true" /> Checking provider and looking for
-              models…
+              <Spinner aria-hidden="true" />{" "}
+              {t("Checking provider and looking for models…")}
             </div>
           )}
           {preflightState === "idle" && (
             <p className="rounded-lg border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              Check the connection to unlock saving. This does not persist a
-              draft or expose the credential.
+              {t(
+                "Check the connection to unlock saving. This does not persist a draft or expose the credential."
+              )}
             </p>
           )}
           {preflightMessage &&
@@ -1829,10 +1931,10 @@ function ReviewStep({
                 aria-hidden="true"
               />
               {preflightState === "checking"
-                ? "Checking…"
+                ? t("Checking…")
                 : preflightState === "passed"
-                  ? "Check again"
-                  : "Check connection"}
+                  ? t("Check again")
+                  : t("Check connection")}
             </Button>
             {preflightState === "failed" &&
               (!verificationOverride || !verificationIsCurrent) && (
@@ -1841,14 +1943,15 @@ function ReviewStep({
                   variant="ghost"
                   onClick={onContinueWithoutVerification}
                 >
-                  Continue without verification
+                  {t("Continue without verification")}
                 </Button>
               )}
           </div>
           {verificationOverride && verificationIsCurrent && (
             <p className="text-xs text-muted-foreground">
-              Verification was skipped by choice. Saving will use the connection
-              exactly as entered.
+              {t(
+                "Verification was skipped by choice. Saving will use the connection exactly as entered."
+              )}
             </p>
           )}
         </CardContent>

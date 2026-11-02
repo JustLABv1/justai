@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { Activity, Clock3, Info, ListOrdered, UsersRound } from "lucide-react"
 
 import type { TranscriptionWorkerAnalytics } from "@/lib/types"
@@ -26,14 +27,14 @@ function formatDuration(value: number) {
   return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`
 }
 
-function formatHours(value: number) {
+function formatHours(value: number, locale: string) {
   if (!Number.isFinite(value) || value <= 0) return "0h"
-  return `${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(value)}h`
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value)}h`
 }
 
-function metricLabel(value: number, suffix = "") {
+function metricLabel(value: number, locale: string) {
   if (!Number.isFinite(value)) return "—"
-  return `${new Intl.NumberFormat("en").format(Math.round(value))}${suffix}`
+  return `${new Intl.NumberFormat(locale).format(Math.round(value))}`
 }
 
 function WorkerMetric({
@@ -68,15 +69,17 @@ export function PlatformTranscriptionWorkers({
   analytics: TranscriptionWorkerAnalytics | null | undefined
   detailed?: boolean
 }) {
+  const { t, locale } = useTranslations()
+
   if (!analytics) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Transcription workers</CardTitle>
-          <CardDescription>Loading worker consumption…</CardDescription>
+          <CardTitle>{t("Transcription workers")}</CardTitle>
+          <CardDescription>{t("Loading worker consumption…")}</CardDescription>
         </CardHeader>
         <CardContent className="py-8 text-sm text-muted-foreground">
-          Worker telemetry will appear when the platform responds.
+          {t("Worker telemetry will appear when the platform responds.")}
         </CardContent>
       </Card>
     )
@@ -87,10 +90,10 @@ export function PlatformTranscriptionWorkers({
   const saturated = analytics.active >= capacity
   const hasQueue = analytics.queued > 0
   const statusLabel = hasQueue
-    ? "Queue building"
+    ? t("Queue building")
     : saturated
-      ? "At capacity"
-      : "Capacity available"
+      ? t("At capacity")
+      : t("Capacity available")
   const statusVariant = hasQueue || saturated ? "outline" : "default"
 
   return (
@@ -101,9 +104,9 @@ export function PlatformTranscriptionWorkers({
             <UsersRound aria-hidden="true" className="size-4" />
           </span>
           <div className="min-w-0">
-            <CardTitle>Transcription workers</CardTitle>
+            <CardTitle>{t("Transcription workers")}</CardTitle>
             <CardDescription>
-              Live capacity and video-processing usage over the last{" "}
+              {t("Live capacity and video-processing usage over the last")}{" "}
               {analytics.periodDays} days.
             </CardDescription>
           </div>
@@ -115,21 +118,24 @@ export function PlatformTranscriptionWorkers({
       <CardContent className="flex flex-col gap-4">
         <div className="rounded-xl bg-muted/50 p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span className="font-medium">Live worker consumption</span>
+            <span className="font-medium">{t("Live worker consumption")}</span>
             <span className="font-mono text-xs text-muted-foreground tabular-nums">
-              {analytics.active} / {capacity} video jobs
+              {analytics.active} / {capacity} {t("video jobs")}
             </span>
           </div>
           <Progress
-            aria-label="Live transcription worker utilization"
+            aria-label={t("Live transcription worker utilization")}
             className="mt-3 h-2"
             value={utilization}
           />
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>{Math.round(analytics.utilizationPercent)}% utilized</span>
             <span>
-              {analytics.queued} queued · {analytics.activeSliceWorkers} slice
-              workers active
+              {Math.round(analytics.utilizationPercent)}
+              {t("% utilized")}
+            </span>
+            <span>
+              {analytics.queued} {t("queued ·")} {analytics.activeSliceWorkers}{" "}
+              {t("slice workers active")}
             </span>
           </div>
         </div>
@@ -138,43 +144,44 @@ export function PlatformTranscriptionWorkers({
           <WorkerMetric
             detail={`of ${capacity} concurrent slots`}
             icon={Activity}
-            label="Active jobs"
-            value={metricLabel(analytics.active)}
+            label={t("Active jobs")}
+            value={metricLabel(analytics.active, locale)}
           />
           <WorkerMetric
             detail={`over ${analytics.periodDays} days`}
             icon={ListOrdered}
-            label="Completed jobs"
-            value={metricLabel(analytics.completedJobs)}
+            label={t("Completed jobs")}
+            value={metricLabel(analytics.completedJobs, locale)}
           />
           <WorkerMetric
             detail="Completed video duration"
             icon={Clock3}
-            label="Audio processed"
-            value={formatHours(analytics.audioHoursProcessed)}
+            label={t("Audio processed")}
+            value={formatHours(analytics.audioHoursProcessed, locale)}
           />
           <WorkerMetric
             detail="Waiting before a slot opens"
             icon={Clock3}
-            label="P95 queue wait"
+            label={t("P95 queue wait")}
             value={formatDuration(analytics.p95QueueWaitMs)}
           />
         </div>
 
         <Alert>
           <Info />
-          <AlertTitle>What adding workers changes</AlertTitle>
+          <AlertTitle>{t("What adding workers changes")}</AlertTitle>
           <AlertDescription>
-            Each additional capacity slot allows one more video to transcribe at
-            the same time. It increases throughput and shortens queues, but also
-            increases CPU, memory, provider requests, and potentially cost. The{" "}
-            {analytics.sliceWorkersPerJob} slice workers shown here control
-            parallel work inside each video; capacity controls how many videos
-            can run together. Change{" "}
+            {t(
+              "Each additional capacity slot allows one more video to transcribe at the same time. It increases throughput and shortens queues, but also increases CPU, memory, provider requests, and potentially cost. The"
+            )}{" "}
+            {analytics.sliceWorkersPerJob}{" "}
+            {t(
+              "slice workers shown here control parallel work inside each video; capacity controls how many videos can run together. Change"
+            )}{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
               video_transcription_worker_capacity
             </code>{" "}
-            in the backend configuration to add slots.
+            {t("in the backend configuration to add slots.")}
           </AlertDescription>
         </Alert>
 
@@ -182,13 +189,13 @@ export function PlatformTranscriptionWorkers({
           <WorkerMetric
             detail="Average time before work starts"
             icon={Clock3}
-            label="Average queue wait"
+            label={t("Average queue wait")}
             value={formatDuration(analytics.averageQueueWaitMs)}
           />
           <WorkerMetric
             detail="P95 end-to-end worker time"
             icon={Clock3}
-            label="P95 processing time"
+            label={t("P95 processing time")}
             value={formatDuration(analytics.p95ProcessingMs)}
           />
         </div>
@@ -198,11 +205,11 @@ export function PlatformTranscriptionWorkers({
             <table className="w-full min-w-[34rem] text-left text-xs">
               <thead>
                 <tr className="border-b bg-muted/20 text-muted-foreground">
-                  <th className="p-2.5 font-medium">UTC day</th>
-                  <th className="p-2.5 font-medium">Jobs</th>
-                  <th className="p-2.5 font-medium">Completed</th>
-                  <th className="p-2.5 font-medium">Failed</th>
-                  <th className="p-2.5 font-medium">Cancelled</th>
+                  <th className="p-2.5 font-medium">{t("UTC day")}</th>
+                  <th className="p-2.5 font-medium">{t("Jobs")}</th>
+                  <th className="p-2.5 font-medium">{t("Completed")}</th>
+                  <th className="p-2.5 font-medium">{t("Failed")}</th>
+                  <th className="p-2.5 font-medium">{t("Cancelled")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -219,7 +226,7 @@ export function PlatformTranscriptionWorkers({
             </table>
             {analytics.timeSeries.length === 0 ? (
               <p className="p-6 text-center text-sm text-muted-foreground">
-                No video transcription jobs in this period.
+                {t("No video transcription jobs in this period.")}
               </p>
             ) : null}
           </div>

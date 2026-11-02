@@ -1,6 +1,11 @@
 "use client"
 
 import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
+
+import {
   memo,
   type ReactNode,
   useCallback,
@@ -315,7 +320,7 @@ function emptyWorkflow(): WorkflowDraft {
 type WorkflowTemplateId =
   "research-brief" | "meeting-actions" | "content-review" | "daily-news"
 
-const workflowTemplates: Array<{
+const workflowTemplatesMessages: Array<{
   id: WorkflowTemplateId
   name: string
   description: string
@@ -772,6 +777,8 @@ export function AgentsView({
   onAgentsChange,
   onTabChange,
 }: AgentsViewProps) {
+  const { t } = useTranslations()
+
   const [connections, setConnections] = useState<AgentConnection[]>([])
   const [workflows, setWorkflows] = useState<AgentWorkflow[]>([])
   const [runs, setRuns] = useState<AgentRun[]>([])
@@ -983,7 +990,7 @@ export function AgentsView({
       setDiscoveryMessage(
         caught instanceof Error
           ? caught.message
-          : "Agent Card discovery failed."
+          : t("Agent Card discovery failed.")
       )
     } finally {
       setDiscovering(false)
@@ -1332,7 +1339,9 @@ export function AgentsView({
       setValidationTone(result.valid ? "success" : "error")
     } catch (caught) {
       setValidationMessage(
-        caught instanceof Error ? caught.message : "Workflow validation failed."
+        caught instanceof Error
+          ? caught.message
+          : t("Workflow validation failed.")
       )
       setValidationTarget(null)
       setValidationTone("error")
@@ -1417,7 +1426,7 @@ export function AgentsView({
       setValidationMessage(
         caught instanceof Error
           ? caught.message
-          : "The workflow could not be saved."
+          : t("The workflow could not be saved.")
       )
       setValidationTarget(null)
       setValidationTone("error")
@@ -1565,18 +1574,21 @@ export function AgentsView({
       {disabled && (
         <Alert role="status">
           <ShieldCheck data-icon="inline-start" />
-          <AlertTitle>Agents are disabled</AlertTitle>
+          <AlertTitle>{t("Agents are disabled")}</AlertTitle>
           <AlertDescription>
-            The platform administrator disabled new agent runs and scheduling.
-            Existing agents, workflows, and run history remain inspectable.
+            {t(
+              "The platform administrator disabled new agent runs and scheduling. Existing agents, workflows, and run history remain inspectable."
+            )}
           </AlertDescription>
         </Alert>
       )}
       <PageHeader>
         <PageHeading>
-          <PageTitle>Agent workspace</PageTitle>
+          <PageTitle>{t("Agent workspace")}</PageTitle>
           <PageDescription>
-            Manage your team of agents, design workflows, and monitor execution.
+            {t(
+              "Manage your team of agents, design workflows, and monitor execution."
+            )}
           </PageDescription>
         </PageHeading>
         <PageActions>
@@ -1584,18 +1596,18 @@ export function AgentsView({
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={() => openRemote()}>
                 <Link2 data-icon="inline-start" />
-                Connect remote
+                {t("Connect remote")}
               </Button>
               <Button onClick={() => openNative()}>
                 <Plus data-icon="inline-start" />
-                New native agent
+                {t("New native agent")}
               </Button>
             </div>
           )}
           {activeTab === "workflows" && !disabled && (
             <Button onClick={() => openWorkflow()}>
               <Plus data-icon="inline-start" />
-              New workflow
+              {t("New workflow")}
             </Button>
           )}
         </PageActions>
@@ -1604,8 +1616,8 @@ export function AgentsView({
       {error && (
         <Alert aria-live="polite" role="alert" variant="destructive">
           <CircleAlert data-icon="inline-start" />
-          <AlertTitle>Agent workspace needs attention</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertTitle>{t("Agent workspace needs attention")}</AlertTitle>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
@@ -1614,31 +1626,31 @@ export function AgentsView({
         onValueChange={(value) => onTabChange(value as AgentTab)}
       >
         <TabsList
-          aria-label="Agent workspace sections"
+          aria-label={t("Agent workspace sections")}
           variant="line"
           className="w-full justify-start border-b pb-0"
         >
           <TabsTrigger value="agents">
             <Bot data-icon="inline-start" />
-            Agents{" "}
+            {t("Agents")}{" "}
             <span className="ml-1 text-muted-foreground">{agents.length}</span>
           </TabsTrigger>
           <TabsTrigger value="workflows">
             <GitBranch data-icon="inline-start" />
-            Workflows{" "}
+            {t("Workflows")}{" "}
             <span className="ml-1 text-muted-foreground">
               {workflows.length}
             </span>
           </TabsTrigger>
           <TabsTrigger value="runs">
             <Activity data-icon="inline-start" />
-            Runs{" "}
+            {t("Runs")}{" "}
             <span className="ml-1 text-muted-foreground">{runs.length}</span>
           </TabsTrigger>
         </TabsList>
         <TabsContent value="agents" className="pt-6">
           {loading && !agents.length ? (
-            <LoadingState label="Loading agents…" />
+            <LoadingState label={t("Loading agents…")} />
           ) : (
             <AgentsPanel
               agents={agents}
@@ -1714,36 +1726,39 @@ export function AgentsView({
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {editingAgent ? "Edit native agent" : "Create native agent"}
+              {editingAgent ? t("Edit native agent") : t("Create native agent")}
             </DialogTitle>
             <DialogDescription>
-              Native agents use JustAI’s configured model, memory, MCP
-              permissions, and conversation runtime.
+              {t(
+                "Native agents use JustAI’s configured model, memory, MCP permissions, and conversation runtime."
+              )}
             </DialogDescription>
           </DialogHeader>
           {error && (
             <Alert aria-live="polite" role="alert" variant="destructive">
-              <AlertTitle>Could not save native agent</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <AlertTitle>{t("Could not save native agent")}</AlertTitle>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
           <form onSubmit={(event) => void saveNative(event)}>
             <FieldGroup>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field>
-                  <FieldLabel htmlFor="native-agent-name">Name</FieldLabel>
+                  <FieldLabel htmlFor="native-agent-name">
+                    {t("Name")}
+                  </FieldLabel>
                   <Input
                     id="native-agent-name"
                     value={nativeForm.name}
                     onChange={(event) =>
                       setNativeForm({ ...nativeForm, name: event.target.value })
                     }
-                    placeholder="Research lead"
+                    placeholder={t("Research lead")}
                   />
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="native-agent-visibility">
-                    Visibility
+                    {t("Visibility")}
                   </FieldLabel>
                   <Select
                     value={nativeForm.visibility}
@@ -1757,14 +1772,14 @@ export function AgentsView({
                   >
                     <SelectTrigger id="native-agent-visibility">
                       <SelectValue>
-                        {visibilityLabel(nativeForm.visibility)}
+                        {t(visibilityLabel(nativeForm.visibility))}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="private">Private</SelectItem>
+                        <SelectItem value="private">{t("Private")}</SelectItem>
                         <SelectItem value="workspace">
-                          Workspace shared
+                          {t("Workspace shared")}
                         </SelectItem>
                       </SelectGroup>
                     </SelectContent>
@@ -1773,7 +1788,7 @@ export function AgentsView({
               </div>
               <Field>
                 <FieldLabel htmlFor="native-agent-description">
-                  Description
+                  {t("Description")}
                 </FieldLabel>
                 <Input
                   id="native-agent-description"
@@ -1784,12 +1799,12 @@ export function AgentsView({
                       description: event.target.value,
                     })
                   }
-                  placeholder="What this agent is good at"
+                  placeholder={t("What this agent is good at")}
                 />
               </Field>
               <Field>
                 <FieldLabel htmlFor="native-agent-instructions">
-                  Instructions
+                  {t("Instructions")}
                 </FieldLabel>
                 <Textarea
                   id="native-agent-instructions"
@@ -1801,17 +1816,18 @@ export function AgentsView({
                       instructions: event.target.value,
                     })
                   }
-                  placeholder="Act as a careful research editor…"
+                  placeholder={t("Act as a careful research editor…")}
                 />
                 <FieldDescription>
-                  These instructions are versioned. Existing conversations keep
-                  their pinned version.
+                  {t(
+                    "These instructions are versioned. Existing conversations keep their pinned version."
+                  )}
                 </FieldDescription>
               </Field>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor="native-agent-endpoint">
-                    Chat endpoint
+                    {t("Chat endpoint")}
                   </FieldLabel>
                   <Select
                     value={nativeForm.endpointId || "default"}
@@ -1829,13 +1845,13 @@ export function AgentsView({
                               (endpoint) =>
                                 endpoint.id === nativeForm.endpointId
                             )?.name ?? "Selected endpoint")
-                          : "Workspace default"}
+                          : t("Workspace default")}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
                         <SelectItem value="default">
-                          Workspace default
+                          {t("Workspace default")}
                         </SelectItem>
                         {endpoints
                           .filter(
@@ -1853,7 +1869,7 @@ export function AgentsView({
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="native-agent-model">
-                    Model override
+                    {t("Model override")}
                   </FieldLabel>
                   <Input
                     id="native-agent-model"
@@ -1864,46 +1880,48 @@ export function AgentsView({
                         model: event.target.value,
                       })
                     }
-                    placeholder="Use endpoint default"
+                    placeholder={t("Use endpoint default")}
                   />
                 </Field>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field orientation="horizontal">
                   <Switch
-                    aria-label="Use memory"
+                    aria-label={t("Use memory")}
                     checked={nativeForm.useMemory}
                     onCheckedChange={(checked) =>
                       setNativeForm({ ...nativeForm, useMemory: checked })
                     }
                   />
                   <div>
-                    <FieldLabel>Use memory</FieldLabel>
+                    <FieldLabel>{t("Use memory")}</FieldLabel>
                     <FieldDescription>
-                      Include the user’s approved persistent preferences.
+                      {t("Include the user’s approved persistent preferences.")}
                     </FieldDescription>
                   </div>
                 </Field>
                 <Field orientation="horizontal">
                   <Switch
-                    aria-label="Use deep context"
+                    aria-label={t("Use deep context")}
                     checked={nativeForm.deepContext}
                     onCheckedChange={(checked) =>
                       setNativeForm({ ...nativeForm, deepContext: checked })
                     }
                   />
                   <div>
-                    <FieldLabel>Deep context</FieldLabel>
+                    <FieldLabel>{t("Deep context")}</FieldLabel>
                     <FieldDescription>
-                      Use attached workspace context when available.
+                      {t("Use attached workspace context when available.")}
                     </FieldDescription>
                   </div>
                 </Field>
               </div>
               <FieldSet>
-                <FieldLegend variant="label">Delegation allowlist</FieldLegend>
+                <FieldLegend variant="label">
+                  {t("Delegation allowlist")}
+                </FieldLegend>
                 <FieldDescription>
-                  Only these agents may be selected by{" "}
+                  {t("Only these agents may be selected by")}{" "}
                   <code>delegate_agent</code>.
                 </FieldDescription>
                 {agents.filter((agent) => agent.id !== editingAgent?.id)
@@ -1943,7 +1961,7 @@ export function AgentsView({
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    Create another agent to enable delegation.
+                    {t("Create another agent to enable delegation.")}
                   </p>
                 )}
               </FieldSet>
@@ -1954,7 +1972,7 @@ export function AgentsView({
                 type="button"
                 onClick={() => setNativeOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button
                 disabled={
@@ -1965,10 +1983,10 @@ export function AgentsView({
                 type="submit"
               >
                 {saving
-                  ? "Saving…"
+                  ? t("Saving…")
                   : editingAgent
-                    ? "Save changes"
-                    : "Create agent"}
+                    ? t("Save changes")
+                    : t("Create agent")}
               </Button>
             </DialogFooter>
           </form>
@@ -1988,18 +2006,20 @@ export function AgentsView({
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {editingAgent ? "Configure A2A agent" : "Connect an A2A agent"}
+              {editingAgent
+                ? t("Configure A2A agent")
+                : t("Connect an A2A agent")}
             </DialogTitle>
             <DialogDescription>
-              JustAI makes outbound A2A 1.0 HTTP+JSON/SSE calls. Credentials are
-              encrypted and never included in cards, prompts, logs, or audit
-              details.
+              {t(
+                "JustAI makes outbound A2A 1.0 HTTP+JSON/SSE calls. Credentials are encrypted and never included in cards, prompts, logs, or audit details."
+              )}
             </DialogDescription>
           </DialogHeader>
           {error && (
             <Alert aria-live="polite" role="alert" variant="destructive">
-              <AlertTitle>Could not save remote agent</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <AlertTitle>{t("Could not save remote agent")}</AlertTitle>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
           <form onSubmit={(event) => void saveRemote(event)}>
@@ -2007,7 +2027,7 @@ export function AgentsView({
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor="remote-agent-name">
-                    Display name
+                    {t("Display name")}
                   </FieldLabel>
                   <Input
                     id="remote-agent-name"
@@ -2015,12 +2035,12 @@ export function AgentsView({
                     onChange={(event) =>
                       setRemoteForm({ ...remoteForm, name: event.target.value })
                     }
-                    placeholder="Vendor research agent"
+                    placeholder={t("Vendor research agent")}
                   />
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="remote-agent-visibility">
-                    Visibility
+                    {t("Visibility")}
                   </FieldLabel>
                   <Select
                     value={remoteForm.visibility}
@@ -2038,14 +2058,14 @@ export function AgentsView({
                   >
                     <SelectTrigger id="remote-agent-visibility">
                       <SelectValue>
-                        {visibilityLabel(remoteForm.visibility)}
+                        {t(visibilityLabel(remoteForm.visibility))}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="private">Private</SelectItem>
+                        <SelectItem value="private">{t("Private")}</SelectItem>
                         <SelectItem value="workspace">
-                          Workspace shared
+                          {t("Workspace shared")}
                         </SelectItem>
                       </SelectGroup>
                     </SelectContent>
@@ -2053,7 +2073,7 @@ export function AgentsView({
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="remote-connection-scope">
-                    Connection scope
+                    {t("Connection scope")}
                   </FieldLabel>
                   <Select
                     value={remoteForm.connectionScope}
@@ -2068,27 +2088,30 @@ export function AgentsView({
                   >
                     <SelectTrigger id="remote-connection-scope">
                       <SelectValue>
-                        {connectionScopeLabel(remoteForm.connectionScope)}
+                        {t(connectionScopeLabel(remoteForm.connectionScope))}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="user">Private connection</SelectItem>
+                        <SelectItem value="user">
+                          {t("Private connection")}
+                        </SelectItem>
                         <SelectItem value="organization">
-                          Workspace connection
+                          {t("Workspace connection")}
                         </SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                   <FieldDescription>
-                    Workspace agents require a workspace connection. Shared
-                    connections are managed by owners and admins.
+                    {t(
+                      "Workspace agents require a workspace connection. Shared connections are managed by owners and admins."
+                    )}
                   </FieldDescription>
                 </Field>
               </div>
               <Field>
                 <FieldLabel htmlFor="remote-agent-url">
-                  A2A endpoint URL
+                  {t("A2A endpoint URL")}
                 </FieldLabel>
                 <div className="flex gap-2">
                   <Input
@@ -2112,12 +2135,13 @@ export function AgentsView({
                       className={discovering ? "animate-pulse" : ""}
                       data-icon="inline-start"
                     />
-                    {discovering ? "Discovering…" : "Discover"}
+                    {discovering ? t("Discovering…") : t("Discover")}
                   </Button>
                 </div>
                 <FieldDescription>
-                  Private network targets are controlled by the backend
-                  safe-dial policy.
+                  {t(
+                    "Private network targets are controlled by the backend safe-dial policy."
+                  )}
                 </FieldDescription>
               </Field>
               {discoveryMessage && (
@@ -2128,7 +2152,7 @@ export function AgentsView({
               )}
               <Field>
                 <FieldLabel htmlFor="remote-authentication">
-                  Authentication
+                  {t("Authentication")}
                 </FieldLabel>
                 <Select
                   value={remoteForm.authType}
@@ -2142,26 +2166,32 @@ export function AgentsView({
                 >
                   <SelectTrigger id="remote-authentication">
                     <SelectValue>
-                      {authTypeLabel(remoteForm.authType)}
+                      {t(authTypeLabel(remoteForm.authType))}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectItem value="none">No authentication</SelectItem>
-                      <SelectItem value="api_key">API key</SelectItem>
+                      <SelectItem value="none">
+                        {t("No authentication")}
+                      </SelectItem>
+                      <SelectItem value="api_key">{t("API key")}</SelectItem>
                       <SelectItem value="http">
-                        HTTP Basic / auth header
+                        {t("HTTP Basic / auth header")}
                       </SelectItem>
                       <SelectItem value="oauth2">OAuth2</SelectItem>
                       <SelectItem value="oidc">OIDC</SelectItem>
-                      <SelectItem value="mtls">mTLS certificate</SelectItem>
+                      <SelectItem value="mtls">
+                        {t("mTLS certificate")}
+                      </SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </Select>
               </Field>
               {remoteForm.authType === "api_key" && (
                 <Field>
-                  <FieldLabel htmlFor="remote-api-key">API key</FieldLabel>
+                  <FieldLabel htmlFor="remote-api-key">
+                    {t("API key")}
+                  </FieldLabel>
                   <Input
                     id="remote-api-key"
                     type="password"
@@ -2179,7 +2209,9 @@ export function AgentsView({
               {remoteForm.authType === "http" && (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
-                    <FieldLabel htmlFor="remote-username">Username</FieldLabel>
+                    <FieldLabel htmlFor="remote-username">
+                      {t("Username")}
+                    </FieldLabel>
                     <Input
                       id="remote-username"
                       value={remoteForm.username}
@@ -2192,7 +2224,9 @@ export function AgentsView({
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="remote-password">Password</FieldLabel>
+                    <FieldLabel htmlFor="remote-password">
+                      {t("Password")}
+                    </FieldLabel>
                     <Input
                       id="remote-password"
                       type="password"
@@ -2213,7 +2247,7 @@ export function AgentsView({
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="remote-oauth-client">
-                      Client ID
+                      {t("Client ID")}
                     </FieldLabel>
                     <Input
                       id="remote-oauth-client"
@@ -2228,7 +2262,7 @@ export function AgentsView({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="remote-oauth-scopes">
-                      Scopes
+                      {t("Scopes")}
                     </FieldLabel>
                     <Input
                       id="remote-oauth-scopes"
@@ -2244,7 +2278,7 @@ export function AgentsView({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="remote-oauth-auth">
-                      Authorization URL
+                      {t("Authorization URL")}
                     </FieldLabel>
                     <Input
                       id="remote-oauth-auth"
@@ -2260,7 +2294,7 @@ export function AgentsView({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="remote-oauth-token">
-                      Token URL
+                      {t("Token URL")}
                     </FieldLabel>
                     <Input
                       id="remote-oauth-token"
@@ -2276,7 +2310,7 @@ export function AgentsView({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="remote-client-secret">
-                      Client secret
+                      {t("Client secret")}
                     </FieldLabel>
                     <Input
                       id="remote-client-secret"
@@ -2297,7 +2331,7 @@ export function AgentsView({
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="remote-certificate">
-                      Client certificate
+                      {t("Client certificate")}
                     </FieldLabel>
                     <Textarea
                       id="remote-certificate"
@@ -2314,7 +2348,7 @@ export function AgentsView({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="remote-private-key">
-                      Private key
+                      {t("Private key")}
                     </FieldLabel>
                     <Textarea
                       id="remote-private-key"
@@ -2333,17 +2367,18 @@ export function AgentsView({
               )}
               <Field orientation="horizontal">
                 <Switch
-                  aria-label="Trust read-only operations"
+                  aria-label={t("Trust read-only operations")}
                   checked={remoteForm.trustedReadOnly}
                   onCheckedChange={(checked) =>
                     setRemoteForm({ ...remoteForm, trustedReadOnly: checked })
                   }
                 />
                 <div>
-                  <FieldLabel>Trust read-only operations</FieldLabel>
+                  <FieldLabel>{t("Trust read-only operations")}</FieldLabel>
                   <FieldDescription>
-                    Only enable this for a connection you control. Otherwise
-                    remote runs pause for approval.
+                    {t(
+                      "Only enable this for a connection you control. Otherwise remote runs pause for approval."
+                    )}
                   </FieldDescription>
                 </div>
               </Field>
@@ -2354,7 +2389,7 @@ export function AgentsView({
                 type="button"
                 onClick={() => setRemoteOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button
                 disabled={
@@ -2367,11 +2402,11 @@ export function AgentsView({
                 <LockKeyhole data-icon="inline-start" />
                 {saving
                   ? editingAgent
-                    ? "Saving…"
-                    : "Connecting…"
+                    ? t("Saving…")
+                    : t("Connecting…")
                   : editingAgent
-                    ? "Save changes"
-                    : "Save encrypted connection"}
+                    ? t("Save changes")
+                    : t("Save encrypted connection")}
               </Button>
             </DialogFooter>
           </form>
@@ -2386,10 +2421,11 @@ export function AgentsView({
       >
         <DialogContent className="max-h-[min(720px,calc(100svh-2rem))] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Run workflow</DialogTitle>
+            <DialogTitle>{t("Run workflow")}</DialogTitle>
             <DialogDescription>
-              Provide the values declared by this workflow. They are captured
-              with the immutable run snapshot and passed only to mapped nodes.
+              {t(
+                "Provide the values declared by this workflow. They are captured with the immutable run snapshot and passed only to mapped nodes."
+              )}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={(event) => void runWorkflow(runInput, event)}>
@@ -2410,7 +2446,7 @@ export function AgentsView({
                           [name]: event.target.value,
                         }))
                       }
-                      placeholder="Enter a value"
+                      placeholder={t("Enter a value")}
                     />
                   </Field>
                 ))}
@@ -2419,8 +2455,9 @@ export function AgentsView({
               <Alert>
                 <ListChecks data-icon="inline-start" />
                 <AlertDescription>
-                  This workflow has no declared inputs. Add a “Workflow input”
-                  binding to a node if the run should accept a value.
+                  {t(
+                    "This workflow has no declared inputs. Add a “Workflow input” binding to a node if the run should accept a value."
+                  )}
                 </AlertDescription>
               </Alert>
             )}
@@ -2431,10 +2468,10 @@ export function AgentsView({
                 type="button"
                 disabled={running}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button type="submit" disabled={running}>
-                {running ? "Starting…" : "Start run"}
+                {running ? t("Starting…") : t("Start run")}
               </Button>
             </DialogFooter>
           </form>
@@ -2445,24 +2482,34 @@ export function AgentsView({
         open={deleteTarget !== null}
         title={
           deleteTarget?.kind === "agent"
-            ? `Delete ${deleteTarget.item.name}?`
+            ? t("Delete {value0}?", { value0: deleteTarget.item.name })
             : deleteTarget?.kind === "connection"
-              ? `Remove the ${deleteTarget.item.name} connection?`
-              : `Delete ${deleteTarget?.item.name ?? "this workflow"}?`
+              ? t("Remove the {value0} connection?", {
+                  value0: deleteTarget.item.name,
+                })
+              : t("Delete {value0}?", {
+                  value0: deleteTarget?.item.name ?? "this workflow",
+                })
         }
         description={
           deleteTarget?.kind === "agent"
-            ? "Existing conversations keep their pinned agent version. New runs will no longer be able to select this agent."
+            ? t(
+                "Existing conversations keep their pinned agent version. New runs will no longer be able to select this agent."
+              )
             : deleteTarget?.kind === "connection"
-              ? "Remote agents using this connection may stop working. This cannot be undone."
-              : "Existing runs stay inspectable, but this workflow will no longer be available for new runs or schedules."
+              ? t(
+                  "Remote agents using this connection may stop working. This cannot be undone."
+                )
+              : t(
+                  "Existing runs stay inspectable, but this workflow will no longer be available for new runs or schedules."
+                )
         }
         confirmLabel={
           deleteTarget?.kind === "connection"
-            ? "Remove connection"
+            ? t("Remove connection")
             : deleteTarget?.kind === "agent"
-              ? "Delete agent"
-              : "Delete workflow"
+              ? t("Delete agent")
+              : t("Delete workflow")
         }
         pending={deleting}
         onOpenChange={(open) => {
@@ -2512,6 +2559,8 @@ function AgentsPanel({
   updatingConnectionId: string
   disabled?: boolean
 }) {
+  const { t } = useTranslations()
+
   const [query, setQuery] = useState("")
   const visibleAgents = agents.filter((agent) =>
     `${agent.name} ${agent.description} ${agent.kind}`
@@ -2522,14 +2571,14 @@ function AgentsPanel({
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Agent directory</h2>
+          <h2 className="text-lg font-semibold">{t("Agent directory")}</h2>
           <p className="text-sm text-muted-foreground">
-            Reusable specialists and connected remote agents.
+            {t("Reusable specialists and connected remote agents.")}
           </p>
         </div>
         <Input
-          aria-label="Search agents"
-          placeholder="Search agents…"
+          aria-label={t("Search agents")}
+          placeholder={t("Search agents…")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           className="max-w-sm"
@@ -2537,7 +2586,7 @@ function AgentsPanel({
       </div>
       {agents.length > 0 && !visibleAgents.length && (
         <p className="text-sm text-muted-foreground">
-          No agents match your search.
+          {t("No agents match your search.")}
         </p>
       )}
       {agents.length ? (
@@ -2567,13 +2616,13 @@ function AgentsPanel({
                       <CardDescription className="mt-1 line-clamp-2">
                         {agent.description ||
                           (agent.kind === "remote"
-                            ? "Connected A2A agent"
-                            : "Native JustAI agent")}
+                            ? t("Connected A2A agent")
+                            : t("Native JustAI agent"))}
                       </CardDescription>
                     </div>
                     <CardAction className="ml-auto shrink-0">
                       <Badge variant={badgeVariant(agent.status)}>
-                        {agent.kind === "remote" ? "A2A" : "Native"} ·{" "}
+                        {agent.kind === "remote" ? "A2A" : t("Native")} ·{" "}
                         {statusLabel(agent.status)}
                       </Badge>
                     </CardAction>
@@ -2590,11 +2639,11 @@ function AgentsPanel({
                         {agent.credentialConfigured ? (
                           <Badge variant="outline">
                             <KeyRound data-icon="inline-start" />
-                            Credential saved
+                            {t("Credential saved")}
                           </Badge>
                         ) : (
                           <Badge variant="destructive">
-                            Credential missing
+                            {t("Credential missing")}
                           </Badge>
                         )}
                       </>
@@ -2602,13 +2651,13 @@ function AgentsPanel({
                       <>
                         <Badge variant="outline">
                           <ShieldCheck data-icon="inline-start" />
-                          JustAI runtime
+                          {t("JustAI runtime")}
                         </Badge>
                         {agent.useMemory && (
-                          <Badge variant="outline">Memory</Badge>
+                          <Badge variant="outline">{t("Memory")}</Badge>
                         )}
                         {agent.deepContext && (
-                          <Badge variant="outline">Deep context</Badge>
+                          <Badge variant="outline">{t("Deep context")}</Badge>
                         )}
                       </>
                     )}
@@ -2623,13 +2672,13 @@ function AgentsPanel({
                   )}
                   {agent.delegationAgentIds?.length ? (
                     <p className="text-xs text-muted-foreground">
-                      Can delegate to {agent.delegationAgentIds.length}{" "}
-                      allowlisted agent
+                      {t("Can delegate to")} {agent.delegationAgentIds.length}{" "}
+                      {t("allowlisted agent")}
                       {agent.delegationAgentIds.length === 1 ? "" : "s"}.
                     </p>
                   ) : (
                     <p className="text-xs text-muted-foreground">
-                      No delegation targets configured.
+                      {t("No delegation targets configured.")}
                     </p>
                   )}
                 </CardContent>
@@ -2639,10 +2688,10 @@ function AgentsPanel({
                     variant="ghost"
                     disabled={disabled}
                     onClick={() => onDelete(agent)}
-                    aria-label={`Delete ${agent.name}`}
+                    aria-label={t("Delete {value0}", { value0: agent.name })}
                   >
                     <Trash2 data-icon="inline-start" />
-                    Delete
+                    {t("Delete")}
                   </Button>
                   <Button
                     size="sm"
@@ -2650,7 +2699,7 @@ function AgentsPanel({
                     disabled={disabled}
                     onClick={() => onEdit(agent)}
                   >
-                    Configure
+                    {t("Configure")}
                   </Button>
                 </CardFooter>
               </Card>
@@ -2663,10 +2712,11 @@ function AgentsPanel({
             <div className="rounded-full bg-muted p-3">
               <Bot />
             </div>
-            <h2 className="mt-4 font-medium">No agents yet</h2>
+            <h2 className="mt-4 font-medium">{t("No agents yet")}</h2>
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-              Create a native specialist or connect an A2A agent. Both can be
-              selected in chat and placed in workflows.
+              {t(
+                "Create a native specialist or connect an A2A agent. Both can be selected in chat and placed in workflows."
+              )}
             </p>
           </CardContent>
         </Card>
@@ -2674,12 +2724,16 @@ function AgentsPanel({
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="font-medium">Connections</h2>
+            <h2 className="font-medium">{t("Connections")}</h2>
             <p className="text-sm text-muted-foreground">
-              Encrypted remote access shared by the workspace or kept personal.
+              {t(
+                "Encrypted remote access shared by the workspace or kept personal."
+              )}
             </p>
           </div>
-          <Badge variant="outline">{connections.length} configured</Badge>
+          <Badge variant="outline">
+            {connections.length} {t("configured")}
+          </Badge>
         </div>
         {connections.length ? (
           <div className="grid gap-3 md:grid-cols-2">
@@ -2698,7 +2752,7 @@ function AgentsPanel({
                       <Badge
                         variant={connection.enabled ? "secondary" : "outline"}
                       >
-                        {connection.enabled ? "Enabled" : "Disabled"}
+                        {connection.enabled ? t("Enabled") : t("Disabled")}
                       </Badge>
                       <Badge
                         variant={
@@ -2706,13 +2760,15 @@ function AgentsPanel({
                         }
                       >
                         {connection.lastError
-                          ? "Needs attention"
+                          ? t("Needs attention")
                           : connection.lastTestedAt
-                            ? "Tested"
-                            : "Not tested"}
+                            ? t("Tested")
+                            : t("Not tested")}
                       </Badge>
                       {connection.trustedReadOnly && (
-                        <Badge variant="outline">Trusted read-only</Badge>
+                        <Badge variant="outline">
+                          {t("Trusted read-only")}
+                        </Badge>
                       )}
                     </div>
                   </div>
@@ -2723,14 +2779,18 @@ function AgentsPanel({
                       onCheckedChange={(checked) =>
                         onToggleConnection(connection, checked)
                       }
-                      aria-label={`Enable ${connection.name}`}
+                      aria-label={t("Enable {value0}", {
+                        value0: connection.name,
+                      })}
                     />
                     <Button
                       size="icon"
                       variant="ghost"
                       disabled={disabled || Boolean(testingConnectionId)}
                       onClick={() => onTest(connection)}
-                      aria-label={`Test ${connection.name}`}
+                      aria-label={t("Test {value0}", {
+                        value0: connection.name,
+                      })}
                     >
                       <RefreshCw
                         className={
@@ -2746,7 +2806,9 @@ function AgentsPanel({
                       variant="ghost"
                       disabled={disabled}
                       onClick={() => onDeleteConnection(connection)}
-                      aria-label={`Delete ${connection.name}`}
+                      aria-label={t("Delete {value0}", {
+                        value0: connection.name,
+                      })}
                     >
                       <Trash2 data-icon="inline-start" />
                     </Button>
@@ -2757,7 +2819,7 @@ function AgentsPanel({
           </div>
         ) : (
           <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-            No remote connections configured.
+            {t("No remote connections configured.")}
           </p>
         )}
       </section>
@@ -2832,6 +2894,10 @@ function WorkflowsPanel({
   onValidationDismiss: () => void
   disabled?: boolean
 }) {
+  const workflowTemplates = useTranslatedConfig(workflowTemplatesMessages)
+
+  const { t } = useTranslations()
+
   const [workflowQuery, setWorkflowQuery] = useState("")
   const editorRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -2883,14 +2949,15 @@ function WorkflowsPanel({
       {!draft && (
         <Card className="h-fit max-h-[calc(100vh-13rem)] overflow-y-auto">
           <CardHeader>
-            <CardTitle>Workflow library</CardTitle>
+            <CardTitle>{t("Workflow library")}</CardTitle>
             <CardDescription>
-              Reusable workflows for your team. Select a workflow to open the
-              builder.
+              {t(
+                "Reusable workflows for your team. Select a workflow to open the builder."
+              )}
             </CardDescription>
             <Input
-              aria-label="Search workflows"
-              placeholder="Search workflows…"
+              aria-label={t("Search workflows")}
+              placeholder={t("Search workflows…")}
               value={workflowQuery}
               onChange={(event) => setWorkflowQuery(event.target.value)}
               className="mt-3 max-w-md"
@@ -2916,11 +2983,11 @@ function WorkflowsPanel({
                     {workflow.name}
                   </span>
                   <span className="mt-1 block text-xs text-muted-foreground">
-                    {workflow.definition.nodes.length} nodes ·{" "}
+                    {workflow.definition.nodes.length} {t("nodes ·")}{" "}
                     {workflowScheduleDescription(workflow.schedule)}
                   </span>
                   <span className="block text-xs text-muted-foreground">
-                    Next run:{" "}
+                    {t("Next run:")}{" "}
                     {formatWorkflowNextRun(
                       workflow.nextRunAt,
                       workflow.timezone
@@ -2930,13 +2997,13 @@ function WorkflowsPanel({
               ))}
             {!workflows.length && (
               <p className="py-5 text-center text-xs text-muted-foreground">
-                No saved workflows.
+                {t("No saved workflows.")}
               </p>
             )}
             <div className="mt-2 border-t pt-5 md:col-span-2 xl:col-span-3">
               <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
                 <Sparkles className="size-3.5 text-primary" />
-                Start from a template
+                {t("Start from a template")}
               </p>
               <div className="grid gap-3 md:grid-cols-3">
                 {workflowTemplates.map((template) => (
@@ -2981,14 +3048,18 @@ function WorkflowsPanel({
                     variant="ghost"
                     onClick={onClose}
                   >
-                    Workflows
+                    {t("Workflows")}
                   </Button>
                   <CardTitle>
-                    {draft.id ? draft.name || "Edit workflow" : "New workflow"}
+                    {draft.id
+                      ? draft.name || "Edit workflow"
+                      : t("New workflow")}
                   </CardTitle>
                 </div>
                 <CardDescription>
-                  Design the flow, configure each step, then validate and run.
+                  {t(
+                    "Design the flow, configure each step, then validate and run."
+                  )}
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -3006,7 +3077,7 @@ function WorkflowsPanel({
                     }}
                   >
                     <Trash2 data-icon="inline-start" />
-                    Delete
+                    {t("Delete")}
                   </Button>
                 )}
                 <Button
@@ -3016,8 +3087,8 @@ function WorkflowsPanel({
                   onClick={() => void toggleFullscreen()}
                   aria-label={
                     isFullscreen
-                      ? "Exit full screen editor"
-                      : "Open full screen editor"
+                      ? t("Exit full screen editor")
+                      : t("Open full screen editor")
                   }
                 >
                   {isFullscreen ? (
@@ -3026,7 +3097,7 @@ function WorkflowsPanel({
                     <Maximize2 data-icon="inline-start" />
                   )}
                   <span className="hidden sm:inline">
-                    {isFullscreen ? "Exit full screen" : "Full screen"}
+                    {isFullscreen ? t("Exit full screen") : t("Full screen")}
                   </span>
                 </Button>
                 <Button
@@ -3037,7 +3108,7 @@ function WorkflowsPanel({
                   disabled={validating}
                 >
                   <CheckCircle2 data-icon="inline-start" />
-                  {validating ? "Validating…" : "Validate"}
+                  {validating ? t("Validating…") : t("Validate")}
                 </Button>
                 <Button
                   type="button"
@@ -3047,7 +3118,7 @@ function WorkflowsPanel({
                   disabled={disabled || saving}
                 >
                   <Check data-icon="inline-start" />
-                  {saving ? "Saving…" : "Save"}
+                  {saving ? t("Saving…") : t("Save")}
                 </Button>
                 <Button
                   type="button"
@@ -3056,7 +3127,7 @@ function WorkflowsPanel({
                   disabled={disabled}
                 >
                   <Play data-icon="inline-start" />
-                  Run
+                  {t("Run")}
                 </Button>
               </div>
             </div>
@@ -3069,10 +3140,10 @@ function WorkflowsPanel({
                 <ListChecks data-icon="inline-start" />
                 <AlertTitle>
                   {validationTone === "error"
-                    ? "Workflow needs attention"
+                    ? t("Workflow needs attention")
                     : validationTone === "success"
-                      ? "Workflow ready"
-                      : "Workflow setup"}
+                      ? t("Workflow ready")
+                      : t("Workflow setup")}
                 </AlertTitle>
                 <AlertDescription>{validationMessage}</AlertDescription>
               </Alert>
@@ -3086,10 +3157,13 @@ function WorkflowsPanel({
                 if (validationTarget) onValidationDismiss()
               }}
             >
-              <TabsList aria-label="Workflow editor sections" variant="line">
-                <TabsTrigger value="build">Build</TabsTrigger>
-                <TabsTrigger value="settings">Settings</TabsTrigger>
-                <TabsTrigger value="schedule">Schedule</TabsTrigger>
+              <TabsList
+                aria-label={t("Workflow editor sections")}
+                variant="line"
+              >
+                <TabsTrigger value="build">{t("Build")}</TabsTrigger>
+                <TabsTrigger value="settings">{t("Settings")}</TabsTrigger>
+                <TabsTrigger value="schedule">{t("Schedule")}</TabsTrigger>
               </TabsList>
               <TabsContent value="build" className="pt-4">
                 {" "}
@@ -3097,9 +3171,13 @@ function WorkflowsPanel({
                   <div className="flex h-[620px] flex-col gap-2 overflow-hidden rounded-xl bg-muted/50">
                     <div className="flex items-center justify-between border-b px-3 py-2">
                       <div>
-                        <p className="text-xs font-medium">Execution graph</p>
+                        <p className="text-xs font-medium">
+                          {t("Execution graph")}
+                        </p>
                         <p className="text-[11px] text-muted-foreground">
-                          Drag nodes; connect bottom handles to top handles.
+                          {t(
+                            "Drag nodes; connect bottom handles to top handles."
+                          )}
                         </p>
                       </div>
                       <div className="flex gap-2">
@@ -3117,7 +3195,7 @@ function WorkflowsPanel({
                             )
                           }}
                         >
-                          Auto layout
+                          {t("Auto layout")}
                         </Button>
                         <Button
                           size="sm"
@@ -3128,7 +3206,7 @@ function WorkflowsPanel({
                           }
                         >
                           <Plus data-icon="inline-start" />
-                          Agent node
+                          {t("Agent node")}
                         </Button>
                       </div>
                     </div>
@@ -3144,7 +3222,9 @@ function WorkflowsPanel({
                   </div>
                   <div className="max-h-[min(46rem,calc(100vh-12rem))] overflow-y-auto pr-1">
                     <InspectorSection
-                      title={`Connections (${draft.definition.edges.length})`}
+                      title={t("Connections ({value0})", {
+                        value0: draft.definition.edges.length,
+                      })}
                     >
                       {draft.definition.edges.length ? (
                         draft.definition.edges.map((edge) => (
@@ -3159,7 +3239,10 @@ function WorkflowsPanel({
                               size="icon-sm"
                               variant="ghost"
                               disabled={disabled}
-                              aria-label={`Remove connection ${edge.from} to ${edge.to}`}
+                              aria-label={t(
+                                "Remove connection {value0} to {value1}",
+                                { value0: edge.from, value1: edge.to }
+                              )}
                               onClick={() =>
                                 onUpdate({
                                   definition: {
@@ -3177,7 +3260,7 @@ function WorkflowsPanel({
                         ))
                       ) : (
                         <p className="text-xs text-muted-foreground">
-                          Connect nodes using the handles on the canvas.
+                          {t("Connect nodes using the handles on the canvas.")}
                         </p>
                       )}
                     </InspectorSection>
@@ -3204,7 +3287,7 @@ function WorkflowsPanel({
                 {" "}
                 <div className="grid gap-4 md:grid-cols-3">
                   <Field data-invalid={validationTarget === "name"}>
-                    <FieldLabel htmlFor="workflow-name">Name</FieldLabel>
+                    <FieldLabel htmlFor="workflow-name">{t("Name")}</FieldLabel>
                     <Input
                       id="workflow-name"
                       aria-invalid={validationTarget === "name"}
@@ -3214,18 +3297,19 @@ function WorkflowsPanel({
                       onChange={(event) =>
                         onUpdate({ name: event.target.value })
                       }
-                      placeholder="Research then synthesize"
+                      placeholder={t("Research then synthesize")}
                     />
                     {validationTarget === "name" && (
                       <FieldDescription>
-                        Enter a name so this workflow can be saved and found
-                        later.
+                        {t(
+                          "Enter a name so this workflow can be saved and found later."
+                        )}
                       </FieldDescription>
                     )}
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="workflow-visibility">
-                      Visibility
+                      {t("Visibility")}
                     </FieldLabel>
                     <Select
                       value={draft.visibility}
@@ -3239,14 +3323,16 @@ function WorkflowsPanel({
                     >
                       <SelectTrigger id="workflow-visibility">
                         <SelectValue>
-                          {visibilityLabel(draft.visibility)}
+                          {t(visibilityLabel(draft.visibility))}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          <SelectItem value="private">Private</SelectItem>
+                          <SelectItem value="private">
+                            {t("Private")}
+                          </SelectItem>
                           <SelectItem value="workspace">
-                            Workspace shared
+                            {t("Workspace shared")}
                           </SelectItem>
                         </SelectGroup>
                       </SelectContent>
@@ -3254,7 +3340,7 @@ function WorkflowsPanel({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="workflow-timezone">
-                      Timezone
+                      {t("Timezone")}
                     </FieldLabel>
                     <Input
                       id="workflow-timezone"
@@ -3269,7 +3355,7 @@ function WorkflowsPanel({
                 </div>
                 <Field>
                   <FieldLabel htmlFor="workflow-description">
-                    Description
+                    {t("Description")}
                   </FieldLabel>
                   <Input
                     id="workflow-description"
@@ -3278,7 +3364,7 @@ function WorkflowsPanel({
                     onChange={(event) =>
                       onUpdate({ description: event.target.value })
                     }
-                    placeholder="What this workflow produces"
+                    placeholder={t("What this workflow produces")}
                   />
                 </Field>
               </TabsContent>
@@ -3308,10 +3394,13 @@ function WorkflowsPanel({
             <div className="rounded-full bg-muted p-3">
               <GitBranch />
             </div>
-            <h2 className="mt-4 font-medium">Create a custom workflow</h2>
+            <h2 className="mt-4 font-medium">
+              {t("Create a custom workflow")}
+            </h2>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              Start with a node, add a second agent, connect them, and run a
-              parallel or fan-in graph with durable progress.
+              {t(
+                "Start with a node, add a second agent, connect them, and run a parallel or fan-in graph with durable progress."
+              )}
             </p>
             <Button
               className="mt-5"
@@ -3319,7 +3408,7 @@ function WorkflowsPanel({
               disabled={disabled}
             >
               <Plus data-icon="inline-start" />
-              New workflow
+              {t("New workflow")}
             </Button>
           </CardContent>
         </Card>
@@ -3376,11 +3465,15 @@ function NodeInspector({
   onRemove: () => void
   disabled?: boolean
 }) {
+  const { t } = useTranslations()
+
   if (!node)
     return (
       <Card className="h-fit border-dashed">
         <CardContent className="flex min-h-48 items-center justify-center text-center text-sm text-muted-foreground">
-          Select a node to configure its agent, context, and safety policy.
+          {t(
+            "Select a node to configure its agent, context, and safety policy."
+          )}
         </CardContent>
       </Card>
     )
@@ -3438,7 +3531,7 @@ function NodeInspector({
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <CardTitle className="text-sm">Node configuration</CardTitle>
+            <CardTitle className="text-sm">{t("Node configuration")}</CardTitle>
             <CardDescription>{selectedNodeId}</CardDescription>
           </div>
           <Button
@@ -3446,7 +3539,7 @@ function NodeInspector({
             variant="ghost"
             disabled={disabled}
             onClick={onRemove}
-            aria-label="Remove selected node"
+            aria-label={t("Remove selected node")}
           >
             <X data-icon="inline-start" />
           </Button>
@@ -3454,7 +3547,7 @@ function NodeInspector({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <Field>
-          <FieldLabel htmlFor={`agent-${node.id}`}>Agent</FieldLabel>
+          <FieldLabel htmlFor={`agent-${node.id}`}>{t("Agent")}</FieldLabel>
           <Select
             value={node.agentId}
             disabled={disabled}
@@ -3471,10 +3564,10 @@ function NodeInspector({
                       selectedAgent.kind ?? "native"
                     }${
                       selectedAgent.kind === "remote" && selectedConnection
-                        ? ` · ${connectionScopeLabel(selectedConnection.scopeType)}`
+                        ? ` · ${t(connectionScopeLabel(selectedConnection.scopeType))}`
                         : ""
                     }`
-                  : "Select an agent"}
+                  : t("Select an agent")}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -3489,7 +3582,7 @@ function NodeInspector({
                     <SelectItem key={agent.id} value={agent.id}>
                       {agent.name} · {agent.kind}
                       {agent.kind === "remote" && connection
-                        ? ` · ${connectionScopeLabel(connection.scopeType)}`
+                        ? ` · ${t(connectionScopeLabel(connection.scopeType))}`
                         : ""}
                     </SelectItem>
                   )
@@ -3500,7 +3593,7 @@ function NodeInspector({
         </Field>
         <Field>
           <FieldLabel htmlFor={`instruction-${node.id}`}>
-            Instruction
+            {t("Instruction")}
           </FieldLabel>
           <Textarea
             id={`instruction-${node.id}`}
@@ -3514,7 +3607,7 @@ function NodeInspector({
         </Field>
         <Field>
           <FieldLabel htmlFor={`output-format-${node.id}`}>
-            Output format
+            {t("Output format")}
           </FieldLabel>
           <Select
             value={node.outputFormat || "response"}
@@ -3528,15 +3621,17 @@ function NodeInspector({
             }
           >
             <SelectTrigger
-              aria-label="Output format"
+              aria-label={t("Output format")}
               className="w-full"
               id={`output-format-${node.id}`}
             >
-              <SelectValue>{outputFormatLabel(node.outputFormat)}</SelectValue>
+              <SelectValue>
+                {t(outputFormatLabel(node.outputFormat))}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="response">Response only</SelectItem>
+                <SelectItem value="response">{t("Response only")}</SelectItem>
                 {["pdf", "md", "txt", "json", "csv", "html"].map((format) => (
                   <SelectItem key={format} value={format}>
                     {format.toUpperCase()} file
@@ -3546,15 +3641,18 @@ function NodeInspector({
             </SelectContent>
           </Select>
           <FieldDescription>
-            The final response is saved as a downloadable file. Agents can also
-            create files when instructed.
+            {t(
+              "The final response is saved as a downloadable file. Agents can also create files when instructed."
+            )}
           </FieldDescription>
         </Field>
-        <InspectorSection title="Safety & execution">
+        <InspectorSection title={t("Safety & execution")}>
           {" "}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor={`approval-${node.id}`}>Approval</FieldLabel>
+              <FieldLabel htmlFor={`approval-${node.id}`}>
+                {t("Approval")}
+              </FieldLabel>
               <Select
                 value={node.approvalMode || "review"}
                 disabled={disabled}
@@ -3564,22 +3662,22 @@ function NodeInspector({
               >
                 <SelectTrigger id={`approval-${node.id}`}>
                   <SelectValue>
-                    {approvalModeLabel(node.approvalMode || "review")}
+                    {t(approvalModeLabel(node.approvalMode || "review"))}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
                     <SelectItem value="read_only_auto">
-                      Auto trusted read-only
+                      {t("Auto trusted read-only")}
                     </SelectItem>
-                    <SelectItem value="review">Always review</SelectItem>
+                    <SelectItem value="review">{t("Always review")}</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
             </Field>
             <Field>
               <FieldLabel htmlFor={`max-attempts-${node.id}`}>
-                Max attempts
+                {t("Max attempts")}
               </FieldLabel>
               <Input
                 id={`max-attempts-${node.id}`}
@@ -3603,7 +3701,7 @@ function NodeInspector({
           </div>
           <Field>
             <FieldLabel htmlFor={`timeout-${node.id}`}>
-              Node timeout (seconds)
+              {t("Node timeout (seconds)")}
             </FieldLabel>
             <Input
               id={`timeout-${node.id}`}
@@ -3623,17 +3721,18 @@ function NodeInspector({
             />
           </Field>
         </InspectorSection>
-        <InspectorSection title="Input & output mappings">
+        <InspectorSection title={t("Input & output mappings")}>
           {" "}
           <FieldSet>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <FieldLegend variant="label">
-                  Input and output mappings
+                  {t("Input and output mappings")}
                 </FieldLegend>
                 <FieldDescription>
-                  Give this node named values from the workflow run or a
-                  connected previous node.
+                  {t(
+                    "Give this node named values from the workflow run or a connected previous node."
+                  )}
                 </FieldDescription>
               </div>
               <Button
@@ -3644,7 +3743,7 @@ function NodeInspector({
                 disabled={disabled}
               >
                 <Plus data-icon="inline-start" />
-                Add mapping
+                {t("Add mapping")}
               </Button>
             </div>
             {inputBindings.length ? (
@@ -3661,7 +3760,7 @@ function NodeInspector({
                           <FieldLabel
                             htmlFor={`binding-name-${node.id}-${index}`}
                           >
-                            Name
+                            {t("Name")}
                           </FieldLabel>
                           <Input
                             id={`binding-name-${node.id}-${index}`}
@@ -3677,7 +3776,7 @@ function NodeInspector({
                           <FieldLabel
                             htmlFor={`binding-source-${node.id}-${index}`}
                           >
-                            Source
+                            {t("Source")}
                           </FieldLabel>
                           <Select
                             value={source === "node" ? "node" : "input"}
@@ -3697,17 +3796,17 @@ function NodeInspector({
                             >
                               <SelectValue>
                                 {source === "node"
-                                  ? "Previous output"
-                                  : "Workflow input"}
+                                  ? t("Previous output")
+                                  : t("Workflow input")}
                               </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
                                 <SelectItem value="input">
-                                  Workflow input
+                                  {t("Workflow input")}
                                 </SelectItem>
                                 <SelectItem value="node">
-                                  Previous output
+                                  {t("Previous output")}
                                 </SelectItem>
                               </SelectGroup>
                             </SelectContent>
@@ -3720,7 +3819,9 @@ function NodeInspector({
                           className="self-end"
                           onClick={() => removeBinding(index)}
                           disabled={disabled}
-                          aria-label={`Remove ${binding.name || "input"} mapping`}
+                          aria-label={t("Remove {value0} mapping", {
+                            value0: binding.name || "input",
+                          })}
                         >
                           <X data-icon="inline-start" />
                         </Button>
@@ -3731,7 +3832,7 @@ function NodeInspector({
                             <FieldLabel
                               htmlFor={`binding-node-${node.id}-${index}`}
                             >
-                              Previous node
+                              {t("Previous node")}
                             </FieldLabel>
                             <Select
                               value={binding.nodeId ?? "none"}
@@ -3752,13 +3853,13 @@ function NodeInspector({
                                   {otherNodes.find(
                                     (candidate) =>
                                       candidate.id === binding.nodeId
-                                  )?.id ?? "Choose a connected node"}
+                                  )?.id ?? t("Choose a connected node")}
                                 </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectGroup>
                                   <SelectItem value="none">
-                                    Choose a connected node
+                                    {t("Choose a connected node")}
                                   </SelectItem>
                                   {otherNodes.map((candidate) => (
                                     <SelectItem
@@ -3776,7 +3877,7 @@ function NodeInspector({
                             <FieldLabel
                               htmlFor={`binding-path-${node.id}-${index}`}
                             >
-                              Output path (optional)
+                              {t("Output path (optional)")}
                             </FieldLabel>
                             <Input
                               id={`binding-path-${node.id}-${index}`}
@@ -3798,17 +3899,23 @@ function NodeInspector({
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
-                No mappings yet. Nodes receive the workflow context by default.
+                {t(
+                  "No mappings yet. Nodes receive the workflow context by default."
+                )}
               </p>
             )}
           </FieldSet>
         </InspectorSection>
-        <InspectorSection title="Context & permissions">
+        <InspectorSection title={t("Context & permissions")}>
           {" "}
           <FieldSet>
-            <FieldLegend variant="label">Delegation allowlist</FieldLegend>
+            <FieldLegend variant="label">
+              {t("Delegation allowlist")}
+            </FieldLegend>
             <FieldDescription>
-              These agents may be selected by this node when it delegates work.
+              {t(
+                "These agents may be selected by this node when it delegates work."
+              )}
             </FieldDescription>
             <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
               {agents.length ? (
@@ -3843,16 +3950,17 @@ function NodeInspector({
                   ))
               ) : (
                 <span className="text-xs text-muted-foreground">
-                  Add another agent to enable delegation.
+                  {t("Add another agent to enable delegation.")}
                 </span>
               )}
             </div>
           </FieldSet>
           <FieldSet>
-            <FieldLegend variant="label">MCP grants</FieldLegend>
+            <FieldLegend variant="label">{t("MCP grants")}</FieldLegend>
             <FieldDescription>
-              Only selected servers and tools enter this node’s immutable
-              context scope.
+              {t(
+                "Only selected servers and tools enter this node’s immutable context scope."
+              )}
             </FieldDescription>
             <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
               {mcpServers.length ? (
@@ -3884,17 +3992,19 @@ function NodeInspector({
                 ))
               ) : (
                 <span className="text-xs text-muted-foreground">
-                  No MCP servers connected.
+                  {t("No MCP servers connected.")}
                 </span>
               )}
             </div>
           </FieldSet>
           <FieldSet>
-            <FieldLegend variant="label">Storage folder grants</FieldLegend>
+            <FieldLegend variant="label">
+              {t("Storage folder grants")}
+            </FieldLegend>
             <FieldDescription>
-              Every run reads the current contents of the selected folder and
-              all of its subfolders. The resolved files are frozen in the run
-              snapshot for auditability.
+              {t(
+                "Every run reads the current contents of the selected folder and all of its subfolders. The resolved files are frozen in the run snapshot for auditability."
+              )}
             </FieldDescription>
             <div className="flex max-h-32 flex-col gap-2 overflow-y-auto">
               {knowledgeSpaces.length ? (
@@ -3931,13 +4041,15 @@ function NodeInspector({
                 ))
               ) : (
                 <span className="text-xs text-muted-foreground">
-                  Create a folder in Storage first.
+                  {t("Create a folder in Storage first.")}
                 </span>
               )}
             </div>
           </FieldSet>
           <FieldSet>
-            <FieldLegend variant="label">Individual file grants</FieldLegend>
+            <FieldLegend variant="label">
+              {t("Individual file grants")}
+            </FieldLegend>
             <div className="flex max-h-24 flex-col gap-2 overflow-y-auto">
               {knowledgeSources.length ? (
                 knowledgeSources.map((source) => (
@@ -3968,23 +4080,24 @@ function NodeInspector({
                 ))
               ) : (
                 <span className="text-xs text-muted-foreground">
-                  No knowledge sources available.
+                  {t("No knowledge sources available.")}
                 </span>
               )}
             </div>
           </FieldSet>
           <FieldSet>
             <FieldLegend variant="label">
-              Additional context references
+              {t("Additional context references")}
             </FieldLegend>
             <FieldDescription>
-              Optional comma-separated IDs or tool names. Access is evaluated at
-              run time and remains scoped to this node.
+              {t(
+                "Optional comma-separated IDs or tool names. Access is evaluated at run time and remains scoped to this node."
+              )}
             </FieldDescription>
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor={`repositories-${node.id}`}>
-                  Repository IDs
+                  {t("Repository IDs")}
                 </FieldLabel>
                 <Input
                   id={`repositories-${node.id}`}
@@ -3997,7 +4110,9 @@ function NodeInspector({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor={`notes-${node.id}`}>Note IDs</FieldLabel>
+                <FieldLabel htmlFor={`notes-${node.id}`}>
+                  {t("Note IDs")}
+                </FieldLabel>
                 <Input
                   id={`notes-${node.id}`}
                   value={formatDelimitedList(context.noteIds)}
@@ -4010,7 +4125,7 @@ function NodeInspector({
               </Field>
               <Field>
                 <FieldLabel htmlFor={`transcriptions-${node.id}`}>
-                  Transcription session IDs
+                  {t("Transcription session IDs")}
                 </FieldLabel>
                 <Input
                   id={`transcriptions-${node.id}`}
@@ -4027,7 +4142,7 @@ function NodeInspector({
               </Field>
               <Field>
                 <FieldLabel htmlFor={`mcp-tools-${node.id}`}>
-                  MCP tool names
+                  {t("MCP tool names")}
                 </FieldLabel>
                 <Input
                   id={`mcp-tools-${node.id}`}
@@ -4064,30 +4179,36 @@ function ScheduleEditor({
   onEnabledChange: (enabled: boolean) => void
   disabled?: boolean
 }) {
+  const { t } = useTranslations()
+
   const kind = schedule.kind || "manual"
   return (
     <section className="flex flex-col gap-3 rounded-xl bg-muted/50 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-medium">Schedule</h3>
+          <h3 className="text-sm font-medium">{t("Schedule")}</h3>
           <p className="text-xs text-muted-foreground">
-            Daily, weekly, and monthly recurrence use the workflow timezone.
+            {t(
+              "Daily, weekly, and monthly recurrence use the workflow timezone."
+            )}
           </p>
         </div>
         <Field orientation="horizontal">
           <Switch
-            aria-label="Enable schedule"
+            aria-label={t("Enable schedule")}
             id="schedule-enabled"
             checked={enabled}
             disabled={disabled}
             onCheckedChange={onEnabledChange}
           />
-          <FieldLabel htmlFor="schedule-enabled">Enabled</FieldLabel>
+          <FieldLabel htmlFor="schedule-enabled">{t("Enabled")}</FieldLabel>
         </Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-4">
         <Field>
-          <FieldLabel htmlFor="schedule-recurrence">Recurrence</FieldLabel>
+          <FieldLabel htmlFor="schedule-recurrence">
+            {t("Recurrence")}
+          </FieldLabel>
           <Select
             value={kind}
             disabled={disabled}
@@ -4107,14 +4228,14 @@ function ScheduleEditor({
             }
           >
             <SelectTrigger id="schedule-recurrence">
-              <SelectValue>{scheduleKindLabel(kind)}</SelectValue>
+              <SelectValue>{t(scheduleKindLabel(kind))}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="manual">Manual only</SelectItem>
-                <SelectItem value="daily">Daily</SelectItem>
-                <SelectItem value="weekly">Weekly</SelectItem>
-                <SelectItem value="monthly">Monthly</SelectItem>
+                <SelectItem value="manual">{t("Manual only")}</SelectItem>
+                <SelectItem value="daily">{t("Daily")}</SelectItem>
+                <SelectItem value="weekly">{t("Weekly")}</SelectItem>
+                <SelectItem value="monthly">{t("Monthly")}</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -4122,7 +4243,7 @@ function ScheduleEditor({
         {kind !== "manual" && (
           <>
             <Field>
-              <FieldLabel htmlFor="schedule-interval">Every</FieldLabel>
+              <FieldLabel htmlFor="schedule-interval">{t("Every")}</FieldLabel>
               <Input
                 id="schedule-interval"
                 type="number"
@@ -4140,7 +4261,9 @@ function ScheduleEditor({
             </Field>
             {kind === "weekly" && (
               <Field>
-                <FieldLabel htmlFor="schedule-weekday">Weekday</FieldLabel>
+                <FieldLabel htmlFor="schedule-weekday">
+                  {t("Weekday")}
+                </FieldLabel>
                 <Select
                   value={String(schedule.weekday ?? 1)}
                   disabled={disabled}
@@ -4157,13 +4280,13 @@ function ScheduleEditor({
                   <SelectContent>
                     <SelectGroup>
                       {[
-                        "Sunday",
-                        "Monday",
-                        "Tuesday",
-                        "Wednesday",
-                        "Thursday",
-                        "Friday",
-                        "Saturday",
+                        t("Sunday"),
+                        t("Monday"),
+                        t("Tuesday"),
+                        t("Wednesday"),
+                        t("Thursday"),
+                        t("Friday"),
+                        t("Saturday"),
                       ].map((day, index) => (
                         <SelectItem key={day} value={String(index)}>
                           {day}
@@ -4177,7 +4300,7 @@ function ScheduleEditor({
             {kind === "monthly" && (
               <Field>
                 <FieldLabel htmlFor="schedule-day-of-month">
-                  Day of month
+                  {t("Day of month")}
                 </FieldLabel>
                 <Input
                   id="schedule-day-of-month"
@@ -4199,7 +4322,7 @@ function ScheduleEditor({
               </Field>
             )}
             <Field>
-              <FieldLabel htmlFor="schedule-time">Time</FieldLabel>
+              <FieldLabel htmlFor="schedule-time">{t("Time")}</FieldLabel>
               <Input
                 id="schedule-time"
                 type="time"
@@ -4216,7 +4339,7 @@ function ScheduleEditor({
       <div className="rounded-lg border bg-background/70 px-3 py-2 text-xs">
         <p className="font-medium">{workflowScheduleDescription(schedule)}</p>
         <p className="mt-1 text-muted-foreground">
-          Next run: {formatWorkflowNextRun(nextRunAt, timezone)}
+          {t("Next run:")} {formatWorkflowNextRun(nextRunAt, timezone)}
         </p>
       </div>
     </section>
@@ -4240,6 +4363,8 @@ function RunsPanel({
   workflows: AgentWorkflow[]
   disabled?: boolean
 }) {
+  const { t } = useTranslations()
+
   const [selectedID, setSelectedID] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
       const requested = new URLSearchParams(window.location.search).get("run")
@@ -4533,7 +4658,7 @@ function RunsPanel({
 
   const runName = (run: AgentRun) =>
     workflows.find((workflow) => workflow.id === run.workflowId)?.name ??
-    (run.sourceType === "chat" ? "Chat delegation" : "Agent run")
+    (run.sourceType === "chat" ? t("Chat delegation") : t("Agent run"))
   const filteredRuns = [...runs]
     .filter(
       (run) =>
@@ -4550,24 +4675,24 @@ function RunsPanel({
     <div className="flex min-w-0 flex-col gap-5">
       {error && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[
-          { label: "Loaded runs", value: runs.length },
+          { label: t("Loaded runs"), value: runs.length },
           {
-            label: "In progress",
+            label: t("In progress"),
             value: runs.filter((run) =>
               ["running", "queued"].includes(run.status)
             ).length,
           },
           {
-            label: "Completed",
+            label: t("Completed"),
             value: runs.filter((run) => run.status === "completed").length,
           },
           {
-            label: "Failed",
+            label: t("Failed"),
             value: runs.filter((run) => run.status === "failed").length,
           },
         ].map((metric) => (
@@ -4581,9 +4706,9 @@ function RunsPanel({
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>Run history</CardTitle>
+          <CardTitle>{t("Run history")}</CardTitle>
           <CardDescription>
-            Track execution, investigate failures, and review approvals.
+            {t("Track execution, investigate failures, and review approvals.")}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -4615,19 +4740,19 @@ function RunsPanel({
               }}
             >
               <SelectTrigger
-                aria-label="Filter run status"
+                aria-label={t("Filter run status")}
                 className="h-8 min-w-36 sm:min-w-40"
                 size="sm"
               >
                 <SelectValue>
                   {statusFilter === "all"
-                    ? "All statuses"
+                    ? t("All statuses")
                     : statusLabel(statusFilter)}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="all">{t("All statuses")}</SelectItem>
                   {[...new Set(runs.map((run) => run.status))]
                     .sort()
                     .map((status) => (
@@ -4642,13 +4767,13 @@ function RunsPanel({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Workflow / run</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Result</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t("Workflow / run")}</TableHead>
+                <TableHead>{t("Status")}</TableHead>
+                <TableHead>{t("Source")}</TableHead>
+                <TableHead>{t("Started")}</TableHead>
+                <TableHead>{t("Duration")}</TableHead>
+                <TableHead>{t("Result")}</TableHead>
+                <TableHead className="text-right">{t("Actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -4684,7 +4809,9 @@ function RunsPanel({
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
-                      aria-label={`Delete ${runName(run)} run`}
+                      aria-label={t("Delete {value0} run", {
+                        value0: runName(run),
+                      })}
                       disabled={
                         disabled ||
                         ["queued", "running", "waiting_approval"].includes(
@@ -4697,8 +4824,8 @@ function RunsPanel({
                         ["queued", "running", "waiting_approval"].includes(
                           run.status
                         )
-                          ? "Cancel this run before deleting it"
-                          : "Delete run"
+                          ? t("Cancel this run before deleting it")
+                          : t("Delete run")
                       }
                       variant="ghost"
                     >
@@ -4710,13 +4837,13 @@ function RunsPanel({
             </TableBody>
           </Table>
           <nav
-            aria-label="Run history pagination"
+            aria-label={t("Run history pagination")}
             className="flex flex-wrap items-center justify-between gap-3"
           >
             <span className="text-xs text-muted-foreground" aria-live="polite">
               {filteredRuns.length ? currentPage * 25 + 1 : 0}–
-              {Math.min((currentPage + 1) * 25, filteredRuns.length)} of{" "}
-              {filteredRuns.length} · 25 per page
+              {Math.min((currentPage + 1) * 25, filteredRuns.length)} {t("of")}{" "}
+              {filteredRuns.length} {t("· 25 per page")}
             </span>
             <div className="flex items-center gap-2">
               <Button
@@ -4725,10 +4852,10 @@ function RunsPanel({
                 disabled={currentPage === 0}
                 onClick={() => setPage(currentPage - 1)}
               >
-                Previous
+                {t("Previous")}
               </Button>
               <span className="text-xs">
-                Page {currentPage + 1} of {pageCount}
+                {t("Page")} {currentPage + 1} {t("of")} {pageCount}
               </span>
               <Button
                 variant="outline"
@@ -4736,7 +4863,7 @@ function RunsPanel({
                 disabled={currentPage >= pageCount - 1}
                 onClick={() => setPage(currentPage + 1)}
               >
-                Next
+                {t("Next")}
               </Button>
               {nextCursor && (
                 <Button
@@ -4745,7 +4872,7 @@ function RunsPanel({
                   disabled={loadingOlder}
                   onClick={() => void loadOlderRuns()}
                 >
-                  {loadingOlder ? "Loading…" : "Load older runs"}
+                  {loadingOlder ? t("Loading…") : t("Load older runs")}
                 </Button>
               )}
             </div>
@@ -4754,7 +4881,7 @@ function RunsPanel({
             <EmptyRuns />
           ) : !filteredRuns.length ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No runs match your search.
+              {t("No runs match your search.")}
             </p>
           ) : null}
         </CardContent>
@@ -4768,10 +4895,11 @@ function RunsPanel({
       >
         <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-4xl">
           <SheetHeader className="shrink-0 border-b pr-12">
-            <SheetTitle>Run details</SheetTitle>
+            <SheetTitle>{t("Run details")}</SheetTitle>
             <SheetDescription>
-              Execution, results, and approvals. Your place in the run history
-              is preserved.
+              {t(
+                "Execution, results, and approvals. Your place in the run history is preserved."
+              )}
             </SheetDescription>
           </SheetHeader>
           <div
@@ -4780,7 +4908,7 @@ function RunsPanel({
           >
             {error && (
               <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription>{t(error)}</AlertDescription>
               </Alert>
             )}
             {showDetail && (detail || selectedSummary) ? (
@@ -4800,7 +4928,7 @@ function RunsPanel({
             ) : showDetail ? (
               <Card className="border-dashed">
                 <CardContent className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
-                  Loading run details…
+                  {t("Loading run details…")}
                 </CardContent>
               </Card>
             ) : null}
@@ -4809,9 +4937,11 @@ function RunsPanel({
       </Sheet>
       <ConfirmActionDialog
         open={deleteRunTarget !== null}
-        title="Delete this run?"
-        description="This permanently removes the run, its execution events, approvals, and generated artifacts. This cannot be undone."
-        confirmLabel="Delete run"
+        title={t("Delete this run?")}
+        description={t(
+          "This permanently removes the run, its execution events, approvals, and generated artifacts. This cannot be undone."
+        )}
+        confirmLabel={t("Delete run")}
         pending={deletingRun}
         onOpenChange={(open) => {
           if (!open && !deletingRun) setDeleteRunTarget(null)
@@ -4823,14 +4953,18 @@ function RunsPanel({
 }
 
 function EmptyRuns() {
+  const { t } = useTranslations()
+
   return (
     <div className="flex flex-col items-center gap-2 py-12 text-center">
       <div className="rounded-full bg-muted p-3">
         <Activity />
       </div>
-      <p className="font-medium">No runs yet</p>
+      <p className="font-medium">{t("No runs yet")}</p>
       <p className="max-w-xs text-xs text-muted-foreground">
-        Run a workflow or delegate from chat and progress will appear here.
+        {t(
+          "Run a workflow or delegate from chat and progress will appear here."
+        )}
       </p>
     </div>
   )
@@ -4860,6 +4994,8 @@ function RunDetail({
   ) => void
   disabled?: boolean
 }) {
+  const { t, locale } = useTranslations()
+
   const nodes = run.nodes ?? []
   const completed = nodes.filter(
     (node) => node.status === "completed" || node.status === "skipped"
@@ -4913,7 +5049,7 @@ function RunDetail({
               <Badge variant={badgeVariant(run.status)}>
                 {statusLabel(run.status)}
               </Badge>
-              <span>{new Date(run.startedAt).toLocaleString()}</span>
+              <span>{new Date(run.startedAt).toLocaleString(locale)}</span>
               <span aria-hidden="true">·</span>
               <span>{run.sourceType}</span>
             </CardDescription>
@@ -4927,13 +5063,13 @@ function RunDetail({
                 disabled={disabled}
               >
                 <X data-icon="inline-start" />
-                Cancel
+                {t("Cancel")}
               </Button>
             )}
             {["failed", "cancelled"].includes(run.status) && (
               <Button size="sm" onClick={onRetry} disabled={disabled}>
                 <RotateCcw data-icon="inline-start" />
-                Retry
+                {t("Retry")}
               </Button>
             )}
             {run.conversationId && (
@@ -4949,11 +5085,11 @@ function RunDetail({
               run.status
             ) && (
               <Button
-                aria-label="Delete run"
+                aria-label={t("Delete run")}
                 disabled={disabled}
                 onClick={onDelete}
                 size="icon-sm"
-                title="Delete run"
+                title={t("Delete run")}
                 variant="ghost"
               >
                 <Trash2 />
@@ -4963,28 +5099,33 @@ function RunDetail({
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        <section className="grid gap-3 sm:grid-cols-3" aria-label="Run summary">
+        <section
+          className="grid gap-3 sm:grid-cols-3"
+          aria-label={t("Run summary")}
+        >
           <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
-            <p className="text-xs text-muted-foreground">Nodes successful</p>
+            <p className="text-xs text-muted-foreground">
+              {t("Nodes successful")}
+            </p>
             <p className="mt-1 text-xl font-semibold">
               {completed}/{nodes.length || 1}
             </p>
           </div>
           <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
-            <p className="text-xs text-muted-foreground">Duration</p>
+            <p className="text-xs text-muted-foreground">{t("Duration")}</p>
             <p className="mt-1 flex items-center gap-2 text-xl font-semibold">
               <Clock3 className="size-4 text-muted-foreground" />
               {duration}
             </p>
           </div>
           <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
-            <p className="text-xs text-muted-foreground">Health</p>
+            <p className="text-xs text-muted-foreground">{t("Health")}</p>
             <p className="mt-1 text-xl font-semibold">
               {failed
-                ? `${failed} failed`
+                ? t("{value0} failed", { value0: failed })
                 : completed === nodes.length && nodes.length
-                  ? "All successful"
-                  : "In progress"}
+                  ? t("All successful")
+                  : t("In progress")}
             </p>
           </div>
         </section>
@@ -4994,10 +5135,11 @@ function RunDetail({
           <section className="flex flex-col gap-3">
             <Separator />
             <div>
-              <h3 className="font-medium">Approvals required</h3>
+              <h3 className="font-medium">{t("Approvals required")}</h3>
               <p className="text-xs text-muted-foreground">
-                The action hash is checked server-side before the decision is
-                accepted.
+                {t(
+                  "The action hash is checked server-side before the decision is accepted."
+                )}
               </p>
             </div>
             {pendingApprovals.map((approval) => (
@@ -5016,10 +5158,10 @@ function RunDetail({
         >
           <div>
             <h3 id="node-status-title" className="font-medium">
-              Node status
+              {t("Node status")}
             </h3>
             <p className="text-xs text-muted-foreground">
-              Outcome and duration for every task in this run.
+              {t("Outcome and duration for every task in this run.")}
             </p>
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -5034,7 +5176,7 @@ function RunDetail({
             <div className="mb-3 flex items-center gap-2">
               <CheckCircle2 className="size-4 text-primary" />
               <h3 id="run-result-title" className="font-medium">
-                Final result
+                {t("Final result")}
               </h3>
             </div>
             <div className="rounded-2xl border border-primary/20 bg-primary/[0.04] p-5 sm:p-6">
@@ -5048,15 +5190,19 @@ function RunDetail({
           <RunErrorMessage content={run.error} />
         ) : (
           <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
-            The final result will appear here when the workflow completes.
+            {t(
+              "The final result will appear here when the workflow completes."
+            )}
           </div>
         )}
 
         <RunFiles run={run} />
 
         <RunDisclosure
-          title="Flow and execution details"
-          description="Inspect the workflow graph, prompts, intermediate responses, and raw values."
+          title={t("Flow and execution details")}
+          description={t(
+            "Inspect the workflow graph, prompts, intermediate responses, and raw values."
+          )}
         >
           {flowNodes.length > 0 && (
             <div className="mb-5 h-80 overflow-hidden rounded-xl bg-muted/50">
@@ -5092,8 +5238,11 @@ function RunDetail({
         </RunDisclosure>
 
         <RunDisclosure
-          title="Activity log"
-          description={`${activityCount} activities (${events.length} raw events) for troubleshooting and audit.`}
+          title={t("Activity log")}
+          description={t(
+            "{value0} activities ({value1} raw events) for troubleshooting and audit.",
+            { value0: activityCount, value1: events.length }
+          )}
         >
           <RunEventLog agents={agents} events={events} nodes={nodes} />
         </RunDisclosure>
@@ -5156,6 +5305,8 @@ function formatRunDuration(startedAt: string, finishedAt?: string | null) {
 }
 
 function RunUserMessage({ input }: { input: unknown }) {
+  const { t } = useTranslations()
+
   const content = runInputText(input)
   if (!content) return null
 
@@ -5164,7 +5315,7 @@ function RunUserMessage({ input }: { input: unknown }) {
       <div className="max-w-[min(44rem,92%)] rounded-[1.35rem] rounded-br-md border border-primary/15 bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-sm">
         <div className="mb-1 flex items-center justify-end gap-1.5 text-[11px] font-medium text-primary-foreground/75">
           <MessageSquare className="size-3.5" />
-          Run input
+          {t("Run input")}
         </div>
         <p className="break-words whitespace-pre-wrap">{content}</p>
       </div>
@@ -5183,9 +5334,11 @@ function RunAgentMessage({
   instruction?: string
   events: AgentRunEvent[]
 }) {
+  const { t, locale } = useTranslations()
+
   const progress = events
     .filter((event) => event.eventType === "node.progress")
-    .map((event) => eventText(event))
+    .map((event) => t(eventText(event)))
     .filter(Boolean)
     .join("")
   const output = runNodeOutputText(node.output)
@@ -5213,7 +5366,7 @@ function RunAgentMessage({
           {instruction && (
             <div className="mb-3 border-b pb-3">
               <p className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                Instruction
+                {t("Instruction")}
               </p>
               <p className="text-sm leading-6 break-words whitespace-pre-wrap">
                 {instruction}
@@ -5223,7 +5376,7 @@ function RunAgentMessage({
           {response ? (
             <div>
               <p className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                {output ? "Response" : "Live response"}
+                {output ? t("Response") : t("Live response")}
               </p>
               <StaticAssistantMarkdown
                 content={response}
@@ -5233,11 +5386,11 @@ function RunAgentMessage({
           ) : isWorking ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               <Activity className="size-4 animate-pulse" />
-              Agent is working…
+              {t("Agent is working…")}
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              This agent did not return a response.
+              {t("This agent did not return a response.")}
             </p>
           )}
           {node.error && (
@@ -5250,23 +5403,27 @@ function RunAgentMessage({
           )}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-          <span>{events.length} activity events</span>
+          <span>
+            {events.length} {t("activity events")}
+          </span>
           <span aria-hidden="true">·</span>
-          <span>attempt {node.attempt || 0}</span>
-          {node.providerTaskId && <span>· remote task attached</span>}
+          <span>
+            {t("attempt")} {node.attempt || 0}
+          </span>
+          {node.providerTaskId && <span>{t("· remote task attached")}</span>}
         </div>
         <details className="group mt-2 rounded-xl border bg-muted/[0.16] px-3 py-2 text-xs">
           <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
             <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-            Execution details
+            {t("Execution details")}
           </summary>
           <div className="mt-3 flex flex-col gap-3 border-t pt-3">
-            <RunDetailValue label="Input" value={node.input} />
-            <RunDetailValue label="Output" value={node.output} />
+            <RunDetailValue label={t("Input")} value={node.input} />
+            <RunDetailValue label={t("Output")} value={node.output} />
             {node.providerTaskId && (
               <div>
                 <p className="mb-1 font-medium text-muted-foreground">
-                  Remote task
+                  {t("Remote task")}
                 </p>
                 <p className="font-mono text-[11px] break-all">
                   {node.providerTaskId}
@@ -5275,11 +5432,15 @@ function RunAgentMessage({
             )}
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
               {node.startedAt && (
-                <span>Started {new Date(node.startedAt).toLocaleString()}</span>
+                <span>
+                  {t("Started")}{" "}
+                  {new Date(node.startedAt).toLocaleString(locale)}
+                </span>
               )}
               {node.finishedAt && (
                 <span>
-                  Finished {new Date(node.finishedAt).toLocaleString()}
+                  {t("Finished")}{" "}
+                  {new Date(node.finishedAt).toLocaleString(locale)}
                 </span>
               )}
             </div>
@@ -5291,13 +5452,17 @@ function RunAgentMessage({
 }
 
 function RunErrorMessage({ content }: { content: string }) {
+  const { t } = useTranslations()
+
   return (
     <div className="flex items-start gap-3">
       <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive ring-1 ring-destructive/15">
         <CircleAlert className="size-4" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="mb-1.5 text-sm font-medium text-destructive">Run error</p>
+        <p className="mb-1.5 text-sm font-medium text-destructive">
+          {t("Run error")}
+        </p>
         <div className="rounded-2xl rounded-tl-md border border-destructive/25 bg-destructive/[0.04] px-4 py-3 text-sm leading-6 text-destructive">
           <p className="break-words whitespace-pre-wrap">{content}</p>
         </div>
@@ -5315,6 +5480,8 @@ function RunEventLog({
   nodes: AgentRunNode[]
   agents: Agent[]
 }) {
+  const { t, locale } = useTranslations()
+
   type ActivityItem =
     | { kind: "event"; event: AgentRunEvent }
     | {
@@ -5335,7 +5502,7 @@ function RunEventLog({
     }
     const key = event.nodeId ?? "run"
     const existing = progressByNode.get(key)
-    const text = eventText(event)
+    const text = t(eventText(event))
     if (existing) {
       existing.count += 1
       existing.characters += text.length
@@ -5361,11 +5528,12 @@ function RunEventLog({
             className="flex items-center gap-2 font-medium"
           >
             <Terminal className="size-4 text-muted-foreground" />
-            Agent activity
+            {t("Agent activity")}
           </h3>
           <p className="text-xs text-muted-foreground">
-            Durable events replayed from this run, including progress and
-            failures.
+            {t(
+              "Durable events replayed from this run, including progress and failures."
+            )}
           </p>
         </div>
         <Badge variant="outline" className="shrink-0">
@@ -5398,7 +5566,7 @@ function RunEventLog({
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                       <span className="text-xs font-medium">
                         {item.kind === "progress"
-                          ? "Response generated"
+                          ? t("Response generated")
                           : formatEventType(event.eventType)}
                       </span>
                       {agent && (
@@ -5412,14 +5580,20 @@ function RunEventLog({
                     </div>
                     <p className="mt-1 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
                       {item.kind === "progress"
-                        ? `${item.count} streaming chunks combined · ${item.characters.toLocaleString()} characters`
-                        : eventText(event)}
+                        ? t(
+                            "{value0} streaming chunks combined · {value1} characters",
+                            {
+                              value0: item.count,
+                              value1: item.characters.toLocaleString(locale),
+                            }
+                          )
+                        : t(eventText(event))}
                     </p>
                     {item.kind === "event" && (
                       <details className="group mt-1.5 text-[11px]">
                         <summary className="flex cursor-pointer list-none items-center gap-1 text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
                           <ChevronDown className="size-3 transition-transform group-open:rotate-180" />
-                          View event payload
+                          {t("View event payload")}
                         </summary>
                         <pre className="mt-2 max-h-48 overflow-auto rounded-lg border bg-background p-2 font-mono text-[10px] leading-4 whitespace-pre-wrap">
                           {formatRunValue(event.payload)}
@@ -5434,7 +5608,7 @@ function RunEventLog({
         </div>
       ) : (
         <div className="rounded-xl border border-dashed px-4 py-5 text-sm text-muted-foreground">
-          No persisted activity events are available for this run yet.
+          {t("No persisted activity events are available for this run yet.")}
         </div>
       )}
     </section>
@@ -5460,6 +5634,8 @@ function RunNodeOverview({
   node: AgentRunNode
   agents: Agent[]
 }) {
+  const { t } = useTranslations()
+
   return (
     <Card size="sm">
       <CardContent className="flex flex-col gap-2">
@@ -5477,17 +5653,17 @@ function RunNodeOverview({
         <p className="text-xs text-muted-foreground">
           {agents.find((agent) => agent.id === node.agentId)?.name ??
             "Agent unavailable"}{" "}
-          · attempt {node.attempt || 0}
+          {t("· attempt")} {node.attempt || 0}
         </p>
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Clock3 className="size-3.5" />
           {node.startedAt
             ? formatRunDuration(node.startedAt, node.finishedAt)
-            : "Not started"}
+            : t("Not started")}
         </p>
         {node.providerTaskId && (
           <p className="text-[11px] break-all text-muted-foreground">
-            Remote task: {node.providerTaskId}
+            {t("Remote task:")} {node.providerTaskId}
           </p>
         )}
         {node.error && <p className="text-xs text-destructive">{node.error}</p>}
@@ -5631,6 +5807,8 @@ function ApprovalCard({
     decision: "approved" | "rejected"
   ) => void
 }) {
+  const { t, locale } = useTranslations()
+
   return (
     <Card className="border-primary/30 bg-primary/[0.03]">
       <CardContent className="flex flex-col gap-3">
@@ -5639,7 +5817,8 @@ function ApprovalCard({
           <div className="min-w-0">
             <p className="font-medium">{statusLabel(approval.actionType)}</p>
             <p className="text-xs text-muted-foreground">
-              Expires {new Date(approval.expiresAt).toLocaleString()}
+              {t("Expires")}{" "}
+              {new Date(approval.expiresAt).toLocaleString(locale)}
             </p>
           </div>
         </div>
@@ -5653,11 +5832,11 @@ function ApprovalCard({
             onClick={() => onDecision(approval, "rejected")}
           >
             <X data-icon="inline-start" />
-            Reject
+            {t("Reject")}
           </Button>
           <Button size="sm" onClick={() => onDecision(approval, "approved")}>
             <Check data-icon="inline-start" />
-            Approve exact action
+            {t("Approve exact action")}
           </Button>
         </div>
       </CardContent>
@@ -5666,10 +5845,12 @@ function ApprovalCard({
 }
 
 function MessageLink() {
+  const { t } = useTranslations()
+
   return (
     <span className="inline-flex items-center gap-1">
       <UserRound data-icon="inline-start" />
-      Open chat
+      {t("Open chat")}
     </span>
   )
 }

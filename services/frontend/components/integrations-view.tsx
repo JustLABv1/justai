@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { MCPView } from "@/components/mcp-view"
 import {
   Page,
@@ -27,14 +28,17 @@ export function IntegrationsView({
   resourceError,
   onRetry,
 }: Props) {
+  const { t } = useTranslations()
+
   return (
     <Page>
       <PageHeader>
         <PageHeading>
-          <PageTitle>MCP servers</PageTitle>
+          <PageTitle>{t("MCP servers")}</PageTitle>
           <PageDescription>
-            Connect and manage the MCP servers JustAI can use in your everyday
-            work.
+            {t(
+              "Connect and manage the MCP servers JustAI can use in your everyday work."
+            )}
           </PageDescription>
         </PageHeading>
       </PageHeader>

@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useSyncExternalStore } from "react"
 import { Check, Monitor, Moon, Sun } from "lucide-react"
 
@@ -28,6 +29,8 @@ const getClientSnapshot = () => true
 const getServerSnapshot = () => false
 
 function ThemeSwitcher({ expanded = false }: { expanded?: boolean }) {
+  const { t } = useTranslations()
+
   const { theme, setTheme } = useThemeTransition()
   const mounted = useSyncExternalStore(
     emptySubscribe,
@@ -40,20 +43,20 @@ function ThemeSwitcher({ expanded = false }: { expanded?: boolean }) {
       <DropdownMenuTrigger
         render={
           <Button
-            aria-label="Choose color theme"
+            aria-label={t("Choose color theme")}
             className={cn(
               expanded
                 ? "h-10 w-full justify-start gap-2.5 px-3"
                 : "size-9 rounded-xl text-muted-foreground"
             )}
-            title="Choose color theme"
+            title={t("Choose color theme")}
             size={expanded ? "default" : "icon"}
             variant="ghost"
           />
         }
       >
         <Sun aria-hidden="true" />
-        {expanded && <span>Theme</span>}
+        {expanded && <span>{t("Theme")}</span>}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
         <DropdownMenuGroup>
@@ -67,7 +70,7 @@ function ThemeSwitcher({ expanded = false }: { expanded?: boolean }) {
                 onClick={() => setTheme(item.value)}
               >
                 <Icon data-icon="inline-start" />
-                <span>{item.label}</span>
+                <span>{t(item.label)}</span>
                 {active && <Check className="ml-auto" data-icon="inline-end" />}
               </DropdownMenuItem>
             )
@@ -79,6 +82,8 @@ function ThemeSwitcher({ expanded = false }: { expanded?: boolean }) {
 }
 
 function ThemeMenu() {
+  const { t } = useTranslations()
+
   const { theme, setTheme } = useThemeTransition()
   const mounted = useSyncExternalStore(
     emptySubscribe,
@@ -90,16 +95,19 @@ function ThemeMenu() {
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
         <Sun data-icon="inline-start" />
-        Appearance
+        {t("Appearance")}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
         {themes.map((item) => {
           const Icon = item.icon
           const active = mounted && theme === item.value
           return (
-            <DropdownMenuItem key={item.value} onClick={() => setTheme(item.value)}>
+            <DropdownMenuItem
+              key={item.value}
+              onClick={() => setTheme(item.value)}
+            >
               <Icon data-icon="inline-start" />
-              {item.label}
+              {t(item.label)}
               {active && <Check className="ml-auto" data-icon="inline-end" />}
             </DropdownMenuItem>
           )

@@ -1,5 +1,9 @@
 "use client"
 
+import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Bot,
@@ -50,7 +54,7 @@ type GlobalSearchDialogProps = {
   platformAdmin: boolean
 }
 
-const resultGroups = [
+const resultGroupsMessages = [
   { kind: "conversation", label: "Conversations", icon: MessageSquare },
   { kind: "note", label: "Notes", icon: NotebookPen },
   { kind: "knowledge", label: "Knowledge", icon: BookOpenText },
@@ -71,7 +75,7 @@ type NavigationItem = {
   adminOnly?: boolean
 }
 
-const navigationItems: NavigationItem[] = [
+const navigationItemsMessages: NavigationItem[] = [
   {
     id: "chat",
     label: "Chat",
@@ -194,6 +198,11 @@ export function GlobalSearchDialog({
   disabledFeatures,
   platformAdmin,
 }: GlobalSearchDialogProps) {
+  const resultGroups = useTranslatedConfig(resultGroupsMessages)
+  const navigationItems = useTranslatedConfig(navigationItemsMessages)
+
+  const { t } = useTranslations()
+
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<UniversalSearchResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -270,7 +279,7 @@ export function GlobalSearchDialog({
           (result) => result.kind === group.kind
         ),
       })),
-    [query, results]
+    [query, results, resultGroups]
   )
 
   const visibleNavigationItems = useMemo(() => {
@@ -283,7 +292,7 @@ export function GlobalSearchDialog({
         value.toLowerCase().includes(normalizedQuery)
       )
     })
-  }, [disabledFeatures, platformAdmin, query])
+  }, [disabledFeatures, platformAdmin, query, navigationItems])
 
   function selectNavigation(item: NavigationItem) {
     setOpen(false)
@@ -305,15 +314,17 @@ export function GlobalSearchDialog({
 
   return (
     <CommandDialog
-      description="Search conversations, notes, knowledge, transcripts, and projects."
+      description={t(
+        "Search conversations, notes, knowledge, transcripts, and projects."
+      )}
       onOpenChange={setOpen}
       open={open}
-      title="Universal search"
+      title={t("Universal search")}
     >
       <CommandInput
         autoFocus
         onValueChange={setQuery}
-        placeholder="Search everything in this workspace…"
+        placeholder={t("Search everything in this workspace…")}
         value={query}
       />
       <CommandList>
@@ -345,19 +356,21 @@ export function GlobalSearchDialog({
           <div className="flex flex-col items-center gap-2 px-6 py-10 text-center text-xs text-muted-foreground">
             <Search className="size-5" />
             <p>
-              Search across chats, notes, knowledge, transcripts, and projects.
+              {t(
+                "Search across chats, notes, knowledge, transcripts, and projects."
+              )}
             </p>
             <p className="flex flex-wrap items-center justify-center gap-1.5 text-[11px]">
-              <span>Open anytime with</span>
+              <span>{t("Open anytime with")}</span>
               <kbd className="rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
                 ⌘
               </kbd>
               <kbd className="rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
                 K
               </kbd>
-              <span className="text-muted-foreground/70">or</span>
+              <span className="text-muted-foreground/70">{t("or")}</span>
               <kbd className="rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
-                Ctrl
+                {t("Ctrl")}
               </kbd>
               <kbd className="rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
                 K
@@ -367,11 +380,11 @@ export function GlobalSearchDialog({
         )}
         {query.trim() && loading && (
           <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-            Searching workspace…
+            {t("Searching workspace…")}
           </p>
         )}
         {query.trim() && !loading && !error && (
-          <CommandEmpty>No matching workspace content.</CommandEmpty>
+          <CommandEmpty>{t("No matching workspace content.")}</CommandEmpty>
         )}
         {query.trim() && !loading && error && (
           <div
@@ -379,7 +392,7 @@ export function GlobalSearchDialog({
             className="mx-3 my-2 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
             role="alert"
           >
-            <span className="min-w-0">{error}</span>
+            <span className="min-w-0">{t(error)}</span>
             <Button
               className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={() => setRetryToken((value) => value + 1)}
@@ -387,7 +400,7 @@ export function GlobalSearchDialog({
               type="button"
               variant="outline"
             >
-              Retry
+              {t("Retry")}
             </Button>
           </div>
         )}

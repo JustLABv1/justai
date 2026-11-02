@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { LoaderCircle, Trash2, UserPlus } from "lucide-react"
 
@@ -79,6 +80,8 @@ export function SettingsView({
   memberCreateRequest,
   section = "workspace",
 }: SettingsViewProps) {
+  const { t, locale } = useTranslations()
+
   const [members, setMembers] = useState<OrganizationMember[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
   const [membersError, setMembersError] = useState("")
@@ -464,8 +467,8 @@ export function SettingsView({
     <div className="w-full space-y-5">
       {actionError && (
         <Alert aria-live="polite" role="alert" variant="destructive">
-          <AlertTitle>Could not save changes</AlertTitle>
-          <AlertDescription>{actionError}</AlertDescription>
+          <AlertTitle>{t("Could not save changes")}</AlertTitle>
+          <AlertDescription>{t(actionError)}</AlertDescription>
         </Alert>
       )}
 
@@ -493,14 +496,14 @@ export function SettingsView({
         <Card size="sm">
           <CardHeader className="flex flex-row items-start justify-between gap-6">
             <div className="min-w-0">
-              <CardTitle>Member directory</CardTitle>
+              <CardTitle>{t("Member directory")}</CardTitle>
               <CardDescription className="mt-1 truncate text-sm">
-                People with access to {activeOrganization.name}.
+                {t("People with access to")} {activeOrganization.name}.
               </CardDescription>
             </div>
             {!membersLoading && (
               <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                {members.length} {members.length === 1 ? "member" : "members"}
+                {members.length} {t(members.length === 1 ? "member" : "members")}
               </span>
             )}
           </CardHeader>
@@ -508,7 +511,7 @@ export function SettingsView({
             <>
               {membersError && (
                 <Alert className="mb-4" variant="destructive">
-                  <AlertDescription>{membersError}</AlertDescription>
+                  <AlertDescription>{t(membersError)}</AlertDescription>
                 </Alert>
               )}
               {membersLoading ? (
@@ -517,12 +520,13 @@ export function SettingsView({
                   className="flex items-center gap-2 rounded-xl border p-4 text-sm text-muted-foreground"
                   role="status"
                 >
-                  <LoaderCircle className="animate-spin" /> Loading members…
+                  <LoaderCircle className="animate-spin" />{" "}
+                  {t("Loading members…")}
                 </div>
               ) : membersError ? (
                 <div className="flex flex-col items-start gap-3 rounded-xl border border-destructive/30 p-4 text-sm">
                   <p className="text-destructive">
-                    Members could not be loaded.
+                    {t("Members could not be loaded.")}
                   </p>
                   <Button
                     size="sm"
@@ -530,12 +534,12 @@ export function SettingsView({
                     variant="outline"
                     onClick={() => void loadMembers()}
                   >
-                    Try again
+                    {t("Try again")}
                   </Button>
                 </div>
               ) : members.length === 0 ? (
                 <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  No members found.
+                  {t("No members found.")}
                 </div>
               ) : (
                 <div className="divide-y rounded-xl bg-card">
@@ -547,7 +551,9 @@ export function SettingsView({
                       <Avatar className="size-9" size="sm">
                         {member.avatarUrl && (
                           <AvatarImage
-                            alt={`${member.displayName || member.email}'s profile picture`}
+                            alt={t("{value0}'s profile picture", {
+                              value0: member.displayName || member.email,
+                            })}
                             src={resolveAPIURL(
                               versionedAvatarURL(
                                 member.avatarUrl,
@@ -569,7 +575,7 @@ export function SettingsView({
                         </p>
                       </div>
                       <span className="hidden text-xs text-muted-foreground lg:block">
-                        Joined {formatDate(member.createdAt)}
+                        {t("Joined")} {formatDate(member.createdAt, locale)}
                       </span>
                       <Select
                         disabled={
@@ -587,25 +593,31 @@ export function SettingsView({
                       >
                         <SelectTrigger
                           className="w-32"
-                          aria-label={`Role for ${member.displayName}`}
+                          aria-label={t("Role for {value0}", {
+                            value0: member.displayName,
+                          })}
                         >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="member">Member</SelectItem>
-                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="member">{t("Member")}</SelectItem>
+                          <SelectItem value="admin">{t("Admin")}</SelectItem>
                           {(activeOrganization.role === "owner" ||
                             user.platformAdmin) && (
-                            <SelectItem value="owner">Owner</SelectItem>
+                            <SelectItem value="owner">{t("Owner")}</SelectItem>
                           )}
                         </SelectContent>
                       </Select>
                       {canManageMembers && member.role !== "owner" && (
                         <Button
-                          aria-label={`Remove ${member.displayName}`}
+                          aria-label={t("Remove {value0}", {
+                            value0: member.displayName,
+                          })}
                           onClick={() => setRemoveTarget(member)}
                           size="icon-sm"
-                          title={`Remove ${member.displayName}`}
+                          title={t("Remove {value0}", {
+                            value0: member.displayName,
+                          })}
                           variant="ghost"
                         >
                           <Trash2 className="text-destructive" />
@@ -629,31 +641,35 @@ export function SettingsView({
         <DialogContent className="sm:max-w-md">
           <form onSubmit={(event) => void createWorkspace(event)}>
             <DialogHeader>
-              <DialogTitle>Create workspace</DialogTitle>
+              <DialogTitle>{t("Create workspace")}</DialogTitle>
               <DialogDescription>
-                Start a separate workspace for another team, project, or
-                environment.
+                {t(
+                  "Start a separate workspace for another team, project, or environment."
+                )}
               </DialogDescription>
             </DialogHeader>
             {actionError && (
               <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertDescription>{actionError}</AlertDescription>
+                <AlertDescription>{t(actionError)}</AlertDescription>
               </Alert>
             )}
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="workspace-name">Workspace name</FieldLabel>
+                <FieldLabel htmlFor="workspace-name">
+                  {t("Workspace name")}
+                </FieldLabel>
                 <Input
                   id="workspace-name"
                   onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="Product team"
+                  placeholder={t("Product team")}
                   required
                   value={workspaceName}
                 />
               </Field>
               <FieldDescription>
-                Everyone you add will see the workspace’s conversations and
-                shared integrations.
+                {t(
+                  "Everyone you add will see the workspace’s conversations and shared integrations."
+                )}
               </FieldDescription>
             </FieldGroup>
             <DialogFooter>
@@ -662,7 +678,7 @@ export function SettingsView({
                 type="button"
                 variant="outline"
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button disabled={saving || !workspaceName.trim()} type="submit">
                 {saving ? (
@@ -671,10 +687,10 @@ export function SettingsView({
                       className="animate-spin"
                       data-icon="inline-start"
                     />{" "}
-                    Creating…
+                    {t("Creating…")}
                   </>
                 ) : (
-                  "Create workspace"
+                  t("Create workspace")
                 )}
               </Button>
             </DialogFooter>
@@ -691,19 +707,19 @@ export function SettingsView({
         <DialogContent className="sm:max-w-md">
           <form onSubmit={(event) => void renameWorkspace(event)}>
             <DialogHeader>
-              <DialogTitle>Rename workspace</DialogTitle>
+              <DialogTitle>{t("Rename workspace")}</DialogTitle>
               <DialogDescription>
-                Use a clear name so members can identify this workspace.
+                {t("Use a clear name so members can identify this workspace.")}
               </DialogDescription>
             </DialogHeader>
             {actionError && (
               <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertDescription>{actionError}</AlertDescription>
+                <AlertDescription>{t(actionError)}</AlertDescription>
               </Alert>
             )}
             <Field>
               <FieldLabel htmlFor="rename-workspace-name">
-                Workspace name
+                {t("Workspace name")}
               </FieldLabel>
               <Input
                 id="rename-workspace-name"
@@ -718,10 +734,10 @@ export function SettingsView({
                 type="button"
                 variant="outline"
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button disabled={saving || !workspaceName.trim()} type="submit">
-                {saving ? "Saving…" : "Save changes"}
+                {saving ? t("Saving…") : t("Save changes")}
               </Button>
             </DialogFooter>
           </form>
@@ -737,20 +753,23 @@ export function SettingsView({
         <DialogContent className="sm:max-w-md">
           <form onSubmit={(event) => void addMember(event)}>
             <DialogHeader>
-              <DialogTitle>Add workspace member</DialogTitle>
+              <DialogTitle>{t("Add workspace member")}</DialogTitle>
               <DialogDescription>
-                The person must already have a JustAI account. Invitations by
-                email can be added once mail delivery is configured.
+                {t(
+                  "The person must already have a JustAI account. Invitations by email can be added once mail delivery is configured."
+                )}
               </DialogDescription>
             </DialogHeader>
             {actionError && (
               <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertDescription>{actionError}</AlertDescription>
+                <AlertDescription>{t(actionError)}</AlertDescription>
               </Alert>
             )}
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="member-email">Account email</FieldLabel>
+                <FieldLabel htmlFor="member-email">
+                  {t("Account email")}
+                </FieldLabel>
                 <Input
                   autoComplete="email"
                   id="member-email"
@@ -762,7 +781,7 @@ export function SettingsView({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="member-role">Role</FieldLabel>
+                <FieldLabel htmlFor="member-role">{t("Role")}</FieldLabel>
                 <Select
                   onValueChange={(value) =>
                     value && setMemberRole(value as MemberRole)
@@ -773,8 +792,8 @@ export function SettingsView({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="member">Member</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="member">{t("Member")}</SelectItem>
+                    <SelectItem value="admin">{t("Admin")}</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
@@ -785,7 +804,7 @@ export function SettingsView({
                 type="button"
                 variant="outline"
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button disabled={saving || !memberEmail.trim()} type="submit">
                 {saving ? (
@@ -794,11 +813,11 @@ export function SettingsView({
                       className="animate-spin"
                       data-icon="inline-start"
                     />{" "}
-                    Adding…
+                    {t("Adding…")}
                   </>
                 ) : (
                   <>
-                    <UserPlus data-icon="inline-start" /> Add member
+                    <UserPlus data-icon="inline-start" /> {t("Add member")}
                   </>
                 )}
               </Button>
@@ -809,9 +828,15 @@ export function SettingsView({
 
       <ConfirmActionDialog
         open={removeTarget !== null}
-        title={`Remove ${removeTarget?.displayName || removeTarget?.email || "this member"}?`}
-        description={`This person will lose access to ${activeOrganization?.name ?? "this workspace"}. Their existing workspace data remains available to the workspace.`}
-        confirmLabel="Remove member"
+        title={t("Remove {value0}?", {
+          value0:
+            removeTarget?.displayName || removeTarget?.email || "this member",
+        })}
+        description={t(
+          "This person will lose access to {value0}. Their existing workspace data remains available to the workspace.",
+          { value0: activeOrganization?.name ?? "this workspace" }
+        )}
+        confirmLabel={t("Remove member")}
         pending={removing}
         onOpenChange={(open) => {
           if (!open && !removing) setRemoveTarget(null)
@@ -821,9 +846,23 @@ export function SettingsView({
 
       <ConfirmActionDialog
         open={ownerTransferTarget !== null}
-        title={`Transfer ownership to ${ownerTransferTarget?.displayName || ownerTransferTarget?.email || "this member"}?`}
-        description={`You will become an admin of ${activeOrganization?.name ?? "this workspace"}. ${ownerTransferTarget?.displayName || ownerTransferTarget?.email || "This member"} will become the new owner.`}
-        confirmLabel="Transfer ownership"
+        title={t("Transfer ownership to {value0}?", {
+          value0:
+            ownerTransferTarget?.displayName ||
+            ownerTransferTarget?.email ||
+            "this member",
+        })}
+        description={t(
+          "You will become an admin of {value0}. {value1} will become the new owner.",
+          {
+            value0: activeOrganization?.name ?? "this workspace",
+            value1:
+              ownerTransferTarget?.displayName ||
+              ownerTransferTarget?.email ||
+              "This member",
+          }
+        )}
+        confirmLabel={t("Transfer ownership")}
         pending={ownerTransferBusy}
         destructive={false}
         onOpenChange={(open) => {
@@ -836,18 +875,26 @@ export function SettingsView({
         open={lifecycleAction !== null}
         title={
           lifecycleAction === "archive"
-            ? `Archive ${activeOrganization?.name ?? "this workspace"}?`
-            : `Leave ${activeOrganization?.name ?? "this workspace"}?`
+            ? t("Archive {value0}?", {
+                value0: activeOrganization?.name ?? "this workspace",
+              })
+            : t("Leave {value0}?", {
+                value0: activeOrganization?.name ?? "this workspace",
+              })
         }
         description={
           lifecycleAction === "archive"
-            ? "Members will lose access until a platform administrator restores the workspace. Existing data is retained."
-            : "You will lose access to this workspace. Existing workspace data remains available to its members."
+            ? t(
+                "Members will lose access until a platform administrator restores the workspace. Existing data is retained."
+              )
+            : t(
+                "You will lose access to this workspace. Existing workspace data remains available to its members."
+              )
         }
         confirmLabel={
           lifecycleAction === "archive"
-            ? "Archive workspace"
-            : "Leave workspace"
+            ? t("Archive workspace")
+            : t("Leave workspace")
         }
         pending={lifecycleBusy}
         onOpenChange={(open) => {
@@ -868,16 +915,17 @@ export function SettingsView({
           <form onSubmit={(event) => void deleteWorkspace(event)}>
             <DialogHeader>
               <DialogTitle>
-                Delete {activeOrganization?.name ?? "workspace"}?
+                {t("Delete")} {activeOrganization?.name ?? "workspace"}?
               </DialogTitle>
               <DialogDescription>
-                This permanently removes the workspace and its data. Type the
-                exact workspace name to confirm.
+                {t(
+                  "This permanently removes the workspace and its data. Type the exact workspace name to confirm."
+                )}
               </DialogDescription>
             </DialogHeader>
             <Field>
               <FieldLabel htmlFor="delete-workspace-confirmation">
-                Workspace name
+                {t("Workspace name")}
               </FieldLabel>
               <Input
                 autoComplete="off"
@@ -894,7 +942,7 @@ export function SettingsView({
                 variant="outline"
                 onClick={() => setDeleteDialogOpen(false)}
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button
                 type="submit"
@@ -904,7 +952,7 @@ export function SettingsView({
                   deleteConfirmation !== (activeOrganization?.name ?? "")
                 }
               >
-                {lifecycleBusy ? "Deleting…" : "Delete workspace"}
+                {lifecycleBusy ? t("Deleting…") : t("Delete workspace")}
               </Button>
             </DialogFooter>
           </form>
@@ -914,10 +962,8 @@ export function SettingsView({
   )
 }
 
-function formatDate(value: string) {
+function formatDate(value: string, locale: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "recently"
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
-    date
-  )
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date)
 }

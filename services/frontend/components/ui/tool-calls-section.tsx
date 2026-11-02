@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import type { ReactNode } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
@@ -126,6 +127,8 @@ export function ToolCallsSection({
   renderContent,
   approvalActions = true,
 }: ToolCallsSectionProps) {
+  const { t } = useTranslations()
+
   const pendingApprovalIndices = useMemo(
     () =>
       toolCalls.reduce<number[]>((indices, call, index) => {
@@ -307,7 +310,8 @@ export function ToolCallsSection({
       >
         {renderStackedIcons()}
         <span className="text-xs font-medium">
-          Used {toolCalls.length} tool
+          {t("Used")}
+          {toolCalls.length} tool
           {toolCalls.length > 1 ? "s" : ""}
         </span>
         {summary && (
@@ -326,7 +330,7 @@ export function ToolCallsSection({
           >
             <HugeiconsIcon icon={AlertCircleIcon} size={13} />
             {pendingApprovalIndices.length === 1
-              ? "Approval required"
+              ? t("Approval required")
               : `${pendingApprovalIndices.length} approvals required`}
           </span>
         )}
@@ -362,14 +366,14 @@ export function ToolCallsSection({
             const isCallExpanded = expandedCalls.has(index) || requiresApproval
             const statusLabel =
               call.status === "waiting"
-                ? "Approval needed"
+                ? t("Approval needed")
                 : call.status === "running"
-                  ? "Running"
+                  ? t("Running")
                   : call.status === "failed"
-                    ? "Failed"
+                    ? t("Failed")
                     : call.status === "cancelled"
-                      ? "Cancelled"
-                      : "Completed"
+                      ? t("Cancelled")
+                      : t("Completed")
 
             return (
               <div
@@ -463,10 +467,10 @@ export function ToolCallsSection({
                               icon={AlertCircleIcon}
                               size={14}
                             />
-                            Approval required
+                            {t("Approval required")}
                           </div>
                           <p className="mt-1 text-[10px] text-amber-800/80 dark:text-amber-200/80">
-                            Review this MCP request before it runs.
+                            {t("Review this MCP request before it runs.")}
                           </p>
                           {approvalActions && call.respondToApproval && (
                             <div className="mt-2 flex flex-wrap gap-2">
@@ -478,7 +482,9 @@ export function ToolCallsSection({
                                   submitApproval(call, { approved: true })
                                 }
                               >
-                                {approvalIsSubmitting ? "Submitting…" : "Allow"}
+                                {approvalIsSubmitting
+                                  ? t("Submitting…")
+                                  : t("Allow")}
                               </Button>
                               <Button
                                 disabled={approvalIsSubmitting}
@@ -491,7 +497,7 @@ export function ToolCallsSection({
                                   })
                                 }
                               >
-                                Deny
+                                {t("Deny")}
                               </Button>
                             </div>
                           )}
@@ -500,7 +506,7 @@ export function ToolCallsSection({
                       {hasInput && (
                         <div className="flex flex-col">
                           <span className="mb-1 font-medium text-zinc-400 dark:text-zinc-500">
-                            Input
+                            {t("Input")}
                           </span>
                           {contentRenderer(call.inputs, call, "input")}
                         </div>
@@ -508,7 +514,7 @@ export function ToolCallsSection({
                       {call.output !== undefined && (
                         <div className="flex flex-col">
                           <span className="mb-1 font-medium text-zinc-400 dark:text-zinc-500">
-                            Output
+                            {t("Output")}
                           </span>
                           {contentRenderer(call.output, call, "output")}
                         </div>

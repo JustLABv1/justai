@@ -1,5 +1,9 @@
 "use client"
 
+import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
 import { Check, CircleAlert, LoaderCircle, SkipForward, X } from "lucide-react"
 import type { ReactNode } from "react"
 import { Progress } from "@/components/ui/progress"
@@ -13,7 +17,7 @@ import { videoStepProgress } from "@/lib/video-processing"
 import { cn } from "@/lib/utils"
 import styles from "./video-processing-progress.module.css"
 
-const presentation: Record<
+const presentationMessages: Record<
   string,
   { label: string; title: string; description: string }
 > = {
@@ -72,6 +76,10 @@ export function VideoProcessingProgress({
   children: ReactNode
   actions?: ReactNode
 }) {
+  const presentation = useTranslatedConfig(presentationMessages)
+
+  const { t } = useTranslations()
+
   const failedStep = steps.find((step) => step.status === "failed")
   const failed = Boolean(failedStep) || upload.status === "failed"
   const cancelled = upload.status === "cancelled"
@@ -99,36 +107,51 @@ export function VideoProcessingProgress({
       ? currentStep.parallel?.phase
       : undefined
   const title = failed
-    ? `${currentStep?.key === "diarization" ? "Speaker separation" : currentStep?.key === "transcription" ? "Transcription" : current.label} needs attention`
+    ? t("{value0} needs attention", {
+        value0:
+          currentStep?.key === "diarization"
+            ? t("Speaker separation")
+            : currentStep?.key === "transcription"
+              ? t("Transcription")
+              : current.label,
+      })
     : cancelled
-      ? "Transcription cancelled"
+      ? t("Transcription cancelled")
       : completed
-        ? "Your transcript is ready"
+        ? t("Your transcript is ready")
         : queued
-          ? "Waiting to start transcription"
+          ? t("Waiting to start transcription")
           : upload.stage === "skipping_diarization"
-            ? "Skipping speaker separation"
+            ? t("Skipping speaker separation")
             : phase === "preparing"
-              ? "Preparing your audio"
+              ? t("Preparing your audio")
               : phase === "fusing"
-                ? "Combining transcript blocks"
+                ? t("Combining transcript blocks")
                 : current.title
   const description = failed
     ? failedStep?.key === "diarization"
-      ? "Your progress is saved. Retry speaker separation or skip it to continue."
-      : "Your progress is saved. Retry the failed step to continue."
+      ? t(
+          "Your progress is saved. Retry speaker separation or skip it to continue."
+        )
+      : t("Your progress is saved. Retry the failed step to continue.")
     : cancelled
-      ? "Any transcript already created is still available."
+      ? t("Any transcript already created is still available.")
       : completed
-        ? "Your transcript is available for review and export."
+        ? t("Your transcript is available for review and export.")
         : queued
-          ? "Your upload is complete. Processing starts automatically when a worker is available."
+          ? t(
+              "Your upload is complete. Processing starts automatically when a worker is available."
+            )
           : upload.stage === "skipping_diarization"
-            ? "We're continuing with your transcript without speaker separation."
+            ? t(
+                "We're continuing with your transcript without speaker separation."
+              )
             : phase === "preparing"
-              ? "We're extracting audio and preparing it for transcription."
+              ? t("We're extracting audio and preparing it for transcription.")
               : phase === "fusing"
-                ? "We're merging the transcribed blocks and resolving overlapping passages."
+                ? t(
+                    "We're merging the transcribed blocks and resolving overlapping passages."
+                  )
                 : current.description
 
   return (
@@ -140,12 +163,12 @@ export function VideoProcessingProgress({
         >
           {upload.fileName}
         </p>
-        <p className="text-sm font-medium">Video transcription</p>
+        <p className="text-sm font-medium">{t("Video transcription")}</p>
       </header>
       <Separator />
       <div className="grid min-w-0 gap-7 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-8">
         <ol
-          aria-label="Transcription progress"
+          aria-label={t("Transcription progress")}
           className="grid grid-cols-3 gap-2 sm:flex sm:flex-col sm:gap-0"
         >
           {visibleSteps.map((step, stepIndex) => {
@@ -156,18 +179,18 @@ export function VideoProcessingProgress({
             const error = step.status === "failed"
             const stopped = step.status === "cancelled"
             const label = complete
-              ? "Completed"
+              ? t("Completed")
               : skipped
-                ? "Skipped"
+                ? t("Skipped")
                 : error
-                  ? "Needs attention"
+                  ? t("Needs attention")
                   : stopped
-                    ? "Cancelled"
+                    ? t("Cancelled")
                     : active
                       ? queued
-                        ? "Queued"
-                        : "In progress"
-                      : "Pending"
+                        ? t("Queued")
+                        : t("In progress")
+                      : t("Pending")
             return (
               <li
                 key={step.key}
@@ -234,14 +257,22 @@ export function VideoProcessingProgress({
               )}
             >
               {failed
-                ? "Processing paused"
+                ? t("Processing paused")
                 : cancelled
-                  ? "Cancelled"
+                  ? t("Cancelled")
                   : completed
-                    ? "Completed"
+                    ? t("Completed")
                     : currentStep?.key === "finalization"
-                      ? "Finishing up"
-                      : `Step ${Math.max(0, index) + 1} of ${visibleSteps.length} · ${queued ? "Queued" : currentStep?.status === "retrying" ? "Retrying" : "In progress"}`}
+                      ? t("Finishing up")
+                      : t("Step {value0} of {value1} · {value2}", {
+                          value0: Math.max(0, index) + 1,
+                          value1: visibleSteps.length,
+                          value2: queued
+                            ? t("Queued")
+                            : currentStep?.status === "retrying"
+                              ? t("Retrying")
+                              : t("In progress"),
+                        })}
             </p>
             <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
               {title}
@@ -264,12 +295,12 @@ export function VideoProcessingProgress({
                 </span>
               </div>
               <Progress
-                aria-label={`${current.label} progress`}
+                aria-label={t("{value0} progress", { value0: current.label })}
                 value={measured.percent}
               />
               {elapsed ? (
                 <p className="text-xs text-muted-foreground tabular-nums">
-                  Current step · {elapsed} elapsed
+                  {t("Current step ·")} {elapsed} elapsed
                 </p>
               ) : null}
             </div>
@@ -280,17 +311,19 @@ export function VideoProcessingProgress({
                 className="size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none"
               />
               {statusLabel}
-              {elapsed ? ` · ${elapsed} elapsed` : ""}
+              {elapsed ? t(" · {value0} elapsed", { value0: elapsed }) : ""}
             </p>
           ) : null}
           {children}
           {running ? (
             <p className="text-xs text-muted-foreground">
               {next
-                ? `Next: ${presentation[next.key]?.title ?? next.key}`
+                ? t("Next: {value0}", {
+                    value0: presentation[next.key]?.title ?? next.key,
+                  })
                 : currentStep?.key !== "finalization"
-                  ? "Next: save your transcript for review"
-                  : "Your transcript will open when it is ready."}
+                  ? t("Next: save your transcript for review")
+                  : t("Your transcript will open when it is ready.")}
             </p>
           ) : null}
           {actions}
@@ -299,12 +332,16 @@ export function VideoProcessingProgress({
       <Separator />
       <p className="text-xs leading-5 text-muted-foreground">
         {upload.status === "uploading"
-          ? "Keep this page open until the upload is complete."
+          ? t("Keep this page open until the upload is complete.")
           : failed || cancelled
-            ? "Any available transcript is saved. You can return to it later."
+            ? t(
+                "Any available transcript is saved. You can return to it later."
+              )
             : completed
-              ? "Your transcript is saved and ready to use."
-              : "Your upload is complete. You can leave this page; processing continues in the background."}
+              ? t("Your transcript is saved and ready to use.")
+              : t(
+                  "Your upload is complete. You can leave this page; processing continues in the background."
+                )}
       </p>
     </div>
   )

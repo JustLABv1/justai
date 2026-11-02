@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useState, type FormEvent, type ReactNode } from "react"
 import {
   BookOpenText,
@@ -89,6 +90,8 @@ export function WorkspaceContext({
   onNavigate,
   onClose,
 }: WorkspaceContextProps) {
+  const { t, locale } = useTranslations()
+
   const [activeTab, setActiveTab] = useState<ContextTab>("sources")
   const [context, setContext] = useState<ConversationContext>({
     knowledgeSources: [],
@@ -388,15 +391,17 @@ export function WorkspaceContext({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] text-muted-foreground">
-            Conversation context
+            {t("Conversation context")}
           </p>
-          <h2 className="text-sm font-semibold tracking-tight">Context</h2>
+          <h2 className="text-sm font-semibold tracking-tight">
+            {t("Context")}
+          </h2>
         </div>
         <Button
-          aria-label="Hide context inspector"
+          aria-label={t("Hide context inspector")}
           onClick={onClose}
           size="icon-sm"
-          title="Hide context inspector"
+          title={t("Hide context inspector")}
           variant="ghost"
         >
           <X data-icon="inline-start" />
@@ -405,25 +410,26 @@ export function WorkspaceContext({
 
       {loading && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <LoaderCircle className="size-3.5 animate-spin" /> Loading attached
-          context…
+          <LoaderCircle className="size-3.5 animate-spin" />{" "}
+          {t("Loading attached context…")}
         </div>
       )}
       {visibleNotice && (
         <p className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
-          {visibleNotice}
+          {t(visibleNotice)}
         </p>
       )}
 
       <div className="flex flex-col gap-2 rounded-xl bg-sidebar-accent p-3">
         <ContextHeading
           icon={FolderKanban}
-          label="Project context"
+          label={t("Project context")}
           meta={visibleContext.project ? "Attached" : "Optional"}
         />
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          A project brief follows this conversation and keeps responses aligned
-          across turns.
+          {t(
+            "A project brief follows this conversation and keeps responses aligned across turns."
+          )}
           {conversation?.visibility === "workspace"
             ? " Members can use the attached brief."
             : ""}
@@ -438,27 +444,27 @@ export function WorkspaceContext({
             value={visibleContext.project?.id ?? "none"}
           >
             <SelectTrigger className="min-w-0 flex-1" size="sm">
-              <SelectValue placeholder="No project" />
+              <SelectValue placeholder={t("No project")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="none">No project</SelectItem>
+              <SelectItem value="none">{t("No project")}</SelectItem>
               {projects.map((project) => (
                 <SelectItem key={project.id} value={project.id}>
                   {project.name}
-                  {project.visibility === "workspace" ? " · Workspace" : ""}
+                  {project.visibility === "workspace" ? t(" · Workspace") : ""}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Button
-            aria-label="Create project"
+            aria-label={t("Create project")}
             disabled={
               busy === "project-create" ||
               (conversationId !== null && conversation?.canManage === false)
             }
             onClick={() => setProjectDialogOpen(true)}
             size="icon-sm"
-            title="Create project"
+            title={t("Create project")}
             variant="outline"
           >
             <Plus />
@@ -474,13 +480,13 @@ export function WorkspaceContext({
       <div
         className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1"
         role="tablist"
-        aria-label="Chat context"
+        aria-label={t("Chat context")}
       >
         {(
           [
-            ["sources", "Sources"],
+            ["sources", t("Sources")],
             ["mcp", "MCP"],
-            ["live", "Live"],
+            ["live", t("Live")],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -504,7 +510,7 @@ export function WorkspaceContext({
         <div className="flex flex-col gap-2">
           <ContextHeading
             icon={BookOpenText}
-            label="Knowledge sources"
+            label={t("Knowledge sources")}
             meta={`${readySources.length}/${availableSources.length} ready`}
           />
           {availableSources.length > 0 ? (
@@ -521,18 +527,21 @@ export function WorkspaceContext({
                         (item) => item.id === source.id
                       ) && (
                         <Button
-                          aria-label={`Keep ${source.title} in conversation context`}
+                          aria-label={t(
+                            "Keep {value0} in conversation context",
+                            { value0: source.title }
+                          )}
                           disabled={busy === source.id}
                           onClick={() => void pinKnowledge(source.id)}
                           size="icon-sm"
-                          title="Keep in conversation context"
+                          title={t("Keep in conversation context")}
                           variant="ghost"
                         >
                           <Pin />
                         </Button>
                       )}
                     <Button
-                      aria-label={`${visibleContext.knowledgeSources.some((item) => item.id === source.id) ? "Remove" : "Attach"} ${source.title}`}
+                      aria-label={`${visibleContext.knowledgeSources.some((item) => item.id === source.id) ? t("Remove") : t("Attach")} ${source.title}`}
                       disabled={
                         busy === source.id ||
                         (source.status === "failed" &&
@@ -575,12 +584,12 @@ export function WorkspaceContext({
             size="sm"
             variant="outline"
           >
-            Manage knowledge
+            {t("Manage knowledge")}
           </Button>
           <div className="mt-3 flex flex-col gap-2 border-t pt-3">
             <ContextHeading
               icon={NotebookPen}
-              label="Notes"
+              label={t("Notes")}
               meta={`${visibleContext.notes?.length ?? 0}/${availableNotes.length} attached`}
             />
             {availableNotes.length > 0 ? (
@@ -590,13 +599,13 @@ export function WorkspaceContext({
                 )
                 return (
                   <ContextItem
-                    detail={`${note.content ? `${note.content.length} characters` : "Empty note"} · updated ${new Date(note.updatedAt).toLocaleDateString()}`}
+                    detail={`${note.content ? `${note.content.length} characters` : "Empty note"} · updated ${new Date(note.updatedAt).toLocaleDateString(locale)}`}
                     icon={NotebookPen}
                     key={note.id}
                     label={note.title}
                     action={
                       <Button
-                        aria-label={`${attached ? "Detach" : "Attach"} ${note.title}`}
+                        aria-label={`${attached ? t("Detach") : t("Attach")} ${note.title}`}
                         disabled={busy === note.id}
                         onClick={() => void toggle("note", note.id, attached)}
                         size="icon-sm"
@@ -623,7 +632,7 @@ export function WorkspaceContext({
               size="sm"
               variant="outline"
             >
-              Open notes
+              {t("Open notes")}
             </Button>
           </div>
         </div>
@@ -633,7 +642,7 @@ export function WorkspaceContext({
         <div className="flex flex-col gap-2">
           <ContextHeading
             icon={Plug}
-            label="Connected tools"
+            label={t("Connected tools")}
             meta={`${activeServers.length} servers`}
           />
           {activeServers.length > 0 ? (
@@ -648,7 +657,7 @@ export function WorkspaceContext({
                 }
                 action={
                   <Button
-                    aria-label={`${visibleContext.mcpServers.some((item) => item.id === server.id) ? "Detach" : "Attach"} ${server.name}`}
+                    aria-label={`${visibleContext.mcpServers.some((item) => item.id === server.id) ? t("Detach") : t("Attach")} ${server.name}`}
                     disabled={
                       busy === server.id ||
                       (server.authType !== "none" &&
@@ -686,10 +695,9 @@ export function WorkspaceContext({
             <ContextEmpty icon={Plug} text="No MCP servers connected." />
           )}
           <div className="rounded-lg border border-dashed p-3 text-xs leading-relaxed text-muted-foreground">
-            Organization-default MCP servers are attached to new chats
-            automatically. Other connected servers stay opt-in for this
-            conversation. Tool calls and their bounded results stay attached to
-            the relevant chat turn.
+            {t(
+              "Organization-default MCP servers are attached to new chats automatically. Other connected servers stay opt-in for this conversation. Tool calls and their bounded results stay attached to the relevant chat turn."
+            )}
           </div>
           <Button
             className="mt-1 w-full"
@@ -697,7 +705,7 @@ export function WorkspaceContext({
             size="sm"
             variant="outline"
           >
-            Inspect MCP
+            {t("Inspect MCP")}
           </Button>
         </div>
       )}
@@ -706,7 +714,7 @@ export function WorkspaceContext({
         <div className="flex flex-col gap-2">
           <ContextHeading
             icon={Headphones}
-            label="Live transcription"
+            label={t("Live transcription")}
             meta={`${liveSessions.length} sessions`}
           />
           {liveSessions.length > 0 ? (
@@ -719,7 +727,7 @@ export function WorkspaceContext({
                 status={session.status === "live" ? "Listening" : undefined}
                 action={
                   <Button
-                    aria-label={`${visibleContext.transcriptionSessions.some((item) => item.id === session.id) ? "Detach" : "Attach"} ${session.title}`}
+                    aria-label={`${visibleContext.transcriptionSessions.some((item) => item.id === session.id) ? t("Detach") : t("Attach")} ${session.title}`}
                     disabled={busy === session.id}
                     onClick={() =>
                       void toggle(
@@ -758,7 +766,7 @@ export function WorkspaceContext({
             size="sm"
             variant="outline"
           >
-            Open live transcription
+            {t("Open live transcription")}
           </Button>
         </div>
       )}
@@ -771,23 +779,24 @@ export function WorkspaceContext({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create project context</DialogTitle>
+            <DialogTitle>{t("Create project context")}</DialogTitle>
             <DialogDescription>
-              Save a short brief that is automatically included whenever this
-              project is attached to a conversation.
+              {t(
+                "Save a short brief that is automatically included whenever this project is attached to a conversation."
+              )}
             </DialogDescription>
           </DialogHeader>
           <form className="flex flex-col gap-4" onSubmit={createProject}>
             <Input
-              aria-label="Project name"
+              aria-label={t("Project name")}
               onChange={(event) => setProjectName(event.target.value)}
-              placeholder="Project name"
+              placeholder={t("Project name")}
               value={projectName}
             />
             <Textarea
-              aria-label="Project brief"
+              aria-label={t("Project brief")}
               onChange={(event) => setProjectDescription(event.target.value)}
-              placeholder="Goals, terminology, constraints, and decisions…"
+              placeholder={t("Goals, terminology, constraints, and decisions…")}
               value={projectDescription}
             />
             <Select
@@ -800,8 +809,10 @@ export function WorkspaceContext({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="private">Private project</SelectItem>
-                <SelectItem value="workspace">Workspace project</SelectItem>
+                <SelectItem value="private">{t("Private project")}</SelectItem>
+                <SelectItem value="workspace">
+                  {t("Workspace project")}
+                </SelectItem>
               </SelectContent>
             </Select>
             <DialogFooter>
@@ -811,7 +822,7 @@ export function WorkspaceContext({
                 type="button"
                 variant="ghost"
               >
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button disabled={busy === "project-create"} type="submit">
                 {busy === "project-create" && (
@@ -820,7 +831,7 @@ export function WorkspaceContext({
                     data-icon="inline-start"
                   />
                 )}
-                Create project
+                {t("Create project")}
               </Button>
             </DialogFooter>
           </form>
@@ -829,7 +840,7 @@ export function WorkspaceContext({
 
       <div className="mt-auto flex items-center gap-2 border-t pt-4 text-[11px] text-muted-foreground">
         <CheckCircle2 className="size-4 shrink-0" />
-        Knowledge sources stay available to add across new chats.
+        {t("Knowledge sources stay available to add across new chats.")}
       </div>
     </div>
   )
@@ -851,10 +862,11 @@ export function WorkspaceContext({
             side="right"
           >
             <SheetHeader className="sr-only">
-              <SheetTitle>Conversation context</SheetTitle>
+              <SheetTitle>{t("Conversation context")}</SheetTitle>
               <SheetDescription>
-                Attach Knowledge sources, Notes, MCP servers, and transcription
-                sessions to this conversation.
+                {t(
+                  "Attach Knowledge sources, Notes, MCP servers, and transcription sessions to this conversation."
+                )}
               </SheetDescription>
             </SheetHeader>
             {panel}

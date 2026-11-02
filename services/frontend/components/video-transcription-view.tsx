@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   VideoCaptionSettings,
   type VideoCaptionOptions,
@@ -74,8 +75,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import {
-} from "@/components/ui/page"
+import {} from "@/components/ui/page"
 import {
   Select,
   SelectContent,
@@ -183,6 +183,8 @@ export function VideoTranscriptionView({
   createSessionRequested?: boolean
   onCreateSessionRequestHandled?: () => void
 }) {
+  const { t } = useTranslations()
+
   const [snapshotState, setSnapshot] = useState<VideoSnapshot | null>(null)
   // The rendered workspace is guarded below; this non-null view keeps the
   // legacy branch type-safe while it is retained as a migration reference.
@@ -628,12 +630,23 @@ export function VideoTranscriptionView({
       return
     }
     if (effectiveDiarizationEndpoint && captionOptions) {
-      const visionEndpoint = endpoints.find((endpoint) =>
-        endpoint.id === captionOptions.endpointId && endpoint.enabled &&
-        (endpoint.capabilities.vision || endpoint.capabilities.multimodal)
+      const visionEndpoint = endpoints.find(
+        (endpoint) =>
+          endpoint.id === captionOptions.endpointId &&
+          endpoint.enabled &&
+          (endpoint.capabilities.vision || endpoint.capabilities.multimodal)
       )
-      if (!visionEndpoint || !(captionOptions.model.trim() || visionEndpoint.visionModel || visionEndpoint.chatModel)) {
-        setError("Select an available vision endpoint and model for speaker name captions.")
+      if (
+        !visionEndpoint ||
+        !(
+          captionOptions.model.trim() ||
+          visionEndpoint.visionModel ||
+          visionEndpoint.chatModel
+        )
+      ) {
+        setError(
+          "Select an available vision endpoint and model for speaker name captions."
+        )
         return
       }
     }
@@ -671,7 +684,9 @@ export function VideoTranscriptionView({
           fileName: file.name,
           mimeType: file.type || "application/octet-stream",
           fileBytes: file.size,
-          captionOptions: effectiveDiarizationEndpoint ? captionOptions : undefined,
+          captionOptions: effectiveDiarizationEndpoint
+            ? captionOptions
+            : undefined,
         }
       )
       setSnapshot({
@@ -1198,30 +1213,31 @@ export function VideoTranscriptionView({
   )
   const cancelLabel =
     snapshot?.videoUpload?.status === "uploading"
-      ? "Cancel upload"
-      : "Cancel transcription"
+      ? t("Cancel upload")
+      : t("Cancel transcription")
 
   return (
     <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
       {error && (
         <Alert className="shrink-0" variant="destructive">
-          <AlertTitle>Video transcription needs attention</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertTitle>{t("Video transcription needs attention")}</AlertTitle>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
       {!snapshot && !createOpen ? (
         <>
-          <h1 className="sr-only">Video transcription</h1>
+          <h1 className="sr-only">{t("Video transcription")}</h1>
           <Empty className="min-h-0 flex-1 border-0">
             <EmptyHeader>
               <div className="mb-2 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
                 <FileVideo aria-hidden="true" />
               </div>
-              <EmptyTitle>Transcribe a video</EmptyTitle>
+              <EmptyTitle>{t("Transcribe a video")}</EmptyTitle>
               <EmptyDescription>
-                Upload a prerecorded video and receive a timestamped transcript.
-                Processing continues in the background.
+                {t(
+                  "Upload a prerecorded video and receive a timestamped transcript. Processing continues in the background."
+                )}
               </EmptyDescription>
             </EmptyHeader>
             <Button
@@ -1231,7 +1247,7 @@ export function VideoTranscriptionView({
               }}
             >
               <Upload data-icon="inline-start" />
-              New video transcription
+              {t("New video transcription")}
             </Button>
           </Empty>
         </>
@@ -1327,21 +1343,25 @@ export function VideoTranscriptionView({
                           aria-hidden="true"
                           className="size-4 shrink-0"
                         />
-                        Transcript
+                        {t("Transcript")}
                       </CardTitle>
                       <CardDescription>
-                        {transcript.length} messages ·{" "}
-                        {snapshot.segments.length} segments
+                        {transcript.length} {t("messages ·")}{" "}
+                        {snapshot.segments.length} {t("segments")}
                         {livePreviewSegments.length > 0
-                          ? ` · ${livePreviewSegments.length} live preview lines`
+                          ? t(" · {value0} live preview lines", {
+                              value0: livePreviewSegments.length,
+                            })
                           : ""}
                         {transcriptQuery
-                          ? ` · ${filteredTranscript.length} matches`
+                          ? t(" · {value0} matches", {
+                              value0: filteredTranscript.length,
+                            })
                           : ""}
                       </CardDescription>
                     </div>
                     <Tabs
-                      aria-label="Transcript display mode"
+                      aria-label={t("Transcript display mode")}
                       onValueChange={(value) => {
                         if (value === "verbatim" || value === "polished") {
                           setTranscriptMode(value)
@@ -1350,12 +1370,14 @@ export function VideoTranscriptionView({
                       value={transcriptMode}
                     >
                       <TabsList>
-                        <TabsTrigger value="verbatim">Verbatim</TabsTrigger>
+                        <TabsTrigger value="verbatim">
+                          {t("Verbatim")}
+                        </TabsTrigger>
                         <TabsTrigger
                           disabled={!polishedAvailable}
                           value="polished"
                         >
-                          Polished
+                          {t("Polished")}
                         </TabsTrigger>
                       </TabsList>
                     </Tabs>
@@ -1366,12 +1388,12 @@ export function VideoTranscriptionView({
                       className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
                     />
                     <Input
-                      aria-label="Search transcript"
+                      aria-label={t("Search transcript")}
                       className="h-9 pl-9"
                       onChange={(event) =>
                         setTranscriptQuery(event.target.value)
                       }
-                      placeholder="Search transcript"
+                      placeholder={t("Search transcript")}
                       value={transcriptQuery}
                     />
                   </div>
@@ -1404,7 +1426,11 @@ export function VideoTranscriptionView({
                           >
                             <button
                               aria-current={active ? "true" : undefined}
-                              aria-label={`Jump to ${formatVideoTimestamp(message.startOffsetMs)}`}
+                              aria-label={t("Jump to {value0}", {
+                                value0: formatVideoTimestamp(
+                                  message.startOffsetMs
+                                ),
+                              })}
                               className={cn(
                                 "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
                                 active
@@ -1427,11 +1453,14 @@ export function VideoTranscriptionView({
                             <span className="min-w-0">
                               {speaker ? (
                                 <Button
-                                  aria-label={`Rename ${speaker.displayName || speaker.label}`}
+                                  aria-label={t("Rename {value0}", {
+                                    value0:
+                                      speaker.displayName || speaker.label,
+                                  })}
                                   className="group/speaker-name mb-1 h-auto max-w-full justify-start p-0 hover:bg-transparent"
                                   onClick={() => openSpeakerRename(speaker)}
                                   size="sm"
-                                  title="Rename speaker"
+                                  title={t("Rename speaker")}
                                   variant="ghost"
                                 >
                                   <Badge
@@ -1458,9 +1487,11 @@ export function VideoTranscriptionView({
                   ) : transcript.length > 0 && transcriptQuery ? (
                     <Empty className="min-h-48 border-0 p-4">
                       <EmptyHeader>
-                        <EmptyTitle>No matching lines</EmptyTitle>
+                        <EmptyTitle>{t("No matching lines")}</EmptyTitle>
                         <EmptyDescription>
-                          Try another word or clear the transcript search.
+                          {t(
+                            "Try another word or clear the transcript search."
+                          )}
                         </EmptyDescription>
                       </EmptyHeader>
                       <Button
@@ -1468,7 +1499,7 @@ export function VideoTranscriptionView({
                         size="sm"
                         variant="outline"
                       >
-                        Clear search
+                        {t("Clear search")}
                       </Button>
                     </Empty>
                   ) : livePreviewSegments.length > 0 ? (
@@ -1476,20 +1507,24 @@ export function VideoTranscriptionView({
                   ) : isVideoProcessing ? (
                     <Empty className="min-h-48 border-0 p-4">
                       <EmptyHeader>
-                        <EmptyTitle>Waiting for the first slice</EmptyTitle>
+                        <EmptyTitle>
+                          {t("Waiting for the first slice")}
+                        </EmptyTitle>
                         <EmptyDescription>
-                          Workers are transcribing in parallel. Preview lines
-                          will appear as output arrives.
+                          {t(
+                            "Workers are transcribing in parallel. Preview lines will appear as output arrives."
+                          )}
                         </EmptyDescription>
                       </EmptyHeader>
                     </Empty>
                   ) : (
                     <Empty className="min-h-48 border-0 p-4">
                       <EmptyHeader>
-                        <EmptyTitle>No transcript yet</EmptyTitle>
+                        <EmptyTitle>{t("No transcript yet")}</EmptyTitle>
                         <EmptyDescription>
-                          The transcript will appear here after video processing
-                          starts.
+                          {t(
+                            "The transcript will appear here after video processing starts."
+                          )}
                         </EmptyDescription>
                       </EmptyHeader>
                     </Empty>
@@ -1503,7 +1538,7 @@ export function VideoTranscriptionView({
               >
                 {speakerSummaries.length > 0 ? (
                   <Card
-                    aria-label="Speaker summary"
+                    aria-label={t("Speaker summary")}
                     className="shrink-0 shadow-none"
                   >
                     <CardHeader className="gap-1 px-4 py-4">
@@ -1512,14 +1547,17 @@ export function VideoTranscriptionView({
                           aria-hidden="true"
                           className="size-4 shrink-0 text-primary"
                         />
-                        Speaker summary
+                        {t("Speaker summary")}
                       </CardTitle>
                       <CardDescription>
                         {speakerSummaries.length === 1
-                          ? "1 speaker"
-                          : `${speakerSummaries.length} speakers`}{" "}
-                        detected. Rename speakers and play a short sample from
-                        their first detected line.
+                          ? t("1 speaker")
+                          : t("{value0} speakers", {
+                              value0: speakerSummaries.length,
+                            })}{" "}
+                        {t(
+                          "detected. Rename speakers and play a short sample from their first detected line."
+                        )}
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="flex flex-col gap-2 px-4 pb-4">
@@ -1557,8 +1595,8 @@ export function VideoTranscriptionView({
                                   <p className="mt-1 text-[11px] text-muted-foreground">
                                     {summary.segmentCount}{" "}
                                     {summary.segmentCount === 1
-                                      ? "segment"
-                                      : "segments"}{" "}
+                                      ? t("segment")
+                                      : t("segments")}{" "}
                                     ·{" "}
                                     {formatSpeakerSummaryDuration(
                                       summary.speakingMs
@@ -1574,8 +1612,12 @@ export function VideoTranscriptionView({
                                   <Button
                                     aria-label={
                                       isPlaying
-                                        ? `Stop sample for ${speakerName}`
-                                        : `Play sample for ${speakerName}`
+                                        ? t("Stop sample for {value0}", {
+                                            value0: speakerName,
+                                          })
+                                        : t("Play sample for {value0}", {
+                                            value0: speakerName,
+                                          })
                                     }
                                     className="shrink-0"
                                     disabled={!canPlaySample}
@@ -1583,21 +1625,25 @@ export function VideoTranscriptionView({
                                     size="icon-sm"
                                     title={
                                       isPlaying
-                                        ? "Stop sample"
-                                        : "Play speaker sample"
+                                        ? t("Stop sample")
+                                        : t("Play speaker sample")
                                     }
                                     variant={isPlaying ? "default" : "outline"}
                                   >
                                     {isPlaying ? <Pause /> : <Play />}
                                   </Button>
                                   <Button
-                                    aria-label={`Rename ${speakerName}`}
+                                    aria-label={t("Rename {value0}", {
+                                      value0: speakerName,
+                                    })}
                                     className="shrink-0"
                                     onClick={() =>
                                       openSpeakerRename(summary.speaker)
                                     }
                                     size="icon-sm"
-                                    title={`Rename ${speakerName}`}
+                                    title={t("Rename {value0}", {
+                                      value0: speakerName,
+                                    })}
                                     variant="ghost"
                                   >
                                     <Pencil />
@@ -1613,8 +1659,12 @@ export function VideoTranscriptionView({
                         className="text-[11px] text-muted-foreground"
                       >
                         {snapshot.videoUpload?.playbackUrl
-                          ? "Samples play for up to 8 seconds in the source video."
-                          : "Samples become available when source video playback is ready."}
+                          ? t(
+                              "Samples play for up to 8 seconds in the source video."
+                            )
+                          : t(
+                              "Samples become available when source video playback is ready."
+                            )}
                       </p>
                     </CardContent>
                   </Card>
@@ -1627,7 +1677,7 @@ export function VideoTranscriptionView({
                           aria-hidden="true"
                           className="size-4 shrink-0"
                         />
-                        <span className="truncate">Source video</span>
+                        <span className="truncate">{t("Source video")}</span>
                       </CardTitle>
                     </div>
                     <CardDescription className="truncate">
@@ -1677,8 +1727,9 @@ export function VideoTranscriptionView({
                         <div className="flex aspect-video flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
                           <FileVideo aria-hidden="true" />
                           <p className="text-xs">
-                            The video will be available here once the upload has
-                            finished.
+                            {t(
+                              "The video will be available here once the upload has finished."
+                            )}
                           </p>
                         </div>
                       )}
@@ -1695,14 +1746,14 @@ export function VideoTranscriptionView({
                             ? ` / ${formatVideoTimestamp(displayDurationMs)}`
                             : ""}
                         </span>
-                        <span>Click a transcript line to seek</span>
+                        <span>{t("Click a transcript line to seek")}</span>
                       </div>
                     ) : null}
                     {videoPlaybackError ? (
                       <Alert variant="destructive">
-                        <AlertTitle>Playback unavailable</AlertTitle>
+                        <AlertTitle>{t("Playback unavailable")}</AlertTitle>
                         <AlertDescription>
-                          {videoPlaybackError}
+                          {t(videoPlaybackError)}
                         </AlertDescription>
                         <div className="mt-2">
                           <Button
@@ -1711,7 +1762,7 @@ export function VideoTranscriptionView({
                             variant="outline"
                           >
                             <RefreshCw data-icon="inline-start" />
-                            Refresh link
+                            {t("Refresh link")}
                           </Button>
                         </div>
                       </Alert>
@@ -1732,12 +1783,12 @@ export function VideoTranscriptionView({
                       <div className="flex items-center justify-between gap-3">
                         <span className="min-w-0 text-muted-foreground">
                           {snapshot.videoUpload.status === "failed"
-                            ? "Processing failed"
+                            ? t("Processing failed")
                             : snapshot.videoUpload.status === "uploaded"
-                              ? "Upload complete"
+                              ? t("Upload complete")
                               : snapshot.videoUpload.status === "cancelled"
-                                ? "Processing cancelled"
-                                : "Upload paused"}
+                                ? t("Processing cancelled")
+                                : t("Upload paused")}
                         </span>
                         <Button
                           disabled={videoStarting}
@@ -1747,12 +1798,12 @@ export function VideoTranscriptionView({
                         >
                           <RefreshCw data-icon="inline-start" />
                           {snapshot.videoUpload.status === "failed"
-                            ? "Retry"
+                            ? t("Retry")
                             : snapshot.videoUpload.status === "uploaded"
-                              ? "Queue processing"
+                              ? t("Queue processing")
                               : snapshot.videoUpload.status === "cancelled"
-                                ? "Retry processing"
-                                : "Resume upload"}
+                                ? t("Retry processing")
+                                : t("Resume upload")}
                         </Button>
                       </div>
                     ) : null}
@@ -1761,12 +1812,13 @@ export function VideoTranscriptionView({
                     !videoStarting ? (
                       <div className="flex flex-col gap-1.5">
                         <p className="text-muted-foreground">
-                          This upload is paused. Select the original video file
-                          to resume it.
+                          {t(
+                            "This upload is paused. Select the original video file to resume it."
+                          )}
                         </p>
                         <Input
                           accept="video/*,.mkv,.avi,.mpeg,.mpg,.wmv"
-                          aria-label="Select original video file"
+                          aria-label={t("Select original video file")}
                           className="h-8 text-xs"
                           onChange={(event) => {
                             const file = event.target.files?.[0]
@@ -1783,20 +1835,22 @@ export function VideoTranscriptionView({
                 ) : null}
                 <Card className="shrink-0 shadow-none">
                   <CardHeader className="gap-1 px-4 py-4">
-                    <CardTitle className="text-sm">At a glance</CardTitle>
+                    <CardTitle className="text-sm">
+                      {t("At a glance")}
+                    </CardTitle>
                     <CardDescription>
-                      Transcript settings and coverage
+                      {t("Transcript settings and coverage")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-2 px-4 pb-4 text-xs text-muted-foreground">
                     <div className="flex items-center justify-between gap-3">
-                      <span>Language</span>
+                      <span>{t("Language")}</span>
                       <span className="font-medium text-foreground">
                         {snapshot.session.language}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <span>Messages</span>
+                      <span>{t("Messages")}</span>
                       <span className="font-medium text-foreground">
                         {transcript.length}
                       </span>
@@ -1807,16 +1861,16 @@ export function VideoTranscriptionView({
                           aria-hidden="true"
                           className="size-3.5 shrink-0"
                         />
-                        Speakers
+                        {t("Speakers")}
                       </span>
                       <span className="font-medium text-foreground">
                         {snapshot.speakers.length || "Not separated"}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <span>Grammar</span>
+                      <span>{t("Grammar")}</span>
                       <span className="font-medium text-foreground">
-                        {polishStatusLabel(snapshot.session.polishStatus)}
+                        {t(polishStatusLabel(snapshot.session.polishStatus))}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-3">
@@ -1825,7 +1879,7 @@ export function VideoTranscriptionView({
                           aria-hidden="true"
                           className="size-3.5 shrink-0"
                         />
-                        Duration
+                        {t("Duration")}
                       </span>
                       <span className="font-medium text-foreground tabular-nums">
                         {displayDurationMs
@@ -1867,8 +1921,8 @@ export function VideoTranscriptionView({
 
       {createOpen ? (
         <TranscriptionCreationFlow
-          title="New video transcription"
-          description="Upload a recording and choose how it is processed."
+          title={t("New video transcription")}
+          description={t("Upload a recording and choose how it is processed.")}
           steps={[{ label: "Recording" }, { label: "Options" }]}
           step={createStep}
           onStepChange={setCreateStep}
@@ -1930,9 +1984,11 @@ export function VideoTranscriptionView({
           {createStep === 0 ? (
             <FieldGroup>
               <div>
-                <h2 className="text-lg font-semibold">Choose a recording</h2>
+                <h2 className="text-lg font-semibold">
+                  {t("Choose a recording")}
+                </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Meetings, interviews, lectures — start with your video.
+                  {t("Meetings, interviews, lectures — start with your video.")}
                 </p>
               </div>
 
@@ -1955,7 +2011,11 @@ export function VideoTranscriptionView({
                 role="button"
                 tabIndex={0}
               >
-                <input {...getInputProps()} aria-label="Video file" className="sr-only" />
+                <input
+                  {...getInputProps()}
+                  aria-label={t("Video file")}
+                  className="sr-only"
+                />
                 <span className="flex size-12 items-center justify-center rounded-2xl bg-background text-primary">
                   {videoFile ? (
                     <FileVideo aria-hidden="true" className="size-5" />
@@ -1968,14 +2028,18 @@ export function VideoTranscriptionView({
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {videoFile
-                    ? `${formatBytes(videoFile.size, 1)} · Click or drop to replace`
-                    : "MP4, MOV, MKV, WebM and more"}
+                    ? t("{value0} · Click or drop to replace", {
+                        value0: formatBytes(videoFile.size, 1),
+                      })
+                    : t("MP4, MOV, MKV, WebM and more")}
                 </span>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_14rem]">
                 <Field>
-                  <FieldLabel htmlFor="video-session-title">Name</FieldLabel>
+                  <FieldLabel htmlFor="video-session-title">
+                    {t("Name")}
+                  </FieldLabel>
                   <Input
                     id="video-session-title"
                     onChange={(event) => setTitle(event.target.value)}
@@ -1983,7 +2047,7 @@ export function VideoTranscriptionView({
                   />
                 </Field>
                 <Field>
-                  <FieldLabel>Language</FieldLabel>
+                  <FieldLabel>{t("Language")}</FieldLabel>
                   <Select
                     items={languageItems}
                     onValueChange={(value) => setLanguage(value || "auto")}
@@ -2008,29 +2072,37 @@ export function VideoTranscriptionView({
           ) : (
             <FieldGroup>
               <div>
-                <h2 className="text-lg font-semibold">Choose options</h2>
+                <h2 className="text-lg font-semibold">{t("Choose options")}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  The defaults work for most recordings.
+                  {t("The defaults work for most recordings.")}
                 </p>
               </div>
 
               <div className="flex items-center gap-3 rounded-xl bg-muted/60 p-3">
-                <FileVideo aria-hidden="true" className="size-5 shrink-0 text-primary" />
+                <FileVideo
+                  aria-hidden="true"
+                  className="size-5 shrink-0 text-primary"
+                />
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{videoFile?.name}</p>
+                  <p className="truncate text-sm font-medium">
+                    {videoFile?.name}
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    {formatBytes(videoFile?.size ?? 0, 1)} · {title.trim() || "Video transcript"}
+                    {formatBytes(videoFile?.size ?? 0, 1)} ·{" "}
+                    {title.trim() || "Video transcript"}
                   </p>
                 </div>
               </div>
 
               <Field orientation="horizontal">
                 <div className="flex flex-1 flex-col gap-1">
-                  <FieldLabel htmlFor="video-option-speakers">Separate speakers</FieldLabel>
+                  <FieldLabel htmlFor="video-option-speakers">
+                    {t("Separate speakers")}
+                  </FieldLabel>
                   <FieldDescription>
                     {diarizationEndpoints.length === 0
-                      ? "No speaker separation endpoint is configured."
-                      : "Label who is talking in the transcript."}
+                      ? t("No speaker separation endpoint is configured.")
+                      : t("Label who is talking in the transcript.")}
                   </FieldDescription>
                 </div>
                 <Switch
@@ -2047,26 +2119,33 @@ export function VideoTranscriptionView({
 
               <Field orientation="horizontal">
                 <div className="flex flex-1 flex-col gap-1">
-                  <FieldLabel htmlFor="video-option-grammar">Polish grammar</FieldLabel>
+                  <FieldLabel htmlFor="video-option-grammar">
+                    {t("Polish grammar")}
+                  </FieldLabel>
                   <FieldDescription>
                     {grammarEndpoints.length === 0
-                      ? "No chat endpoint is configured."
-                      : "Clean up punctuation and wording. The original stays available as Verbatim."}
+                      ? t("No chat endpoint is configured.")
+                      : t(
+                          "Clean up punctuation and wording. The original stays available as Verbatim."
+                        )}
                   </FieldDescription>
                 </div>
                 <Switch
                   checked={Boolean(effectiveGrammarEndpoint)}
                   disabled={grammarEndpoints.length === 0}
                   id="video-option-grammar"
-                  onCheckedChange={(on) => setGrammarChoice(on ? "auto" : "none")}
+                  onCheckedChange={(on) =>
+                    setGrammarChoice(on ? "auto" : "none")
+                  }
                 />
               </Field>
 
               <Collapsible defaultOpen={!effectiveSelectedEndpoint}>
                 <CollapsibleTrigger className="group/advanced flex w-full items-center gap-2 rounded-lg py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  Advanced settings
+                  {t("Advanced settings")}
                   <span className="min-w-0 flex-1 truncate text-left text-xs font-normal text-muted-foreground">
-                    {selectedTranscriptionEndpoint?.name ?? "No endpoint selected"}
+                    {selectedTranscriptionEndpoint?.name ??
+                      "No endpoint selected"}
                   </span>
                   <ChevronDown
                     aria-hidden="true"
@@ -2075,182 +2154,214 @@ export function VideoTranscriptionView({
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <FieldGroup className="pt-4">
-              <Field>
-                    <FieldLabel>Transcription endpoint</FieldLabel>
-                    <Select
-                      items={transcriptionEndpoints.map((endpoint) => ({
-                        value: endpoint.id,
-                        label: `${endpoint.name} · ${endpoint.providerType} · ${transcriptionModeLabel(endpoint)}`,
-                      }))}
-                      onValueChange={(value) => setSelectedEndpoint(value ?? "")}
-                      value={effectiveSelectedEndpoint}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select a transcription endpoint" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectLabel>Transcription providers</SelectLabel>
-                          {transcriptionEndpoints.map((endpoint) => (
-                            <SelectItem key={endpoint.id} value={endpoint.id}>
-                              {endpoint.name} · {endpoint.providerType} ·{" "}
-                              {transcriptionModeLabel(endpoint)}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <VideoModelField
-                    description="Choose the ASR model used for the timestamped transcript."
-                    endpoint={selectedTranscriptionEndpoint}
-                    label="Transcription model"
-                    loading={
-                      Boolean(selectedTranscriptionEndpoint) &&
-                      !modelDiscovery[
-                        videoModelKey(
-                          selectedTranscriptionEndpoint?.id ?? "",
-                          "transcription"
-                        )
-                      ]
-                    }
-                    models={modelOptionsFor(
-                      selectedTranscriptionEndpoint,
-                      "transcription"
-                    )}
-                    onValueChange={(value) =>
-                      setModelValue(
-                        selectedTranscriptionEndpoint,
-                        "transcription",
-                        value
-                      )
-                    }
-                    value={transcriptionModel}
-                  />
-                  <Field>
-                    <FieldLabel>Speaker separation</FieldLabel>
-                    <Select
-                      disabled={diarizationEndpoints.length === 0}
-                      items={[
-                        { value: "none", label: "Keep one transcript stream" },
-                        ...diarizationEndpoints.map((endpoint) => ({
+                    <Field>
+                      <FieldLabel>{t("Transcription endpoint")}</FieldLabel>
+                      <Select
+                        items={transcriptionEndpoints.map((endpoint) => ({
                           value: endpoint.id,
-                          label: `${endpoint.name} · ${endpoint.providerType}`,
-                        })),
-                      ]}
-                      onValueChange={(value) =>
-                        setSelectedDiarizationEndpoint(value ?? "none")
-                      }
-                      value={selectedDiarizationEndpoint}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Keep one transcript stream" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectLabel>Diarization providers</SelectLabel>
-                          <SelectItem value="none">
-                            Keep one transcript stream
-                          </SelectItem>
-                          {diarizationEndpoints.map((endpoint) => (
-                            <SelectItem key={endpoint.id} value={endpoint.id}>
-                              {endpoint.name} · {endpoint.providerType}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <FieldDescription>
-                      Separate speakers in the transcript when a diarization
-                      endpoint is available.
-                    </FieldDescription>
-                  </Field>
-                  {effectiveDiarizationEndpoint ? (
+                          label: `${endpoint.name} · ${endpoint.providerType} · ${t(transcriptionModeLabel(endpoint))}`,
+                        }))}
+                        onValueChange={(value) =>
+                          setSelectedEndpoint(value ?? "")
+                        }
+                        value={effectiveSelectedEndpoint}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue
+                            placeholder={t("Select a transcription endpoint")}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectLabel>
+                              {t("Transcription providers")}
+                            </SelectLabel>
+                            {transcriptionEndpoints.map((endpoint) => (
+                              <SelectItem key={endpoint.id} value={endpoint.id}>
+                                {endpoint.name} · {endpoint.providerType} ·{" "}
+                                {t(transcriptionModeLabel(endpoint))}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
                     <VideoModelField
-                      description="Choose the diarization model used to identify speakers."
-                      endpoint={selectedDiarizationEndpointItem}
-                      label="Speaker separation model"
+                      description={t(
+                        "Choose the ASR model used for the timestamped transcript."
+                      )}
+                      endpoint={selectedTranscriptionEndpoint}
+                      label={t("Transcription model")}
                       loading={
-                        Boolean(selectedDiarizationEndpointItem) &&
+                        Boolean(selectedTranscriptionEndpoint) &&
                         !modelDiscovery[
                           videoModelKey(
-                            selectedDiarizationEndpointItem?.id ?? "",
-                            "diarization"
+                            selectedTranscriptionEndpoint?.id ?? "",
+                            "transcription"
                           )
                         ]
                       }
                       models={modelOptionsFor(
-                        selectedDiarizationEndpointItem,
-                        "diarization"
+                        selectedTranscriptionEndpoint,
+                        "transcription"
                       )}
                       onValueChange={(value) =>
                         setModelValue(
-                          selectedDiarizationEndpointItem,
-                          "diarization",
+                          selectedTranscriptionEndpoint,
+                          "transcription",
                           value
                         )
                       }
-                      value={diarizationModel}
+                      value={transcriptionModel}
                     />
-                  ) : null}
-                  <VideoCaptionSettings
-                    endpoints={endpoints}
-                    enabled={Boolean(effectiveDiarizationEndpoint)}
-                    value={captionOptions}
-                    onChange={setCaptionOptions}
-                  />
-                  <Field>
-                    <FieldLabel>Grammar polishing</FieldLabel>
-                    <Select
-                      items={[
-                        { value: "none", label: "Keep verbatim transcript" },
-                        ...grammarEndpoints.map((endpoint) => ({
-                          value: endpoint.id,
-                          label: `${endpoint.name} · ${endpoint.providerType}`,
-                        })),
-                      ]}
-                      onValueChange={(value) => setGrammarChoice(value ?? "none")}
-                      value={effectiveGrammarEndpoint || "none"}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Keep verbatim transcript" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectLabel>Chat providers</SelectLabel>
-                          <SelectItem value="none">
-                            Keep verbatim transcript
-                          </SelectItem>
-                          {grammarEndpoints.map((endpoint) => (
-                            <SelectItem key={endpoint.id} value={endpoint.id}>
-                              {endpoint.name} · {endpoint.providerType}
+                    <Field>
+                      <FieldLabel>{t("Speaker separation")}</FieldLabel>
+                      <Select
+                        disabled={diarizationEndpoints.length === 0}
+                        items={[
+                          {
+                            value: "none",
+                            label: "Keep one transcript stream",
+                          },
+                          ...diarizationEndpoints.map((endpoint) => ({
+                            value: endpoint.id,
+                            label: `${endpoint.name} · ${endpoint.providerType}`,
+                          })),
+                        ]}
+                        onValueChange={(value) =>
+                          setSelectedDiarizationEndpoint(value ?? "none")
+                        }
+                        value={selectedDiarizationEndpoint}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue
+                            placeholder={t("Keep one transcript stream")}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectLabel>
+                              {t("Diarization providers")}
+                            </SelectLabel>
+                            <SelectItem value="none">
+                              {t("Keep one transcript stream")}
                             </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <FieldDescription>
-                      The original ASR output stays available under Verbatim.
-                    </FieldDescription>
-                  </Field>
-                  {effectiveGrammarEndpoint ? (
-                    <VideoModelField
-                      description="Choose the chat model used to polish the transcript."
-                      endpoint={selectedGrammarEndpoint}
-                      label="Grammar model"
-                      loading={
-                        Boolean(selectedGrammarEndpoint) &&
-                        !modelDiscovery[
-                          videoModelKey(selectedGrammarEndpoint?.id ?? "", "chat")
-                        ]
-                      }
-                      models={modelOptionsFor(selectedGrammarEndpoint, "chat")}
-                      onValueChange={(value) =>
-                        setModelValue(selectedGrammarEndpoint, "chat", value)
-                      }
-                      value={grammarModel}
+                            {diarizationEndpoints.map((endpoint) => (
+                              <SelectItem key={endpoint.id} value={endpoint.id}>
+                                {endpoint.name} · {endpoint.providerType}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>
+                        {t(
+                          "Separate speakers in the transcript when a diarization endpoint is available."
+                        )}
+                      </FieldDescription>
+                    </Field>
+                    {effectiveDiarizationEndpoint ? (
+                      <VideoModelField
+                        description={t(
+                          "Choose the diarization model used to identify speakers."
+                        )}
+                        endpoint={selectedDiarizationEndpointItem}
+                        label={t("Speaker separation model")}
+                        loading={
+                          Boolean(selectedDiarizationEndpointItem) &&
+                          !modelDiscovery[
+                            videoModelKey(
+                              selectedDiarizationEndpointItem?.id ?? "",
+                              "diarization"
+                            )
+                          ]
+                        }
+                        models={modelOptionsFor(
+                          selectedDiarizationEndpointItem,
+                          "diarization"
+                        )}
+                        onValueChange={(value) =>
+                          setModelValue(
+                            selectedDiarizationEndpointItem,
+                            "diarization",
+                            value
+                          )
+                        }
+                        value={diarizationModel}
+                      />
+                    ) : null}
+                    <VideoCaptionSettings
+                      endpoints={endpoints}
+                      enabled={Boolean(effectiveDiarizationEndpoint)}
+                      value={captionOptions}
+                      onChange={setCaptionOptions}
                     />
-                  ) : null}
+                    <Field>
+                      <FieldLabel>{t("Grammar polishing")}</FieldLabel>
+                      <Select
+                        items={[
+                          { value: "none", label: "Keep verbatim transcript" },
+                          ...grammarEndpoints.map((endpoint) => ({
+                            value: endpoint.id,
+                            label: `${endpoint.name} · ${endpoint.providerType}`,
+                          })),
+                        ]}
+                        onValueChange={(value) =>
+                          setGrammarChoice(value ?? "none")
+                        }
+                        value={effectiveGrammarEndpoint || "none"}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue
+                            placeholder={t("Keep verbatim transcript")}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectLabel>{t("Chat providers")}</SelectLabel>
+                            <SelectItem value="none">
+                              {t("Keep verbatim transcript")}
+                            </SelectItem>
+                            {grammarEndpoints.map((endpoint) => (
+                              <SelectItem key={endpoint.id} value={endpoint.id}>
+                                {endpoint.name} · {endpoint.providerType}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>
+                        {t(
+                          "The original ASR output stays available under Verbatim."
+                        )}
+                      </FieldDescription>
+                    </Field>
+                    {effectiveGrammarEndpoint ? (
+                      <VideoModelField
+                        description={t(
+                          "Choose the chat model used to polish the transcript."
+                        )}
+                        endpoint={selectedGrammarEndpoint}
+                        label={t("Grammar model")}
+                        loading={
+                          Boolean(selectedGrammarEndpoint) &&
+                          !modelDiscovery[
+                            videoModelKey(
+                              selectedGrammarEndpoint?.id ?? "",
+                              "chat"
+                            )
+                          ]
+                        }
+                        models={modelOptionsFor(
+                          selectedGrammarEndpoint,
+                          "chat"
+                        )}
+                        onValueChange={(value) =>
+                          setModelValue(selectedGrammarEndpoint, "chat", value)
+                        }
+                        value={grammarModel}
+                      />
+                    ) : null}
                   </FieldGroup>
                 </CollapsibleContent>
               </Collapsible>
@@ -2267,15 +2378,18 @@ export function VideoTranscriptionView({
       >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Rename speaker</DialogTitle>
+            <DialogTitle>{t("Rename speaker")}</DialogTitle>
             <DialogDescription>
-              This name is shown for every transcript line attributed to this
-              speaker.
+              {t(
+                "This name is shown for every transcript line attributed to this speaker."
+              )}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="video-speaker-name">Speaker name</FieldLabel>
+              <FieldLabel htmlFor="video-speaker-name">
+                {t("Speaker name")}
+              </FieldLabel>
               <Input
                 autoFocus
                 id="video-speaker-name"
@@ -2296,7 +2410,7 @@ export function VideoTranscriptionView({
               onClick={() => setSpeakerToRename(null)}
               variant="outline"
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={speakerRenameSaving || !speakerName.trim()}
@@ -2310,7 +2424,7 @@ export function VideoTranscriptionView({
               ) : (
                 <Pencil data-icon="inline-start" />
               )}
-              Save speaker
+              {t("Save speaker")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2319,14 +2433,15 @@ export function VideoTranscriptionView({
       <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancel this video?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Cancel this video?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              This stops the upload and cancels transcription. A completed
-              upload is retained so you can still view the source or retry it.
+              {t(
+                "This stops the upload and cancels transcription. A completed upload is retained so you can still view the source or retry it."
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep processing</AlertDialogCancel>
+            <AlertDialogCancel>{t("Keep processing")}</AlertDialogCancel>
             <AlertDialogAction
               disabled={videoCancelInFlight}
               onClick={() => {
@@ -2348,15 +2463,16 @@ export function VideoTranscriptionView({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Skip speaker separation?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Skip speaker separation?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              The transcript and timestamps will be kept, but this video will
-              not receive automatic speaker labels.
+              {t(
+                "The transcript and timestamps will be kept, but this video will not receive automatic speaker labels."
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={skipSpeakerInFlight}>
-              Keep speaker separation
+              {t("Keep speaker separation")}
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={skipSpeakerInFlight}
@@ -2373,7 +2489,7 @@ export function VideoTranscriptionView({
               ) : (
                 <SkipForward data-icon="inline-start" />
               )}
-              Skip separation
+              {t("Skip separation")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2387,9 +2503,11 @@ function LiveTranscriptPreview({
 }: {
   segments: TranscriptionVideoPreviewSegment[]
 }) {
+  const { t } = useTranslations()
+
   return (
     <div
-      aria-label="Live transcript preview"
+      aria-label={t("Live transcript preview")}
       aria-live="polite"
       className="space-y-3"
     >
@@ -2397,11 +2515,12 @@ function LiveTranscriptPreview({
         <div className="min-w-0">
           <p className="flex items-center gap-2 text-sm font-medium">
             <AudioLines aria-hidden="true" className="size-4 text-primary" />
-            Live transcript preview
+            {t("Live transcript preview")}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Recent output from active workers. The final fused transcript will
-            replace this preview.
+            {t(
+              "Recent output from active workers. The final fused transcript will replace this preview."
+            )}
           </p>
         </div>
         <Badge className="shrink-0" variant="outline">
@@ -2409,7 +2528,7 @@ function LiveTranscriptPreview({
             aria-hidden="true"
             className="size-3 motion-safe:animate-spin motion-reduce:animate-none"
           />
-          Live
+          {t("Live")}
         </Badge>
       </div>
       <div className="divide-y rounded-xl border border-border/70 bg-muted/10">
@@ -2448,7 +2567,9 @@ function VideoModelField({
   onValueChange: (value: string) => void
   value: string
 }) {
-  const fieldLabel = label ?? "Model"
+  const { t } = useTranslations()
+
+  const fieldLabel = label ?? t("Model")
   return (
     <Field>
       <FieldLabel>{fieldLabel}</FieldLabel>
@@ -2464,7 +2585,7 @@ function VideoModelField({
         <SelectTrigger className="w-full">
           <SelectValue
             placeholder={
-              loading ? "Loading available models…" : "Endpoint default"
+              loading ? t("Loading available models…") : t("Endpoint default")
             }
           />
         </SelectTrigger>
@@ -2515,6 +2636,8 @@ function VideoPipeline({
   upload: TranscriptionVideoUpload
   session: TranscriptionSession
 }) {
+  const { t } = useTranslations()
+
   const [now, setNow] = useState(() => Date.now())
   const pipelineStorageKey = `justai.video-transcription.pipeline.details-collapsed:${upload.sessionId}`
   const [open, setOpen] = useState(false)
@@ -2566,27 +2689,27 @@ function VideoPipeline({
   const overallLabel =
     upload.status === "completed"
       ? hasFailedStep
-        ? "Processing completed with warnings"
-        : "Processing complete"
+        ? t("Processing completed with warnings")
+        : t("Processing complete")
       : upload.status === "failed"
-        ? "Processing stopped"
+        ? t("Processing stopped")
         : upload.status === "cancelled"
-          ? "Processing cancelled"
+          ? t("Processing cancelled")
           : activeStep
             ? skipSpeakerRequested
-              ? "Skipping speaker separation"
+              ? t("Skipping speaker separation")
               : parallelProgress?.phase === "preparing"
-                ? "Preparing audio"
+                ? t("Preparing audio")
                 : parallelProgress?.phase === "fusing"
-                  ? "Combining transcript blocks"
+                  ? t("Combining transcript blocks")
                   : parallelProgress?.phase === "transcribing"
-                    ? "Transcribing your recording"
-                    : `${videoPipelineStepLabel(activeStep.key)} in progress`
+                    ? t("Transcribing your recording")
+                    : `${t(videoPipelineStepLabel(activeStep.key))} in progress`
             : upload.status === "queued"
               ? workersSaturated
-                ? "Waiting to start"
-                : "Queued for transcription"
-              : "Preparing video"
+                ? t("Waiting to start")
+                : t("Queued for transcription")
+              : t("Preparing video")
 
   const statusHeader =
     !prominent ||
@@ -2623,7 +2746,9 @@ function VideoPipeline({
               <Check aria-hidden="true" className="size-4 text-primary" />
             )}
             {failedStep
-              ? `${videoPipelineStepLabel(failedStep.key)} needs attention`
+              ? t("{value0} needs attention", {
+                  value0: t(videoPipelineStepLabel(failedStep.key)),
+                })
               : overallLabel}
           </CardTitle>
           <div
@@ -2640,7 +2765,7 @@ function VideoPipeline({
                 variant="outline"
               >
                 <RefreshCw data-icon="inline-start" />{" "}
-                {retryingStep ? "Retrying…" : "Retry step"}
+                {retryingStep ? t("Retrying…") : t("Retry step")}
               </Button>
             ) : null}
             {showSpeakerSkipAction ? (
@@ -2651,7 +2776,9 @@ function VideoPipeline({
                 variant="ghost"
               >
                 <SkipForward data-icon="inline-start" />{" "}
-                {skipSpeakerRequested ? "Skipping…" : "Skip speaker separation"}
+                {skipSpeakerRequested
+                  ? t("Skipping…")
+                  : t("Skip speaker separation")}
               </Button>
             ) : null}
             {onViewPartialTranscript ? (
@@ -2660,7 +2787,8 @@ function VideoPipeline({
                 size="sm"
                 variant="ghost"
               >
-                <FileText data-icon="inline-start" /> View partial transcript
+                <FileText data-icon="inline-start" />{" "}
+                {t("View partial transcript")}
               </Button>
             ) : null}
             {!prominent ? (
@@ -2668,11 +2796,11 @@ function VideoPipeline({
                 render={<Button size="sm" variant="ghost" />}
                 aria-label={
                   open
-                    ? "Collapse video processing pipeline"
-                    : "Expand video processing pipeline"
+                    ? t("Collapse video processing pipeline")
+                    : t("Expand video processing pipeline")
                 }
               >
-                {open ? "Hide output" : "Step output"}
+                {open ? t("Hide output") : t("Step output")}
                 <ChevronDown
                   data-icon="inline-end"
                   className={cn(
@@ -2686,7 +2814,7 @@ function VideoPipeline({
         </div>
         {upload.status === "uploading" && !prominent ? (
           <Progress
-            aria-label="Video upload progress"
+            aria-label={t("Video upload progress")}
             className="h-1"
             value={
               upload.expectedBytes > 0
@@ -2730,7 +2858,7 @@ function VideoPipeline({
       open={prominent || open}
     >
       <Card
-        aria-label="Video processing pipeline"
+        aria-label={t("Video processing pipeline")}
         className="flex min-h-0 flex-col gap-0 overflow-hidden py-0 shadow-none"
       >
         {prominent ? (
@@ -2741,7 +2869,9 @@ function VideoPipeline({
             actions={statusHeader}
             statusLabel={
               failedStep
-                ? `${videoPipelineStepLabel(failedStep.key)} failed`
+                ? t("{value0} failed", {
+                    value0: t(videoPipelineStepLabel(failedStep.key)),
+                  })
                 : overallLabel
             }
             elapsed={
@@ -2819,7 +2949,8 @@ function getVideoPipelineSteps(
     const steps = videoPipelineKeys.map((key) => ({
       ...(byKey.get(key) ?? {
         key,
-        status: key === "speaker_names" ? ("skipped" as const) : ("pending" as const),
+        status:
+          key === "speaker_names" ? ("skipped" as const) : ("pending" as const),
       }),
     }))
     repairCancelledVideoPipeline(steps, upload)

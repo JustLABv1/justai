@@ -1,4 +1,5 @@
 "use client"
+import { useTranslations } from "@/components/locale-provider"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
@@ -40,6 +41,8 @@ export function LiveProcessingSettings({
   grammarEndpoints: Endpoint[]
   onChange: (next: LiveTranscriptionSnapshot) => void
 }) {
+  const { t } = useTranslations()
+
   const [open, setOpen] = useState(false)
   const [diarization, setDiarization] = useState(
     snapshot.session.diarizationEndpointId || "none"
@@ -81,25 +84,27 @@ export function LiveProcessingSettings({
       }}
     >
       <DialogTrigger render={<Button size="sm" variant="outline" />}>
-        Processing settings
+        {t("Processing settings")}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>After capture ends</DialogTitle>
+          <DialogTitle>{t("After capture ends")}</DialogTitle>
           <DialogDescription>
-            Recognize speakers first, then polish the transcript automatically.
+            {t(
+              "Recognize speakers first, then polish the transcript automatically."
+            )}
           </DialogDescription>
         </DialogHeader>
         <FieldGroup>
           {[
             {
-              label: "Speaker separation",
+              label: t("Speaker separation"),
               capability: "diarization" as const,
               value: diarization,
               set: setDiarization,
             },
             {
-              label: "Grammar polish",
+              label: t("Grammar polish"),
               capability: "chat" as const,
               value: grammar,
               set: setGrammar,
@@ -126,7 +131,7 @@ export function LiveProcessingSettings({
                   <SelectContent>
                     <SelectGroup>
                       <SelectLabel>{field.label}</SelectLabel>
-                      <SelectItem value="none">Off</SelectItem>
+                      <SelectItem value="none">{t("Off")}</SelectItem>
                       {choices.map((e) => (
                         <SelectItem key={e.id} value={e.id}>
                           {e.name}
@@ -137,8 +142,9 @@ export function LiveProcessingSettings({
                 </Select>
                 {field.capability === "diarization" ? (
                   <FieldDescription>
-                    Audio recording is automatically enabled for speaker
-                    separation.
+                    {t(
+                      "Audio recording is automatically enabled for speaker separation."
+                    )}
                   </FieldDescription>
                 ) : null}
               </Field>
@@ -147,7 +153,7 @@ export function LiveProcessingSettings({
         </FieldGroup>
         {error ? (
           <p role="alert" className="text-sm text-destructive">
-            {error}
+            {t(error)}
           </p>
         ) : null}
         <DialogFooter>
@@ -156,10 +162,10 @@ export function LiveProcessingSettings({
             variant="outline"
             onClick={() => setOpen(false)}
           >
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button disabled={busy} onClick={() => void save()}>
-            {busy ? "Saving…" : "Save settings"}
+            {busy ? t("Saving…") : t("Save settings")}
           </Button>
         </DialogFooter>
       </DialogContent>

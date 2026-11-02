@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ImageIcon, LoaderCircle } from "lucide-react"
 import Image from "next/image"
@@ -75,6 +76,8 @@ export function SpeakerVideoCaptions({
   onSpeakersChange: (speakers: TranscriptionSpeaker[]) => void
   onSeek: (offsetMs: number) => void
 }) {
+  const { t } = useTranslations()
+
   const [open, setOpen] = useState(false)
   const [run, setRun] = useState<CaptionRun | null>(null)
   const [endpoints, setEndpoints] = useState<Endpoint[]>([])
@@ -252,9 +255,9 @@ export function SpeakerVideoCaptions({
     <div className="space-y-2 rounded-lg bg-muted/50 p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="font-medium">Names from video captions</p>
+          <p className="font-medium">{t("Names from video captions")}</p>
           <p className="text-xs text-muted-foreground">
-            Match printed name captions to speaker turns.
+            {t("Match printed name captions to speaker turns.")}
           </p>
         </div>
         <Button
@@ -267,48 +270,53 @@ export function SpeakerVideoCaptions({
         >
           <ImageIcon className="size-4" />
           {active
-            ? "View analysis"
+            ? t("View analysis")
             : run
-              ? "Review captions"
-              : "Read name captions"}
+              ? t("Review captions")
+              : t("Read name captions")}
         </Button>
       </div>
       {active && (
         <div role="status" className="space-y-2">
           <p className="text-xs text-muted-foreground">
             {run?.status === "queued"
-              ? "Queued · waiting for an analysis worker"
-              : `Reading name captions · ${analyzed} of ${total} images analyzed`}
+              ? t("Queued · waiting for an analysis worker")
+              : t(
+                  "Reading name captions · {value0} of {value1} images analyzed",
+                  { value0: analyzed, value1: total }
+                )}
           </p>
           <Progress
-            aria-label="Name caption analysis"
+            aria-label={t("Name caption analysis")}
             value={total ? (analyzed / total) * 100 : 0}
           />
         </div>
       )}
       {!available && !active && (
         <p className="text-xs text-muted-foreground">
-          Analysis requires a completed video with an available source file.
+          {t(
+            "Analysis requires a completed video with an available source file."
+          )}
         </p>
       )}
       {error && !open && (
         <p role="alert" className="text-destructive">
-          {error}
+          {t(error)}
         </p>
       )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Read speaker name captions</DialogTitle>
+            <DialogTitle>{t("Read speaker name captions")}</DialogTitle>
             <DialogDescription>
-              Read visible text in the lower half of selected video frames and
-              match it to audio speaker labels. Manually named speakers stay
-              unchanged.
+              {t(
+                "Read visible text in the lower half of selected video frames and match it to audio speaker labels. Manually named speakers stay unchanged."
+              )}
             </DialogDescription>
           </DialogHeader>
           {error && (
             <p role="alert" className="text-sm text-destructive">
-              {error}
+              {t(error)}
             </p>
           )}
           {run && (
@@ -320,13 +328,13 @@ export function SpeakerVideoCaptions({
                 <p className="font-medium">
                   {active
                     ? run.status === "queued"
-                      ? "Waiting to start"
-                      : "Reading name captions"
+                      ? t("Waiting to start")
+                      : t("Reading name captions")
                     : run.status === "completed"
-                      ? "Caption analysis complete"
+                      ? t("Caption analysis complete")
                       : run.status === "cancelled"
-                        ? "Analysis cancelled"
-                        : "Analysis failed"}
+                        ? t("Analysis cancelled")
+                        : t("Analysis failed")}
                 </p>
                 {active && (
                   <Button
@@ -335,23 +343,26 @@ export function SpeakerVideoCaptions({
                     disabled={busy}
                     onClick={cancel}
                   >
-                    Cancel analysis
+                    {t("Cancel analysis")}
                   </Button>
                 )}
               </div>
               <p className="text-muted-foreground">
-                {analyzed} of {total} images analyzed
-                {failedImages ? ` · ${failedImages} could not be read` : ""}
+                {analyzed} {t("of")} {total} {t("images analyzed")}
+                {failedImages
+                  ? t(" · {value0} could not be read", { value0: failedImages })
+                  : ""}
               </p>
               {active && (
                 <>
                   <Progress
-                    aria-label="Name caption analysis"
+                    aria-label={t("Name caption analysis")}
                     value={total ? (analyzed / total) * 100 : 0}
                   />
                   <p className="text-xs text-muted-foreground">
-                    You can leave this page. Analysis continues in the
-                    background.
+                    {t(
+                      "You can leave this page. Analysis continues in the background."
+                    )}
                   </p>
                 </>
               )}
@@ -362,8 +373,9 @@ export function SpeakerVideoCaptions({
               )}
               {run.status === "completed" && !run.results.length && (
                 <p>
-                  No reliable name captions were found. Existing speaker names
-                  remain unchanged.
+                  {t(
+                    "No reliable name captions were found. Existing speaker names remain unchanged."
+                  )}
                 </p>
               )}
               {run.results.map((result) => (
@@ -373,15 +385,17 @@ export function SpeakerVideoCaptions({
                 >
                   <p className="font-medium">
                     {speakers.find((item) => item.id === result.speakerId)
-                      ?.label ?? "Speaker"}{" "}
+                      ?.label ?? t("Speaker")}{" "}
                     → {result.name}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {result.applied
-                      ? "Automatically applied"
+                      ? t("Automatically applied")
                       : result.conflict
-                        ? "Conflicting captions · review before accepting"
-                        : "Suggestion · accept or dismiss in the speaker list"}{" "}
+                        ? t("Conflicting captions · review before accepting")
+                        : t(
+                            "Suggestion · accept or dismiss in the speaker list"
+                          )}{" "}
                     · {Math.round(result.confidence * 100)}%
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -412,7 +426,7 @@ export function SpeakerVideoCaptions({
             <div className="space-y-4">
               <Field>
                 <FieldLabel htmlFor="caption-endpoint">
-                  Vision endpoint
+                  {t("Vision endpoint")}
                 </FieldLabel>
                 <Select
                   value={endpointId}
@@ -429,8 +443,8 @@ export function SpeakerVideoCaptions({
                     <SelectValue
                       placeholder={
                         loadingEndpoints
-                          ? "Loading endpoints…"
-                          : "Select a vision endpoint"
+                          ? t("Loading endpoints…")
+                          : t("Select a vision endpoint")
                       }
                     />
                   </SelectTrigger>
@@ -445,12 +459,15 @@ export function SpeakerVideoCaptions({
               </Field>
               {!loadingEndpoints && !endpoints.length && (
                 <p className="text-sm text-muted-foreground">
-                  Configure an enabled endpoint with vision capability in
-                  Settings → Endpoints to read video images.
+                  {t(
+                    "Configure an enabled endpoint with vision capability in Settings → Endpoints to read video images."
+                  )}
                 </p>
               )}
               <Field>
-                <FieldLabel htmlFor="caption-model">Vision model</FieldLabel>
+                <FieldLabel htmlFor="caption-model">
+                  {t("Vision model")}
+                </FieldLabel>
                 <Input
                   id="caption-model"
                   value={model}
@@ -464,7 +481,9 @@ export function SpeakerVideoCaptions({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="caption-budget">Maximum images</FieldLabel>
+                <FieldLabel htmlFor="caption-budget">
+                  {t("Maximum images")}
+                </FieldLabel>
                 <Select
                   value={budget}
                   onValueChange={(value) => setBudget(value ?? "24")}
@@ -486,8 +505,9 @@ export function SpeakerVideoCaptions({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Up to four images per unnamed speaker. The budget stays fixed
-                  for long videos; each image uses one model request.
+                  {t(
+                    "Up to four images per unnamed speaker. The budget stays fixed for long videos; each image uses one model request."
+                  )}
                 </p>
               </Field>
               <div className="flex items-start justify-between gap-4">
@@ -496,11 +516,12 @@ export function SpeakerVideoCaptions({
                     htmlFor="caption-auto-apply"
                     className="text-sm font-medium"
                   >
-                    Apply consistent matches automatically
+                    {t("Apply consistent matches automatically")}
                   </label>
                   <p className="text-xs text-muted-foreground">
-                    Requires at least three matching images across two speech
-                    turns, with no conflicting name.
+                    {t(
+                      "Requires at least three matching images across two speech turns, with no conflicting name."
+                    )}
                   </p>
                 </div>
                 <Switch
@@ -510,8 +531,9 @@ export function SpeakerVideoCaptions({
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Selected frame crops are sent to the chosen endpoint when you
-                start. This reads printed names; it does not identify faces.
+                {t(
+                  "Selected frame crops are sent to the chosen endpoint when you start. This reads printed names; it does not identify faces."
+                )}
               </p>
               <Button
                 className="w-full"
@@ -529,7 +551,7 @@ export function SpeakerVideoCaptions({
                 onClick={start}
               >
                 {busy && <LoaderCircle className="size-4 animate-spin" />}
-                {run ? "Start new analysis" : "Start caption analysis"}
+                {run ? t("Start new analysis") : t("Start caption analysis")}
               </Button>
             </div>
           )}
@@ -544,7 +566,7 @@ export function SpeakerVideoCaptions({
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>
-              Caption evidence · {timestamp(image?.offsetMs ?? 0)}
+              {t("Caption evidence ·")} {timestamp(image?.offsetMs ?? 0)}
             </DialogTitle>
             <DialogDescription>
               {observation?.caption || "Selected lower-third video crop"}
@@ -552,7 +574,7 @@ export function SpeakerVideoCaptions({
           </DialogHeader>
           {imageError ? (
             <p role="alert" className="text-sm text-destructive">
-              {imageError}
+              {t(imageError)}
             </p>
           ) : imageURL ? (
             <Image
@@ -560,12 +582,15 @@ export function SpeakerVideoCaptions({
               height={540}
               unoptimized
               src={imageURL}
-              alt={`Video caption at ${timestamp(image?.offsetMs ?? 0)}: ${observation?.caption ?? ""}`}
+              alt={t("Video caption at {value0}: {value1}", {
+                value0: timestamp(image?.offsetMs ?? 0),
+                value1: observation?.caption ?? "",
+              })}
               className="max-h-[60dvh] w-full rounded-lg object-contain"
             />
           ) : (
             <p role="status" className="text-sm text-muted-foreground">
-              Loading evidence image…
+              {t("Loading evidence image…")}
             </p>
           )}
           <Button
@@ -576,7 +601,7 @@ export function SpeakerVideoCaptions({
               setOpen(false)
             }}
           >
-            Go to this moment in video
+            {t("Go to this moment in video")}
           </Button>
         </DialogContent>
       </Dialog>

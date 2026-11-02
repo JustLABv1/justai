@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Home, Info } from "lucide-react"
@@ -61,7 +62,11 @@ import {
   FocusWorkspaceSidebar,
   railNavigation,
 } from "@/components/focus-workspace-sidebar"
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
 import { initialsFor } from "@/lib/identity"
 
 type WorkspaceStatus = "loading" | "ready" | "error"
@@ -72,7 +77,13 @@ type DeleteTarget =
 
 const HISTORY_OPEN_STORAGE_KEY = "justai.chat-history-open"
 
-export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: boolean }) {
+export function Workspace({
+  defaultSidebarOpen = true,
+}: {
+  defaultSidebarOpen?: boolean
+}) {
+  const { t } = useTranslations()
+
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -261,7 +272,9 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
           "/api/v1/auth/me"
         )
         if (cancelled) return
-        const onboarding = await api.get<{ completed: boolean }>("/api/v1/onboarding")
+        const onboarding = await api.get<{ completed: boolean }>(
+          "/api/v1/onboarding"
+        )
         if (cancelled) return
         if (!onboarding.completed) {
           router.replace("/setup")
@@ -1101,7 +1114,7 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
     return (
       <main className="flex min-h-full flex-1 items-center justify-center bg-background p-6">
         <Alert className="max-w-md" variant="destructive">
-          <AlertTitle>Workspace unavailable</AlertTitle>
+          <AlertTitle>{t("Workspace unavailable")}</AlertTitle>
           <AlertDescription className="flex flex-col gap-4">
             <span>{loadError || "Please sign in again to continue."}</span>
             <Button
@@ -1109,7 +1122,7 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
               variant="outline"
               onClick={() => setReloadToken((value) => value + 1)}
             >
-              Try again
+              {t("Try again")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -1174,7 +1187,9 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
           <WorkspaceHeader activeView={activeView} />
           {Object.keys(featureErrors).length > 0 && (
             <Alert className="m-4 mb-0 shrink-0" variant="destructive">
-              <AlertTitle>Some workspace features need attention</AlertTitle>
+              <AlertTitle>
+                {t("Some workspace features need attention")}
+              </AlertTitle>
               <AlertDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 {Object.entries(featureErrors).map(([key, message]) => (
                   <span key={key}>
@@ -1186,7 +1201,7 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
                   variant="outline"
                   onClick={() => setReloadToken((value) => value + 1)}
                 >
-                  Retry
+                  {t("Retry")}
                 </Button>
               </AlertDescription>
             </Alert>
@@ -1198,12 +1213,13 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
                 <Info />
                 <AlertTitle>
                   {activeView === "video-transcription"
-                    ? "Video transcription is disabled"
-                    : "Live transcription is disabled"}
+                    ? t("Video transcription is disabled")
+                    : t("Live transcription is disabled")}
                 </AlertTitle>
                 <AlertDescription>
-                  This capability was intentionally disabled by a platform
-                  administrator.
+                  {t(
+                    "This capability was intentionally disabled by a platform administrator."
+                  )}
                 </AlertDescription>
               </Alert>
             )}
@@ -1214,12 +1230,13 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
               <Alert className="m-4 mb-0 shrink-0 border-muted-foreground/20 bg-muted/30">
                 <Info />
                 <AlertTitle>
-                  {route.settingsTab === "knowledge" ? "Knowledge" : "MCP"} is
-                  disabled
+                  {route.settingsTab === "knowledge" ? t("Knowledge") : "MCP"}{" "}
+                  {t("is disabled")}
                 </AlertTitle>
                 <AlertDescription>
-                  This capability was intentionally disabled by a platform
-                  administrator.
+                  {t(
+                    "This capability was intentionally disabled by a platform administrator."
+                  )}
                 </AlertDescription>
               </Alert>
             )}
@@ -1272,7 +1289,7 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
             {activeView === "transcription" &&
               sessionViewMatches &&
               (disabledFeatures.transcription ? (
-                <FeatureDisabledPanel label="Live transcription" />
+                <FeatureDisabledPanel label={t("Live transcription")} />
               ) : (
                 <LiveTranscriptionView
                   endpoints={endpoints}
@@ -1293,7 +1310,7 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
             {activeView === "video-transcription" &&
               sessionViewMatches &&
               (disabledFeatures.transcription ? (
-                <FeatureDisabledPanel label="Video transcription" />
+                <FeatureDisabledPanel label={t("Video transcription")} />
               ) : (
                 <VideoTranscriptionView
                   endpoints={endpoints}
@@ -1349,7 +1366,7 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
             )}
             {activeView === "knowledge" &&
               (disabledFeatures.knowledge ? (
-                <FeatureDisabledPanel label="Knowledge" />
+                <FeatureDisabledPanel label={t("Knowledge")} />
               ) : (
                 <KnowledgeWorkspace
                   notes={notes}
@@ -1432,24 +1449,26 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete{" "}
+              {t("Delete")}{" "}
               {deleteTarget?.kind === "conversation"
                 ? "chat"
-                : "live transcription"}
+                : t("live transcription")}
               ?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              “{deleteTarget?.title}” and its stored data will be permanently
-              removed. This action cannot be undone.
+              “{deleteTarget?.title}
+              {t(
+                "” and its stored data will be permanently removed. This action cannot be undone."
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => void confirmDelete()}
             >
-              Delete permanently
+              {t("Delete permanently")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1459,6 +1478,8 @@ export function Workspace({ defaultSidebarOpen = true }: { defaultSidebarOpen?: 
 }
 
 function WorkspaceLoading() {
+  const { t } = useTranslations()
+
   return (
     <main
       className="flex min-h-full flex-1 items-center justify-center bg-background p-6"
@@ -1468,38 +1489,44 @@ function WorkspaceLoading() {
     >
       <div className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
         <BrandMark className="size-10" />
-        <p className="text-sm text-muted-foreground">Loading JustAI…</p>
+        <p className="text-sm text-muted-foreground">{t("Loading JustAI…")}</p>
       </div>
     </main>
   )
 }
 
 function FeatureDisabledPanel({ label }: { label: string }) {
+  const { t } = useTranslations()
+
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center p-6">
       <Alert className="max-w-md border-muted-foreground/20 bg-muted/30">
         <Info />
-        <AlertTitle>{label} is currently disabled</AlertTitle>
+        <AlertTitle>
+          {label} {t("is currently disabled")}
+        </AlertTitle>
         <AlertDescription>
-          A platform administrator has intentionally disabled this capability.
-          It will be available again when the platform control is enabled.
+          {t(
+            "A platform administrator has intentionally disabled this capability. It will be available again when the platform control is enabled."
+          )}
         </AlertDescription>
       </Alert>
     </div>
   )
 }
 
-
 function WorkspaceHeader({ activeView }: { activeView: ViewId }) {
+  const { t } = useTranslations()
+
   const item = railNavigation.find((entry) => entry.id === activeView)
   const label =
     item?.label ??
     (activeView === "settings"
-      ? "Settings"
+      ? t("Settings")
       : activeView === "profile"
-        ? "Profile"
+        ? t("Profile")
         : activeView === "admin"
-          ? "Platform admin"
+          ? t("Platform admin")
           : "JustAI")
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
@@ -1508,17 +1535,19 @@ function WorkspaceHeader({ activeView }: { activeView: ViewId }) {
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
-            <Home aria-label="Home" className="size-3.5" />
+            <Home aria-label={t("Home")} className="size-3.5" />
           </BreadcrumbItem>
           {item?.group && (
             <>
               <BreadcrumbSeparator />
-              <BreadcrumbItem className="text-muted-foreground">{item.group}</BreadcrumbItem>
+              <BreadcrumbItem className="text-muted-foreground">
+                {item.group}
+              </BreadcrumbItem>
             </>
           )}
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage>{label}</BreadcrumbPage>
+            <BreadcrumbPage>{t(label)}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>

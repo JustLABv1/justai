@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslatedConfig } from "@/components/locale-provider"
 import { useEffect, useState } from "react"
 import { useAuiState } from "@assistant-ui/react"
 import {
@@ -7,7 +8,7 @@ import {
   type LexicalComposerInputProps,
 } from "@assistant-ui/react-lexical"
 
-const prompts = [
+const promptsMessages = [
   "Hi, what do you need today?",
   "What would you like to explore?",
   "Let's turn your ideas into a plan.",
@@ -18,6 +19,8 @@ const prompts = [
 export function AnimatedComposerInput(
   props: Omit<LexicalComposerInputProps, "placeholder">
 ) {
+  const prompts = useTranslatedConfig(promptsMessages)
+
   const empty = useAuiState((state) => state.composer.text.length === 0)
   const [focused, setFocused] = useState(false)
   const [reducedMotion, setReducedMotion] = useState(true)
@@ -59,7 +62,7 @@ export function AnimatedComposerInput(
       clearInterval(rotation)
       clearTimeout(swap)
     }
-  }, [empty, focused, reducedMotion, visible])
+  }, [empty, focused, reducedMotion, visible, prompts])
 
   return (
     <LexicalComposerInput

@@ -2,6 +2,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import {
+  useTranslations,
+  useTranslatedConfig,
+} from "@/components/locale-provider"
+
+import {
   type ReactNode,
   useCallback,
   useEffect,
@@ -123,7 +128,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-const tabs: Array<{ id: AdminTab; label: string; icon: typeof ShieldCheck }> = [
+const tabsMessages: Array<{
+  id: AdminTab
+  label: string
+  icon: typeof ShieldCheck
+}> = [
   { id: "overview", label: "Overview", icon: Activity },
   { id: "users", label: "Users", icon: UsersRound },
   { id: "workspaces", label: "Workspaces", icon: Network },
@@ -137,7 +146,7 @@ const tabs: Array<{ id: AdminTab; label: string; icon: typeof ShieldCheck }> = [
   { id: "audit", label: "Audit", icon: KeyRound },
 ]
 
-const tabGroups: Array<{ label: string; ids: AdminTab[] }> = [
+const tabGroupsMessages: Array<{ label: string; ids: AdminTab[] }> = [
   { label: "Overview", ids: ["overview"] },
   { label: "Operations", ids: ["users", "workspaces", "endpoints", "mcp"] },
   {
@@ -195,6 +204,11 @@ export function PlatformAdminShell({
   onTabChange,
   user,
 }: PlatformAdminShellProps) {
+  const tabs = useTranslatedConfig(tabsMessages)
+  const tabGroups = useTranslatedConfig(tabGroupsMessages)
+
+  const { t } = useTranslations()
+
   const [error, setError] = useState("")
   const [settings, setSettings] = useState<PlatformSettings>(emptySettings)
   const [dashboard, setDashboard] = useState<AdminDashboardResponse | null>(
@@ -448,30 +462,32 @@ export function PlatformAdminShell({
   }
 
   const title = useMemo(
-    () => tabs.find((tab) => tab.id === activeTab)?.label ?? "Overview",
-    [activeTab]
+    () => tabs.find((tab) => tab.id === activeTab)?.label ?? t("Overview"),
+    [activeTab, tabs, t]
   )
 
   const pageAction =
     activeTab === "endpoints" ? (
       <Button onClick={() => setEndpointCreateRequest((value) => value + 1)}>
-        <Plus data-icon="inline-start" aria-hidden="true" /> Add endpoint
+        <Plus data-icon="inline-start" aria-hidden="true" /> {t("Add endpoint")}
       </Button>
     ) : activeTab === "mcp" ? (
       <Button onClick={() => setMcpCreateRequest((value) => value + 1)}>
-        <Plus data-icon="inline-start" aria-hidden="true" /> Add MCP server
+        <Plus data-icon="inline-start" aria-hidden="true" />{" "}
+        {t("Add MCP server")}
       </Button>
     ) : activeTab === "authentication" ? (
       <Button
         onClick={() => setAuthenticationCreateRequest((value) => value + 1)}
       >
-        <Plus data-icon="inline-start" aria-hidden="true" /> Add provider
+        <Plus data-icon="inline-start" aria-hidden="true" /> {t("Add provider")}
       </Button>
     ) : activeTab === "announcements" ? (
       <Button
         onClick={() => setAnnouncementCreateRequest((value) => value + 1)}
       >
-        <Plus data-icon="inline-start" aria-hidden="true" /> Add announcement
+        <Plus data-icon="inline-start" aria-hidden="true" />{" "}
+        {t("Add announcement")}
       </Button>
     ) : null
 
@@ -480,9 +496,9 @@ export function PlatformAdminShell({
       <div className="mx-auto max-w-2xl py-12">
         <Alert variant="destructive">
           <AlertTriangle />
-          <AlertTitle>Platform administrator access required</AlertTitle>
+          <AlertTitle>{t("Platform administrator access required")}</AlertTitle>
           <AlertDescription>
-            This area is restricted to platform administrators.
+            {t("This area is restricted to platform administrators.")}
           </AlertDescription>
         </Alert>
       </div>
@@ -495,19 +511,20 @@ export function PlatformAdminShell({
         <PageHeading>
           <PageTitle>{title}</PageTitle>
           <PageDescription>
-            Global controls for JustAI users, workspaces, integrations, and
-            reliability.
+            {t(
+              "Global controls for JustAI users, workspaces, integrations, and reliability."
+            )}
           </PageDescription>
         </PageHeading>
         <PageActions>
           {pageAction}
           <Button
-            aria-label="Refresh admin data"
+            aria-label={t("Refresh admin data")}
             onClick={() => void load()}
             variant="outline"
             size="sm"
           >
-            <RefreshCw data-icon="inline-start" /> Refresh
+            <RefreshCw data-icon="inline-start" /> {t("Refresh")}
           </Button>
         </PageActions>
       </PageHeader>
@@ -515,7 +532,7 @@ export function PlatformAdminShell({
       <SettingsLayout>
         <SettingsNav
           activeId={activeTab}
-          aria-label="Platform administration"
+          aria-label={t("Platform administration")}
           groups={tabGroups.map((group) => ({
             label: group.label,
             items: group.ids.flatMap((id) => {
@@ -534,8 +551,8 @@ export function PlatformAdminShell({
           {error && (
             <Alert className="mb-4" variant="destructive">
               <AlertTriangle />
-              <AlertTitle>Admin request failed</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <AlertTitle>{t("Admin request failed")}</AlertTitle>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
 
@@ -580,7 +597,7 @@ export function PlatformAdminShell({
                 resultLabel={activeTab === "users" ? "users" : "workspaces"}
                 resultTotal={listTotal || undefined}
                 search={{
-                  label: `Search ${activeTab}`,
+                  label: t("Search {value0}", { value0: activeTab }),
                   onChange: (value) => {
                     setListPage(1)
                     setQuery(value)
@@ -598,7 +615,7 @@ export function PlatformAdminShell({
                   }}
                 >
                   <SelectTrigger
-                    aria-label={`${activeTab} status`}
+                    aria-label={t("{value0} status", { value0: activeTab })}
                     className="h-8 min-w-36 sm:min-w-40"
                     size="sm"
                   >
@@ -606,14 +623,20 @@ export function PlatformAdminShell({
                   </SelectTrigger>
                   <SelectContent align="start">
                     <SelectGroup>
-                      <SelectItem value="all">All statuses</SelectItem>
-                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="all">{t("All statuses")}</SelectItem>
+                      <SelectItem value="active">{t("Active")}</SelectItem>
                       {activeTab === "users" ? (
-                        <SelectItem value="suspended">Suspended</SelectItem>
+                        <SelectItem value="suspended">
+                          {t("Suspended")}
+                        </SelectItem>
                       ) : (
                         <>
-                          <SelectItem value="archived">Archived</SelectItem>
-                          <SelectItem value="suspended">Suspended</SelectItem>
+                          <SelectItem value="archived">
+                            {t("Archived")}
+                          </SelectItem>
+                          <SelectItem value="suspended">
+                            {t("Suspended")}
+                          </SelectItem>
                         </>
                       )}
                     </SelectGroup>
@@ -656,7 +679,7 @@ export function PlatformAdminShell({
           )}
           {activeTab === "mcp" && (
             <InventoryView
-              title="Global and scoped MCP servers"
+              title={t("Global and scoped MCP servers")}
               items={servers}
               kind="mcp"
               onRefresh={() => void load()}
@@ -713,6 +736,8 @@ function ControlsView({
   onToggle: (key: PlatformControlKey, value: boolean) => void
   onSave: () => void
 }) {
+  const { t } = useTranslations()
+
   const controls: Array<[PlatformControlKey, string, string]> = [
     ["loginEnabled", "Login", "Allow existing users to sign in."],
     [
@@ -724,19 +749,19 @@ function ControlsView({
     ["aiEnabled", "AI chat", "Allow model requests and text chat."],
     [
       "agentsEnabled",
-      "Agents",
+      t("Agents"),
       "Allow agent runs, delegation, and workflow scheduling.",
     ],
-    ["voiceEnabled", "Voice", "Allow realtime voice and speech synthesis."],
+    ["voiceEnabled", t("Voice"), "Allow realtime voice and speech synthesis."],
     [
       "transcriptionEnabled",
-      "Transcription",
+      t("Transcription"),
       "Allow rooms, capture, and processing.",
     ],
     ["mcpEnabled", "MCP", "Allow MCP discovery, attachment, and execution."],
     [
       "knowledgeEnabled",
-      "Knowledge",
+      t("Knowledge"),
       "Allow source upload, indexing, and retrieval.",
     ],
     [
@@ -748,8 +773,10 @@ function ControlsView({
   return (
     <div className="flex flex-col gap-4">
       <SettingsSection
-        description="Switches are saved as soon as they change. Existing sessions remain valid when login is disabled."
-        title="Platform controls"
+        description={t(
+          "Switches are saved as soon as they change. Existing sessions remain valid when login is disabled."
+        )}
+        title={t("Platform controls")}
       >
         {controls.map(([key, label, description]) => (
           <SettingsRow
@@ -760,7 +787,9 @@ function ControlsView({
           >
             <div className="flex items-center gap-2">
               {savingControl === key && (
-                <span className="text-xs text-muted-foreground">Saving…</span>
+                <span className="text-xs text-muted-foreground">
+                  {t("Saving…")}
+                </span>
               )}
               <Switch
                 checked={Boolean(settings[key])}
@@ -773,25 +802,27 @@ function ControlsView({
         ))}
       </SettingsSection>
       <SettingsSection
-        description="Shown with a 503 response while a capability is disabled."
+        description={t(
+          "Shown with a 503 response while a capability is disabled."
+        )}
         footer={
           <Button disabled={savingMaintenance} onClick={onSave}>
             {savingMaintenance ? "Saving…" : "Save maintenance message"}
           </Button>
         }
-        title="Maintenance message"
+        title={t("Maintenance message")}
       >
         <SettingsRow
-          description="Visible to anyone who hits a disabled capability."
+          description={t("Visible to anyone who hits a disabled capability.")}
           htmlFor="platform-maintenance-message"
-          label="Message"
+          label={t("Message")}
         >
           <Textarea
             id="platform-maintenance-message"
             onChange={(event) =>
               onChange({ ...settings, maintenanceMessage: event.target.value })
             }
-            placeholder="We’re performing maintenance…"
+            placeholder={t("We’re performing maintenance…")}
             value={settings.maintenanceMessage}
           />
         </SettingsRow>
@@ -811,12 +842,14 @@ function Pagination({
   total: number
   onPageChange: (page: number) => void
 }) {
+  const { t } = useTranslations()
+
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   if (pageCount <= 1) return null
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
       <span className="min-w-0 flex-1">
-        Page {page} of {pageCount} · {total} total
+        {t("Page")} {page} {t("of")} {pageCount} · {total} total
       </span>
       <div className="flex shrink-0 gap-1">
         <Button
@@ -825,7 +858,7 @@ function Pagination({
           size="sm"
           variant="outline"
         >
-          Previous
+          {t("Previous")}
         </Button>
         <Button
           disabled={page >= pageCount}
@@ -833,7 +866,7 @@ function Pagination({
           size="sm"
           variant="outline"
         >
-          Next
+          {t("Next")}
         </Button>
       </div>
     </div>
@@ -857,6 +890,8 @@ function UsersView({
   total: number
   onPageChange: (page: number) => void
 }) {
+  const { t, locale } = useTranslations()
+
   const [detail, setDetail] = useState<any | null>(null)
   const [actionError, setActionError] = useState("")
   const [loadingDetail, setLoadingDetail] = useState(false)
@@ -885,11 +920,11 @@ function UsersView({
     const isSuspension = patch.status === "suspended"
     const verb = isAdminChange
       ? item.platformAdmin
-        ? "Demote"
-        : "Promote"
+        ? t("Demote")
+        : t("Promote")
       : isSuspension
-        ? "Suspend"
-        : "Unsuspend"
+        ? t("Suspend")
+        : t("Unsuspend")
     setConfirmAction({
       item,
       patch,
@@ -897,8 +932,12 @@ function UsersView({
       description: isAdminChange
         ? `${verb}ing platform administrator access changes this user's ability to manage every workspace and platform control.`
         : isSuspension
-          ? "Suspending this user revokes their current access and prevents new sign-ins until they are unsuspended."
-          : "This user will be able to sign in and use their workspaces again.",
+          ? t(
+              "Suspending this user revokes their current access and prevents new sign-ins until they are unsuspended."
+            )
+          : t(
+              "This user will be able to sign in and use their workspaces again."
+            ),
       confirmLabel: verb,
       destructive: isSuspension || isAdminChange,
     })
@@ -1018,26 +1057,27 @@ function UsersView({
     <>
       <Card>
         <CardHeader>
-          <CardTitle>Users</CardTitle>
+          <CardTitle>{t("Users")}</CardTitle>
           <CardDescription>
-            Search, inspect, suspend, revoke sessions, and manage platform
-            administrator access.
+            {t(
+              "Search, inspect, suspend, revoke sessions, and manage platform administrator access."
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 overflow-x-auto">
           {actionError && (
             <Alert variant="destructive">
               <AlertTriangle />
-              <AlertDescription>{actionError}</AlertDescription>
+              <AlertDescription>{t(actionError)}</AlertDescription>
             </Alert>
           )}
           <table className="w-full min-w-[36rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
-                <th className="p-2">User</th>
-                <th className="p-2">Status</th>
-                <th className="p-2">Access</th>
-                <th className="p-2 text-right">Actions</th>
+                <th className="p-2">{t("User")}</th>
+                <th className="p-2">{t("Status")}</th>
+                <th className="p-2">{t("Access")}</th>
+                <th className="p-2 text-right">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1065,7 +1105,8 @@ function UsersView({
                   <td className="p-2">
                     {item.platformAdmin ? (
                       <Badge>
-                        <ShieldCheck data-icon="inline-start" /> platform admin
+                        <ShieldCheck data-icon="inline-start" />{" "}
+                        {t("platform admin")}
                       </Badge>
                     ) : (
                       <span className="text-muted-foreground">standard</span>
@@ -1077,7 +1118,9 @@ function UsersView({
                         <DropdownMenuTrigger
                           render={
                             <Button
-                              aria-label={`Actions for ${item.displayName}`}
+                              aria-label={t("Actions for {value0}", {
+                                value0: item.displayName,
+                              })}
                               size="icon-sm"
                               variant="ghost"
                             />
@@ -1090,7 +1133,7 @@ function UsersView({
                             <DropdownMenuItem
                               onClick={() => void showDetail(item.id)}
                             >
-                              <Search aria-hidden="true" /> Details
+                              <Search aria-hidden="true" /> {t("Details")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
@@ -1108,8 +1151,8 @@ function UsersView({
                                 <Ban aria-hidden="true" />
                               )}
                               {item.status === "suspended"
-                                ? "Unsuspend"
-                                : "Suspend"}
+                                ? t("Unsuspend")
+                                : t("Suspend")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
@@ -1120,13 +1163,14 @@ function UsersView({
                             >
                               <ShieldCheck aria-hidden="true" />
                               {item.platformAdmin
-                                ? "Demote admin"
-                                : "Promote admin"}
+                                ? t("Demote admin")
+                                : t("Promote admin")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => setRevokeCandidate(item)}
                             >
-                              <RefreshCw aria-hidden="true" /> Revoke sessions
+                              <RefreshCw aria-hidden="true" />{" "}
+                              {t("Revoke sessions")}
                             </DropdownMenuItem>
                           </DropdownMenuGroup>
                           <DropdownMenuSeparator />
@@ -1134,7 +1178,7 @@ function UsersView({
                             onClick={() => void openDeleteUser(item)}
                             variant="destructive"
                           >
-                            <Trash2 aria-hidden="true" /> Delete user
+                            <Trash2 aria-hidden="true" /> {t("Delete user")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1146,7 +1190,7 @@ function UsersView({
           </table>
           {users.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No users match this search.
+              {t("No users match this search.")}
             </p>
           )}
           <Pagination
@@ -1170,7 +1214,7 @@ function UsersView({
           </DialogHeader>
           {loadingDetail ? (
             <p className="text-sm text-muted-foreground">
-              Loading user details…
+              {t("Loading user details…")}
             </p>
           ) : detail ? (
             <div className="flex flex-col gap-4 text-sm">
@@ -1184,10 +1228,12 @@ function UsersView({
                 >
                   {detail.user.status ?? "active"}
                 </Badge>
-                {detail.user.platformAdmin && <Badge>platform admin</Badge>}
+                {detail.user.platformAdmin && (
+                  <Badge>{t("platform admin")}</Badge>
+                )}
               </div>
               <div>
-                <p className="font-medium">Workspaces</p>
+                <p className="font-medium">{t("Workspaces")}</p>
                 <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
                   {(detail.organizations ?? []).map((organization: any) => (
                     <div
@@ -1200,12 +1246,14 @@ function UsersView({
                       </span>
                     </div>
                   ))}
-                  {detail.organizations?.length === 0 && <span>None</span>}
+                  {detail.organizations?.length === 0 && (
+                    <span>{t("None")}</span>
+                  )}
                 </div>
               </div>
               <div>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="font-medium">Sessions</p>
+                  <p className="font-medium">{t("Sessions")}</p>
                   <span className="text-xs text-muted-foreground">
                     {
                       (detail.sessions ?? []).filter(
@@ -1226,11 +1274,13 @@ function UsersView({
                           <Badge
                             variant={session.active ? "default" : "secondary"}
                           >
-                            {session.active ? "Active" : "Revoked"}
+                            {session.active ? t("Active") : t("Revoked")}
                           </Badge>
                           <span className="text-muted-foreground">
-                            Last seen{" "}
-                            {new Date(session.lastSeenAt).toLocaleString()}
+                            {t("Last seen")}{" "}
+                            {new Date(session.lastSeenAt).toLocaleString(
+                              locale
+                            )}
                           </span>
                         </div>
                         <p className="mt-1 truncate text-muted-foreground">
@@ -1241,22 +1291,22 @@ function UsersView({
                       </div>
                       {session.active && (
                         <Button
-                          aria-label="Revoke this session"
+                          aria-label={t("Revoke this session")}
                           disabled={sessionBusyId === session.id}
                           onClick={() => void revokeSession(session)}
                           size="sm"
                           variant="outline"
                         >
                           {sessionBusyId === session.id
-                            ? "Revoking…"
-                            : "Revoke"}
+                            ? t("Revoking…")
+                            : t("Revoke")}
                         </Button>
                       )}
                     </div>
                   ))}
                   {detail.sessions?.length === 0 && (
                     <span className="text-muted-foreground">
-                      No sessions found.
+                      {t("No sessions found.")}
                     </span>
                   )}
                 </div>
@@ -1267,7 +1317,7 @@ function UsersView({
             {detail?.user && (
               <DropdownMenu>
                 <DropdownMenuTrigger render={<Button variant="outline" />}>
-                  <MoreHorizontal data-icon="inline-start" /> Actions
+                  <MoreHorizontal data-icon="inline-start" /> {t("Actions")}
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuGroup>
@@ -1287,8 +1337,8 @@ function UsersView({
                         <Ban aria-hidden="true" />
                       )}
                       {detail.user.status === "suspended"
-                        ? "Unsuspend"
-                        : "Suspend"}
+                        ? t("Unsuspend")
+                        : t("Suspend")}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() =>
@@ -1299,13 +1349,13 @@ function UsersView({
                     >
                       <ShieldCheck aria-hidden="true" />
                       {detail.user.platformAdmin
-                        ? "Demote admin"
-                        : "Promote admin"}
+                        ? t("Demote admin")
+                        : t("Promote admin")}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setRevokeCandidate(detail.user)}
                     >
-                      <RefreshCw aria-hidden="true" /> Revoke sessions
+                      <RefreshCw aria-hidden="true" /> {t("Revoke sessions")}
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
@@ -1313,7 +1363,7 @@ function UsersView({
                     onClick={() => void openDeleteUser(detail.user)}
                     variant="destructive"
                   >
-                    <Trash2 aria-hidden="true" /> Delete user
+                    <Trash2 aria-hidden="true" /> {t("Delete user")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -1332,15 +1382,21 @@ function UsersView({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Permanently delete user</DialogTitle>
+            <DialogTitle>{t("Permanently delete user")}</DialogTitle>
             <DialogDescription>
               {deleteCandidate?.owned.length
-                ? `This also deletes ${deleteCandidate.owned.length} owned workspace(s). Type DELETE to continue.`
-                : `This permanently removes ${deleteCandidate?.item.displayName ?? "this user"}. Type DELETE to continue.`}
+                ? t(
+                    "This also deletes {value0} owned workspace(s). Type DELETE to continue.",
+                    { value0: deleteCandidate.owned.length }
+                  )
+                : t(
+                    "This permanently removes {value0}. Type DELETE to continue.",
+                    { value0: deleteCandidate?.item.displayName ?? "this user" }
+                  )}
             </DialogDescription>
           </DialogHeader>
           <Input
-            aria-label="Type DELETE to confirm"
+            aria-label={t("Type DELETE to confirm")}
             autoComplete="off"
             onChange={(event) => setDeletePhrase(event.target.value)}
             placeholder="DELETE"
@@ -1348,14 +1404,14 @@ function UsersView({
           />
           <DialogFooter>
             <Button onClick={() => setDeleteCandidate(null)} variant="outline">
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={deletePhrase !== "DELETE"}
               onClick={() => void deleteUser()}
               variant="destructive"
             >
-              Delete user
+              {t("Delete user")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1366,14 +1422,17 @@ function UsersView({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Revoke active sessions</DialogTitle>
+            <DialogTitle>{t("Revoke active sessions")}</DialogTitle>
             <DialogDescription>
-              {`Every active session for ${revokeCandidate?.displayName ?? "this user"} will need to sign in again.`}
+              {t(
+                "Every active session for {value0} will need to sign in again.",
+                { value0: revokeCandidate?.displayName ?? "this user" }
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button onClick={() => setRevokeCandidate(null)} variant="outline">
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               onClick={() => {
@@ -1394,7 +1453,7 @@ function UsersView({
                   .finally(() => setRevokeCandidate(null))
               }}
             >
-              Revoke sessions
+              {t("Revoke sessions")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1430,6 +1489,8 @@ function WorkspacesView({
   total: number
   onPageChange: (page: number) => void
 }) {
+  const { t } = useTranslations()
+
   const [detail, setDetail] = useState<any | null>(null)
   const [actionError, setActionError] = useState("")
   const [transferCandidate, setTransferCandidate] = useState<any | null>(null)
@@ -1452,22 +1513,28 @@ function WorkspacesView({
       !isArchive && (item.status === "suspended" || nextStatus === "suspended")
     const verb = isArchive
       ? item.status === "archived"
-        ? "Restore"
-        : "Archive"
+        ? t("Restore")
+        : t("Archive")
       : isSuspend
-        ? "Suspend"
-        : "Unsuspend"
+        ? t("Suspend")
+        : t("Unsuspend")
     setConfirmAction({
       item,
       patch,
       title: `${verb} ${item.name ?? "this workspace"}?`,
       description: isArchive
         ? item.status === "archived"
-          ? "Restoring this workspace makes its resources available to members again."
-          : "Archiving this workspace hides it from normal use until an administrator restores it."
+          ? t(
+              "Restoring this workspace makes its resources available to members again."
+            )
+          : t(
+              "Archiving this workspace hides it from normal use until an administrator restores it."
+            )
         : isSuspend
-          ? "Suspending this workspace blocks member access and active work until it is unsuspended."
-          : "Members will be able to access this workspace again.",
+          ? t(
+              "Suspending this workspace blocks member access and active work until it is unsuspended."
+            )
+          : t("Members will be able to access this workspace again."),
       confirmLabel: verb,
     })
   }
@@ -1500,26 +1567,27 @@ function WorkspacesView({
     <>
       <Card>
         <CardHeader>
-          <CardTitle>Workspaces</CardTitle>
+          <CardTitle>{t("Workspaces")}</CardTitle>
           <CardDescription>
-            Archive, suspend, inspect, transfer, or delete organization-owned
-            resources.
+            {t(
+              "Archive, suspend, inspect, transfer, or delete organization-owned resources."
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 overflow-x-auto">
           {actionError && (
             <Alert variant="destructive">
               <AlertTriangle />
-              <AlertDescription>{actionError}</AlertDescription>
+              <AlertDescription>{t(actionError)}</AlertDescription>
             </Alert>
           )}
           <table className="w-full min-w-[36rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
-                <th className="p-2">Workspace</th>
-                <th className="p-2">Members</th>
-                <th className="p-2">Status</th>
-                <th className="p-2 text-right">Actions</th>
+                <th className="p-2">{t("Workspace")}</th>
+                <th className="p-2">{t("Members")}</th>
+                <th className="p-2">{t("Status")}</th>
+                <th className="p-2 text-right">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1555,7 +1623,9 @@ function WorkspacesView({
                         <DropdownMenuTrigger
                           render={
                             <Button
-                              aria-label={`Actions for ${item.name}`}
+                              aria-label={t("Actions for {value0}", {
+                                value0: item.name,
+                              })}
                               size="icon-sm"
                               variant="ghost"
                             />
@@ -1568,7 +1638,7 @@ function WorkspacesView({
                             <DropdownMenuItem
                               onClick={() => void showDetail(item.id)}
                             >
-                              <Search aria-hidden="true" /> Details
+                              <Search aria-hidden="true" /> {t("Details")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
@@ -1586,8 +1656,8 @@ function WorkspacesView({
                                 <Archive aria-hidden="true" />
                               )}
                               {item.status === "archived"
-                                ? "Restore"
-                                : "Archive"}
+                                ? t("Restore")
+                                : t("Archive")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
@@ -1605,8 +1675,8 @@ function WorkspacesView({
                                 <Ban aria-hidden="true" />
                               )}
                               {item.status === "suspended"
-                                ? "Unsuspend"
-                                : "Suspend"}
+                                ? t("Unsuspend")
+                                : t("Suspend")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => {
@@ -1614,8 +1684,8 @@ function WorkspacesView({
                                 setTransferCandidate(item)
                               }}
                             >
-                              <ArrowLeftRight aria-hidden="true" /> Transfer
-                              ownership
+                              <ArrowLeftRight aria-hidden="true" />{" "}
+                              {t("Transfer ownership")}
                             </DropdownMenuItem>
                           </DropdownMenuGroup>
                           <DropdownMenuSeparator />
@@ -1626,7 +1696,8 @@ function WorkspacesView({
                             }}
                             variant="destructive"
                           >
-                            <Trash2 aria-hidden="true" /> Delete workspace
+                            <Trash2 aria-hidden="true" />{" "}
+                            {t("Delete workspace")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1638,7 +1709,7 @@ function WorkspacesView({
           </table>
           {workspaces.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No workspaces match this search.
+              {t("No workspaces match this search.")}
             </p>
           )}
           <Pagination
@@ -1670,23 +1741,23 @@ function WorkspacesView({
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <ResourceCount
-                  label="Conversations"
+                  label={t("Conversations")}
                   value={detail.resources?.conversations}
                 />
                 <ResourceCount
-                  label="Endpoints"
+                  label={t("Endpoints")}
                   value={detail.resources?.endpoints}
                 />
                 <ResourceCount
-                  label="MCP servers"
+                  label={t("MCP servers")}
                   value={detail.resources?.mcpServers}
                 />
                 <ResourceCount
-                  label="Knowledge sources"
+                  label={t("Knowledge sources")}
                   value={detail.resources?.knowledgeSources}
                 />
                 <ResourceCount
-                  label="Transcriptions"
+                  label={t("Transcriptions")}
                   value={detail.resources?.transcriptions}
                 />
               </div>
@@ -1707,7 +1778,7 @@ function WorkspacesView({
           )}
           <DialogFooter>
             <Button onClick={() => setDetail(null)} variant="outline">
-              Close
+              {t("Close")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1718,17 +1789,17 @@ function WorkspacesView({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Transfer workspace ownership</DialogTitle>
+            <DialogTitle>{t("Transfer workspace ownership")}</DialogTitle>
             <DialogDescription>
-              Enter the user ID of the new owner for{" "}
+              {t("Enter the user ID of the new owner for")}{" "}
               {transferCandidate?.name ?? "this workspace"}.
             </DialogDescription>
           </DialogHeader>
           <Input
-            aria-label="New owner user ID"
+            aria-label={t("New owner user ID")}
             autoComplete="off"
             onChange={(event) => setNewOwnerID(event.target.value)}
-            placeholder="User ID"
+            placeholder={t("User ID")}
             value={newOwnerID}
           />
           <DialogFooter>
@@ -1736,7 +1807,7 @@ function WorkspacesView({
               onClick={() => setTransferCandidate(null)}
               variant="outline"
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={!newOwnerID.trim()}
@@ -1760,7 +1831,7 @@ function WorkspacesView({
                   .finally(() => setTransferCandidate(null))
               }}
             >
-              Transfer ownership
+              {t("Transfer ownership")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1771,22 +1842,22 @@ function WorkspacesView({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Permanently delete workspace</DialogTitle>
+            <DialogTitle>{t("Permanently delete workspace")}</DialogTitle>
             <DialogDescription>
-              Type {deleteCandidate?.name ?? "the workspace name"} to
-              permanently delete this workspace and its data.
+              {t("Type")} {deleteCandidate?.name ?? "the workspace name"}{" "}
+              {t("to permanently delete this workspace and its data.")}
             </DialogDescription>
           </DialogHeader>
           <Input
-            aria-label="Type workspace name to confirm"
+            aria-label={t("Type workspace name to confirm")}
             autoComplete="off"
             onChange={(event) => setDeletePhrase(event.target.value)}
-            placeholder={deleteCandidate?.name ?? "Workspace name"}
+            placeholder={deleteCandidate?.name ?? t("Workspace name")}
             value={deletePhrase}
           />
           <DialogFooter>
             <Button onClick={() => setDeleteCandidate(null)} variant="outline">
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={deletePhrase !== deleteCandidate?.name}
@@ -1809,7 +1880,7 @@ function WorkspacesView({
               }}
               variant="destructive"
             >
-              Delete workspace
+              {t("Delete workspace")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1860,6 +1931,8 @@ function InventoryView({
   onRefresh: () => void
   createRequest?: number
 }) {
+  const { t } = useTranslations()
+
   const [actionError, setActionError] = useState("")
   const [actionNotice, setActionNotice] = useState("")
   const [busyId, setBusyId] = useState("")
@@ -1891,7 +1964,7 @@ function InventoryView({
   const createIconInputRef = useRef<HTMLInputElement | null>(null)
   const createIconObjectURLRef = useRef("")
   const createRequestRef = useRef(createRequest ?? 0)
-  const resourceLabel = kind === "endpoint" ? "Endpoint" : "MCP server"
+  const resourceLabel = kind === "endpoint" ? t("Endpoint") : t("MCP server")
 
   const resetCreateIcon = useCallback(() => {
     if (createIconObjectURLRef.current) {
@@ -2011,7 +2084,7 @@ function InventoryView({
     void runAction(
       itemId,
       {
-        label: "Uploading logo…",
+        label: t("Uploading logo…"),
         cancellable: false,
         stoppedMessage: "MCP logo upload was stopped.",
       },
@@ -2147,8 +2220,9 @@ function InventoryView({
           <div>
             <CardTitle>{title}</CardTitle>
             <CardDescription>
-              Shared catalog resources are visible to eligible workspaces and
-              remain mutable here only.
+              {t(
+                "Shared catalog resources are visible to eligible workspaces and remain mutable here only."
+              )}
             </CardDescription>
           </div>
         </CardHeader>
@@ -2156,7 +2230,7 @@ function InventoryView({
           {actionError && (
             <Alert variant="destructive">
               <AlertTriangle />
-              <AlertDescription>{actionError}</AlertDescription>
+              <AlertDescription>{t(actionError)}</AlertDescription>
             </Alert>
           )}
           {actionNotice && (
@@ -2165,17 +2239,17 @@ function InventoryView({
               className="rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
               role="status"
             >
-              {actionNotice}
+              {t(actionNotice)}
             </div>
           )}
           <table className="w-full min-w-[48rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
-                <th className="p-2">Name</th>
-                <th className="p-2">Scope</th>
-                <th className="p-2">Provider / URL</th>
-                <th className="p-2">State</th>
-                <th className="p-2 text-right">Actions</th>
+                <th className="p-2">{t("Name")}</th>
+                <th className="p-2">{t("Scope")}</th>
+                <th className="p-2">{t("Provider / URL")}</th>
+                <th className="p-2">{t("State")}</th>
+                <th className="p-2 text-right">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -2188,10 +2262,10 @@ function InventoryView({
                   (kind === "mcp" ? String(item.lastError || "") : "")
                 const scopeLabel =
                   item.scopeType === "global"
-                    ? "Platform"
+                    ? t("Platform")
                     : item.scopeType === "organization"
-                      ? "Workspace"
-                      : "Personal"
+                      ? t("Workspace")
+                      : t("Personal")
                 return (
                   <tr className="border-b last:border-0" key={item.id}>
                     <td className="p-2 font-medium">
@@ -2233,14 +2307,16 @@ function InventoryView({
                           className="mt-1 max-w-xs text-xs break-words text-destructive"
                           role="alert"
                         >
-                          {itemError}
+                          {t(itemError)}
                         </p>
                       )}
                     </td>
                     <td className="p-2">
                       {kind === "mcp" && (
                         <input
-                          aria-label={`Choose logo for ${item.name}`}
+                          aria-label={t("Choose logo for {value0}", {
+                            value0: item.name,
+                          })}
                           className="hidden"
                           id={`mcp-logo-${item.id}`}
                           type="file"
@@ -2264,11 +2340,13 @@ function InventoryView({
                                 aria-hidden="true"
                                 className="size-3.5 animate-spin"
                               />
-                              <span>{rowAction?.label ?? "Working…"}</span>
+                              <span>{rowAction?.label ?? t("Working…")}</span>
                             </div>
                             {rowAction?.cancellable && (
                               <Button
-                                aria-label={`Stop action for ${item.name}`}
+                                aria-label={t("Stop action for {value0}", {
+                                  value0: item.name,
+                                })}
                                 onClick={stopActiveAction}
                                 size="sm"
                                 type="button"
@@ -2278,7 +2356,7 @@ function InventoryView({
                                   data-icon="inline-start"
                                   aria-hidden="true"
                                 />
-                                Stop
+                                {t("Stop")}
                               </Button>
                             )}
                           </div>
@@ -2287,7 +2365,9 @@ function InventoryView({
                             <DropdownMenuTrigger
                               render={
                                 <Button
-                                  aria-label={`Actions for ${item.name}`}
+                                  aria-label={t("Actions for {value0}", {
+                                    value0: item.name,
+                                  })}
                                   disabled={busy}
                                   size="icon-sm"
                                   variant="ghost"
@@ -2324,7 +2404,7 @@ function InventoryView({
                                   ) : (
                                     <CheckCircle2 aria-hidden="true" />
                                   )}
-                                  {item.enabled ? "Disable" : "Enable"}
+                                  {item.enabled ? t("Disable") : t("Enable")}
                                 </DropdownMenuItem>
                                 {kind === "endpoint" && (
                                   <DropdownMenuItem
@@ -2348,8 +2428,8 @@ function InventoryView({
                                       )
                                     }
                                   >
-                                    <TestTube2 aria-hidden="true" /> Test
-                                    endpoint
+                                    <TestTube2 aria-hidden="true" />{" "}
+                                    {t("Test endpoint")}
                                   </DropdownMenuItem>
                                 )}
                                 {kind === "mcp" && (
@@ -2374,8 +2454,8 @@ function InventoryView({
                                         )
                                       }
                                     >
-                                      <TestTube2 aria-hidden="true" /> Test
-                                      server
+                                      <TestTube2 aria-hidden="true" />{" "}
+                                      {t("Test server")}
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       disabled={busy}
@@ -2396,8 +2476,8 @@ function InventoryView({
                                         )
                                       }
                                     >
-                                      <Wrench aria-hidden="true" /> Discover
-                                      tools
+                                      <Wrench aria-hidden="true" />{" "}
+                                      {t("Discover tools")}
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       disabled={busy}
@@ -2407,7 +2487,8 @@ function InventoryView({
                                           ?.click()
                                       }
                                     >
-                                      <ImagePlus aria-hidden="true" /> Set logo
+                                      <ImagePlus aria-hidden="true" />{" "}
+                                      {t("Set logo")}
                                     </DropdownMenuItem>
                                   </>
                                 )}
@@ -2418,10 +2499,10 @@ function InventoryView({
                                 variant="destructive"
                                 onClick={() => setDeleteCandidate(item)}
                               >
-                                <Trash2 aria-hidden="true" /> Delete{" "}
+                                <Trash2 aria-hidden="true" /> {t("Delete")}{" "}
                                 {kind === "endpoint"
                                   ? "endpoint"
-                                  : "MCP server"}
+                                  : t("MCP server")}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -2435,7 +2516,7 @@ function InventoryView({
           </table>
           {items.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No resources found.
+              {t("No resources found.")}
             </p>
           )}
         </CardContent>
@@ -2451,13 +2532,22 @@ function InventoryView({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete {resourceLabel.toLowerCase()}</DialogTitle>
+            <DialogTitle>
+              {t("Delete")} {resourceLabel.toLowerCase()}
+            </DialogTitle>
             <DialogDescription>
-              {`Permanently delete ${deleteCandidate?.name ?? `this ${resourceLabel.toLowerCase()}`}? Type DELETE to confirm. This cannot be undone.`}
+              {t(
+                "Permanently delete {value0}? Type DELETE to confirm. This cannot be undone.",
+                {
+                  value0:
+                    deleteCandidate?.name ??
+                    `this ${resourceLabel.toLowerCase()}`,
+                }
+              )}
             </DialogDescription>
           </DialogHeader>
           <Input
-            aria-label="Type DELETE to confirm"
+            aria-label={t("Type DELETE to confirm")}
             autoComplete="off"
             onChange={(event) => setDeletePhrase(event.target.value)}
             placeholder="DELETE"
@@ -2465,7 +2555,7 @@ function InventoryView({
           />
           <DialogFooter>
             <Button onClick={() => setDeleteCandidate(null)} variant="outline">
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               disabled={deletePhrase !== "DELETE"}
@@ -2477,7 +2567,7 @@ function InventoryView({
                 void runAction(
                   resource.id,
                   {
-                    label: "Deleting…",
+                    label: t("Deleting…"),
                     cancellable: false,
                     stoppedMessage: `${resourceLabel} deletion was stopped.`,
                   },
@@ -2490,7 +2580,7 @@ function InventoryView({
               }}
               variant="destructive"
             >
-              Delete {resourceLabel.toLowerCase()}
+              {t("Delete")} {resourceLabel.toLowerCase()}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2507,35 +2597,38 @@ function InventoryView({
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              Add {kind === "endpoint" ? "endpoint" : "MCP server"}
+              {t("Add")} {kind === "endpoint" ? "endpoint" : t("MCP server")}
             </DialogTitle>
             <DialogDescription>
-              Register a resource in the shared platform catalog or assign it to
-              a specific scope.
+              {t(
+                "Register a resource in the shared platform catalog or assign it to a specific scope."
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
             {createError && (
               <Alert variant="destructive">
                 <AlertTriangle />
-                <AlertDescription>{createError}</AlertDescription>
+                <AlertDescription>{t(createError)}</AlertDescription>
               </Alert>
             )}
             <label className="grid gap-1 text-sm">
-              Name
+              {t("Name")}
               <Input
                 value={createValues.name}
                 onChange={(event) =>
                   updateCreateValue("name", event.target.value)
                 }
                 placeholder={
-                  kind === "endpoint" ? "Production LLM" : "Knowledge tools"
+                  kind === "endpoint"
+                    ? t("Production LLM")
+                    : t("Knowledge tools")
                 }
               />
             </label>
             {kind === "mcp" && (
               <label className="grid gap-1 text-sm">
-                Logo (optional)
+                {t("Logo (optional)")}
                 <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
                   <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
                     {createIconPreview ? (
@@ -2543,7 +2636,7 @@ function InventoryView({
                       // a Next Image host allowlist.
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        alt="Selected MCP logo preview"
+                        alt={t("Selected MCP logo preview")}
                         className="size-full rounded-md object-contain"
                         src={createIconPreview}
                       />
@@ -2567,12 +2660,13 @@ function InventoryView({
                     <p className="truncate text-sm font-medium">
                       {createIconFile?.name ??
                         (createIconPreview
-                          ? "Logo selected"
-                          : "No logo selected")}
+                          ? t("Logo selected")
+                          : t("No logo selected"))}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on
-                      upload
+                      {t(
+                        "PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on upload"
+                      )}
                     </p>
                     <div className="pt-1">
                       <Button
@@ -2585,7 +2679,9 @@ function InventoryView({
                           data-icon="inline-start"
                           aria-hidden="true"
                         />
-                        {createIconPreview ? "Replace logo" : "Choose logo"}
+                        {createIconPreview
+                          ? t("Replace logo")
+                          : t("Choose logo")}
                       </Button>
                       {createIconPreview && (
                         <Button
@@ -2596,7 +2692,7 @@ function InventoryView({
                           onClick={resetCreateIcon}
                         >
                           <X data-icon="inline-start" aria-hidden="true" />
-                          Remove logo
+                          {t("Remove logo")}
                         </Button>
                       )}
                     </div>
@@ -2605,7 +2701,7 @@ function InventoryView({
               </label>
             )}
             <div className="grid gap-1 text-sm">
-              <span className="font-medium">Scope</span>
+              <span className="font-medium">{t("Scope")}</span>
               <Select
                 items={{
                   global: "Global",
@@ -2622,16 +2718,18 @@ function InventoryView({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="global">Global</SelectItem>
-                    <SelectItem value="organization">Organization</SelectItem>
-                    <SelectItem value="user">User</SelectItem>
+                    <SelectItem value="global">{t("Global")}</SelectItem>
+                    <SelectItem value="organization">
+                      {t("Organization")}
+                    </SelectItem>
+                    <SelectItem value="user">{t("User")}</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
             {createValues.scopeType !== "global" && (
               <label className="grid gap-1 text-sm">
-                Scope ID
+                {t("Scope ID")}
                 <Input
                   value={createValues.scopeId}
                   onChange={(event) =>
@@ -2644,7 +2742,7 @@ function InventoryView({
             {kind === "endpoint" ? (
               <>
                 <div className="grid gap-1 text-sm">
-                  <span className="font-medium">Provider</span>
+                  <span className="font-medium">{t("Provider")}</span>
                   <Select
                     items={{
                       "openai-compatible": "OpenAI-compatible",
@@ -2668,19 +2766,19 @@ function InventoryView({
                     <SelectContent>
                       <SelectGroup>
                         <SelectItem value="openai-compatible">
-                          OpenAI-compatible
+                          {t("OpenAI-compatible")}
                         </SelectItem>
                         <SelectItem value="openai">OpenAI</SelectItem>
                         <SelectItem value="gemini">Gemini</SelectItem>
                         <SelectItem value="anthropic">Anthropic</SelectItem>
                         <SelectItem value="ollama">Ollama</SelectItem>
-                        <SelectItem value="mock">JustAI demo</SelectItem>
+                        <SelectItem value="mock">{t("JustAI demo")}</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                 </div>
                 <label className="grid gap-1 text-sm">
-                  Base URL
+                  {t("Base URL")}
                   <Input
                     value={createValues.baseUrl}
                     onChange={(event) =>
@@ -2690,7 +2788,7 @@ function InventoryView({
                   />
                 </label>
                 <label className="grid gap-1 text-sm">
-                  Chat model
+                  {t("Chat model")}
                   <Input
                     value={createValues.chatModel}
                     onChange={(event) =>
@@ -2700,21 +2798,21 @@ function InventoryView({
                   />
                 </label>
                 <label className="grid gap-1 text-sm">
-                  API key or token
+                  {t("API key or token")}
                   <Input
                     type="password"
                     value={createValues.credential}
                     onChange={(event) =>
                       updateCreateValue("credential", event.target.value)
                     }
-                    placeholder="Stored encrypted on the backend"
+                    placeholder={t("Stored encrypted on the backend")}
                   />
                 </label>
               </>
             ) : (
               <>
                 <label className="grid gap-1 text-sm">
-                  MCP endpoint URL
+                  {t("MCP endpoint URL")}
                   <Input
                     value={createValues.endpointUrl}
                     onChange={(event) =>
@@ -2724,7 +2822,7 @@ function InventoryView({
                   />
                 </label>
                 <div className="grid gap-1 text-sm">
-                  <span className="font-medium">Authentication</span>
+                  <span className="font-medium">{t("Authentication")}</span>
                   <Select
                     items={{
                       none: "No auth",
@@ -2741,8 +2839,10 @@ function InventoryView({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="none">No auth</SelectItem>
-                        <SelectItem value="api_key">Bearer token</SelectItem>
+                        <SelectItem value="none">{t("No auth")}</SelectItem>
+                        <SelectItem value="api_key">
+                          {t("Bearer token")}
+                        </SelectItem>
                         <SelectItem value="oauth">OAuth 2.1</SelectItem>
                       </SelectGroup>
                     </SelectContent>
@@ -2751,16 +2851,18 @@ function InventoryView({
                     createValues.authType === "oauth") && (
                     <p className="text-xs text-muted-foreground">
                       {createValues.authType === "none"
-                        ? "No credential is sent to this server."
-                        : "Sign in with the provider after saving; JustAI manages the access and refresh tokens."}
+                        ? t("No credential is sent to this server.")
+                        : t(
+                            "Sign in with the provider after saving; JustAI manages the access and refresh tokens."
+                          )}
                     </p>
                   )}
                 </div>
                 {createValues.authType !== "none" && (
                   <label className="grid gap-1 text-sm">
                     {createValues.authType === "oauth"
-                      ? "Access token (optional)"
-                      : "Bearer token"}
+                      ? t("Access token (optional)")
+                      : t("Bearer token")}
                     <Input
                       type="password"
                       value={createValues.credential}
@@ -2769,13 +2871,13 @@ function InventoryView({
                       }
                       placeholder={
                         createValues.authType === "oauth"
-                          ? "Leave blank to authorize after saving"
-                          : "Paste the token from your MCP provider"
+                          ? t("Leave blank to authorize after saving")
+                          : t("Paste the token from your MCP provider")
                       }
                     />
                     {createValues.authType === "oauth" && (
                       <span className="text-xs text-muted-foreground">
-                        Leave blank to authorize after saving.
+                        {t("Leave blank to authorize after saving.")}
                       </span>
                     )}
                   </label>
@@ -2783,17 +2885,17 @@ function InventoryView({
                 {createValues.authType === "oauth" && (
                   <>
                     <label className="grid gap-1 text-sm">
-                      OAuth client ID
+                      {t("OAuth client ID")}
                       <Input
                         value={createValues.oauthClientId}
                         onChange={(event) =>
                           updateCreateValue("oauthClientId", event.target.value)
                         }
-                        placeholder="Client ID"
+                        placeholder={t("Client ID")}
                       />
                     </label>
                     <label className="grid gap-1 text-sm">
-                      Authorization URL (optional)
+                      {t("Authorization URL (optional)")}
                       <Input
                         value={createValues.oauthAuthorizationUrl}
                         onChange={(event) =>
@@ -2806,7 +2908,7 @@ function InventoryView({
                       />
                     </label>
                     <label className="grid gap-1 text-sm">
-                      Token URL (optional)
+                      {t("Token URL (optional)")}
                       <Input
                         value={createValues.oauthTokenUrl}
                         onChange={(event) =>
@@ -2816,7 +2918,7 @@ function InventoryView({
                       />
                     </label>
                     <label className="grid gap-1 text-sm">
-                      OAuth scopes (optional)
+                      {t("OAuth scopes (optional)")}
                       <Input
                         value={createValues.oauthScopes}
                         onChange={(event) =>
@@ -2836,10 +2938,10 @@ function InventoryView({
               variant="outline"
               onClick={() => setCreateOpen(false)}
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button disabled={createBusy} onClick={() => void createResource()}>
-              {createBusy ? "Creating…" : "Create"}
+              {createBusy ? t("Creating…") : t("Create")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2866,6 +2968,8 @@ function healthState(value: any): HealthState {
 }
 
 function HealthStatusBadge({ state }: { state: HealthState }) {
+  const { t } = useTranslations()
+
   const Icon =
     state === "healthy"
       ? CheckCircle2
@@ -2874,12 +2978,12 @@ function HealthStatusBadge({ state }: { state: HealthState }) {
         : AlertTriangle
   const label =
     state === "healthy"
-      ? "Operational"
+      ? t("Operational")
       : state === "warning"
-        ? "Degraded"
+        ? t("Degraded")
         : state === "down"
-          ? "Unavailable"
-          : "Unknown"
+          ? t("Unavailable")
+          : t("Unknown")
   const variant =
     state === "healthy"
       ? "default"
@@ -2954,17 +3058,21 @@ function HealthPanel({
 }
 
 function HealthView({ health }: { health: Record<string, any> | null }) {
+  const { t, locale } = useTranslations()
+
   if (!health) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Service health</CardTitle>
+          <CardTitle>{t("Service health")}</CardTitle>
           <CardDescription>
-            Runtime checks for the platform services and background workers.
+            {t(
+              "Runtime checks for the platform services and background workers."
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="py-8 text-sm text-muted-foreground">
-          Loading health checks…
+          {t("Loading health checks…")}
         </CardContent>
       </Card>
     )
@@ -2995,7 +3103,10 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
     typeof health?.checkedAt === "string" ? new Date(health.checkedAt) : null
   const checkedLabel =
     checkedAt && !Number.isNaN(checkedAt.getTime())
-      ? checkedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      ? checkedAt.toLocaleTimeString(locale, {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
       : null
   const enabledProviders = Number(providers.enabled ?? 0)
   const totalProviders = Number(providers.total ?? 0)
@@ -3013,16 +3124,18 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>Service health</CardTitle>
+            <CardTitle>{t("Service health")}</CardTitle>
             <CardDescription>
-              Runtime checks for the platform services and background workers.
+              {t(
+                "Runtime checks for the platform services and background workers."
+              )}
             </CardDescription>
           </div>
           <CardAction className="flex flex-col items-end gap-1.5">
             <HealthStatusBadge state={overallState} />
             {checkedLabel && (
               <span className="text-xs text-muted-foreground">
-                Checked at {checkedLabel}
+                {t("Checked at")} {checkedLabel}
               </span>
             )}
           </CardAction>
@@ -3031,38 +3144,40 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <HealthPanel
-          description="PostgreSQL connectivity and readiness."
+          description={t("PostgreSQL connectivity and readiness.")}
           icon={Database}
           state={healthState(database)}
-          title="Database"
+          title={t("Database")}
         >
           <HealthMetric
             detail="Primary application store"
-            label="Connection"
+            label={t("Connection")}
             value={database.ok ? "Connected" : "Unavailable"}
           />
         </HealthPanel>
         <HealthPanel
-          description="Configured model endpoints and recent request failures."
+          description={t(
+            "Configured model endpoints and recent request failures."
+          )}
           icon={Globe2}
           state={healthState(providers)}
-          title="Providers"
+          title={t("Providers")}
         >
           <div className="grid gap-2 sm:grid-cols-2">
             <HealthMetric
               detail={`${totalProviders} configured`}
-              label="Enabled"
+              label={t("Enabled")}
               value={`${enabledProviders} / ${totalProviders}`}
             />
             <HealthMetric
               detail="Last hour"
-              label="Recent failures"
+              label={t("Recent failures")}
               value={String(providerFailures)}
             />
           </div>
         </HealthPanel>
         <HealthPanel
-          description="Connected tool servers and MCP execution."
+          description={t("Connected tool servers and MCP execution.")}
           icon={Wrench}
           state={healthState(mcp)}
           title="MCP"
@@ -3070,45 +3185,49 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
           <div className="grid gap-2 sm:grid-cols-2">
             <HealthMetric
               detail={`${totalMcp} configured`}
-              label="Enabled"
+              label={t("Enabled")}
               value={`${enabledMcp} / ${totalMcp}`}
             />
             <HealthMetric
               detail="Across configured servers"
-              label="Failures"
+              label={t("Failures")}
               value={String(mcpFailures)}
             />
           </div>
         </HealthPanel>
         <HealthPanel
-          description="Agent execution, durable runs, and approval backlog."
+          description={t(
+            "Agent execution, durable runs, and approval backlog."
+          )}
           icon={Activity}
           state={healthState(agents)}
-          title="Agents"
+          title={t("Agents")}
         >
           <div className="grid gap-2 sm:grid-cols-3">
             <HealthMetric
               detail="Native and remote"
-              label="Configured"
+              label={t("Configured")}
               value={String(agents.total ?? 0)}
             />
             <HealthMetric
               detail="Currently active"
-              label="Runs"
+              label={t("Runs")}
               value={String(agents.activeRuns ?? 0)}
             />
             <HealthMetric
               detail="Awaiting a decision"
-              label="Approvals"
+              label={t("Approvals")}
               value={String(agents.pendingApprovals ?? 0)}
             />
           </div>
         </HealthPanel>
         <HealthPanel
-          description="Background jobs that keep retrieval and transcription moving."
+          description={t(
+            "Background jobs that keep retrieval and transcription moving."
+          )}
           icon={Activity}
           state={healthState(workers)}
-          title="Workers"
+          title={t("Workers")}
         >
           <div className="grid gap-2 sm:grid-cols-2">
             {workerEntries.map(([label, value]) => (
@@ -3118,7 +3237,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
               >
                 <span className="text-sm">{label}</span>
                 <Badge variant={value ? "default" : "destructive"}>
-                  {value ? "Online" : "Offline"}
+                  {value ? t("Online") : t("Offline")}
                 </Badge>
               </div>
             ))}
@@ -3126,7 +3245,7 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
           {workerDetails.length > 0 && (
             <div className="mt-3 flex flex-col gap-1.5 border-t pt-3">
               <p className="text-xs font-medium text-muted-foreground">
-                Heartbeat diagnostics
+                {t("Heartbeat diagnostics")}
               </p>
               {workerDetails.map((worker: any) => (
                 <div
@@ -3143,10 +3262,12 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
                   </span>
                   <span className="text-muted-foreground">
                     {worker.heartbeatAgeSeconds >= 0
-                      ? `${worker.heartbeatAgeSeconds}s since heartbeat`
+                      ? t("{value0}s since heartbeat", {
+                          value0: worker.heartbeatAgeSeconds,
+                        })
                       : worker.started
-                        ? "Awaiting heartbeat"
-                        : "Not started"}
+                        ? t("Awaiting heartbeat")
+                        : t("Not started")}
                     {worker.lastError ? ` · ${worker.lastError}` : ""}
                   </span>
                 </div>
@@ -3159,13 +3280,19 @@ function HealthView({ health }: { health: Record<string, any> | null }) {
       {(providerFailures > 0 || mcpFailures > 0) && (
         <Alert variant="destructive">
           <AlertTriangle />
-          <AlertTitle>Recent service failures</AlertTitle>
+          <AlertTitle>{t("Recent service failures")}</AlertTitle>
           <AlertDescription>
             {providerFailures > 0 &&
-              `${providerFailures} provider ${providerFailures === 1 ? "failure" : "failures"} recorded in the last hour.`}
+              t("{value0} provider {value1} recorded in the last hour.", {
+                value0: providerFailures,
+                value1: providerFailures === 1 ? "failure" : "failures",
+              })}
             {providerFailures > 0 && mcpFailures > 0 && " "}
             {mcpFailures > 0 &&
-              `${mcpFailures} MCP ${mcpFailures === 1 ? "failure" : "failures"} reported.`}
+              t("{value0} MCP {value1} reported.", {
+                value0: mcpFailures,
+                value1: mcpFailures === 1 ? "failure" : "failures",
+              })}
           </AlertDescription>
         </Alert>
       )}
@@ -3184,6 +3311,8 @@ function AnalyticsView({
   onFiltersChange: (filters: Record<string, string>) => void
   onRefresh: () => void
 }) {
+  const { t, locale } = useTranslations()
+
   const summary = analytics?.summary
   const setFilter = (key: string, value: string) =>
     onFiltersChange({ ...filters, [key]: value })
@@ -3193,49 +3322,50 @@ function AnalyticsView({
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>Analytics</CardTitle>
+          <CardTitle>{t("Analytics")}</CardTitle>
           <CardDescription>
-            Filter request volume, latency, usage, and tool calls across the
-            platform.
+            {t(
+              "Filter request volume, latency, usage, and tool calls across the platform."
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <Input
-            aria-label="Analytics days"
+            aria-label={t("Analytics days")}
             onChange={(event) => setFilter("days", event.target.value)}
-            placeholder="Days (1–365)"
+            placeholder={t("Days (1–365)")}
             value={filters.days}
           />
           <Input
-            aria-label="Analytics from"
+            aria-label={t("Analytics from")}
             onChange={(event) => setFilter("from", event.target.value)}
-            placeholder="From (YYYY-MM-DD)"
+            placeholder={t("From (YYYY-MM-DD)")}
             value={filters.from}
           />
           <Input
-            aria-label="Analytics to"
+            aria-label={t("Analytics to")}
             onChange={(event) => setFilter("to", event.target.value)}
-            placeholder="To (YYYY-MM-DD)"
+            placeholder={t("To (YYYY-MM-DD)")}
             value={filters.to}
           />
           <Input
-            aria-label="Analytics organization"
+            aria-label={t("Analytics organization")}
             onChange={(event) =>
               setFilter("organizationId", event.target.value)
             }
-            placeholder="Organization ID"
+            placeholder={t("Organization ID")}
             value={filters.organizationId}
           />
           <Input
-            aria-label="Analytics endpoint"
+            aria-label={t("Analytics endpoint")}
             onChange={(event) => setFilter("endpointId", event.target.value)}
-            placeholder="Endpoint ID"
+            placeholder={t("Endpoint ID")}
             value={filters.endpointId}
           />
           <Input
-            aria-label="Analytics model"
+            aria-label={t("Analytics model")}
             onChange={(event) => setFilter("model", event.target.value)}
-            placeholder="Model"
+            placeholder={t("Model")}
             value={filters.model}
           />
           <Select
@@ -3245,43 +3375,48 @@ function AnalyticsView({
               setFilter("status", nextValue === "all" ? "" : nextValue)
             }}
           >
-            <SelectTrigger aria-label="Analytics status" className="w-full">
+            <SelectTrigger
+              aria-label={t("Analytics status")}
+              className="w-full"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="running">Running</SelectItem>
-                <SelectItem value="requires-action">Requires action</SelectItem>
-                <SelectItem value="complete">Complete</SelectItem>
-                <SelectItem value="error">Error</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-                <SelectItem value="incomplete">Incomplete</SelectItem>
+                <SelectItem value="all">{t("All statuses")}</SelectItem>
+                <SelectItem value="running">{t("Running")}</SelectItem>
+                <SelectItem value="requires-action">
+                  {t("Requires action")}
+                </SelectItem>
+                <SelectItem value="complete">{t("Complete")}</SelectItem>
+                <SelectItem value="error">{t("Error")}</SelectItem>
+                <SelectItem value="cancelled">{t("Cancelled")}</SelectItem>
+                <SelectItem value="incomplete">{t("Incomplete")}</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
-          <Button onClick={onRefresh}>Apply filters</Button>
+          <Button onClick={onRefresh}>{t("Apply filters")}</Button>
         </CardContent>
       </Card>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          ["Requests", summary?.requests],
-          ["Success", summary?.succeeded],
-          ["Errors", summary?.failed],
+          [t("Requests"), summary?.requests],
+          [t("Success"), summary?.succeeded],
+          [t("Errors"), summary?.failed],
           [
             "P95 latency",
             summary?.p95LatencyMs
               ? `${Math.round(summary.p95LatencyMs)} ms`
               : "—",
           ],
-          ["Total tokens", compactNumber(summary?.totalTokens)],
+          ["Total tokens", compactNumber(summary?.totalTokens, locale)],
           [
             "Average TTFT",
             summary?.averageTtftMs
               ? `${Math.round(summary.averageTtftMs)} ms`
               : "—",
           ],
-          ["Tool calls", summary?.toolCalls],
+          [t("Tool calls"), summary?.toolCalls],
         ].map(([label, value]) => (
           <Card key={String(label)}>
             <CardHeader className="pb-2">
@@ -3298,17 +3433,17 @@ function AnalyticsView({
       <AdminUsageCharts analytics={analytics} showLatency />
       <Card>
         <CardHeader>
-          <CardTitle>Endpoint and model breakdown</CardTitle>
+          <CardTitle>{t("Endpoint and model breakdown")}</CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full min-w-[44rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
-                <th className="p-2">Endpoint</th>
-                <th className="p-2">Model</th>
-                <th className="p-2">Requests</th>
-                <th className="p-2">Errors</th>
-                <th className="p-2">Avg latency</th>
+                <th className="p-2">{t("Endpoint")}</th>
+                <th className="p-2">{t("Model")}</th>
+                <th className="p-2">{t("Requests")}</th>
+                <th className="p-2">{t("Errors")}</th>
+                <th className="p-2">{t("Avg latency")}</th>
               </tr>
             </thead>
             <tbody>
@@ -3330,29 +3465,29 @@ function AnalyticsView({
           </table>
           {!analytics?.byEndpoint?.length && (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              No runs match these filters.
+              {t("No runs match these filters.")}
             </p>
           )}
         </CardContent>
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Daily activity</CardTitle>
+          <CardTitle>{t("Daily activity")}</CardTitle>
           <CardDescription>
-            Request volume, outcomes, latency, and tool calls by UTC day.
+            {t("Request volume, outcomes, latency, and tool calls by UTC day.")}
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full min-w-[44rem] text-left text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
-                <th className="p-2">Date</th>
-                <th className="p-2">Requests</th>
-                <th className="p-2">Success</th>
-                <th className="p-2">Errors</th>
-                <th className="p-2">Cancelled</th>
-                <th className="p-2">Avg latency</th>
-                <th className="p-2">Tool calls</th>
+                <th className="p-2">{t("Date")}</th>
+                <th className="p-2">{t("Requests")}</th>
+                <th className="p-2">{t("Success")}</th>
+                <th className="p-2">{t("Errors")}</th>
+                <th className="p-2">{t("Cancelled")}</th>
+                <th className="p-2">{t("Avg latency")}</th>
+                <th className="p-2">{t("Tool calls")}</th>
               </tr>
             </thead>
             <tbody>
@@ -3373,7 +3508,7 @@ function AnalyticsView({
           </table>
           {!timeSeries.length && (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              No daily activity for this range.
+              {t("No daily activity for this range.")}
             </p>
           )}
         </CardContent>
@@ -3399,6 +3534,8 @@ function AuditView({
   total: number
   onPageChange: (page: number) => void
 }) {
+  const { t, locale } = useTranslations()
+
   const isMobile = useIsMobile()
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false)
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null)
@@ -3413,9 +3550,11 @@ function AuditView({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Audit trail</CardTitle>
+        <CardTitle>{t("Audit trail")}</CardTitle>
         <CardDescription>
-          Administrative mutations are recorded without credentials or tokens.
+          {t(
+            "Administrative mutations are recorded without credentials or tokens."
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -3426,10 +3565,10 @@ function AuditView({
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
-              aria-label="Audit search"
+              aria-label={t("Audit search")}
               className="min-w-0 flex-1"
               onChange={(event) => setFilter("search", event.target.value)}
-              placeholder="Search actions or details"
+              placeholder={t("Search actions or details")}
               value={filters.search}
             />
             <div className="flex flex-wrap items-center gap-2">
@@ -3438,7 +3577,7 @@ function AuditView({
                 render={<Button size="sm" variant="outline" />}
               >
                 <SlidersHorizontal data-icon="inline-start" />
-                {moreFiltersOpen ? "Hide filters" : "More filters"}
+                {moreFiltersOpen ? t("Hide filters") : t("More filters")}
                 {advancedFilterCount > 0 ? (
                   <span className="ml-0.5 rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">
                     {advancedFilterCount}
@@ -3469,50 +3608,50 @@ function AuditView({
                   size="sm"
                   variant="ghost"
                 >
-                  <X data-icon="inline-start" /> Clear filters
+                  <X data-icon="inline-start" /> {t("Clear filters")}
                 </Button>
               ) : null}
             </div>
           </div>
           <CollapsibleContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <Input
-              aria-label="Audit action"
+              aria-label={t("Audit action")}
               onChange={(event) => setFilter("action", event.target.value)}
-              placeholder="Action"
+              placeholder={t("Action")}
               value={filters.action}
             />
             <Input
-              aria-label="Audit resource type"
+              aria-label={t("Audit resource type")}
               onChange={(event) =>
                 setFilter("resourceType", event.target.value)
               }
-              placeholder="Resource type"
+              placeholder={t("Resource type")}
               value={filters.resourceType}
             />
             <Input
-              aria-label="Audit actor"
+              aria-label={t("Audit actor")}
               onChange={(event) => setFilter("actorId", event.target.value)}
-              placeholder="Actor user ID"
+              placeholder={t("Actor user ID")}
               value={filters.actorId}
             />
             <Input
-              aria-label="Audit organization"
+              aria-label={t("Audit organization")}
               onChange={(event) =>
                 setFilter("organizationId", event.target.value)
               }
-              placeholder="Organization ID"
+              placeholder={t("Organization ID")}
               value={filters.organizationId}
             />
             <Input
-              aria-label="Audit from"
+              aria-label={t("Audit from")}
               onChange={(event) => setFilter("from", event.target.value)}
-              placeholder="From (YYYY-MM-DD)"
+              placeholder={t("From (YYYY-MM-DD)")}
               value={filters.from}
             />
             <Input
-              aria-label="Audit to"
+              aria-label={t("Audit to")}
               onChange={(event) => setFilter("to", event.target.value)}
-              placeholder="To (YYYY-MM-DD)"
+              placeholder={t("To (YYYY-MM-DD)")}
               value={filters.to}
             />
           </CollapsibleContent>
@@ -3532,14 +3671,14 @@ function AuditView({
             </div>
             <time className="text-muted-foreground">
               {event.createdAt
-                ? new Date(event.createdAt).toLocaleString()
+                ? new Date(event.createdAt).toLocaleString(locale)
                 : ""}
             </time>
           </button>
         ))}
         {events.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            No audit events found.
+            {t("No audit events found.")}
           </p>
         )}
         <Pagination
@@ -3562,32 +3701,41 @@ function AuditView({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 text-sm sm:grid-cols-2">
-            <AuditDetail label="Actor" value={selectedEvent?.userId} />
+            <AuditDetail label={t("Actor")} value={selectedEvent?.userId} />
             <AuditDetail
-              label="Organization"
+              label={t("Organization")}
               value={selectedEvent?.organizationId}
             />
             <AuditDetail
-              label="Outcome"
+              label={t("Outcome")}
               value={selectedEvent?.outcome ?? "success"}
             />
-            <AuditDetail label="Request ID" value={selectedEvent?.requestId} />
-            <AuditDetail label="IP address" value={selectedEvent?.ipAddress} />
             <AuditDetail
-              label="Time"
+              label={t("Request ID")}
+              value={selectedEvent?.requestId}
+            />
+            <AuditDetail
+              label={t("IP address")}
+              value={selectedEvent?.ipAddress}
+            />
+            <AuditDetail
+              label={t("Time")}
               value={
                 selectedEvent?.createdAt
-                  ? new Date(selectedEvent.createdAt).toLocaleString()
+                  ? new Date(selectedEvent.createdAt).toLocaleString(locale)
                   : undefined
               }
             />
           </div>
           {selectedEvent?.userAgent && (
-            <AuditDetail label="User agent" value={selectedEvent.userAgent} />
+            <AuditDetail
+              label={t("User agent")}
+              value={selectedEvent.userAgent}
+            />
           )}
           <div>
             <p className="mb-1 text-xs font-medium text-muted-foreground">
-              Details
+              {t("Details")}
             </p>
             <pre className="max-h-72 overflow-auto rounded-lg bg-muted/50 p-3 text-xs break-words whitespace-pre-wrap">
               {formatAuditDetails(selectedEvent?.details)}
@@ -3595,7 +3743,7 @@ function AuditView({
           </div>
           <DialogFooter>
             <Button onClick={() => setSelectedEvent(null)} variant="outline">
-              Close
+              {t("Close")}
             </Button>
           </DialogFooter>
         </DialogContent>

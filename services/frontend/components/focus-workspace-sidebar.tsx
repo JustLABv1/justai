@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   Fragment,
   useMemo,
@@ -39,7 +40,13 @@ function sidebarIcon(
   icon: React.ComponentProps<typeof HugeiconsIcon>["icon"]
 ): SidebarIcon {
   return function SidebarGlyph(props) {
-    return <HugeiconsIcon icon={icon} {...props} strokeWidth={Number(props.strokeWidth ?? 1.75)} />
+    return (
+      <HugeiconsIcon
+        icon={icon}
+        {...props}
+        strokeWidth={Number(props.strokeWidth ?? 1.75)}
+      />
+    )
   }
 }
 
@@ -57,6 +64,7 @@ const ShieldCheck = sidebarIcon(Shield01Icon)
 import { BrandMark } from "@/components/brand-mark"
 import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
+import { LanguageMenu } from "@/components/language-switcher"
 import { ThemeMenu } from "@/components/theme-switcher"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -266,6 +274,8 @@ export function FocusWorkspaceSidebar({
   onSignOut,
   disabledFeatures,
 }: FocusWorkspaceSidebarProps) {
+  const { t } = useTranslations()
+
   const [historyQuery, setHistoryQuery] = useState("")
   const [sessionQuery, setSessionQuery] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
@@ -293,28 +303,32 @@ export function FocusWorkspaceSidebar({
     activeView === "chat" ||
     activeView === "transcription" ||
     activeView === "video-transcription"
-  const navigation = railNavigation
+  const navigation = railNavigation.map((item) => ({
+    ...item,
+    label: t(item.label),
+    hint: t(item.hint),
+  }))
 
   const createAction: CreateAction | null =
     activeView === "chat"
       ? {
-          label: "New conversation",
-          hint: "Start a new conversation",
+          label: t("New conversation"),
+          hint: t("Start a new conversation"),
           icon: Plus,
           onClick: () => onNavigate("chat"),
         }
       : activeView === "transcription"
         ? {
-            label: "New live session",
-            hint: "Create a live transcription room",
+            label: t("New live session"),
+            hint: t("Create a live transcription room"),
             icon: Headphones,
             onClick: onNewTranscriptionSession,
             disabled: Boolean(disabledFeatures.transcription),
           }
         : activeView === "video-transcription"
           ? {
-              label: "New video transcription",
-              hint: "Upload and transcribe a video",
+              label: t("New video transcription"),
+              hint: t("Upload and transcribe a video"),
               icon: FileVideo,
               onClick: onNewVideoTranscription,
               disabled: Boolean(disabledFeatures.transcription),
@@ -409,25 +423,27 @@ export function FocusWorkspaceSidebar({
   const historyMode = activeView === "chat" ? "chat" : "sessions"
   const historyTitle =
     activeView === "chat"
-      ? "Chat history"
+      ? t("Chat history")
       : activeView === "video-transcription"
-        ? "Video transcripts"
-        : "Live sessions"
+        ? t("Video transcripts")
+        : t("Live sessions")
   const historyPanel = historyView ? (
     <div
       aria-label={
         activeView === "chat"
-          ? "Chat history"
+          ? t("Chat history")
           : activeView === "video-transcription"
-            ? "Video transcripts"
-            : "Live sessions"
+            ? t("Video transcripts")
+            : t("Live sessions")
       }
       className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden pt-1 pb-1"
       role="region"
     >
       {actionError && (
         <Alert className="shrink-0" variant="destructive">
-          <AlertDescription className="text-xs">{actionError}</AlertDescription>
+          <AlertDescription className="text-xs">
+            {t(actionError)}
+          </AlertDescription>
         </Alert>
       )}
 
@@ -452,13 +468,13 @@ export function FocusWorkspaceSidebar({
       ) : (
         <>
           <Input
-            aria-label="Search sessions"
+            aria-label={t("Search sessions")}
             className="h-8 shrink-0"
             onChange={(event) => setSessionQuery(event.target.value)}
             placeholder={
               activeView === "video-transcription"
-                ? "Search videos"
-                : "Search sessions"
+                ? t("Search videos")
+                : t("Search sessions")
             }
             type="search"
             value={sessionQuery}
@@ -518,8 +534,12 @@ export function FocusWorkspaceSidebar({
                 <DropdownMenuTrigger
                   render={
                     <SidebarMenuButton
-                      aria-label={`Select workspace (${activeOrganization?.name ?? "Workspace"})`}
-                      tooltip={`Select workspace · ${activeOrganization?.name ?? "Workspace"}`}
+                      aria-label={t("Select workspace ({value0})", {
+                        value0: activeOrganization?.name ?? t("Workspace"),
+                      })}
+                      tooltip={t("Select workspace · {value0}", {
+                        value0: activeOrganization?.name ?? t("Workspace"),
+                      })}
                       className="gap-2.5"
                       size="lg"
                     />
@@ -531,7 +551,7 @@ export function FocusWorkspaceSidebar({
                     cropped
                   />
                   <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
-                    {activeOrganization?.name ?? "Workspace"}
+                    {activeOrganization?.name ?? t("Workspace")}
                   </span>
                   <ChevronsUpDown
                     aria-hidden="true"
@@ -544,7 +564,7 @@ export function FocusWorkspaceSidebar({
                   side="bottom"
                 >
                   <DropdownMenuGroup>
-                    <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+                    <DropdownMenuLabel>{t("Workspaces")}</DropdownMenuLabel>
                     {organizations.map((organization) => (
                       <DropdownMenuItem
                         key={organization.id}
@@ -556,7 +576,7 @@ export function FocusWorkspaceSidebar({
                         </span>
                         {organization.id === activeOrganization?.id && (
                           <span className="text-xs text-muted-foreground">
-                            Current
+                            {t("Current")}
                           </span>
                         )}
                       </DropdownMenuItem>
@@ -565,7 +585,7 @@ export function FocusWorkspaceSidebar({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => onNavigate("settings")}>
                     <Settings2 data-icon="inline-start" />
-                    Manage workspaces
+                    {t("Manage workspaces")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -573,13 +593,15 @@ export function FocusWorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 aria-keyshortcuts="Meta+K Control+K"
-                aria-label="Search workspace"
+                aria-label={t("Search workspace")}
                 className="h-9 bg-sidebar-accent/60 text-sm text-muted-foreground"
                 onClick={() => setSearchOpen(true)}
-                tooltip="Search workspace · ⌘K"
+                tooltip={t("Search workspace · ⌘K")}
               >
                 <Search />
-                <span className="flex-1 text-left font-normal">Search…</span>
+                <span className="flex-1 text-left font-normal">
+                  {t("Search…")}
+                </span>
                 <kbd className="rounded bg-background/60 px-1.5 py-0.5 text-[10px] font-medium">
                   ⌘K
                 </kbd>
@@ -657,7 +679,10 @@ export function FocusWorkspaceSidebar({
                           }}
                           tooltip={
                             disabled
-                              ? `${item.label} · Disabled by platform administrator`
+                              ? t(
+                                  "{value0} · Disabled by platform administrator",
+                                  { value0: item.label }
+                                )
                               : item.label
                           }
                         >
@@ -699,8 +724,14 @@ export function FocusWorkspaceSidebar({
                                 className="right-7"
                                 aria-label={
                                   historyOpen
-                                    ? `Hide ${historyTitle.toLocaleLowerCase()}`
-                                    : `Show ${historyTitle.toLocaleLowerCase()}`
+                                    ? t("Hide {value0}", {
+                                        value0:
+                                          historyTitle.toLocaleLowerCase(),
+                                      })
+                                    : t("Show {value0}", {
+                                        value0:
+                                          historyTitle.toLocaleLowerCase(),
+                                      })
                                 }
                               />
                             }
@@ -733,12 +764,12 @@ export function FocusWorkspaceSidebar({
                                       </span>
                                       {entry.status === "failed" ? (
                                         <span
-                                          aria-label="Failed"
+                                          aria-label={t("Failed")}
                                           className="size-1.5 shrink-0 rounded-full bg-destructive"
                                         />
                                       ) : entry.status === "live" ? (
                                         <span
-                                          aria-label="Live"
+                                          aria-label={t("Live")}
                                           className="size-1.5 shrink-0 rounded-full bg-primary"
                                         />
                                       ) : null}
@@ -752,7 +783,7 @@ export function FocusWorkspaceSidebar({
                                   onClick={() => setHistoryDialogOpen(true)}
                                   className="text-muted-foreground hover:text-sidebar-accent-foreground"
                                 >
-                                  <span>View all…</span>
+                                  <span>{t("View all…")}</span>
                                 </SidebarMenuSubButton>
                               </SidebarMenuSubItem>
                             </SidebarMenuSub>
@@ -771,28 +802,28 @@ export function FocusWorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 aria-current={activeView === "settings" ? "page" : undefined}
-                aria-label="Workspace settings"
+                aria-label={t("Workspace settings")}
                 className="text-sm"
                 isActive={activeView === "settings"}
                 onClick={() => onNavigate("settings")}
-                tooltip="Workspace settings"
+                tooltip={t("Workspace settings")}
               >
                 <Settings2 />
-                <span>Workspace settings</span>
+                <span>{t("Workspace settings")}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             {user.platformAdmin && (
               <SidebarMenuItem>
                 <SidebarMenuButton
                   aria-current={activeView === "admin" ? "page" : undefined}
-                  aria-label="Platform admin"
+                  aria-label={t("Platform admin")}
                   className="text-sm"
                   isActive={activeView === "admin"}
                   onClick={() => onNavigate("admin")}
-                  tooltip="Platform admin"
+                  tooltip={t("Platform admin")}
                 >
                   <ShieldCheck />
-                  <span>Platform admin</span>
+                  <span>{t("Platform admin")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}
@@ -801,8 +832,12 @@ export function FocusWorkspaceSidebar({
                 <DropdownMenuTrigger
                   render={
                     <SidebarMenuButton
-                      aria-label={`${user.displayName} account menu`}
-                      tooltip={`${user.displayName} · Account menu`}
+                      aria-label={t("{value0} account menu", {
+                        value0: user.displayName,
+                      })}
+                      tooltip={t("{value0} · Account menu", {
+                        value0: user.displayName,
+                      })}
                       size="lg"
                     />
                   }
@@ -810,7 +845,9 @@ export function FocusWorkspaceSidebar({
                   <Avatar size="sm">
                     {user.avatarUrl && (
                       <AvatarImage
-                        alt={`${user.displayName}'s profile picture`}
+                        alt={t("{value0}'s profile picture", {
+                          value0: user.displayName,
+                        })}
                         src={resolveAPIURL(
                           versionedAvatarURL(
                             user.avatarUrl,
@@ -853,15 +890,16 @@ export function FocusWorkspaceSidebar({
                     </DropdownMenuLabel>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
+                  <LanguageMenu />
                   <ThemeMenu />
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => onNavigate("profile")}>
                     <UserRound data-icon="inline-start" />
-                    Profile
+                    {t("Profile")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={onSignOut}>
                     <LogOut data-icon="inline-start" />
-                    Sign out
+                    {t("Sign out")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -872,15 +910,15 @@ export function FocusWorkspaceSidebar({
           <div className="workspace-chat-rail">
             <section
               id="recent-chat-rail"
-              aria-label="Recent chats"
+              aria-label={t("Recent chats")}
               className="flex h-full min-h-0 flex-col gap-4 rounded-2xl bg-sidebar p-4 shadow-lg"
             >
               <div className="flex items-center justify-between gap-2">
                 <h2 className="truncate text-sm font-medium">
-                  {activeOrganization?.name ?? "Workspace"}
+                  {activeOrganization?.name ?? t("Workspace")}
                 </h2>
                 <Button
-                  aria-label="Search chats"
+                  aria-label={t("Search chats")}
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => {
@@ -900,13 +938,15 @@ export function FocusWorkspaceSidebar({
                 }}
               >
                 <Plus data-icon="inline-start" />
-                New chat
+                {t("New chat")}
               </Button>
-              <h3 className="text-xs text-muted-foreground">Recent chats</h3>
+              <h3 className="text-xs text-muted-foreground">
+                {t("Recent chats")}
+              </h3>
               <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
                 {recentChats.length === 0 && (
                   <p className="px-2 text-sm text-muted-foreground">
-                    Your conversations will appear here.
+                    {t("Your conversations will appear here.")}
                   </p>
                 )}
                 {recentChats.map((chat) => (
@@ -942,7 +982,7 @@ export function FocusWorkspaceSidebar({
                   setHistoryDialogOpen(true)
                 }}
               >
-                View all chats
+                {t("View all chats")}
                 <ChevronRight data-icon="inline-end" />
               </Button>
             </section>
@@ -1009,6 +1049,8 @@ function TranscriptionHistoryPanel({
   setArchivedOpen: (open: boolean) => void
   video: boolean
 }) {
+  const { t } = useTranslations()
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -1029,12 +1071,12 @@ function TranscriptionHistoryPanel({
           <Empty className="min-h-0 rounded-lg border-0 p-4">
             <EmptyHeader>
               <EmptyTitle>
-                {video ? "No videos yet" : "No sessions yet"}
+                {video ? t("No videos yet") : t("No sessions yet")}
               </EmptyTitle>
               <EmptyDescription>
                 {video
-                  ? "Upload a video to create one."
-                  : "Start listening to create one."}
+                  ? t("Upload a video to create one.")
+                  : t("Start listening to create one.")}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -1052,7 +1094,7 @@ function TranscriptionHistoryPanel({
               }
             >
               <Archive data-icon="inline-start" />
-              Archived
+              {t("Archived")}
               <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
                 {archivedSessions.length}
               </span>
@@ -1095,10 +1137,11 @@ function SessionGroup({
   onDelete: (session: TranscriptionSession) => void
   onSelect: (id: string) => void
 }) {
+  const { t } = useTranslations()
   return (
     <div className="flex flex-col gap-1">
       <p className="px-2 text-[11px] font-medium text-muted-foreground">
-        {group.label}
+        {t(group.label)}
       </p>
       <div className="flex flex-col gap-1">
         {group.items.map((session) => (
@@ -1132,15 +1175,17 @@ function SessionRow({
   onSelect: (id: string) => void
   session: TranscriptionSession
 }) {
+  const { t, locale } = useTranslations()
+
   const hasProcessingWarning =
     session.kind === "video" &&
     session.status === "completed" &&
     session.polishStatus === "failed"
   const statusLabel = hasProcessingWarning
-    ? "completed · grammar failed"
+    ? t("completed · grammar failed")
     : session.status
   const statusDescription = hasProcessingWarning
-    ? "Grammar polish failed"
+    ? t("Grammar polish failed")
     : session.status
   const failed = session.status === "failed"
 
@@ -1189,13 +1234,13 @@ function SessionRow({
               ·
             </span>
             <span className="shrink-0">
-              {formatItemTime(session.updatedAt)}
+              {formatItemTime(session.updatedAt, locale)}
             </span>
           </span>
         </span>
         {session.status === "live" && (
           <Badge className="h-5 px-1.5 text-[10px]" variant="secondary">
-            Live
+            {t("Live")}
           </Badge>
         )}
       </Button>
@@ -1203,10 +1248,10 @@ function SessionRow({
         <DropdownMenuTrigger
           render={
             <Button
-              aria-label={`Actions for ${session.title}`}
+              aria-label={t("Actions for {value0}", { value0: session.title })}
               className="absolute top-1/2 right-1 size-8 -translate-y-1/2 bg-[var(--sidebar-secondary)] opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 max-lg:opacity-100"
               size="icon-xs"
-              title={`Actions for ${session.title}`}
+              title={t("Actions for {value0}", { value0: session.title })}
               variant="ghost"
             />
           }
@@ -1220,14 +1265,14 @@ function SessionRow({
             ) : (
               <Archive data-icon="inline-start" />
             )}
-            {archived ? "Restore" : "Archive"}
+            {archived ? t("Restore") : t("Archive")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => onDelete(session)}
             variant="destructive"
           >
             <Trash2 data-icon="inline-start" />
-            Delete
+            {t("Delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1269,7 +1314,7 @@ function getRecencyGroupLabel(value: string) {
   return "Older"
 }
 
-function formatItemTime(value: string) {
+function formatItemTime(value: string, locale = "en") {
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return ""
 
@@ -1280,13 +1325,13 @@ function formatItemTime(value: string) {
     date.getDate() === now.getDate()
 
   if (sameDay) {
-    return date.toLocaleTimeString(undefined, {
+    return date.toLocaleTimeString(locale, {
       hour: "numeric",
       minute: "2-digit",
     })
   }
 
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
   })

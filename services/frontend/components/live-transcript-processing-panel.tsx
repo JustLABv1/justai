@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useState } from "react"
 import {
   Check,
@@ -25,6 +26,8 @@ export function LiveTranscriptProcessingPanel({
   onChange: (next: LiveTranscriptionSnapshot) => void
   onError: (message: string) => void
 }) {
+  const { t } = useTranslations()
+
   const [busy, setBusy] = useState(false)
   const p = snapshot.liveProcessing
   if (!p || !snapshot.session.startedAt) return null
@@ -43,32 +46,32 @@ export function LiveTranscriptProcessingPanel({
       onError(
         error instanceof Error
           ? error.message
-          : "Processing could not be updated."
+          : t("Processing could not be updated.")
       )
     } finally {
       setBusy(false)
     }
   }
   const steps = [
-    { label: "Capture", status: "completed", icon: Check },
-    { label: "Speakers", status: p.diarizationStatus, icon: Users },
-    { label: "Polish", status: p.polishStatus, icon: Pencil },
+    { label: t("Capture"), status: "completed", icon: Check },
+    { label: t("Speakers"), status: p.diarizationStatus, icon: Users },
+    { label: t("Polish"), status: p.polishStatus, icon: Pencil },
   ]
   return (
     <section
-      aria-label="Transcript post-processing"
+      aria-label={t("Transcript post-processing")}
       className="flex flex-col gap-4 rounded-2xl bg-card p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold">
           {p.status === "completed"
-            ? "Transcript processing complete"
+            ? t("Transcript processing complete")
             : p.status === "failed"
-              ? "Transcript processing needs attention"
-              : "Preparing your final transcript"}
+              ? t("Transcript processing needs attention")
+              : t("Preparing your final transcript")}
         </h2>
         <span className="text-xs text-muted-foreground">
-          Your transcript remains available below.
+          {t("Your transcript remains available below.")}
         </span>
       </div>
       <ol className="grid grid-cols-3 gap-3">
@@ -98,7 +101,7 @@ export function LiveTranscriptProcessingPanel({
             <span>
               {step.label}
               <span className="block text-xs text-muted-foreground">
-                {step.status === "queued" ? "Waiting" : step.status}
+                {step.status === "queued" ? t("Waiting") : step.status}
               </span>
             </span>
           </li>
@@ -116,10 +119,20 @@ export function LiveTranscriptProcessingPanel({
             {p.status === "failed"
               ? p.error
               : p.stage === "diarization"
-                ? `Recognizing speakers · ${snapshot.speakers.length} speaker labels available`
+                ? t(
+                    "Recognizing speakers · {value0} speaker labels available",
+                    { value0: snapshot.speakers.length }
+                  )
                 : p.stage === "grammar"
-                  ? `Polishing transcript · ${snapshot.segments.filter((s) => s.polishedText).length} of ${snapshot.segments.length} text blocks ready`
-                  : "Waiting for the audio recording to finish saving."}
+                  ? t(
+                      "Polishing transcript · {value0} of {value1} text blocks ready",
+                      {
+                        value0: snapshot.segments.filter((s) => s.polishedText)
+                          .length,
+                        value1: snapshot.segments.length,
+                      }
+                    )
+                  : t("Waiting for the audio recording to finish saving.")}
           </p>
           {p.status === "failed" ? (
             <div className="flex flex-wrap gap-2">
@@ -130,7 +143,7 @@ export function LiveTranscriptProcessingPanel({
                 onClick={() => void act("retry")}
               >
                 <RefreshCw data-icon="inline-start" />
-                Retry step
+                {t("Retry step")}
               </Button>
               <Button
                 size="sm"
@@ -139,8 +152,8 @@ export function LiveTranscriptProcessingPanel({
                 onClick={() => void act("skip")}
               >
                 <SkipForward data-icon="inline-start" />
-                Skip{" "}
-                {p.stage === "diarization" ? "speaker separation" : "polish"}
+                {t("Skip")}{" "}
+                {p.stage === "diarization" ? t("speaker separation") : "polish"}
               </Button>
             </div>
           ) : null}

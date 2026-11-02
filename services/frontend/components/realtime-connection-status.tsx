@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { AlertTriangle, CheckCircle2, RefreshCw, WifiOff } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -23,18 +24,20 @@ export function RealtimeConnectionStatus({
   interruptionAt?: Date | null
   className?: string
 }) {
+  const { t, locale } = useTranslations()
+
   const reconnecting = status.state === "reconnecting"
   const degraded = status.state === "degraded"
   const disconnected = status.state === "disconnected"
   const label = reconnecting
     ? `Reconnecting · attempt ${status.attempt} of ${status.maxAttempts}`
     : degraded
-      ? "Connection degraded"
+      ? t("Connection degraded")
       : disconnected
-        ? "Disconnected"
+        ? t("Disconnected")
         : status.state === "connecting"
-          ? "Connecting"
-          : "Live"
+          ? t("Connecting")
+          : t("Live")
   const Icon = reconnecting
     ? RefreshCw
     : degraded
@@ -44,10 +47,10 @@ export function RealtimeConnectionStatus({
         : CheckCircle2
   const quality =
     status.audioQuality === "dropping"
-      ? "Dropping audio"
+      ? t("Dropping audio")
       : status.audioQuality === "delayed"
-        ? "Audio delayed"
-        : "Audio good"
+        ? t("Audio delayed")
+        : t("Audio good")
 
   return (
     <div className={cn("rounded-lg border bg-card px-3 py-2", className)}>
@@ -68,7 +71,7 @@ export function RealtimeConnectionStatus({
         </div>
         <div className="flex items-center gap-2">
           <span className="text-muted-foreground">
-            Signal level is separate
+            {t("Signal level is separate")}
           </span>
           <Badge variant={degraded || disconnected ? "outline" : "secondary"}>
             {quality}
@@ -83,8 +86,8 @@ export function RealtimeConnectionStatus({
       ) : null}
       {interruptionAt ? (
         <p className="mt-1.5 text-[11px] text-muted-foreground">
-          Possible transcript gap near{" "}
-          {interruptionAt.toLocaleTimeString([], {
+          {t("Possible transcript gap near")}{" "}
+          {interruptionAt.toLocaleTimeString(locale, {
             hour: "2-digit",
             minute: "2-digit",
           })}

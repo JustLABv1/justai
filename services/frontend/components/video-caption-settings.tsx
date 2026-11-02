@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect } from "react"
 import type { Endpoint } from "@/lib/types"
 import {
@@ -40,6 +41,8 @@ export function VideoCaptionSettings({
   value: VideoCaptionOptions | null
   onChange: (value: VideoCaptionOptions | null) => void
 }) {
+  const { t } = useTranslations()
+
   const choices = endpoints.filter(
     (endpoint) =>
       endpoint.enabled &&
@@ -84,11 +87,12 @@ export function VideoCaptionSettings({
       <Field orientation="horizontal">
         <div className="flex flex-1 flex-col gap-1">
           <FieldLabel htmlFor="video-caption-enabled">
-            Names from video captions
+            {t("Names from video captions")}
           </FieldLabel>
           <FieldDescription>
-            Read printed names after speaker separation. This selection is
-            remembered for future uploads.
+            {t(
+              "Read printed names after speaker separation. This selection is remembered for future uploads."
+            )}
           </FieldDescription>
         </div>
         <Switch
@@ -111,19 +115,19 @@ export function VideoCaptionSettings({
       </Field>
       {!enabled && (
         <FieldDescription>
-          Enable speaker separation to match names to voices.
+          {t("Enable speaker separation to match names to voices.")}
         </FieldDescription>
       )}
       {enabled && !choices.length && (
         <FieldDescription>
-          Configure an enabled vision endpoint to use this step.
+          {t("Configure an enabled vision endpoint to use this step.")}
         </FieldDescription>
       )}
       {enabled && value && (
         <>
           <Field>
             <FieldLabel htmlFor="video-caption-endpoint">
-              Name caption endpoint
+              {t("Name caption endpoint")}
             </FieldLabel>
             <Select
               value={value.endpointId}
@@ -136,7 +140,7 @@ export function VideoCaptionSettings({
               }))}
             >
               <SelectTrigger id="video-caption-endpoint" className="w-full">
-                <SelectValue placeholder="Select a vision endpoint" />
+                <SelectValue placeholder={t("Select a vision endpoint")} />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
@@ -151,7 +155,7 @@ export function VideoCaptionSettings({
           </Field>
           <Field>
             <FieldLabel htmlFor="video-caption-model">
-              Name caption model
+              {t("Name caption model")}
             </FieldLabel>
             <Input
               id="video-caption-model"
@@ -169,7 +173,7 @@ export function VideoCaptionSettings({
           </Field>
           <Field>
             <FieldLabel htmlFor="video-caption-budget">
-              Maximum caption images
+              {t("Maximum caption images")}
             </FieldLabel>
             <Select
               value={String(value.frameBudget)}
@@ -195,18 +199,20 @@ export function VideoCaptionSettings({
               </SelectContent>
             </Select>
             <FieldDescription>
-              A fixed budget, including for long videos. Selected lower-third
-              images are sent to this endpoint.
+              {t(
+                "A fixed budget, including for long videos. Selected lower-third images are sent to this endpoint."
+              )}
             </FieldDescription>
           </Field>
           <Field orientation="horizontal">
             <div className="flex flex-1 flex-col gap-1">
               <FieldLabel htmlFor="video-caption-apply">
-                Apply consistent names automatically
+                {t("Apply consistent names automatically")}
               </FieldLabel>
               <FieldDescription>
-                Requires three matching images across two speech turns. Other
-                matches remain suggestions.
+                {t(
+                  "Requires three matching images across two speech turns. Other matches remain suggestions."
+                )}
               </FieldDescription>
             </div>
             <Switch

@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useState } from "react"
 import { api } from "@/lib/api"
 import { downloadFile } from "@/lib/download-file"
@@ -26,6 +27,8 @@ import {
 } from "@/components/ui/select"
 
 export function RunFiles({ run }: { run: AgentRun }) {
+  const { t } = useTranslations()
+
   const [selected, setSelected] = useState<AgentArtifact | null>(null)
   const [spaces, setSpaces] = useState<KnowledgeSpace[]>([])
   const [folder, setFolder] = useState("personal")
@@ -88,19 +91,19 @@ export function RunFiles({ run }: { run: AgentRun }) {
   return (
     <section className="flex flex-col gap-3">
       <div>
-        <h3 className="font-medium">Output files</h3>
+        <h3 className="font-medium">{t("Output files")}</h3>
         <p className="text-xs text-muted-foreground">
-          Download files or keep a copy in your knowledge storage.
+          {t("Download files or keep a copy in your knowledge storage.")}
         </p>
       </div>
       {notice && (
         <p role="status" className="text-sm">
-          {notice}
+          {t(notice)}
         </p>
       )}
       {error && !selected && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
       {run.artifacts.map((file) => (
@@ -117,7 +120,7 @@ export function RunFiles({ run }: { run: AgentRun }) {
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline">
-              {file.kind === "file_reference" ? "Reference" : "File"}
+              {file.kind === "file_reference" ? t("Reference") : t("File")}
             </Badge>
             <Button
               size="sm"
@@ -137,7 +140,7 @@ export function RunFiles({ run }: { run: AgentRun }) {
                 }
               }}
             >
-              Download
+              {t("Download")}
             </Button>
             <Button
               size="sm"
@@ -145,7 +148,7 @@ export function RunFiles({ run }: { run: AgentRun }) {
               disabled={busy || file.kind === "file_reference"}
               onClick={() => void openSave(file)}
             >
-              Save to knowledge
+              {t("Save to knowledge")}
             </Button>
           </div>
         </div>
@@ -161,44 +164,47 @@ export function RunFiles({ run }: { run: AgentRun }) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Save to knowledge</DialogTitle>
+            <DialogTitle>{t("Save to knowledge")}</DialogTitle>
             <DialogDescription>
-              Save {selected?.name} as an original file and index its readable
-              content.
+              {t("Save")} {selected?.name}{" "}
+              {t("as an original file and index its readable content.")}
             </DialogDescription>
           </DialogHeader>
           {error && (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
           <Field>
-            <FieldLabel>Destination folder</FieldLabel>
+            <FieldLabel>{t("Destination folder")}</FieldLabel>
             <Select
               value={folder}
               disabled={busy}
               onValueChange={(value) => setFolder(value ?? "personal")}
             >
-              <SelectTrigger aria-label="Destination folder">
+              <SelectTrigger aria-label={t("Destination folder")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectItem value="personal">Personal storage</SelectItem>
+                  <SelectItem value="personal">
+                    {t("Personal storage")}
+                  </SelectItem>
                   {spaces.map((space) => (
                     <SelectItem key={space.id} value={space.id}>
                       {space.name} ·{" "}
                       {space.visibility === "workspace"
-                        ? "Workspace"
-                        : "Private"}
+                        ? t("Workspace")
+                        : t("Private")}
                     </SelectItem>
                   ))}
                 </SelectGroup>
               </SelectContent>
             </Select>
             <FieldDescription>
-              Workspace folders share the saved copy with your workspace.
-              Existing folder permissions apply.
+              {t(
+                "Workspace folders share the saved copy with your workspace. Existing folder permissions apply."
+              )}
             </FieldDescription>
           </Field>
           <DialogFooter>
@@ -207,10 +213,10 @@ export function RunFiles({ run }: { run: AgentRun }) {
               disabled={busy}
               onClick={() => setSelected(null)}
             >
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button disabled={busy} onClick={() => void save()}>
-              {busy ? "Saving…" : "Save file"}
+              {busy ? t("Saving…") : t("Save file")}
             </Button>
           </DialogFooter>
         </DialogContent>

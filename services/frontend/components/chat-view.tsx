@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import {
   useCallback,
   useEffect,
@@ -761,13 +762,15 @@ function createSpeechAdapter(endpointId: string): SpeechSynthesisAdapter {
 }
 
 function BranchPicker() {
+  const { t } = useTranslations()
+
   return (
     <BranchPickerPrimitive.Root
       className="flex items-center gap-1 text-[11px] text-muted-foreground"
       hideWhenSingleBranch
     >
       <BranchPickerPrimitive.Previous
-        aria-label="Previous branch"
+        aria-label={t("Previous branch")}
         className="rounded px-1.5 py-0.5 hover:bg-muted"
       >
         ‹
@@ -776,7 +779,7 @@ function BranchPicker() {
       <span>/</span>
       <BranchPickerPrimitive.Count />
       <BranchPickerPrimitive.Next
-        aria-label="Next branch"
+        aria-label={t("Next branch")}
         className="rounded px-1.5 py-0.5 hover:bg-muted"
       >
         ›
@@ -857,6 +860,8 @@ async function copyTextToClipboard(text: string) {
 }
 
 function CopyMessageAction() {
+  const { t } = useTranslations()
+
   const aui = useAui()
   const isCopied = useAuiState((state) => state.message.isCopied)
   const canCopy = useAuiState((state) => {
@@ -894,7 +899,7 @@ function CopyMessageAction() {
   return (
     <MessageActionButton
       disabled={!canCopy}
-      label={isCopied ? "Copied" : "Copy message"}
+      label={isCopied ? t("Copied") : t("Copy message")}
       onClick={copy}
     >
       {isCopied ? (
@@ -907,12 +912,14 @@ function CopyMessageAction() {
 }
 
 function EditMessageAction() {
+  const { t } = useTranslations()
+
   const aui = useAui()
   const isEditing = useAuiState((state) => state.message.composer.isEditing)
   return (
     <MessageActionButton
       disabled={isEditing}
-      label="Edit message"
+      label={t("Edit message")}
       onClick={() => aui.composer.beginEdit()}
     >
       <Pencil className="size-3.5" />
@@ -921,6 +928,8 @@ function EditMessageAction() {
 }
 
 function ReloadMessageAction() {
+  const { t } = useTranslations()
+
   const aui = useAui()
   const disabled = useAuiState(
     (state) =>
@@ -931,7 +940,7 @@ function ReloadMessageAction() {
   return (
     <MessageActionButton
       disabled={disabled}
-      label="Regenerate response"
+      label={t("Regenerate response")}
       onClick={() => aui.message.reload()}
     >
       <RefreshCw className="size-3.5" />
@@ -940,6 +949,8 @@ function ReloadMessageAction() {
 }
 
 function SpeakMessageAction() {
+  const { t } = useTranslations()
+
   const aui = useAui()
   const speaking = useAuiState((state) => {
     const status = state.message.speech?.status.type
@@ -947,7 +958,7 @@ function SpeakMessageAction() {
   })
   return (
     <MessageActionButton
-      label={speaking ? "Stop reading aloud" : "Read response aloud"}
+      label={speaking ? t("Stop reading aloud") : t("Read response aloud")}
       onClick={() =>
         speaking ? aui.message.stopSpeaking() : aui.message.speak()
       }
@@ -958,6 +969,8 @@ function SpeakMessageAction() {
 }
 
 function FeedbackMessageAction({ type }: { type: "positive" | "negative" }) {
+  const { t } = useTranslations()
+
   const aui = useAui()
   const submitted = useAuiState((state) => {
     const metadata = state.message.metadata
@@ -972,7 +985,7 @@ function FeedbackMessageAction({ type }: { type: "positive" | "negative" }) {
   })
   return (
     <MessageActionButton
-      label={type === "positive" ? "Good response" : "Poor response"}
+      label={type === "positive" ? t("Good response") : t("Poor response")}
       onClick={() => aui.message.submitFeedback({ type })}
     >
       {type === "positive" ? (
@@ -995,24 +1008,26 @@ function FeedbackMessageAction({ type }: { type: "positive" | "negative" }) {
 }
 
 function MessageEditComposer() {
+  const { t } = useTranslations()
+
   return (
     <div className="mx-auto w-full max-w-4xl px-1 py-3 sm:px-4">
       <ComposerPrimitive.Root className="flex items-end gap-2 rounded-2xl border bg-background p-2 shadow-sm">
         <ComposerPrimitive.Input
           autoFocus
           className="max-h-40 min-h-10 min-w-0 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm leading-6 outline-none placeholder:text-muted-foreground"
-          placeholder="Edit message…"
+          placeholder={t("Edit message…")}
           submitMode="ctrlEnter"
         />
         <div className="flex shrink-0 items-center gap-1">
           <ComposerPrimitive.Cancel
-            aria-label="Cancel edit"
+            aria-label={t("Cancel edit")}
             className="flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="size-4" />
           </ComposerPrimitive.Cancel>
           <ComposerPrimitive.Send
-            aria-label="Save edit"
+            aria-label={t("Save edit")}
             className="flex size-8 items-center justify-center rounded-full bg-foreground text-background hover:bg-foreground/85 disabled:opacity-40"
           >
             <ArrowUp className="size-4" />
@@ -1063,6 +1078,8 @@ function ContextDisplay({
   onRemoveRepository?: (repositoryId: string) => Promise<void>
   onSaveKnowledge?: (sourceId: string) => Promise<void>
 }) {
+  const { t } = useTranslations()
+
   const [removingContextId, setRemovingContextId] = useState<string | null>(
     null
   )
@@ -1160,7 +1177,7 @@ function ContextDisplay({
         <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border/70" />
       ) : null}
       <div className="flex min-w-0 items-center gap-1.5">
-        <span className="sr-only">Attached context</span>
+        <span className="sr-only">{t("Attached context")}</span>
         {items.map((item) => (
           <div
             className="inline-flex max-w-52 shrink-0 items-center gap-1.5 rounded-lg bg-muted/50 px-2 py-0.5 text-[11px]"
@@ -1190,12 +1207,14 @@ function ContextDisplay({
               <button
                 type="button"
                 className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-50"
-                aria-label={`Save ${item.label} to Knowledge`}
-                title="Save to Knowledge"
+                aria-label={t("Save {value0} to Knowledge", {
+                  value0: item.label,
+                })}
+                title={t("Save to Knowledge")}
                 disabled={savingContextId !== null}
                 onClick={() => void handleSaveKnowledge(item.resourceId!)}
               >
-                {savingContextId === item.resourceId ? "Saving…" : "Save"}
+                {savingContextId === item.resourceId ? t("Saving…") : t("Save")}
               </button>
             ) : null}
             {item.resourceId &&
@@ -1205,8 +1224,12 @@ function ContextDisplay({
               <button
                 type="button"
                 className="shrink-0 rounded-full p-0.5 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                aria-label={`Remove ${item.label} from this chat`}
-                title={`Remove ${item.label} from this chat`}
+                aria-label={t("Remove {value0} from this chat", {
+                  value0: item.label,
+                })}
+                title={t("Remove {value0} from this chat", {
+                  value0: item.label,
+                })}
                 disabled={removingContextId !== null}
                 onClick={() => {
                   if (item.kind === "mcp" || item.kind === "note") {
@@ -1228,7 +1251,7 @@ function ContextDisplay({
       </div>
       {removeError ? (
         <p role="alert" className="shrink-0 text-[11px] text-destructive">
-          {removeError}
+          {t(removeError)}
         </p>
       ) : null}
     </div>
@@ -1244,6 +1267,8 @@ function StorageReferenceSearch({
   loading: boolean
   error: string | null
 }) {
+  const { t } = useTranslations()
+
   const scope = unstable_useTriggerPopoverScopeContext()
   useEffect(() => {
     onQuery(scope.open ? scope.query : null)
@@ -1252,23 +1277,25 @@ function StorageReferenceSearch({
   if (error)
     return (
       <p role="alert" className="px-2.5 py-2 text-xs text-destructive">
-        {error}
+        {t(error)}
       </p>
     )
   if (loading)
     return (
       <p role="status" className="px-2.5 py-2 text-xs text-muted-foreground">
-        Searching Storage…
+        {t("Searching Storage…")}
       </p>
     )
   return (
     <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
-      Choose a category or type to search Storage.
+      {t("Choose a category or type to search Storage.")}
     </p>
   )
 }
 
 function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
+  const { t } = useTranslations()
+
   return (
     <ComposerPrimitive.Unstable_TriggerPopoverItems
       aria-label={ariaLabel}
@@ -1317,7 +1344,7 @@ function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
               {isAttached && (
                 <Check
                   className="size-3.5 shrink-0 text-primary"
-                  aria-label="Already attached"
+                  aria-label={t("Already attached")}
                 />
               )}
             </ComposerPrimitive.Unstable_TriggerPopoverItem>
@@ -1329,19 +1356,21 @@ function ContextTriggerItems({ ariaLabel }: { ariaLabel: string }) {
 }
 
 function McpTriggerPopoverHeader() {
+  const { t } = useTranslations()
+
   const { open, items, query } = unstable_useTriggerPopoverScopeContext()
   if (!open) return null
 
   return (
     <div className="px-2.5 pt-1.5 pb-1">
       <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-        MCP servers
+        {t("MCP servers")}
       </p>
       {!items.length && (
         <p className="py-2 text-xs text-muted-foreground">
           {query
-            ? "No configured MCP matches your search."
-            : "No enabled MCP servers. Configure one to mention it here."}
+            ? t("No configured MCP matches your search.")
+            : t("No enabled MCP servers. Configure one to mention it here.")}
         </p>
       )}
     </div>
@@ -1349,14 +1378,16 @@ function McpTriggerPopoverHeader() {
 }
 
 function TriggerPopoverKeyboardHint() {
+  const { t } = useTranslations()
+
   const { open } = unstable_useTriggerPopoverScopeContext()
   if (!open) return null
 
   return (
     <p className="mt-0.5 flex items-center gap-3 px-2.5 pt-1.5 pb-1 text-[10px] text-muted-foreground/80">
-      <span>↑↓ navigate</span>
-      <span>↵ select</span>
-      <span>esc close</span>
+      <span>{t("↑↓ navigate")}</span>
+      <span>{t("↵ select")}</span>
+      <span>{t("esc close")}</span>
     </p>
   )
 }
@@ -1459,6 +1490,8 @@ function ChatBackdrop() {
 }
 
 function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
+  const { t } = useTranslations()
+
   const isRunning = useAuiState((state) => state.thread.isRunning)
   const latestAssistantMessage = useAuiState((state) => {
     for (let index = state.thread.messages.length - 1; index >= 0; index -= 1) {
@@ -1494,17 +1527,17 @@ function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
 
     if (toolCall?.type === "tool-call") {
       if (["web_search", "browse_url"].includes(toolCall.toolName)) {
-        return "Searching sources"
+        return t("Searching sources")
       }
       if (["generate_image", "edit_image"].includes(toolCall.toolName)) {
-        return "Creating image"
+        return t("Creating image")
       }
       if (
         ["create_pdf", "create_file", "fill_template"].includes(
           toolCall.toolName
         )
       ) {
-        return "Creating file"
+        return t("Creating file")
       }
       return `Using ${toolCall.toolName.replaceAll("_", " ")}`
     }
@@ -1515,10 +1548,10 @@ function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
       .join("")
       .trim()
 
-    if (streamedText) return "Writing answer"
-    if (elapsedSeconds >= 3) return "Planning a helpful answer"
-    return "Understanding your request"
-  }, [elapsedSeconds, latestAssistantMessage])
+    if (streamedText) return t("Writing answer")
+    if (elapsedSeconds >= 3) return t("Planning a helpful answer")
+    return t("Understanding your request")
+  }, [elapsedSeconds, latestAssistantMessage, t])
 
   if (!isRunning || !isLatest) return null
 
@@ -1542,6 +1575,8 @@ function ChatResponseActivity({ isLatest }: { isLatest: boolean }) {
 }
 
 function ConversationRail() {
+  const { t } = useTranslations()
+
   const messages = useAuiState((state) => state.thread.messages)
   const [previewMessageId, setPreviewMessageId] = useState<string | null>(null)
 
@@ -1556,7 +1591,7 @@ function ConversationRail() {
 
   return (
     <nav
-      aria-label="Conversation navigation"
+      aria-label={t("Conversation navigation")}
       className="absolute inset-y-20 left-3 z-20 hidden w-5 lg:flex lg:items-center"
     >
       <div className="relative h-[min(36vh,15rem)] w-full">
@@ -1579,7 +1614,10 @@ function ConversationRail() {
               : preview
           return (
             <button
-              aria-label={`Jump to ${assistant ? "assistant response" : "your message"} ${index + 1}`}
+              aria-label={t("Jump to {value0} {value1}", {
+                value0: assistant ? t("assistant response") : t("your message"),
+                value1: index + 1,
+              })}
               aria-describedby={
                 previewMessageId === message.id
                   ? `conversation-preview-${message.id}`
@@ -1609,13 +1647,13 @@ function ConversationRail() {
                   role="tooltip"
                 >
                   <span className="block text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
-                    {assistant ? "JustAI" : "You"}
+                    {assistant ? "JustAI" : t("You")}
                   </span>
                   <span className="mt-1 line-clamp-3 block text-xs leading-5 text-popover-foreground">
                     {previewExcerpt ||
                       (assistant
-                        ? "Response with context or tools"
-                        : "Message")}
+                        ? t("Response with context or tools")
+                        : t("Message"))}
                   </span>
                 </span>
               ) : null}
@@ -1642,6 +1680,8 @@ function MessageAttachments() {
 }
 
 function ScrollToLatest() {
+  const { t } = useTranslations()
+
   const viewport = useThreadViewport((state) => state.element.viewport)
   const scrollToBottom = useThreadViewport((state) => state.scrollToBottom)
   const footerInset = useThreadViewport((state) => state.height.inset)
@@ -1702,7 +1742,7 @@ function ScrollToLatest() {
     <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 flex justify-center pb-3">
       <div className="flex w-full max-w-3xl justify-end px-3 sm:px-5">
         <Button
-          aria-label="Jump to latest message"
+          aria-label={t("Jump to latest message")}
           className="pointer-events-auto rounded-full border bg-background/90 p-2 shadow-sm"
           onClick={() => scrollToBottom({ behavior: "auto" })}
           size="icon"
@@ -1935,6 +1975,8 @@ export function ModelEndpointPicker({
   onModelChange: (id: string) => void
   compact: boolean
 }) {
+  const { t } = useTranslations()
+
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const endpoint = endpoints.find((item) => item.id === endpointId)
@@ -1954,7 +1996,7 @@ export function ModelEndpointPicker({
     >
       <PopoverPrimitive.Trigger
         render={<Button variant="ghost" type="button" />}
-        aria-label="Select LLM endpoint and chat model"
+        aria-label={t("Select LLM endpoint and chat model")}
         title={endpoint?.name}
         className={cn(
           "h-8 max-w-64 min-w-0 gap-1.5 rounded-full px-2 text-sm font-normal text-muted-foreground",
@@ -1978,7 +2020,7 @@ export function ModelEndpointPicker({
         >
           <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] bg-popover p-1 text-popover-foreground shadow-sm outline-none">
             <div
-              aria-label="Endpoints"
+              aria-label={t("Endpoints")}
               className="flex max-h-80 w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1"
             >
               {endpoints.map((item) => (
@@ -2014,12 +2056,12 @@ export function ModelEndpointPicker({
             <div className="min-w-0 flex-1 p-1.5">
               <div className="flex items-center justify-between gap-3 px-2 pt-0.5 pb-1.5">
                 <PopoverPrimitive.Title className="text-sm font-medium text-muted-foreground">
-                  Models
+                  {t("Models")}
                 </PopoverPrimitive.Title>
                 <label className="flex max-w-40 min-w-0 items-center gap-1 text-muted-foreground">
                   <input
-                    aria-label="Search models"
-                    placeholder="Quick Search"
+                    aria-label={t("Search models")}
+                    placeholder={t("Quick Search")}
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     className="w-full min-w-0 bg-transparent text-right text-sm outline-none placeholder:text-muted-foreground/60"
@@ -2030,14 +2072,16 @@ export function ModelEndpointPicker({
               <div
                 className="max-h-72 overflow-y-auto"
                 role="group"
-                aria-label={`Models for ${endpoint?.name ?? "endpoint"}`}
+                aria-label={t("Models for {value0}", {
+                  value0: endpoint?.name ?? "endpoint",
+                })}
               >
                 {modelDiscoveryLoading ? (
                   <p
                     role="status"
                     className="p-3 text-sm text-muted-foreground"
                   >
-                    Discovering models…
+                    {t("Discovering models…")}
                   </p>
                 ) : filteredModels.length ? (
                   filteredModels.map((model) => (
@@ -2075,8 +2119,10 @@ export function ModelEndpointPicker({
                 ) : (
                   <p className="p-3 text-sm text-muted-foreground">
                     {query
-                      ? "No matching models."
-                      : "No models available. Configure an endpoint in Settings."}
+                      ? t("No matching models.")
+                      : t(
+                          "No models available. Configure an endpoint in Settings."
+                        )}
                   </p>
                 )}
               </div>
@@ -2101,10 +2147,12 @@ export function AssistantPicker({
   disabled?: boolean
   onAssistantChange: (id: string) => void
 }) {
+  const { t } = useTranslations()
+
   const selectedAssistant = assistants.find(
     (assistant) => assistant.id === assistantId
   )
-  const label = selectedAssistant?.name ?? "JustAI default"
+  const label = selectedAssistant?.name ?? t("JustAI default")
 
   return (
     <DropdownMenu>
@@ -2112,7 +2160,7 @@ export function AssistantPicker({
         disabled={disabled}
         render={
           <Button
-            aria-label="Select agent"
+            aria-label={t("Select agent")}
             className={cn(
               "h-9 max-w-48 min-w-0 justify-start gap-1.5 rounded-full border-0 bg-transparent px-2 text-xs font-normal text-foreground hover:bg-muted/70",
               compact && "max-w-36 px-1.5"
@@ -2134,17 +2182,17 @@ export function AssistantPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-80">
         <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-          Agent
+          {t("Agent")}
         </div>
         <DropdownMenuGroup>
           <DropdownMenuItem onClick={() => onAssistantChange("")}>
             <Bot data-icon="inline-start" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-medium">
-                JustAI default
+                {t("JustAI default")}
               </span>
               <span className="block truncate text-[11px] text-muted-foreground">
-                Use the normal workspace behavior
+                {t("Use the normal workspace behavior")}
               </span>
             </span>
             <Check
@@ -2168,7 +2216,7 @@ export function AssistantPicker({
                   </span>
                   <span className="block truncate text-[11px] text-muted-foreground">
                     {assistant.kind === "remote"
-                      ? "Remote A2A agent"
+                      ? t("Remote A2A agent")
                       : assistant.description ||
                         "Saved instructions and defaults"}
                   </span>
@@ -2183,7 +2231,7 @@ export function AssistantPicker({
             ))
           ) : (
             <p className="px-2 py-2 text-xs text-muted-foreground">
-              Create an assistant in the Assistants workspace first.
+              {t("Create an assistant in the Assistants workspace first.")}
             </p>
           )}
         </DropdownMenuGroup>
@@ -2205,10 +2253,12 @@ export function DeepContextToggle({
   onToggle: () => void
   title: string
 }) {
+  const { t } = useTranslations()
+
   return (
     <PopoverPrimitive.Root>
       <PopoverPrimitive.Trigger
-        aria-label={available ? "Toggle deep context mode" : title}
+        aria-label={available ? t("Toggle deep context mode") : title}
         aria-pressed={enabled}
         disabled={!available}
         openOnHover
@@ -2231,7 +2281,7 @@ export function DeepContextToggle({
         title={title}
       >
         <BrainCircuit className="size-4" aria-hidden="true" />
-        {!compact && <span>Deep context</span>}
+        {!compact && <span>{t("Deep context")}</span>}
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Positioner
@@ -2251,16 +2301,16 @@ export function DeepContextToggle({
               </span>
               <div className="min-w-0 flex-1">
                 <PopoverPrimitive.Title className="text-xs font-semibold">
-                  Deep context
+                  {t("Deep context")}
                 </PopoverPrimitive.Title>
                 <PopoverPrimitive.Description className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  Searches a broader, more diverse set of passages across your
-                  attached repository so JustAI can connect evidence across
-                  files.
+                  {t(
+                    "Searches a broader, more diverse set of passages across your attached repository so JustAI can connect evidence across files."
+                  )}
                 </PopoverPrimitive.Description>
               </div>
               <PopoverPrimitive.Close
-                aria-label="Close deep context explanation"
+                aria-label={t("Close deep context explanation")}
                 className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <X className="size-3.5" />
@@ -2268,14 +2318,16 @@ export function DeepContextToggle({
             </div>
             <div className="mt-3 rounded-xl bg-muted/50 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
               <span className="font-medium text-foreground">
-                {enabled ? "On" : "Off"}
+                {enabled ? t("On") : t("Off")}
               </span>
               {enabled
-                ? " · broader retrieval is active for the next question."
-                : " · quick retrieval uses a smaller context window."}
+                ? t(" · broader retrieval is active for the next question.")
+                : t(" · quick retrieval uses a smaller context window.")}
             </div>
             <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-              This still uses a relevant sample, not the entire repository.
+              {t(
+                "This still uses a relevant sample, not the entire repository."
+              )}
             </p>
           </PopoverPrimitive.Popup>
         </PopoverPrimitive.Positioner>
@@ -2295,11 +2347,13 @@ function ResponseSetupPopover({
   assistantLocked: boolean
   onAssistantChange: (id: string) => void
 }) {
+  const { t } = useTranslations()
+
   const [view, setView] = useState<"main" | "agent">("main")
   const selectedAssistant = assistants.find(
     (assistant) => assistant.id === assistantId
   )
-  const assistantLabel = selectedAssistant?.name ?? "JustAI default"
+  const assistantLabel = selectedAssistant?.name ?? t("JustAI default")
 
   const selectAgent = (id: string) => {
     onAssistantChange(id)
@@ -2309,19 +2363,19 @@ function ResponseSetupPopover({
   return (
     <PopoverPrimitive.Root onOpenChange={(open) => !open && setView("main")}>
       <PopoverPrimitive.Trigger
-        aria-label="Open response setup"
+        aria-label={t("Open response setup")}
         render={
           <Button
             className="h-8 max-w-64 min-w-0 justify-start gap-1.5 rounded-full px-2.5 text-sm font-normal text-muted-foreground hover:bg-muted active:scale-[0.97]"
             size="sm"
-            title="Agent and context settings"
+            title={t("Agent and context settings")}
             type="button"
             variant="ghost"
           />
         }
       >
         <ShieldCheck className="size-4 shrink-0" aria-hidden="true" />
-        <span className="hidden truncate sm:inline">Response setup</span>
+        <span className="hidden truncate sm:inline">{t("Response setup")}</span>
         <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
@@ -2339,10 +2393,10 @@ function ResponseSetupPopover({
               <>
                 <div className="px-2.5 py-2">
                   <PopoverPrimitive.Title className="text-xs font-semibold">
-                    Response setup
+                    {t("Response setup")}
                   </PopoverPrimitive.Title>
                   <PopoverPrimitive.Description className="mt-0.5 text-[11px] text-muted-foreground">
-                    Configure how JustAI answers this conversation.
+                    {t("Configure how JustAI answers this conversation.")}
                   </PopoverPrimitive.Description>
                 </div>
                 <div className="space-y-1">
@@ -2356,10 +2410,12 @@ function ResponseSetupPopover({
                       <Bot className="size-3.5" aria-hidden="true" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-xs font-medium">Agent</span>
+                      <span className="block text-xs font-medium">
+                        {t("Agent")}
+                      </span>
                       <span className="block truncate text-[11px] text-muted-foreground">
                         {assistantLocked
-                          ? "Locked after the first message"
+                          ? t("Locked after the first message")
                           : assistantLabel}
                       </span>
                     </span>
@@ -2372,14 +2428,14 @@ function ResponseSetupPopover({
             ) : (
               <>
                 <SetupPopoverHeader
-                  label="Choose agent"
+                  label={t("Choose agent")}
                   onBack={() => setView("main")}
                 />
                 <div className="max-h-72 overflow-y-auto p-1">
                   <SetupOption
-                    description="Use the normal workspace behavior"
+                    description={t("Use the normal workspace behavior")}
                     icon={<Bot className="size-3.5" aria-hidden="true" />}
-                    label="JustAI default"
+                    label={t("JustAI default")}
                     onClick={() => selectAgent("")}
                     selected={!assistantId}
                   />
@@ -2387,7 +2443,7 @@ function ResponseSetupPopover({
                     <SetupOption
                       description={
                         assistant.kind === "remote"
-                          ? "Remote A2A agent"
+                          ? t("Remote A2A agent")
                           : assistant.description ||
                             "Saved instructions and defaults"
                       }
@@ -2415,10 +2471,12 @@ function SetupPopoverHeader({
   label: string
   onBack: () => void
 }) {
+  const { t } = useTranslations()
+
   return (
     <div className="flex items-center gap-2 border-b px-2.5 py-2">
       <button
-        aria-label="Back to response setup"
+        aria-label={t("Back to response setup")}
         className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.97]"
         onClick={onBack}
         type="button"
@@ -2549,6 +2607,8 @@ function Composer({
   onSaveKnowledge: (sourceId: string) => Promise<void>
   toolApproval?: import("@assistant-ui/react").ToolCallMessagePartProps | null
 }) {
+  const { t } = useTranslations()
+
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
   const composerAnchor = useRef<HTMLDivElement | null>(null)
   const hasThreadMessages = useAuiState(
@@ -2657,18 +2717,18 @@ function Composer({
           label: server.name,
           description: attached
             ? server.enabled
-              ? "Already attached"
-              : "Attached · disabled"
+              ? t("Already attached")
+              : t("Attached · disabled")
             : server.credentialConfigured
-              ? "Add to this chat"
-              : "Needs setup",
+              ? t("Add to this chat")
+              : t("Needs setup"),
           metadata: {
             resourceId: server.id,
             attached,
           },
         }
       })
-  }, [conversationContext.mcpServers, mcpServers])
+  }, [conversationContext.mcpServers, mcpServers, t])
 
   const noteItems = useMemo<Unstable_TriggerItem[]>(() => {
     const attachedNoteIds = new Set(
@@ -2688,14 +2748,14 @@ function Composer({
           id: `note:${note.id}`,
           type: "note",
           label: note.title,
-          description: attached ? "Already attached" : "Add to this chat",
+          description: attached ? t("Already attached") : t("Add to this chat"),
           metadata: {
             resourceId: note.id,
             attached,
           },
         }
       })
-  }, [conversationContext.notes, notes])
+  }, [conversationContext.notes, notes, t])
 
   const contextTriggerAdapter = useMemo(() => {
     const files = new Map<
@@ -2716,7 +2776,7 @@ function Composer({
     const groups = [
       {
         id: "knowledge",
-        label: "Storage files",
+        label: t("Storage files"),
         items: Array.from(files.values()).map((source) => ({
           id: `knowledge:${source.id}`,
           type: "knowledge",
@@ -2727,12 +2787,12 @@ function Composer({
       },
       {
         id: "notes",
-        label: "Notes",
+        label: t("Notes"),
         items: noteItems,
       },
       {
         id: "transcription",
-        label: "Transcription rooms",
+        label: t("Transcription rooms"),
         items: conversationContext.transcriptionSessions.map((session) => ({
           id: `transcription:${session.id}`,
           type: "transcription",
@@ -2759,7 +2819,7 @@ function Composer({
         )
       },
     }
-  }, [conversationContext, noteItems, storageFiles])
+  }, [conversationContext, noteItems, storageFiles, t])
 
   const mcpTriggerAdapter = useMemo(
     () => ({
@@ -2797,7 +2857,7 @@ function Composer({
   const [noteAttachError, setNoteAttachError] = useState<string | null>(null)
   const attachingMcpName =
     mcpItems.find((item) => item.metadata?.resourceId === attachingMcpId)
-      ?.label ?? "MCP server"
+      ?.label ?? t("MCP server")
   const attachMcpFromTrigger = useCallback(
     (item: Unstable_TriggerItem) => {
       if (item.type !== "mcp") return
@@ -2968,7 +3028,7 @@ function Composer({
                   <Quote className="size-3.5 shrink-0" aria-hidden="true" />
                   <ComposerPrimitive.QuoteText className="min-w-0 flex-1 truncate" />
                   <ComposerPrimitive.QuoteDismiss
-                    aria-label="Remove quote"
+                    aria-label={t("Remove quote")}
                     className="rounded p-0.5 hover:bg-muted hover:text-foreground"
                   >
                     <X className="size-3.5" />
@@ -2980,10 +3040,10 @@ function Composer({
                       <span className="size-1.5 shrink-0 rounded-full bg-primary" />
                       <QueueItemPrimitive.Text className="min-w-0 flex-1 truncate" />
                       <QueueItemPrimitive.Steer className="rounded px-1.5 py-0.5 text-[11px] hover:bg-muted hover:text-foreground">
-                        Send now
+                        {t("Send now")}
                       </QueueItemPrimitive.Steer>
                       <QueueItemPrimitive.Remove
-                        aria-label="Remove queued message"
+                        aria-label={t("Remove queued message")}
                         className="rounded p-0.5 hover:bg-muted hover:text-foreground"
                       >
                         <X className="size-3.5" />
@@ -3021,7 +3081,7 @@ function Composer({
                       aria-hidden="true"
                     />
                     <span className="truncate">
-                      Adding{" "}
+                      {t("Adding")}{" "}
                       <span className="font-medium text-foreground">
                         {attachingMcpName}
                       </span>
@@ -3034,7 +3094,7 @@ function Composer({
                     className="mx-1 mb-1 rounded-xl border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-[11px] text-destructive"
                     role="alert"
                   >
-                    {mcpAttachError}
+                    {t(mcpAttachError)}
                   </div>
                 )}
                 {attachingNoteId && (
@@ -3047,7 +3107,7 @@ function Composer({
                       aria-hidden="true"
                     />
                     <span className="truncate">
-                      Adding{" "}
+                      {t("Adding")}{" "}
                       <span className="font-medium text-foreground">
                         {attachingNoteName}
                       </span>
@@ -3060,11 +3120,11 @@ function Composer({
                     className="mx-1 mb-1 rounded-xl border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-[11px] text-destructive"
                     role="alert"
                   >
-                    {noteAttachError}
+                    {t(noteAttachError)}
                   </div>
                 )}
                 <AnimatedComposerInput
-                  aria-label="Message"
+                  aria-label={t("Message")}
                   directiveChip={ComposerMention}
                   directivePluginProps={{
                     onDirectiveSelect: attachContextFromTrigger,
@@ -3090,7 +3150,7 @@ function Composer({
                     )}
                   >
                     <ComposerPrimitive.AddAttachment
-                      aria-label="Attach a file"
+                      aria-label={t("Attach a file")}
                       className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-foreground hover:bg-muted/80 dark:bg-[#3d3d3d] dark:hover:bg-[#474747]"
                       multiple
                     >
@@ -3098,7 +3158,7 @@ function Composer({
                     </ComposerPrimitive.AddAttachment>
                     {onOpenHistory && (
                       <Button
-                        aria-label="Open conversation history"
+                        aria-label={t("Open conversation history")}
                         className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:hidden"
                         onClick={onOpenHistory}
                         size="icon-sm"
@@ -3139,14 +3199,14 @@ function Composer({
                     />
                     {isThreadRunning ? (
                       <ComposerPrimitive.Cancel
-                        aria-label="Cancel response"
+                        aria-label={t("Cancel response")}
                         className="flex size-8 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
                       >
                         <RotateCcw className="size-4" />
                       </ComposerPrimitive.Cancel>
                     ) : (
                       <ComposerPrimitive.Send
-                        aria-label="Send message"
+                        aria-label={t("Send message")}
                         className="flex size-8 items-center justify-center rounded-full bg-[var(--composer-accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                         disabled={
                           hasUnreadyAttachments ||
@@ -3170,9 +3230,10 @@ function Composer({
           compact ? "mt-1 text-[10px]" : "mt-2 text-[11px]"
         )}
       >
-        Type <kbd className="rounded border px-1 font-mono">@</kbd> to mention
-        MCPs, or <kbd className="rounded border px-1 font-mono">/</kbd> for
-        Storage and context.
+        {t("Type")} <kbd className="rounded border px-1 font-mono">@</kbd>{" "}
+        {t("to mention MCPs, or")}{" "}
+        <kbd className="rounded border px-1 font-mono">/</kbd>{" "}
+        {t("for Storage and context.")}
       </p>
     </div>
   )
@@ -3191,6 +3252,8 @@ function AssistantThreadLayout({
   onVoiceErrorClear,
   onVoiceErrorDismiss,
 }: AssistantThreadLayoutProps) {
+  const { t } = useTranslations()
+
   const isEmpty = useAuiState((state) => state.thread.messages.length === 0)
   const latestAssistantMessageId = useAuiState((state) => {
     for (let index = state.thread.messages.length - 1; index >= 0; index -= 1) {
@@ -3229,7 +3292,7 @@ function AssistantThreadLayout({
         <SelectionToolbarPrimitive.Root className="z-50 flex items-center gap-1 rounded-lg border bg-background/95 p-1 text-xs text-foreground shadow-lg backdrop-blur">
           <SelectionToolbarPrimitive.Quote className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
             <Quote className="size-3.5" aria-hidden="true" />
-            Quote
+            {t("Quote")}
           </SelectionToolbarPrimitive.Quote>
         </SelectionToolbarPrimitive.Root>
         <ThreadPrimitive.Viewport
@@ -3335,6 +3398,8 @@ function AssistantChatSurface({
   onAssistantSelectionChange?: (assistantId: string | null) => void
   conversationContext: ConversationContext
 }) {
+  const { t } = useTranslations()
+
   const initialAssistant = assistants.find(
     (assistant) => assistant.id === conversationAssistantId
   )
@@ -3708,11 +3773,11 @@ function AssistantChatSurface({
         maxHeight: 720,
         fallback: (
           <div className="rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-            This MCP app is unavailable.
+            {t("This MCP app is unavailable.")}
           </div>
         ),
       }),
-    [mcpAppHost]
+    [mcpAppHost, t]
   )
   const assistantConfig = useMemo(
     () => AuiConfig({ tools: Tools({ mcpApp: mcpAppRenderer }) }),
@@ -3776,6 +3841,8 @@ export function ChatView({
   onEnsureConversation,
   onOpenHistory,
 }: Props) {
+  const { t } = useTranslations()
+
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
   >(conversationId)
@@ -4392,7 +4459,9 @@ export function ChatView({
                 <BrandMark className="size-full text-primary" />
               </span>
             </div>
-            <p className="font-medium text-foreground">Loading conversation…</p>
+            <p className="font-medium text-foreground">
+              {t("Loading conversation…")}
+            </p>
           </div>
         </div>
       )}
@@ -4404,9 +4473,9 @@ export function ChatView({
         >
           <div className="flex max-w-sm flex-col items-center gap-3">
             <p className="font-medium text-foreground">
-              Conversation history could not be loaded
+              {t("Conversation history could not be loaded")}
             </p>
-            <p className="text-sm text-muted-foreground">{historyError}</p>
+            <p className="text-sm text-muted-foreground">{t(historyError)}</p>
             <Button
               onClick={() => {
                 setHistoryError("")
@@ -4414,7 +4483,7 @@ export function ChatView({
               }}
               variant="outline"
             >
-              <RefreshCw data-icon="inline-start" /> Try again
+              <RefreshCw data-icon="inline-start" /> {t("Try again")}
             </Button>
           </div>
         </div>
@@ -4425,10 +4494,10 @@ export function ChatView({
             (source) => source.contextScope !== "message"
           ).length
         }{" "}
-        knowledge sources, {conversationContext.mcpServers.length} MCP servers,{" "}
-        {conversationContext.notes?.length ?? 0} notes,{" "}
-        {conversationContext.transcriptionSessions.length} transcription
-        sessions attached.
+        {t("knowledge sources,")} {conversationContext.mcpServers.length}{" "}
+        {t("MCP servers,")} {conversationContext.notes?.length ?? 0}{" "}
+        {t("notes,")} {conversationContext.transcriptionSessions.length}{" "}
+        {t("transcription sessions attached.")}
       </span>
     </div>
   )

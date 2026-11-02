@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useMemo, useState } from "react"
 import { Download, ImagePlus, Loader2, Sparkles } from "lucide-react"
 import Image from "next/image"
@@ -34,6 +35,8 @@ type ImageStudioDialogProps = {
 }
 
 export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
+  const { t } = useTranslations()
+
   const imageEndpoints = useMemo(
     () =>
       endpoints.filter(
@@ -150,9 +153,9 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
       <DialogTrigger
         render={
           <Button
-            aria-label="Open image studio"
+            aria-label={t("Open image studio")}
             size="icon-sm"
-            title="Image studio"
+            title={t("Image studio")}
             variant="ghost"
           />
         }
@@ -161,44 +164,48 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
       </DialogTrigger>
       <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Image Studio</DialogTitle>
+          <DialogTitle>{t("Image Studio")}</DialogTitle>
           <DialogDescription>
-            Generate a new image or upload one to make a focused edit.
+            {t("Generate a new image or upload one to make a focused edit.")}
           </DialogDescription>
         </DialogHeader>
 
         {imageEndpoints.length === 0 && (
           <Alert>
             <Sparkles />
-            <AlertTitle>No image endpoint configured</AlertTitle>
+            <AlertTitle>{t("No image endpoint configured")}</AlertTitle>
             <AlertDescription>
-              Add an OpenAI-compatible endpoint with the image-generation
-              capability in Settings → Endpoints.
+              {t(
+                "Add an OpenAI-compatible endpoint with the image-generation capability in Settings → Endpoints."
+              )}
             </AlertDescription>
           </Alert>
         )}
         {error && (
           <Alert aria-live="polite" role="alert" variant="destructive">
-            <AlertTitle>Image action failed</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertTitle>{t("Image action failed")}</AlertTitle>
+            <AlertDescription>{t(error)}</AlertDescription>
           </Alert>
         )}
 
         <form onSubmit={(event) => void submit(event)}>
           <Tabs onValueChange={changeMode} value={mode}>
-            <TabsList aria-label="Image operation">
-              <TabsTrigger value="generate">Generate</TabsTrigger>
-              <TabsTrigger value="edit">Edit</TabsTrigger>
+            <TabsList aria-label={t("Image operation")}>
+              <TabsTrigger value="generate">{t("Generate")}</TabsTrigger>
+              <TabsTrigger value="edit">{t("Edit")}</TabsTrigger>
             </TabsList>
             <TabsContent className="mt-4 space-y-4" value="generate">
               <p className="text-sm text-muted-foreground">
-                Describe the image, composition, style, and any important
-                constraints.
+                {t(
+                  "Describe the image, composition, style, and any important constraints."
+                )}
               </p>
             </TabsContent>
             <TabsContent className="mt-4 space-y-4" value="edit">
               <Field>
-                <FieldLabel htmlFor="image-edit-file">Source image</FieldLabel>
+                <FieldLabel htmlFor="image-edit-file">
+                  {t("Source image")}
+                </FieldLabel>
                 <Input
                   accept="image/png,image/jpeg,image/webp"
                   id="image-edit-file"
@@ -207,7 +214,7 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
                   type="file"
                 />
                 <FieldDescription>
-                  PNG, JPEG, or WebP up to 15 MB.
+                  {t("PNG, JPEG, or WebP up to 15 MB.")}
                 </FieldDescription>
               </Field>
             </TabsContent>
@@ -215,13 +222,15 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="image-endpoint">Image endpoint</FieldLabel>
+              <FieldLabel htmlFor="image-endpoint">
+                {t("Image endpoint")}
+              </FieldLabel>
               <Select
                 onValueChange={(value) => setEndpointId(value ?? "")}
                 value={endpointId || imageEndpoints[0]?.id || ""}
               >
                 <SelectTrigger disabled={saving} id="image-endpoint">
-                  <SelectValue placeholder="Choose an endpoint" />
+                  <SelectValue placeholder={t("Choose an endpoint")} />
                 </SelectTrigger>
                 <SelectContent>
                   {imageEndpoints.map((endpoint) => (
@@ -233,7 +242,7 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
               </Select>
             </Field>
             <Field>
-              <FieldLabel htmlFor="image-prompt">Prompt</FieldLabel>
+              <FieldLabel htmlFor="image-prompt">{t("Prompt")}</FieldLabel>
               <Textarea
                 className="min-h-24"
                 disabled={saving}
@@ -243,8 +252,8 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
                 onChange={(event) => setPrompt(event.target.value)}
                 placeholder={
                   mode === "edit"
-                    ? "Remove the background and add…"
-                    : "A cinematic…"
+                    ? t("Remove the background and add…")
+                    : t("A cinematic…")
                 }
                 value={prompt}
               />
@@ -263,7 +272,9 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
               />
               <div className="flex flex-wrap items-center justify-between gap-3 border-t px-3 py-2">
                 <span className="text-xs text-muted-foreground">
-                  {image.mode === "edit" ? "Edited image" : "Generated image"}
+                  {image.mode === "edit"
+                    ? t("Edited image")
+                    : t("Generated image")}
                 </span>
                 <a
                   className="inline-flex h-6 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-input/50"
@@ -271,7 +282,7 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
                   href={imageSrc}
                 >
                   <Download className="size-3" data-icon="inline-start" />
-                  Download
+                  {t("Download")}
                 </a>
               </div>
             </div>
@@ -283,7 +294,7 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
               type="button"
               variant="outline"
             >
-              Close
+              {t("Close")}
             </Button>
             <Button
               disabled={saving || !prompt.trim() || imageEndpoints.length === 0}
@@ -291,10 +302,10 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
             >
               {saving ? <Loader2 className="animate-spin" /> : <Sparkles />}
               {saving
-                ? "Creating…"
+                ? t("Creating…")
                 : mode === "edit"
-                  ? "Edit image"
-                  : "Generate image"}
+                  ? t("Edit image")
+                  : t("Generate image")}
             </Button>
           </DialogFooter>
         </form>
