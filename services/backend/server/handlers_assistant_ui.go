@@ -1355,6 +1355,9 @@ func (a *App) persistAssistantUIUser(ctx context.Context, conversationID uuid.UU
 			return err
 		}
 		if exists {
+			// The client may have saved this message through the history
+			// upsert first; the conversation still needs its title.
+			a.titleConversationFromUserText(ctx, conversationID, message.Text)
 			return nil
 		}
 	}
@@ -1388,8 +1391,18 @@ func (a *App) persistAssistantUIUser(ctx context.Context, conversationID uuid.UU
 	if err != nil {
 		return err
 	}
-	_, _ = a.DB.ExecContext(ctx, `UPDATE conversations SET title = CASE WHEN title = $2 THEN $3 ELSE title END, updated_at = now() WHERE id = $1`, conversationID, defaultConversationTitle, conversationTitle(message.Text))
+	a.titleConversationFromUserText(ctx, conversationID, message.Text)
 	return nil
+}
+
+// titleConversationFromUserText replaces the placeholder title with the first
+// user message. It never overwrites a title that was set or renamed already.
+func (a *App) titleConversationFromUserText(ctx context.Context, conversationID uuid.UUID, text string) {
+	title := conversationTitle(text)
+	if title == defaultConversationTitle {
+		return
+	}
+	_, _ = a.DB.ExecContext(ctx, `UPDATE conversations SET title = $3, updated_at = now() WHERE id = $1 AND title = $2`, conversationID, defaultConversationTitle, title)
 }
 
 // persistAssistantUITextMessage keeps the voice runtime and any remaining
@@ -3058,6 +3071,9 @@ func (a *App) upsertAssistantMessage(c *gin.Context) {
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err)
 		return
+	}
+	if role == "user" {
+		a.titleConversationFromUserText(c, conversationID, content)
 	}
 	c.Status(http.StatusNoContent)
 }

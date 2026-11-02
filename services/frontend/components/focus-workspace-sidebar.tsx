@@ -402,6 +402,11 @@ export function FocusWorkspaceSidebar({
     onNavigate(view)
   }
 
+  // The backend stores an English placeholder until the first message names the
+  // conversation; show it in the user's language.
+  const displayTitle = (title: string) =>
+    title === "New conversation" ? t("New conversation") : title
+
   const recentItems = useMemo(() => {
     if (activeView === "chat") {
       return [...conversations]
@@ -757,10 +762,10 @@ export function FocusWorkspaceSidebar({
                                         else
                                           onNavigate(activeView, null, entry.id)
                                       }}
-                                      title={entry.title}
+                                      title={displayTitle(entry.title)}
                                     >
                                       <span className="min-w-0 flex-1 truncate">
-                                        {entry.title}
+                                        {displayTitle(entry.title)}
                                       </span>
                                       {entry.status === "failed" ? (
                                         <span
