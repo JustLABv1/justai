@@ -1963,6 +1963,8 @@ export function ModelEndpointPicker({
   models,
   modelId,
   modelDiscoveryLoading,
+  modelDiscoveryFailed,
+  onRetryModelDiscovery,
   onModelChange,
   compact,
 }: {
@@ -1972,6 +1974,8 @@ export function ModelEndpointPicker({
   models: DiscoveredChatModel[]
   modelId: string
   modelDiscoveryLoading?: boolean
+  modelDiscoveryFailed?: boolean
+  onRetryModelDiscovery?: () => void
   onModelChange: (id: string) => void
   compact: boolean
 }) {
@@ -2018,41 +2022,44 @@ export function ModelEndpointPicker({
           sideOffset={12}
           className="z-50"
         >
-          <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] bg-popover p-1 text-popover-foreground shadow-sm outline-none">
-            <div
-              aria-label={t("Endpoints")}
-              className="flex max-h-80 w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1"
-            >
-              {endpoints.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  aria-label={item.name}
-                  aria-pressed={item.id === endpointId}
-                  title={item.name}
-                  onClick={() => {
-                    onEndpointChange(item.id)
-                    setQuery("")
-                  }}
-                  className={cn(
-                    "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                    item.id === endpointId
-                      ? "bg-primary text-primary-foreground hover:bg-primary/85"
-                      : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
-                  )}
+          <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-[1.5rem] bg-popover p-1 text-popover-foreground shadow-sm outline-none">
+            {endpoints.length > 1 && (
+              <div className="px-2.5 pt-2 pb-1">
+                <p className="pb-1.5 text-xs font-medium text-muted-foreground">
+                  {t("Endpoint")}
+                </p>
+                <div
+                  aria-label={t("Endpoints")}
+                  className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto"
+                  role="group"
                 >
-                  <span className="text-sm font-medium" aria-hidden="true">
-                    {item.name
-                      .trim()
-                      .split(/\s+/)
-                      .map((word) => Array.from(word)[0])
-                      .slice(0, 2)
-                      .join("")
-                      .toUpperCase()}
-                  </span>
-                </button>
-              ))}
-            </div>
+                  {endpoints.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-pressed={item.id === endpointId}
+                      title={item.name}
+                      onClick={() => {
+                        onEndpointChange(item.id)
+                        setQuery("")
+                      }}
+                      className={cn(
+                        "flex h-7 max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                        item.id === endpointId
+                          ? "bg-primary text-primary-foreground hover:bg-primary/85"
+                          : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
+                      )}
+                    >
+                      <EndpointIcon
+                        provider={item.providerType}
+                        className="size-3.5 shrink-0"
+                      />
+                      <span className="truncate">{item.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="min-w-0 flex-1 p-1.5">
               <div className="flex items-center justify-between gap-3 px-2 pt-0.5 pb-1.5">
                 <PopoverPrimitive.Title className="text-sm font-medium text-muted-foreground">
@@ -2069,6 +2076,23 @@ export function ModelEndpointPicker({
                   <Search className="size-4 shrink-0" />
                 </label>
               </div>
+              {modelDiscoveryFailed && !modelDiscoveryLoading && (
+                <div
+                  role="status"
+                  className="mx-1 mb-1 flex items-center justify-between gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground"
+                >
+                  <span>{t("Models could not be loaded. Retrying…")}</span>
+                  {onRetryModelDiscovery && (
+                    <button
+                      type="button"
+                      onClick={onRetryModelDiscovery}
+                      className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                    >
+                      {t("Retry now")}
+                    </button>
+                  )}
+                </div>
+              )}
               <div
                 className="max-h-72 overflow-y-auto"
                 role="group"
@@ -2567,6 +2591,8 @@ function Composer({
   models,
   modelId,
   modelDiscoveryLoading,
+  modelDiscoveryFailed,
+  onRetryModelDiscovery,
   onModelChange,
   deepContext,
   onDeepContextChange,
@@ -2593,6 +2619,8 @@ function Composer({
   models: DiscoveredChatModel[]
   modelId: string
   modelDiscoveryLoading?: boolean
+  modelDiscoveryFailed?: boolean
+  onRetryModelDiscovery?: () => void
   onModelChange: (id: string) => void
   deepContext: boolean
   onDeepContextChange: (enabled: boolean) => void
@@ -3189,6 +3217,8 @@ function Composer({
                       models={models}
                       modelId={modelId}
                       modelDiscoveryLoading={modelDiscoveryLoading}
+                      modelDiscoveryFailed={modelDiscoveryFailed}
+                      onRetryModelDiscovery={onRetryModelDiscovery}
                       onModelChange={onModelChange}
                       compact={compact}
                     />
@@ -3426,6 +3456,13 @@ function AssistantChatSurface({
         }
       : {}
   )
+  const [modelDiscoveryStatus, setModelDiscoveryStatus] = useState<
+    Record<string, "ok" | "failed" | "retry">
+  >({})
+  const discoveryAttempts = useRef<Record<string, number>>({})
+  const discoveryRetryTimers = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({})
   const [modelByEndpoint, setModelByEndpoint] = useState<
     Record<string, string>
   >(() =>
@@ -3516,10 +3553,32 @@ function AssistantChatSurface({
     return activeTranscriptionEndpoint?.id ?? fallbackTranscriptionEndpoint?.id
   }, [endpoint, endpoints])
 
+  // "ok" = the endpoint's model list was really fetched. A seeded or fallback
+  // list (saved conversation model, configured model) never counts as fetched,
+  // so it is replaced as soon as discovery succeeds and discovery is retried
+  // with backoff after a failure instead of staying on the fallback forever.
+  const retryModelDiscovery = useCallback(() => {
+    if (!selectedEndpointId) return
+    setModelDiscoveryStatus((current) =>
+      current[selectedEndpointId] === "ok"
+        ? current
+        : { ...current, [selectedEndpointId]: "retry" }
+    )
+  }, [selectedEndpointId])
+
+  useEffect(() => {
+    const retryTimers = discoveryRetryTimers.current
+    return () => {
+      for (const timer of Object.values(retryTimers)) clearTimeout(timer)
+    }
+  }, [])
+
+  const discoveryStatus = modelDiscoveryStatus[selectedEndpointId]
   useEffect(() => {
     if (
       !selectedEndpointId ||
-      modelsByEndpoint[selectedEndpointId] !== undefined
+      discoveryStatus === "ok" ||
+      discoveryStatus === "failed"
     ) {
       return
     }
@@ -3532,6 +3591,7 @@ function AssistantChatSurface({
       .then((result) => {
         if (cancelled) return
         const models = (result.models ?? []).filter((model) => model.id?.trim())
+        discoveryAttempts.current[selectedEndpointId] = 0
         setModelsByEndpoint((current) => ({
           ...current,
           [selectedEndpointId]: models,
@@ -3545,27 +3605,47 @@ function AssistantChatSurface({
             endpoint?.chatModel ??
             "",
         }))
+        setModelDiscoveryStatus((current) => ({
+          ...current,
+          [selectedEndpointId]: "ok",
+        }))
       })
       .catch(() => {
         if (cancelled) return
         // Discovery is best effort. A manually configured endpoint remains
-        // usable even when its gateway does not implement /models.
+        // usable with its configured model, and discovery keeps retrying.
         setModelsByEndpoint((current) => ({
           ...current,
-          [selectedEndpointId]: endpoint?.chatModel
-            ? [{ id: endpoint.chatModel }]
-            : [],
+          [selectedEndpointId]:
+            current[selectedEndpointId] ??
+            (endpoint?.chatModel ? [{ id: endpoint.chatModel }] : []),
         }))
         setModelByEndpoint((current) => ({
           ...current,
           [selectedEndpointId]:
             current[selectedEndpointId] ?? endpoint?.chatModel ?? "",
         }))
+        setModelDiscoveryStatus((current) => ({
+          ...current,
+          [selectedEndpointId]: "failed",
+        }))
+        const attempt = discoveryAttempts.current[selectedEndpointId] ?? 0
+        discoveryAttempts.current[selectedEndpointId] = attempt + 1
+        clearTimeout(discoveryRetryTimers.current[selectedEndpointId])
+        discoveryRetryTimers.current[selectedEndpointId] = setTimeout(
+          () =>
+            setModelDiscoveryStatus((current) =>
+              current[selectedEndpointId] === "failed"
+                ? { ...current, [selectedEndpointId]: "retry" }
+                : current
+            ),
+          Math.min(2000 * 2 ** attempt, 30000)
+        )
       })
     return () => {
       cancelled = true
     }
-  }, [endpoint?.chatModel, modelsByEndpoint, selectedEndpointId])
+  }, [endpoint?.chatModel, discoveryStatus, selectedEndpointId])
 
   const resumableStorage = useMemo(
     () =>
@@ -3799,6 +3879,9 @@ function AssistantChatSurface({
           endpoints,
           models: availableModels,
           modelDiscoveryLoading,
+          modelDiscoveryFailed:
+            modelDiscoveryStatus[selectedEndpointId] === "failed",
+          onRetryModelDiscovery: retryModelDiscovery,
           modelId: selectedModel,
           deepContext,
           onDeepContextChange: setDeepContext,

@@ -546,6 +546,9 @@ export const de = {
   Models: "Modelle",
   "Search models": "Modelle suchen",
   "Quick Search": "Schnellsuche",
+  "Retry now": "Jetzt erneut versuchen",
+  "Models could not be loaded. Retrying…":
+    "Modelle konnten nicht geladen werden. Neuer Versuch…",
   "Discovering models…": "Modelle werden ermittelt…",
   "No matching models.": "Keine passenden Modelle.",
   "No models available. Configure an endpoint in Settings.":
