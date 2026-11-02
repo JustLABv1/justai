@@ -18,15 +18,8 @@ import { MCPView } from "@/components/mcp-view"
 import { PrivacyView } from "@/components/privacy-view"
 import { SettingsView } from "@/components/settings-view"
 import { Button } from "@/components/ui/button"
-import {
-  Page,
-  PageActions,
-  PageDescription,
-  PageHeader,
-  PageHeading,
-  PageTitle,
-} from "@/components/ui/page"
-import { SettingsLayout, SettingsNav } from "@/components/ui/settings"
+import { Page, PageActions, PageTitle } from "@/components/ui/page"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import type {
   Endpoint,
   MCPServer,
@@ -60,6 +53,7 @@ const tabs: Array<{ id: SettingsTab; label: string; icon: typeof Settings2 }> =
     { id: "mcp", label: "Tools", icon: Plug },
     { id: "members", label: "Members", icon: Users },
     { id: "privacy", label: "Data & privacy", icon: ShieldCheck },
+    { id: "lifecycle", label: "Management", icon: Settings2 },
   ]
 
 export function SettingsShell({
@@ -86,6 +80,11 @@ export function SettingsShell({
     organizations[0]
   const visibleTabs = tabs.map((tab) => ({ ...tab, label: t(tab.label) }))
   const pageMeta = {
+    lifecycle: {
+      eyebrow: t("Management"),
+      title: t("Management"),
+      description: t("Archive, leave, or permanently remove this workspace."),
+    },
     workspace: {
       eyebrow: t("Workspace summary"),
       title: t("Overview"),
@@ -172,47 +171,40 @@ export function SettingsShell({
 
   return (
     <Page>
-      <PageHeader>
-        <PageHeading>
-          <PageTitle>{t("Workspace settings")}</PageTitle>
-          <PageDescription>
-            {t(
-              "Configure {workspace} and everything available to its members.",
-              {
-                workspace:
-                  activeOrganization?.name ?? t("your active workspace"),
-              }
-            )}
-          </PageDescription>
-        </PageHeading>
-        {pageAction && <PageActions>{pageAction}</PageActions>}
-      </PageHeader>
+      <PageTitle>{t("Workspace settings")}</PageTitle>
+      {pageAction && <PageActions>{pageAction}</PageActions>}
 
-      <SettingsLayout>
-        <SettingsNav
-          activeId={activeTab}
-          aria-label={t("Workspace settings sections")}
-          groups={[{ items: visibleTabs }]}
-          onSelect={(id) => onTabChange(id as SettingsTab)}
-        />
-
-        <div
-          aria-labelledby={`settings-tab-${activeTab}`}
-          className="min-w-0"
-          id={`settings-panel-${activeTab}`}
-          role="tabpanel"
-          tabIndex={0}
-        >
-          <div className="mb-4 px-1">
-            <h2 className="font-heading text-lg font-semibold tracking-tight">
-              {currentPage.title}
-            </h2>
-            <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
-              {currentPage.description}
-            </p>
-          </div>
-          {activeTab === "workspace" || activeTab === "members" ? (
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => onTabChange(value as SettingsTab)}
+        className="gap-6"
+      >
+        <div className="min-w-0 overflow-x-auto pb-1">
+          <TabsList
+            aria-label={t("Workspace settings sections")}
+            variant="line"
+          >
+            {visibleTabs.map(({ id, label, icon: Icon }) => (
+              <TabsTrigger key={id} value={id}>
+                <Icon aria-hidden="true" />
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+        <TabsContent key={activeTab} value={activeTab} className="min-w-0">
+          {activeTab !== "lifecycle" && (
+            <div className="mb-4 px-1">
+              <p className="max-w-2xl text-sm text-muted-foreground">
+                {currentPage.description}
+              </p>
+            </div>
+          )}
+          {activeTab === "workspace" ||
+          activeTab === "members" ||
+          activeTab === "lifecycle" ? (
             <SettingsView
+              key={activeOrganization?.id}
               activeOrganizationId={activeOrganizationId}
               endpoints={endpoints}
               mcpServers={mcpServers}
@@ -223,7 +215,7 @@ export function SettingsShell({
               workspaceCreateRequest={workspaceCreateRequest}
               memberCreateRequest={memberCreateRequest}
               organizations={organizations}
-              section={activeTab === "members" ? "members" : "workspace"}
+              section={activeTab}
               user={user}
             />
           ) : null}
@@ -261,8 +253,8 @@ export function SettingsShell({
               platformAdmin={user.platformAdmin}
             />
           ) : null}
-        </div>
-      </SettingsLayout>
+        </TabsContent>
+      </Tabs>
     </Page>
   )
 }

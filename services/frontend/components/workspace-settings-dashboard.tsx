@@ -1,32 +1,26 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import { useMemo } from "react"
-import {
-  Activity,
-  Bot,
-  Cpu,
-  Pencil,
-  Plug,
-  ShieldCheck,
-  Users,
-} from "lucide-react"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Bot, Cpu, Pencil, Plug, ShieldCheck, Users } from "lucide-react"
 
-import {
-  AdminUsageCharts,
-  compactNumber,
-} from "@/components/admin-usage-charts"
+import { workspaceActivityDays } from "@/lib/workspace-activity"
+
+import { compactNumber } from "@/components/admin-usage-charts"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart"
 import { Skeleton } from "@/components/ui/skeleton"
 import type {
   AdminAnalyticsResponse,
@@ -34,7 +28,6 @@ import type {
   MCPServer,
   Organization,
 } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 type WorkspaceSettingsDashboardProps = {
   organization: Organization
@@ -46,111 +39,92 @@ type WorkspaceSettingsDashboardProps = {
   analyticsLoading: boolean
   canManage: boolean
   onRename: () => void
-  onArchive: () => void
-  onDelete: () => void
-  onLeave: () => void
 }
 
 function workspaceInitial(name: string) {
   return name.trim().charAt(0).toUpperCase() || "W"
 }
 
-function ActivityHeatmap({
+function WorkspaceActivity({
   analytics,
+  loading,
 }: {
   analytics: AdminAnalyticsResponse | null
+  loading: boolean
 }) {
   const { t, locale } = useTranslations()
-  const dayLabel = new Intl.DateTimeFormat(locale, {
-    month: "short",
-    day: "numeric",
-  })
-
-  const days = useMemo(() => {
-    const counts = new Map(
-      (analytics?.timeSeries ?? []).map((day) => [day.date, day.requests])
-    )
-    const end = new Date()
-    end.setHours(12, 0, 0, 0)
-    const start = new Date(end)
-    start.setDate(start.getDate() - 90 - start.getDay())
-    const result: Array<{ key: string; count: number; date: Date }> = []
-    const cursor = new Date(start)
-    while (cursor <= end) {
-      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`
-      result.push({ key, count: counts.get(key) ?? 0, date: new Date(cursor) })
-      cursor.setDate(cursor.getDate() + 1)
-    }
-    return result
-  }, [analytics])
-  const max = Math.max(1, ...days.map((day) => day.count))
-
+  const data = workspaceActivityDays(analytics?.timeSeries ?? [])
+  const formatDate = (value: string) =>
+    new Intl.DateTimeFormat(locale, {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(`${value}T00:00:00Z`))
   return (
-    <Card className="h-full" size="sm">
+    <Card size="sm" className="min-w-0">
       <CardHeader>
-        <CardTitle>{t("Activity rhythm")}</CardTitle>
+        <CardTitle>{t("Usage trends")}</CardTitle>
         <CardDescription>
           {t("Workspace runs over the last 90 days.")}
         </CardDescription>
-        <CardAction>
-          <Activity
-            className="size-4 text-muted-foreground"
-            aria-hidden="true"
-          />
-        </CardAction>
       </CardHeader>
       <CardContent>
-        <div className="pb-1">
-          <div className="mx-auto grid w-full max-w-lg auto-cols-fr grid-flow-col grid-rows-7 gap-1">
-            {days.map((day) => {
-              const ratio = day.count / max
-              const level =
-                day.count === 0
-                  ? 0
-                  : ratio > 0.66
-                    ? 4
-                    : ratio > 0.33
-                      ? 3
-                      : ratio > 0.12
-                        ? 2
-                        : 1
-              return (
-                <span
-                  aria-label={t("{value0} runs on {value1}", {
-                    value0: day.count,
-                    value1: dayLabel.format(day.date),
-                  })}
-                  className={cn(
-                    "aspect-square w-full rounded-[4px] bg-muted",
-                    level === 1 && "bg-primary/25",
-                    level === 2 && "bg-primary/45",
-                    level === 3 && "bg-primary/70",
-                    level === 4 && "bg-primary"
-                  )}
-                  key={day.key}
-                  role="img"
-                  title={t("{value0} runs on {value1}", {
-                    value0: day.count,
-                    value1: dayLabel.format(day.date),
-                  })}
-                />
-              )
-            })}
+        {loading ? (
+          <Skeleton className="h-56 w-full" />
+        ) : data.some((day) => day.requests > 0) ? (
+          <ChartContainer
+            style={{ height: 224 }}
+            config={{
+              requests: { label: t("AI runs · 90d"), color: "var(--primary)" },
+            }}
+          >
+            <BarChart
+              accessibilityLayer
+              data={data}
+              margin={{ top: 8, right: 8, left: 0, bottom: 4 }}
+            >
+              <CartesianGrid vertical={false} stroke="var(--border)" />
+              <XAxis
+                dataKey="date"
+                tickFormatter={formatDate}
+                axisLine={false}
+                tickLine={false}
+                ticks={[
+                  data[0].date,
+                  data[29].date,
+                  data[59].date,
+                  data[89].date,
+                ]}
+                tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+                tickMargin={12}
+              />
+              <YAxis
+                width={32}
+                tickCount={3}
+                tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+                allowDecimals={false}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(value) => compactNumber(value, locale)}
+              />
+              <ChartTooltip
+                cursor={{ fill: "var(--muted)", fillOpacity: 0.5 }}
+                content={<ChartTooltipContent />}
+              />
+              <Bar
+                dataKey="requests"
+                fill="var(--primary)"
+                radius={[3, 3, 0, 0]}
+                maxBarSize={20}
+                isAnimationActive={false}
+              />
+            </BarChart>
+          </ChartContainer>
+        ) : (
+          <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+            {t("No activity for this period.")}
           </div>
-        </div>
-        <div className="mt-4 flex items-center justify-end gap-1.5 text-[10px] text-muted-foreground">
-          <span>{t("Less")}</span>
-          {[
-            "bg-muted",
-            "bg-primary/25",
-            "bg-primary/45",
-            "bg-primary/70",
-            "bg-primary",
-          ].map((color) => (
-            <span className={cn("size-2.5 rounded-[3px]", color)} key={color} />
-          ))}
-          <span>{t("More")}</span>
-        </div>
+        )}
       </CardContent>
     </Card>
   )
@@ -166,9 +140,6 @@ export function WorkspaceSettingsDashboard({
   analyticsLoading,
   canManage,
   onRename,
-  onArchive,
-  onDelete,
-  onLeave,
 }: WorkspaceSettingsDashboardProps) {
   const { t, locale } = useTranslations()
 
@@ -179,7 +150,7 @@ export function WorkspaceSettingsDashboard({
   const requests = analytics?.summary.requests ?? 0
   const successRate = requests
     ? Math.round(((analytics?.summary.succeeded ?? 0) / requests) * 100)
-    : 100
+    : null
 
   const stats = [
     {
@@ -194,7 +165,11 @@ export function WorkspaceSettingsDashboard({
     },
     {
       label: t("Success rate"),
-      value: analyticsLoading ? null : `${successRate}%`,
+      value: analyticsLoading
+        ? null
+        : successRate === null
+          ? "—"
+          : `${successRate}%`,
       icon: ShieldCheck,
     },
     { label: t("Connected tools"), value: enabledServers, icon: Plug },
@@ -227,120 +202,68 @@ export function WorkspaceSettingsDashboard({
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-6 rounded-2xl bg-muted/40 p-6 sm:grid-cols-4">
         {stats.map(({ label, value, icon: Icon }) => (
-          <Card size="sm" key={label}>
-            <CardHeader>
-              <CardDescription>{label}</CardDescription>
-              <CardAction>
-                <Icon
-                  className="size-4 text-muted-foreground"
-                  aria-hidden="true"
-                />
-              </CardAction>
-            </CardHeader>
-            <CardContent>
+          <div key={label} className="flex flex-col gap-3">
+            <dt className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Icon className="size-3.5" aria-hidden="true" />
+              {label}
+            </dt>
+            <dd className="font-heading text-3xl font-medium tracking-tight tabular-nums">
               {value === null ? (
-                <Skeleton className="h-7 w-16" />
+                <Skeleton className="h-9 w-16" />
+              ) : typeof value === "number" ? (
+                compactNumber(value, locale)
               ) : (
-                <p className="font-heading text-2xl font-semibold tracking-tight">
-                  {typeof value === "number"
-                    ? compactNumber(value, locale)
-                    : value}
-                </p>
+                value
               )}
-            </CardContent>
-          </Card>
+            </dd>
+          </div>
         ))}
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <ActivityHeatmap analytics={analytics} />
-        <Card className="h-full" size="sm">
+      </dl>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
+        {canManage && (
+          <WorkspaceActivity analytics={analytics} loading={analyticsLoading} />
+        )}
+        <Card size="sm">
           <CardHeader>
             <CardTitle>{t("Workspace stack")}</CardTitle>
             <CardDescription>
               {t("Connected capacity at a glance.")}
             </CardDescription>
-            <CardAction>
-              <Cpu
-                className="size-4 text-muted-foreground"
-                aria-hidden="true"
-              />
-            </CardAction>
           </CardHeader>
-          <CardContent className="flex flex-col gap-5">
+          <CardContent className="flex flex-col gap-3">
             {[
               {
                 label: t("Endpoints enabled"),
                 value: enabledEndpoints,
                 total: endpoints.length,
+                icon: Cpu,
               },
               {
                 label: t("MCP servers enabled"),
                 value: enabledServers,
                 total: mcpServers.length,
+                icon: Plug,
               },
-              {
-                label: t("Successful runs"),
-                value: successRate,
-                total: 100,
-                suffix: "%",
-              },
-            ].map((item) => (
-              <div className="flex flex-col gap-2" key={item.label}>
-                <div className="flex items-center justify-between gap-3 text-xs">
-                  <span className="text-muted-foreground">{item.label}</span>
-                  <span className="font-medium tabular-nums">
-                    {item.value}
-                    {item.suffix ?? ` / ${item.total}`}
-                  </span>
-                </div>
-                <Progress
-                  aria-label={item.label}
-                  value={item.total ? (item.value / item.total) * 100 : 0}
+            ].map(({ label, value, total, icon: Icon }) => (
+              <div
+                key={label}
+                className="flex items-center gap-3 rounded-xl bg-muted/50 p-4"
+              >
+                <Icon
+                  className="size-4 text-muted-foreground"
+                  aria-hidden="true"
                 />
+                <span className="flex-1 text-sm">{label}</span>
+                <span className="text-sm font-medium tabular-nums">
+                  {value} / {total}
+                </span>
               </div>
             ))}
           </CardContent>
         </Card>
       </div>
-
-      {canManage && !analyticsLoading && (
-        <AdminUsageCharts analytics={analytics} />
-      )}
-
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>{t("Workspace lifecycle")}</CardTitle>
-          <CardDescription>
-            {t("Archive, leave, or permanently remove this workspace.")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <p className="max-w-2xl text-xs text-muted-foreground">
-            {t(
-              "Archiving hides the workspace without deleting its content. Permanent deletion cannot be undone."
-            )}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {organization.role !== "owner" ? (
-              <Button onClick={onLeave} variant="outline">
-                {t("Leave workspace")}
-              </Button>
-            ) : (
-              <>
-                <Button onClick={onArchive} variant="outline">
-                  {t("Archive workspace")}
-                </Button>
-                <Button onClick={onDelete} variant="destructive">
-                  {t("Delete workspace")}
-                </Button>
-              </>
-            )}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }

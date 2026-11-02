@@ -17,6 +17,7 @@ export type ViewId =
   | "profile"
 
 export type SettingsTab =
+  | "lifecycle"
   | "workspace"
   | "endpoints"
   | "knowledge"

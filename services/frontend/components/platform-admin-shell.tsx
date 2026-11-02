@@ -6,14 +6,7 @@ import {
   useTranslatedConfig,
 } from "@/components/locale-provider"
 
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import {
   Activity,
   Archive,
@@ -69,6 +62,8 @@ import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAnnouncementsView } from "@/components/platform-announcements-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { avatarToneFor, initialsFor } from "@/lib/identity"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -80,20 +75,9 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import {
-  Page,
-  PageActions,
-  PageDescription,
-  PageHeader,
-  PageHeading,
-  PageTitle,
-} from "@/components/ui/page"
-import {
-  SettingsLayout,
-  SettingsNav,
-  SettingsRow,
-  SettingsSection,
-} from "@/components/ui/settings"
+import { Page, PageActions, PageTitle } from "@/components/ui/page"
+import { SettingsRow, SettingsSection } from "@/components/ui/settings"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { FilterBar } from "@/components/ui/filter-bar"
 import {
   Collapsible,
@@ -146,16 +130,6 @@ const tabsMessages: Array<{
   { id: "audit", label: "Audit", icon: KeyRound },
 ]
 
-const tabGroupsMessages: Array<{ label: string; ids: AdminTab[] }> = [
-  { label: "Overview", ids: ["overview"] },
-  { label: "Operations", ids: ["users", "workspaces", "endpoints", "mcp"] },
-  {
-    label: "Configuration",
-    ids: ["controls", "authentication", "announcements"],
-  },
-  { label: "Observability", ids: ["health", "analytics", "audit"] },
-]
-
 function settingLabel(key: string) {
   return key
     .replace(/Enabled$/, "")
@@ -205,7 +179,6 @@ export function PlatformAdminShell({
   user,
 }: PlatformAdminShellProps) {
   const tabs = useTranslatedConfig(tabsMessages)
-  const tabGroups = useTranslatedConfig(tabGroupsMessages)
 
   const { t } = useTranslations()
 
@@ -461,11 +434,6 @@ export function PlatformAdminShell({
     }
   }
 
-  const title = useMemo(
-    () => tabs.find((tab) => tab.id === activeTab)?.label ?? t("Overview"),
-    [activeTab, tabs, t]
-  )
-
   const pageAction =
     activeTab === "endpoints" ? (
       <Button onClick={() => setEndpointCreateRequest((value) => value + 1)}>
@@ -505,49 +473,108 @@ export function PlatformAdminShell({
     )
   }
 
-  return (
-    <Page className="max-w-7xl">
-      <PageHeader>
-        <PageHeading>
-          <PageTitle>{title}</PageTitle>
-          <PageDescription>
+  const listToolbar = (
+    <FilterBar
+      className={activeTab === "users" ? "border-0 px-0 py-0" : undefined}
+      hasActiveFilters={Boolean(query.trim() || listStatus)}
+      onClear={() => {
+        setListPage(1)
+        setQuery("")
+        setListStatus("")
+      }}
+      resultCount={activeTab === "users" ? undefined : workspaces.length}
+      resultLabel={activeTab === "users" ? "users" : "workspaces"}
+      resultTotal={listTotal || undefined}
+      search={{
+        label: t("Search {value0}", { value0: activeTab }),
+        onChange: (value) => {
+          setListPage(1)
+          setQuery(value)
+        },
+        placeholder: t(
+          activeTab === "users" ? "Search users…" : "Search workspaces…"
+        ),
+        value: query,
+      }}
+    >
+      <Select
+        value={listStatus || "all"}
+        onValueChange={(value) => {
+          setListPage(1)
+          const nextValue = value ?? "all"
+          setListStatus(nextValue === "all" ? "" : nextValue)
+        }}
+      >
+        <SelectTrigger
+          aria-label={t("{value0} status", { value0: activeTab })}
+          className="h-8 min-w-36 sm:min-w-40"
+          size="sm"
+        >
+          <SelectValue>
             {t(
-              "Global controls for JustAI users, workspaces, integrations, and reliability."
+              listStatus === "active"
+                ? "Active"
+                : listStatus === "suspended"
+                  ? "Suspended"
+                  : listStatus === "archived"
+                    ? "Archived"
+                    : "All statuses"
             )}
-          </PageDescription>
-        </PageHeading>
-        <PageActions>
-          {pageAction}
-          <Button
-            aria-label={t("Refresh admin data")}
-            onClick={() => void load()}
-            variant="outline"
-            size="sm"
-          >
-            <RefreshCw data-icon="inline-start" /> {t("Refresh")}
-          </Button>
-        </PageActions>
-      </PageHeader>
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent align="start">
+          <SelectGroup>
+            <SelectItem value="all">{t("All statuses")}</SelectItem>
+            <SelectItem value="active">{t("Active")}</SelectItem>
+            {activeTab === "users" ? (
+              <SelectItem value="suspended">{t("Suspended")}</SelectItem>
+            ) : (
+              <>
+                <SelectItem value="archived">{t("Archived")}</SelectItem>
+                <SelectItem value="suspended">{t("Suspended")}</SelectItem>
+              </>
+            )}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </FilterBar>
+  )
 
-      <SettingsLayout>
-        <SettingsNav
-          activeId={activeTab}
-          aria-label={t("Platform administration")}
-          groups={tabGroups.map((group) => ({
-            label: group.label,
-            items: group.ids.flatMap((id) => {
-              const tab = tabs.find((candidate) => candidate.id === id)
-              return tab ? [tab] : []
-            }),
-          }))}
-          onSelect={(id) => {
-            setListPage(1)
-            setListStatus("")
-            onTabChange(id as AdminTab)
-          }}
-        />
+  return (
+    <Page>
+      <PageTitle>{t("Platform administration")}</PageTitle>
+      <PageActions>
+        {pageAction}
+        <Button
+          aria-label={t("Refresh admin data")}
+          onClick={() => void load()}
+          variant="outline"
+          size="sm"
+        >
+          <RefreshCw data-icon="inline-start" /> {t("Refresh")}
+        </Button>
+      </PageActions>
 
-        <div className="min-w-0">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setListPage(1)
+          setListStatus("")
+          onTabChange(value as AdminTab)
+        }}
+        className="gap-6"
+      >
+        <div className="min-w-0 overflow-x-auto pb-1">
+          <TabsList aria-label={t("Platform administration")} variant="line">
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <TabsTrigger key={id} value={id}>
+                <Icon aria-hidden="true" />
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+        <TabsContent key={activeTab} value={activeTab} className="min-w-0">
           {error && (
             <Alert className="mb-4" variant="destructive">
               <AlertTriangle />
@@ -584,67 +611,10 @@ export function PlatformAdminShell({
           )}
           {(activeTab === "users" || activeTab === "workspaces") && (
             <div className="flex flex-col gap-4">
-              <FilterBar
-                hasActiveFilters={Boolean(query.trim() || listStatus)}
-                onClear={() => {
-                  setListPage(1)
-                  setQuery("")
-                  setListStatus("")
-                }}
-                resultCount={
-                  activeTab === "users" ? users.length : workspaces.length
-                }
-                resultLabel={activeTab === "users" ? "users" : "workspaces"}
-                resultTotal={listTotal || undefined}
-                search={{
-                  label: t("Search {value0}", { value0: activeTab }),
-                  onChange: (value) => {
-                    setListPage(1)
-                    setQuery(value)
-                  },
-                  placeholder: `Search ${activeTab}…`,
-                  value: query,
-                }}
-              >
-                <Select
-                  value={listStatus || "all"}
-                  onValueChange={(value) => {
-                    setListPage(1)
-                    const nextValue = value ?? "all"
-                    setListStatus(nextValue === "all" ? "" : nextValue)
-                  }}
-                >
-                  <SelectTrigger
-                    aria-label={t("{value0} status", { value0: activeTab })}
-                    className="h-8 min-w-36 sm:min-w-40"
-                    size="sm"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="start">
-                    <SelectGroup>
-                      <SelectItem value="all">{t("All statuses")}</SelectItem>
-                      <SelectItem value="active">{t("Active")}</SelectItem>
-                      {activeTab === "users" ? (
-                        <SelectItem value="suspended">
-                          {t("Suspended")}
-                        </SelectItem>
-                      ) : (
-                        <>
-                          <SelectItem value="archived">
-                            {t("Archived")}
-                          </SelectItem>
-                          <SelectItem value="suspended">
-                            {t("Suspended")}
-                          </SelectItem>
-                        </>
-                      )}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </FilterBar>
+              {activeTab === "workspaces" && listToolbar}
               {activeTab === "users" ? (
                 <UsersView
+                  toolbar={listToolbar}
                   users={users}
                   onUpdate={updateUser}
                   onReload={() => void load()}
@@ -715,8 +685,8 @@ export function PlatformAdminShell({
               onPageChange={setListPage}
             />
           )}
-        </div>
-      </SettingsLayout>
+        </TabsContent>
+      </Tabs>
     </Page>
   )
 }
@@ -833,11 +803,13 @@ function ControlsView({
 
 function Pagination({
   page,
+  compact = false,
   pageSize,
   total,
   onPageChange,
 }: {
   page: number
+  compact?: boolean
   pageSize: number
   total: number
   onPageChange: (page: number) => void
@@ -847,10 +819,17 @@ function Pagination({
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   if (pageCount <= 1) return null
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
-      <span className="min-w-0 flex-1">
-        {t("Page")} {page} {t("of")} {pageCount} · {total} total
-      </span>
+    <div
+      className={cn(
+        "flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground",
+        !compact && "border-t pt-3"
+      )}
+    >
+      {!compact && (
+        <span className="min-w-0 flex-1">
+          {t("Page")} {page} {t("of")} {pageCount} · {total} total
+        </span>
+      )}
       <div className="flex shrink-0 gap-1">
         <Button
           disabled={page <= 1}
@@ -858,7 +837,7 @@ function Pagination({
           size="sm"
           variant="outline"
         >
-          {t("Previous")}
+          {t("Previous page")}
         </Button>
         <Button
           disabled={page >= pageCount}
@@ -866,7 +845,7 @@ function Pagination({
           size="sm"
           variant="outline"
         >
-          {t("Next")}
+          {t("Next page")}
         </Button>
       </div>
     </div>
@@ -875,6 +854,7 @@ function Pagination({
 
 function UsersView({
   users,
+  toolbar,
   onUpdate,
   onReload,
   page,
@@ -883,6 +863,7 @@ function UsersView({
   onPageChange,
 }: {
   users: any[]
+  toolbar: ReactNode
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
   onReload: () => void
   page: number
@@ -1056,14 +1037,7 @@ function UsersView({
   return (
     <>
       <Card>
-        <CardHeader>
-          <CardTitle>{t("Users")}</CardTitle>
-          <CardDescription>
-            {t(
-              "Search, inspect, suspend, revoke sessions, and manage platform administrator access."
-            )}
-          </CardDescription>
-        </CardHeader>
+        <div className="px-4 pb-1">{toolbar}</div>
         <CardContent className="flex flex-col gap-3 overflow-x-auto">
           {actionError && (
             <Alert variant="destructive">
@@ -1085,31 +1059,44 @@ function UsersView({
                 <tr className="border-b last:border-0" key={item.id}>
                   <td className="p-2">
                     <button
-                      className="text-left hover:underline"
+                      className="flex items-center gap-3 rounded-md text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => void showDetail(item.id)}
                       type="button"
                     >
-                      <div className="font-medium">{item.displayName}</div>
-                      <div className="text-muted-foreground">{item.email}</div>
+                      <Avatar size="sm" className="size-8">
+                        <AvatarFallback className={avatarToneFor(item.id)}>
+                          {initialsFor(item.displayName || item.email)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="flex flex-col">
+                        <span className="font-medium">
+                          {item.displayName || item.email}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {item.email}
+                        </span>
+                      </span>
                     </button>
                   </td>
                   <td className="p-2">
                     <Badge
                       variant={
-                        item.status === "suspended" ? "destructive" : "default"
+                        item.status === "suspended" ? "destructive" : "success"
                       }
                     >
-                      {item.status ?? "active"}
+                      {t(item.status === "suspended" ? "Suspended" : "Active")}
                     </Badge>
                   </td>
                   <td className="p-2">
                     {item.platformAdmin ? (
-                      <Badge>
+                      <Badge variant="secondary">
                         <ShieldCheck data-icon="inline-start" />{" "}
                         {t("platform admin")}
                       </Badge>
                     ) : (
-                      <span className="text-muted-foreground">standard</span>
+                      <span className="text-muted-foreground">
+                        {t("Standard access")}
+                      </span>
                     )}
                   </td>
                   <td className="p-2">
@@ -1193,43 +1180,62 @@ function UsersView({
               {t("No users match this search.")}
             </p>
           )}
+        </CardContent>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
+          <span aria-live="polite">
+            {total === 0
+              ? t("No users match this search.")
+              : t("{start}–{end} of {total}", {
+                  start: (page - 1) * pageSize + 1,
+                  end: Math.min((page - 1) * pageSize + users.length, total),
+                  total,
+                })}
+          </span>
           <Pagination
             page={page}
             pageSize={pageSize}
             total={total}
             onPageChange={onPageChange}
+            compact
           />
-        </CardContent>
+        </div>
       </Card>
       <Dialog
         open={detail !== null}
         onOpenChange={(open) => !open && setDetail(null)}
       >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
-              {detail?.user?.displayName ?? "User details"}
+        <DialogContent className="min-w-0 sm:max-w-xl">
+          <DialogHeader className="min-w-0 pr-6">
+            <DialogTitle className="break-words">
+              {detail?.user?.displayName ?? t("User details")}
             </DialogTitle>
-            <DialogDescription>{detail?.user?.email}</DialogDescription>
+            <DialogDescription className="break-all">
+              {detail?.user?.email}
+            </DialogDescription>
           </DialogHeader>
           {loadingDetail ? (
             <p className="text-sm text-muted-foreground">
               {t("Loading user details…")}
             </p>
           ) : detail ? (
-            <div className="flex flex-col gap-4 text-sm">
+            <div className="flex min-w-0 flex-col gap-5 text-sm">
               <div className="flex flex-wrap gap-2">
                 <Badge
                   variant={
                     detail.user.status === "suspended"
                       ? "destructive"
-                      : "default"
+                      : "success"
                   }
                 >
-                  {detail.user.status ?? "active"}
+                  {t(
+                    detail.user.status === "suspended" ? "Suspended" : "Active"
+                  )}
                 </Badge>
                 {detail.user.platformAdmin && (
-                  <Badge>{t("platform admin")}</Badge>
+                  <Badge variant="secondary">
+                    <ShieldCheck data-icon="inline-start" />
+                    {t("platform admin")}
+                  </Badge>
                 )}
               </div>
               <div>
@@ -1237,12 +1243,28 @@ function UsersView({
                 <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
                   {(detail.organizations ?? []).map((organization: any) => (
                     <div
-                      className="flex items-center justify-between rounded-md border px-2 py-1.5"
+                      className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/50 p-3"
                       key={organization.id}
                     >
-                      <span>{organization.name}</span>
+                      <span className="min-w-0 font-medium break-words">
+                        {organization.name}
+                      </span>
                       <span>
-                        {organization.role} · {organization.status}
+                        {t(
+                          organization.role === "owner"
+                            ? "Owner"
+                            : organization.role === "admin"
+                              ? "Admin"
+                              : "Member"
+                        )}{" "}
+                        ·{" "}
+                        {t(
+                          organization.status === "suspended"
+                            ? "Suspended"
+                            : organization.status === "archived"
+                              ? "Archived"
+                              : "Active"
+                        )}
                       </span>
                     </div>
                   ))}
@@ -1260,19 +1282,19 @@ function UsersView({
                         (session: PlatformSession) => session.active
                       ).length
                     }{" "}
-                    active
+                    {t("Active")}
                   </span>
                 </div>
-                <div className="mt-2 flex max-h-48 flex-col gap-1 overflow-y-auto text-xs">
+                <div className="mt-2 flex max-h-64 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain text-xs">
                   {(detail.sessions ?? []).map((session: PlatformSession) => (
                     <div
-                      className="flex items-start justify-between gap-2 rounded-md border px-2 py-1.5"
+                      className="flex min-w-0 flex-wrap items-start justify-between gap-3 rounded-xl bg-muted/50 p-3"
                       key={session.id}
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1 basis-48">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Badge
-                            variant={session.active ? "default" : "secondary"}
+                            variant={session.active ? "success" : "secondary"}
                           >
                             {session.active ? t("Active") : t("Revoked")}
                           </Badge>
@@ -1283,11 +1305,19 @@ function UsersView({
                             )}
                           </span>
                         </div>
-                        <p className="mt-1 truncate text-muted-foreground">
-                          {[session.userAgent, session.ipAddress]
-                            .filter(Boolean)
-                            .join(" · ") || "No device metadata"}
-                        </p>
+                        <details className="mt-2 min-w-0 text-muted-foreground">
+                          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
+                            {t("Device details")}
+                          </summary>
+                          <p className="mt-2 break-all whitespace-normal">
+                            {session.userAgent || t("No device metadata")}
+                          </p>
+                          {session.ipAddress && (
+                            <p className="mt-1 break-all">
+                              IP: {session.ipAddress}
+                            </p>
+                          )}
+                        </details>
                       </div>
                       {session.active && (
                         <Button
@@ -3398,7 +3428,7 @@ function AnalyticsView({
           <Button onClick={onRefresh}>{t("Apply filters")}</Button>
         </CardContent>
       </Card>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-6 rounded-2xl bg-muted/40 p-6 md:grid-cols-4">
         {[
           [t("Requests"), summary?.requests],
           [t("Success"), summary?.succeeded],
@@ -3418,18 +3448,16 @@ function AnalyticsView({
           ],
           [t("Tool calls"), summary?.toolCalls],
         ].map(([label, value]) => (
-          <Card key={String(label)}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs text-muted-foreground">
-                {label}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-semibold">{value ?? "—"}</p>
-            </CardContent>
-          </Card>
+          <div key={String(label)} className="flex min-w-0 flex-col gap-2">
+            <dt className="text-xs text-muted-foreground">
+              {t(String(label))}
+            </dt>
+            <dd className="font-heading text-2xl font-medium tracking-tight tabular-nums">
+              {value ?? "—"}
+            </dd>
+          </div>
         ))}
-      </div>
+      </dl>
       <AdminUsageCharts analytics={analytics} showLatency />
       <Card>
         <CardHeader>

@@ -189,3 +189,38 @@ func TestOwnerTransferDemotesExistingOwnerAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestListOrganizationMembersPaginatesAndFilters(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	organizationID := uuid.New()
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM organization_members WHERE").WithArgs(organizationID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(47))
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM organization_members om JOIN users").WithArgs(organizationID, "justin", "admin").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(21))
+	mock.ExpectQuery("SELECT u.id,.*LIMIT 20 OFFSET ").WithArgs(organizationID, "justin", "admin", 20).WillReturnRows(sqlmock.NewRows([]string{"id", "email", "display_name", "role", "created_at", "avatar_url", "avatar_version"}))
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/members?page=9&search=justin&role=admin", nil)
+	context.Params = gin.Params{{Key: "id", Value: organizationID.String()}}
+	context.Set(middleware.OrgIDKey, organizationID)
+	(&App{DB: db}).listOrganizationMembers(context)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Total    int
+		Filtered int
+		Page     int
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Total != 47 || body.Filtered != 21 || body.Page != 2 {
+		t.Fatalf("unexpected pagination: %+v", body)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

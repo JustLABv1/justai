@@ -1,5 +1,28 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "User details": "Benutzerdetails",
+  "No device metadata": "Keine Geräteinformationen",
+  "Device details": "Gerätedetails",
+  "Standard access": "Standardzugriff",
+  "Search workspaces…": "Workspaces suchen…",
+  "Search users…": "Benutzer suchen…",
+  "Requests returned errors during the last 24 hours.":
+    "In den letzten 24 Stunden sind bei Anfragen Fehler aufgetreten.",
+  "Recent API errors": "Kürzlich aufgetretene API-Fehler",
+  "View analytics": "Analyse ansehen",
+  "Request activity": "Anfrageverlauf",
+  "Manage users": "Benutzer verwalten",
+  "View system health": "Systemzustand ansehen",
+  "Some systems need attention": "Einige Systeme benötigen Aufmerksamkeit",
+  "All systems operational": "Alle Systeme betriebsbereit",
+  Management: "Verwaltung",
+  "Search members": "Mitglieder suchen",
+  "Search by name or email…": "Nach Name oder E-Mail suchen…",
+  "Filter by role": "Nach Rolle filtern",
+  "All roles": "Alle Rollen",
+  "Member pagination": "Mitgliederseiten",
+  "{start}–{end} of {total}": "{start}–{end} von {total}",
+
   "Start a live session to capture a conversation and create a summary.":
     "Starte eine Live-Aufnahme, um ein Gespräch festzuhalten und zusammenzufassen.",
   "All live sessions": "Alle Live-Aufnahmen",
