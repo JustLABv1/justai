@@ -318,6 +318,21 @@ postgresql:
       cpu: 100m
       memory: 256Mi
 
+# Prometheus metrics. /metrics (worker health) is always available inside the
+# cluster. /metrics/usage exposes usage analytics (events, MCP tools, per-workspace
+# stats) and is disabled until usage.enabled is true; it requires a bearer token
+# stored in the Secret key secrets.refs.metricsToken (min. 16 characters).
+# The default Ingress does not route /metrics to the backend.
+metrics:
+  usage:
+    enabled: false
+  serviceMonitor:
+    # Requires the Prometheus Operator CRDs and metrics.usage.enabled=true.
+    enabled: false
+    interval: 60s
+    scrapeTimeout: 30s
+    labels: {}
+
 secrets:
   create: false
   existingSecret: ""
@@ -331,6 +346,7 @@ secrets:
     pyannoteHfToken: ""
     pyannoteServiceToken: ""
     streamRelayToken: ""
+    metricsToken: ""
     backendHttpProxy: ""
     backendHttpsProxy: ""
     backendNoProxy: ""
@@ -370,6 +386,9 @@ secrets:
     pyannoteServiceToken:
       name: ""
       key: service-token
+    metricsToken:
+      name: ""
+      key: metrics-token
     streamRelayToken:
       name: ""
       key: stream-relay-token

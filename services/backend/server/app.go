@@ -25,6 +25,7 @@ import (
 
 type App struct {
 	videoThumbnails videoThumbnailCache
+	usageMetrics    usageMetricsCache
 	Config          config.Config
 	DB              *sql.DB
 	Tokens          *auth.TokenManager
@@ -149,6 +150,7 @@ func (a *App) Router() *gin.Engine {
 	router.GET("/api/v1/health/ready", readyHandler)
 	router.GET("/api/v1/health/workers", a.workerHealthHandler)
 	router.GET("/metrics", a.metricsHandler)
+	router.GET("/metrics/usage", a.usageMetricsHandler)
 	// Keep conventional root health paths available to load balancers while
 	// retaining the versioned paths used by the compose health checks.
 	router.GET("/health/live", liveHandler)

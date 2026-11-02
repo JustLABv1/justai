@@ -450,3 +450,29 @@ Run `helm lint charts/justai` and
 `ruby charts/justai/tests/stream_relay_test.rb` from the repository root. The relay
 checks render both deployment modes and verify credential mounts, frontend
 isolation, Secret/Vault selection, and rejection of invalid configuration.
+
+## Usage metrics (Prometheus)
+
+`/metrics` (worker health, realtime-stream counters) is served by the backend
+and is not routed by the default Ingress. `/metrics/usage` additionally exposes
+usage analytics: events by category/outcome, token totals, MCP tool calls by
+server/tool/outcome, active users/workspaces, and per-workspace events and
+tokens (busiest 100 workspaces; labels `workspace_id` and `workspace`).
+
+It is off by default. Store a token of at least 16 characters in the Secret key
+`metrics-token` (`secrets.refs.metricsToken` to change name/key, or
+`secrets.data.metricsToken` with `secrets.create=true`) and enable it:
+
+```yaml
+metrics:
+  usage:
+    enabled: true
+  serviceMonitor:       # optional, requires the Prometheus Operator CRDs
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+```
+
+Without the Operator, scrape `<release>-backend:<port>/metrics/usage` (or the
+monolith service's backend port) with `authorization.credentials` set to the
+token. Responses are cached for 30 seconds.

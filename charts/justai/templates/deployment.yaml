@@ -106,6 +106,7 @@ spec:
                 secretKeyRef:
                   name: {{ $encryptionKeyName | quote }}
                   key: {{ $encryptionKeyKey | quote }}
+            {{- include "justai.metricsEnv" . | nindent 12 }}
             {{- if $trustedCAEnabled }}
             - name: SSL_CERT_FILE
               value: "/etc/ssl/certs/extra-ca.crt"
@@ -267,6 +268,7 @@ spec:
                 secretKeyRef:
                   name: {{ $encryptionKeyName | quote }}
                   key: {{ $encryptionKeyKey | quote }}
+            {{- include "justai.metricsEnv" . | nindent 12 }}
             {{- if $trustedCAEnabled }}
             - name: SSL_CERT_FILE
               value: "/etc/ssl/certs/extra-ca.crt"

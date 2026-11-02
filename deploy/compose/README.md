@@ -101,3 +101,20 @@ podman machine stop
 podman machine set --memory 8192
 podman machine start
 ```
+
+## Metrics
+
+- `/metrics` exposes worker health and realtime-stream counters (no usage data).
+- `/metrics/usage` exposes usage analytics in Prometheus format: events by
+  category and outcome, token totals, MCP tool calls by server/tool/outcome,
+  active users/workspaces (1d/7d) and totals. It returns 404 until
+  `JUSTAI_METRICS_TOKEN` (min. 16 characters) is set and requires
+  `Authorization: Bearer <token>`. Results are cached for 30 seconds.
+
+```yaml
+scrape_configs:
+  - job_name: justai-usage
+    metrics_path: /metrics/usage
+    authorization: { credentials: "<JUSTAI_METRICS_TOKEN>" }
+    static_configs: [{ targets: ["justai.example.com"] }]
+```

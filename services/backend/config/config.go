@@ -14,6 +14,7 @@ import (
 
 type Config struct {
 	Port                string
+	MetricsToken        string
 	DatabaseURL         string
 	JWTSecret           []byte
 	JWTIssuer           string
@@ -67,6 +68,7 @@ type OIDCConfig struct {
 
 type fileConfig struct {
 	Port                string                  `yaml:"port"`
+	MetricsToken        string                  `yaml:"metrics_token"`
 	DatabaseURL         string                  `yaml:"database_url"`
 	JWTSecret           string                  `yaml:"jwt_secret"`
 	JWTIssuer           string                  `yaml:"jwt_issuer"`
@@ -165,8 +167,13 @@ func Load(configPath string) (Config, error) {
 	if repositoryMaxFiles < 1 || repositoryMaxFiles > 5000 {
 		return Config{}, fmt.Errorf("JUSTAI_REPOSITORY_MAX_FILES must be between 1 and 5000")
 	}
+	metricsToken := getenvOrFile("JUSTAI_METRICS_TOKEN", fileValues.MetricsToken, "")
+	if metricsToken != "" && len(metricsToken) < 16 {
+		return Config{}, fmt.Errorf("JUSTAI_METRICS_TOKEN must be at least 16 characters")
+	}
 	return Config{
 		Port:            getenvOrFile("JUSTAI_PORT", fileValues.Port, "8080"),
+		MetricsToken:    metricsToken,
 		DatabaseURL:     getenvOrFile("JUSTAI_DATABASE_URL", fileValues.DatabaseURL, ""),
 		JWTSecret:       jwtSecret,
 		JWTIssuer:       getenvOrFile("JUSTAI_JWT_ISSUER", fileValues.JWTIssuer, "justai-backend"),
