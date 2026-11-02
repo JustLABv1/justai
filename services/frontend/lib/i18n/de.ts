@@ -722,6 +722,7 @@ export const de = {
   "Knowledge updated": "Wissen aktualisiert",
   "Folder path": "Ordnerpfad",
   "My files": "Meine Dateien",
+  "{value0} items": "{value0} Elemente",
   Updated: "Aktualisiert",
   "Start chat": "Chat starten",
   "Search this folder": "Diesen Ordner durchsuchen",

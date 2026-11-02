@@ -71,7 +71,7 @@ export function FilterBar({
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         {search && (
-          <div className="relative w-full min-w-0 sm:min-w-56 sm:flex-1">
+          <div className="relative w-full min-w-0 sm:w-auto sm:min-w-56 sm:flex-1">
             <Search
               aria-hidden="true"
               className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
