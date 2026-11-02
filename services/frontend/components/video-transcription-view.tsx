@@ -1279,22 +1279,30 @@ export function VideoTranscriptionView({
                   variant="outline"
                 >
                   <Upload data-icon="inline-start" />
-                  <span>New video</span>
+                  <span>{t("Add recording")}</span>
                 </Button>
               </>
             }
-            eyebrow={
+            eyebrow={<span>{t("Recording")}</span>}
+            meta={
               <>
-                <span>Video transcription</span>
-                <span aria-hidden="true">/</span>
+                {displayDurationMs > 0 ? (
+                  <span>{formatVideoDuration(displayDurationMs)}</span>
+                ) : null}
+                {snapshot.session.language !== "auto" ? (
+                  <span>
+                    {t(
+                      languageItemsFor(snapshot.session.language).find(
+                        (item) => item.value === snapshot.session.language
+                      )?.label ?? snapshot.session.language
+                    )}
+                  </span>
+                ) : null}
                 <span>
-                  {snapshot.session.language === "auto"
-                    ? "Automatic language"
-                    : snapshot.session.language}
+                  {t("Uploaded by {value0}", { value0: user.displayName })}
                 </span>
               </>
             }
-            meta={<span>Uploaded by {user.displayName}</span>}
             title={snapshot.session.title}
           />
 

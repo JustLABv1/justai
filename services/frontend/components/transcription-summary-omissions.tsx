@@ -9,20 +9,34 @@ export function SummaryOmissionReview({
   restoredIds,
   onRestore,
   disabled,
+  compact = false,
 }: {
   omissions: SummaryOmission[]
   restoredIds: string[]
   onRestore: (ids: string[]) => void
   disabled: boolean
+  compact?: boolean
 }) {
   const { t } = useTranslations()
   if (!omissions.length) return null
   return (
-    <details className="rounded-lg bg-muted p-3">
-      <summary className="cursor-pointer text-sm font-medium">
-        {t("{value0} contributions left out · Review", {
-          value0: omissions.length,
-        })}
+    <details
+      className={
+        compact ? "text-xs text-muted-foreground" : "rounded-lg bg-muted p-3"
+      }
+    >
+      <summary
+        className={
+          compact
+            ? "cursor-pointer text-xs"
+            : "cursor-pointer text-sm font-medium"
+        }
+      >
+        {omissions.length === 1
+          ? t("1 contribution left out · Review")
+          : t("{value0} contributions left out · Review", {
+              value0: omissions.length,
+            })}
       </summary>
       <div className="mt-3 flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">

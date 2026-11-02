@@ -3981,4 +3981,49 @@ export const de = {
     "Du kannst auch eine Vorlage für dein Team anlegen.",
   "Keep at least one passage to create a summary.":
     "Wähle mindestens eine Stelle für die Zusammenfassung aus.",
+  "Ask about this": "Fragen stellen",
+  "More actions": "Weitere Aktionen",
+  "Adjust summary": "Zusammenfassung anpassen",
+  "Show recording": "Aufnahme anzeigen",
+  "Hide recording": "Aufnahme ausblenden",
+  "Browse chapters": "Kapitel ansehen",
+  "Topics at a glance": "Themen auf einen Blick",
+  "Previous summary": "Bisherige Zusammenfassung",
+  "Your summary is taking shape…": "Deine Zusammenfassung entsteht…",
+  "We are reading the conversation and gathering the key points.":
+    "Wir lesen das Gespräch und sammeln die wichtigsten Aussagen.",
+  "The summary could not be created.":
+    "Die Zusammenfassung konnte nicht erstellt werden.",
+  "Show details": "Details anzeigen",
+  "Some chapter times are unavailable.":
+    "Für einige Kapitel sind keine Zeitangaben verfügbar.",
+  "The important points, in one place": "Das Wichtigste auf einen Blick",
+  "Turn this conversation into a clear report you can read and share.":
+    "Erstelle einen übersichtlichen Bericht aus diesem Gespräch – zum Nachlesen und Weitergeben.",
+  "1 contribution left out · Review": "1 Beitrag weggelassen · Prüfen",
+  "{value0} passages left out by you": "{value0} Stellen von dir weggelassen",
+  "Add recording": "Aufnahme hinzufügen",
+  "Uploaded by {value0}": "Hochgeladen von {value0}",
+  "Text version": "Textfassung",
+  "As spoken": "Wie gesprochen",
+  "Cleaned up": "Sprachlich überarbeitet",
+  "My edits": "Meine Änderungen",
+  "Unknown speaker": "Unbekannter Sprecher",
+  "{value0} matches": "{value0} Treffer",
+  "Your transcript is on its way": "Dein Transkript entsteht",
+  "Text appears here as the recording is transcribed.":
+    "Der Text erscheint hier, während die Aufnahme transkribiert wird.",
+  "Text is appearing live. Small corrections may follow.":
+    "Der Text erscheint live. Kleine Korrekturen können noch folgen.",
+  Suggested: "Vorgeschlagen",
+  "{value0} speaking time": "{value0} Redezeit",
+  "{value0} voices in this recording": "{value0} Stimmen in dieser Aufnahme",
+  "Edit the text below. Your recording stays unchanged.":
+    "Bearbeite den Text. Deine Aufnahme bleibt unverändert.",
+  "There are no speaker names yet.":
+    "Es sind noch keine Sprechernamen vorhanden.",
+  "You can still read, edit, and download the conversation.":
+    "Du kannst das Gespräch trotzdem lesen, bearbeiten und herunterladen.",
+  "Recording {value0}": "Aufnahme {value0}",
+  "Copy link to this moment": "Link zu dieser Stelle kopieren",
 } as const
