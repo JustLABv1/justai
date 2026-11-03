@@ -129,6 +129,8 @@ function mcpAuthLabel(authType: string) {
       return "No auth"
     case "api_key":
       return "Bearer token"
+    case "litellm":
+      return "LiteLLM API key"
     case "oauth":
       return "OAuth 2.1"
     default:
@@ -1092,6 +1094,7 @@ export function MCPView({
                     items={{
                       none: "No auth",
                       api_key: "Bearer token",
+                      litellm: "LiteLLM API key",
                       oauth: "OAuth 2.1",
                     }}
                     value={form.authType}
@@ -1108,10 +1111,18 @@ export function MCPView({
                         <SelectItem value="api_key">
                           {t("Bearer token")}
                         </SelectItem>
+                        <SelectItem value="litellm">
+                          {t("LiteLLM API key")}
+                        </SelectItem>
                         <SelectItem value="oauth">OAuth 2.1</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                  {form.authType === "litellm" && (
+                    <FieldDescription>
+                      {t("Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.")}
+                    </FieldDescription>
+                  )}
                   {(form.authType === "none" || form.authType === "oauth") && (
                     <FieldDescription>
                       {form.authType === "none"

@@ -1047,9 +1047,20 @@ func (s *Server) notifyInitialized(ctx context.Context) error {
 	return nil
 }
 
+func authHeader(authType string) string {
+	switch authType {
+	case "api_key", "oauth":
+		return "Authorization"
+	case "litellm":
+		return "x-litellm-api-key"
+	default:
+		return ""
+	}
+}
+
 func (s Server) setAuth(request *http.Request) {
-	if (s.AuthType == "api_key" || s.AuthType == "oauth") && s.Credential != "" {
-		request.Header.Set("Authorization", "Bearer "+s.Credential)
+	if header := authHeader(s.AuthType); header != "" && s.Credential != "" {
+		request.Header.Set(header, "Bearer "+s.Credential)
 	}
 }
 
@@ -1127,6 +1138,7 @@ func (s Server) httpClient() *http.Client {
 			// accidentally preserve an Authorization header on a later hop.
 			if len(via) > 0 && !sameOrigin(via[len(via)-1].URL, request.URL) {
 				request.Header.Del("Authorization")
+				request.Header.Del("x-litellm-api-key")
 			}
 			return nil
 		},
@@ -1217,12 +1229,12 @@ func (t authTransport) RoundTrip(request *http.Request) (*http.Response, error) 
 	if clone.Body != nil {
 		clone.Body = &boundedBody{ReadCloser: clone.Body, remaining: maxRequestBytes, label: "MCP request"}
 	}
-	if clone.Header.Get("Authorization") == "" && t.credential != "" && (t.authType == "api_key" || t.authType == "oauth") {
+	if header := authHeader(t.authType); header != "" && clone.Header.Get(header) == "" && t.credential != "" {
 		endpoint, endpointErr := url.Parse(t.endpoint)
 		tokenURL, tokenErr := url.Parse(t.tokenURL)
 		isTokenRequest := tokenErr == nil && tokenURL != nil && sameOrigin(clone.URL, tokenURL)
 		if endpointErr == nil && endpoint != nil && sameOrigin(clone.URL, endpoint) && !isTokenRequest {
-			clone.Header.Set("Authorization", "Bearer "+t.credential)
+			clone.Header.Set(header, "Bearer "+t.credential)
 		}
 	}
 	response, err := base.RoundTrip(clone)

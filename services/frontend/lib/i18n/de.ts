@@ -1,5 +1,7 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
+  "LiteLLM API key": "LiteLLM-API-Schlüssel",
+  "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.": "Den LiteLLM-Schlüssel ohne Bearer eingeben. Wird als x-litellm-api-key: Bearer <key> gesendet.",
   eventId: "Protokolleintrag-ID",
   "{count} recorded event": "{count} erfasstes Ereignis",
   "{count} failed MCP calls": "{count} fehlgeschlagene MCP-Aufrufe",

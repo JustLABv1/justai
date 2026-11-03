@@ -72,3 +72,40 @@ func TestParseToolAppMetadataRejectsNonWidgetURI(t *testing.T) {
 		t.Fatalf("expected non-widget metadata to be ignored, got %+v", metadata)
 	}
 }
+
+func TestLiteLLMAuthAndRedirects(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("x-litellm-api-key") != "" || r.Header.Get("Authorization") != "" {
+				t.Error("credential leaked across origins")
+			}
+		}))
+		origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("x-litellm-api-key") != "Bearer sk-test" {
+				t.Error("missing LiteLLM credential")
+			}
+			if r.Header.Get("Authorization") != "" {
+				t.Error("unexpected Authorization")
+			}
+			if r.URL.Path == "/mcp" {
+				http.Redirect(w, r, "/next", 307)
+			} else {
+				http.Redirect(w, r, foreign.URL, 307)
+			}
+		}))
+		server := Server{EndpointURL: origin.URL + "/mcp", AuthType: "litellm", Credential: "sk-test", AllowPrivate: true}
+		request, _ := http.NewRequest("GET", server.EndpointURL, nil)
+		if explicit {
+			server.setAuth(request)
+		}
+		client := server.httpClient()
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		client.CloseIdleConnections()
+		origin.Close()
+		foreign.Close()
+	}
+}
