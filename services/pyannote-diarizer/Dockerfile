@@ -103,7 +103,7 @@ RUN python -m venv "$VIRTUAL_ENV" \
     && pip install --upgrade \
       "setuptools==${SETUPTOOLS_VERSION}" \
       "wheel==0.46.2" \
-      "msgpack==1.2.1" \
+      "msgpack==1.2.3" \
     && pip check \
     && python -c 'import importlib.metadata as metadata, sys; assert metadata.version("setuptools") == sys.argv[1]' "${SETUPTOOLS_VERSION}"
 
