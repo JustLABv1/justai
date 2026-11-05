@@ -8,15 +8,20 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,23 +33,42 @@ type Config struct {
 }
 type source struct {
 	sync.RWMutex
+	id       string
+	metrics  *metrics
 	manifest Manifest
 	segments map[uint64][]byte
 }
 type Relay struct {
-	token   [32]byte
-	sources map[string]*source
-	slots   chan struct{}
+	tokens   [][32]byte
+	throttle *authThrottle
+	sources  map[string]*source
+	slots    chan struct{}
+	inflight atomic.Int64
+	metrics  *metrics
+	log      *slog.Logger
 }
 
-func New(cfg Config, token string) (*Relay, error) {
-	if len(token) < 32 || strings.ContainsAny(token, "\r\n") {
-		return nil, fmt.Errorf("relay token must contain at least 32 characters without newlines")
+var errBadUpstream = errors.New("upstream must return audio/mpeg with HTTP 200; redirects are forbidden")
+
+func New(cfg Config, token string) (*Relay, error) { return NewWithTokens(cfg, []string{token}) }
+
+// NewWithTokens accepts up to four tokens so a new one can be rolled out
+// before the old one is removed (rotation without downtime).
+func NewWithTokens(cfg Config, tokens []string) (*Relay, error) {
+	if len(tokens) == 0 || len(tokens) > 4 {
+		return nil, fmt.Errorf("configure between one and four relay tokens")
+	}
+	hashed := make([][32]byte, 0, len(tokens))
+	for _, token := range tokens {
+		if len(token) < 32 || strings.ContainsAny(token, "\r\n") {
+			return nil, fmt.Errorf("relay token must contain at least 32 characters without newlines")
+		}
+		hashed = append(hashed, sha256.Sum256([]byte(token)))
 	}
 	if len(cfg.Sources) == 0 || len(cfg.Sources) > 8 {
 		return nil, fmt.Errorf("configure between one and eight sources")
 	}
-	r := &Relay{token: sha256.Sum256([]byte(token)), sources: make(map[string]*source), slots: make(chan struct{}, 32)}
+	r := &Relay{tokens: hashed, throttle: newAuthThrottle(), sources: make(map[string]*source), slots: make(chan struct{}, 32), metrics: newMetrics(), log: slog.Default()}
 	for id, raw := range cfg.Sources {
 		u, err := url.Parse(raw)
 		if !sourceID.MatchString(id) || err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (u.Port() != "" && u.Port() != "443") {
@@ -53,7 +77,7 @@ func New(cfg Config, token string) (*Relay, error) {
 		if ip := net.ParseIP(u.Hostname()); ip != nil && !publicIP(ip) {
 			return nil, fmt.Errorf("source %q has a forbidden address", id)
 		}
-		r.sources[id] = &source{segments: make(map[uint64][]byte), manifest: Manifest{Epoch: randomEpoch()}}
+		r.sources[id] = &source{id: id, metrics: r.metrics, segments: make(map[uint64][]byte), manifest: Manifest{Epoch: randomEpoch()}}
 	}
 	return r, nil
 }
@@ -65,17 +89,101 @@ func randomEpoch() string {
 	return hex.EncodeToString(b[:])
 }
 
+// SetLogger replaces the structured logger (JSON on stdout by default in main).
+func (r *Relay) SetLogger(l *slog.Logger) { r.log = l }
+
+type recorder struct {
+	http.ResponseWriter
+	status   int
+	bytes    int
+	source   string // only ever a configured source ID or "none"
+	endpoint string
+	quiet    bool // throttled: counted in metrics but not logged per request
+}
+
+func (rec *recorder) WriteHeader(c int) { rec.status = c; rec.ResponseWriter.WriteHeader(c) }
+func (rec *recorder) Write(b []byte) (int, error) {
+	if rec.status == 0 {
+		rec.status = 200
+	}
+	n, err := rec.ResponseWriter.Write(b)
+	rec.bytes += n
+	return n, err
+}
+
+var requestID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
 func (r *Relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	start := time.Now()
+	id := req.Header.Get("X-Request-ID")
+	if !requestID.MatchString(id) {
+		id = randomEpoch()[:16]
+	}
+	w.Header().Set("X-Request-ID", id)
+	rec := &recorder{ResponseWriter: w, source: "none", endpoint: "other"}
+	r.metrics.set("relay_http_inflight_requests", float64(r.inflight.Add(1)))
+	defer func() { r.metrics.set("relay_http_inflight_requests", float64(r.inflight.Add(-1))) }()
+	r.serve(rec, req)
+	if rec.status == 0 {
+		rec.status = 200
+	}
+	elapsed := time.Since(start)
+	code := strconv.Itoa(rec.status)
+	r.metrics.add("relay_http_requests_total", 1, "source", rec.source, "endpoint", rec.endpoint, "code", code)
+	r.metrics.add("relay_http_response_bytes_total", float64(rec.bytes), "source", rec.source)
+	r.metrics.observe("relay_http_request_duration_seconds", elapsed.Seconds(), "endpoint", rec.endpoint)
+	if rec.quiet {
+		return
+	}
+	// Never log the Authorization header, query string (epoch) or raw path.
+	level := slog.LevelInfo
+	if rec.status == 401 || rec.status >= 500 {
+		level = slog.LevelWarn
+	}
+	r.log.LogAttrs(req.Context(), level, "request", slog.String("request_id", id), slog.String("remote", remoteHost(req.RemoteAddr)),
+		slog.String("source", rec.source), slog.String("endpoint", rec.endpoint), slog.Int("status", rec.status),
+		slog.Int("bytes", rec.bytes), slog.Duration("duration", elapsed))
+}
+
+func remoteHost(addr string) string {
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		return h
+	}
+	return addr
+}
+
+func (r *Relay) serve(w *recorder, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	supplied := sha256.Sum256([]byte(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")))
-	if !strings.HasPrefix(req.Header.Get("Authorization"), "Bearer ") || subtle.ConstantTimeCompare(supplied[:], r.token[:]) != 1 {
+	valid := 0
+	for i := range r.tokens { // no early exit: constant work per configured token
+		valid |= subtle.ConstantTimeCompare(supplied[:], r.tokens[i][:])
+	}
+	if !strings.HasPrefix(req.Header.Get("Authorization"), "Bearer ") || valid != 1 {
+		ip := remoteHost(req.RemoteAddr)
+		if r.throttle.blocked(ip) {
+			w.quiet = true
+			w.Header().Set("Retry-After", strconv.Itoa(int(authBlockFor.Seconds())))
+			http.Error(w, "too many failed attempts", 429)
+			return
+		}
+		if r.throttle.fail(ip) {
+			r.log.Warn("failed-auth threshold reached; throttling remote", "remote", ip, "for", authBlockFor)
+		}
 		http.Error(w, "unauthorized", 401)
 		return
 	}
 	if req.Method != http.MethodGet {
+		w.endpoint = "other"
 		w.Header().Set("Allow", "GET")
 		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if req.URL.Path == "/metrics" {
+		w.endpoint = "metrics"
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		r.metrics.write(w)
 		return
 	}
 	select {
@@ -94,6 +202,11 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if s == nil {
 		http.NotFound(w, req)
 		return
+	}
+	w.source = s.id
+	w.endpoint = "manifest"
+	if len(parts) == 3 {
+		w.endpoint = "segment"
 	}
 	s.RLock()
 	manifest := s.manifest
@@ -135,7 +248,13 @@ func (r *Relay) Run(ctx context.Context, cfg Config) {
 		s := r.sources[id]
 		go func() {
 			for ctx.Err() == nil {
-				_ = capture(ctx, raw, s.append)
+				began := time.Now()
+				segs0 := s.segmentCount()
+				err := capture(ctx, raw, s.append)
+				if ctx.Err() != nil {
+					return
+				}
+				s.sessionEnded(r.log, err, began, segs0)
 				select {
 				case <-ctx.Done():
 					return
@@ -214,7 +333,7 @@ func captureWithClient(ctx context.Context, raw string, emit func([]byte), clien
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 || strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])) != "audio/mpeg" {
-		return fmt.Errorf("upstream must return audio/mpeg with HTTP 200; redirects are forbidden")
+		return errBadUpstream
 	}
 	// Only MP3 bytes enter FFmpeg. It cannot open networks, playlists or local files.
 	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", "pipe", "-threads", "1", "-f", "mp3", "-i", "pipe:0", "-map", "0:a:0", "-threads", "1", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
@@ -248,11 +367,42 @@ func captureWithClient(ctx context.Context, raw string, emit func([]byte), clien
 	}
 }
 
+func (s *source) segmentCount() uint64 {
+	s.RLock()
+	defer s.RUnlock()
+	return s.manifest.Latest
+}
+
+// sessionEnded classifies why capture stopped. Error text is deliberately not
+// logged: client errors embed the upstream URL, which may carry secrets.
+func (s *source) sessionEnded(log *slog.Logger, err error, began time.Time, segs0 uint64) {
+	reason := "error"
+	switch {
+	case errors.Is(err, errBadUpstream):
+		reason = "rejected"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		reason = "eof"
+	case errors.Is(err, os.ErrDeadlineExceeded):
+		reason = "idle_timeout"
+	}
+	s.metrics.set("relay_upstream_up", 0, "source", s.id)
+	s.metrics.add("relay_upstream_sessions_total", 1, "source", s.id, "reason", reason)
+	log.Warn("upstream session ended", "source", s.id, "reason", reason, "duration", time.Since(began), "segments", s.segmentCount()-segs0)
+}
+
 func (s *source) append(pcm []byte) {
 	s.Lock()
 	defer s.Unlock()
 	s.manifest.Latest++
 	seq := s.manifest.Latest
+	now := time.Now()
+	if seq == 1 || s.metrics.gauge("relay_upstream_up", "source", s.id) == 0 {
+		s.metrics.set("relay_upstream_session_start_timestamp_seconds", float64(now.Unix()), "source", s.id)
+	}
+	s.metrics.set("relay_upstream_up", 1, "source", s.id)
+	s.metrics.add("relay_upstream_segments_total", 1, "source", s.id)
+	s.metrics.set("relay_upstream_latest_sequence", float64(seq), "source", s.id)
+	s.metrics.set("relay_upstream_last_segment_timestamp_seconds", float64(now.Unix()), "source", s.id)
 	s.segments[seq] = pcm
 	if seq > RetainedSegments {
 		delete(s.segments, seq-RetainedSegments)
