@@ -98,6 +98,49 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
 
+  build-stream-relay:
+    name: Build & Push Stream Relay
+    if: github.event_name == 'push'
+    needs: build-ffmpeg
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},prefix=relay-
+            type=raw,value=relay-beta,enable=${{ contains(github.ref_name, '-beta.') }}
+            type=raw,value=relay-latest,enable=${{ !contains(github.ref_name, '-beta.') }}
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: services/backend
+          file: services/backend/Dockerfile
+          target: stream-relay
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-contexts: |
+            ffmpeg-builder=docker-image://${{ env.FFMPEG_IMAGE }}@${{ needs.build-ffmpeg.outputs.digest }}
+          cache-from: type=gha,scope=stream-relay
+          cache-to: type=gha,scope=stream-relay,mode=max
+          provenance: mode=max
+          sbom: true
+
   build-frontend:
     name: Build & Push Frontend
     if: github.event_name == 'push'

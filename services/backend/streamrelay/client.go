@@ -65,6 +65,7 @@ func (c *Client) get(ctx context.Context, path string, limit int64) ([]byte, int
 		return nil, 0, fmt.Errorf("invalid relay request")
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("X-Request-ID", randomEpoch()[:16])
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("stream relay connection failed (check TLS, proxy and connectivity)")

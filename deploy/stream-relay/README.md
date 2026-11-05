@@ -12,6 +12,49 @@ the parliamentary radio URL in `sources.example.json`. It deliberately rejects
 redirects, webpages, HLS, DASH, RTMP and arbitrary user-supplied upstream URLs.
 The existing direct capture mode remains available for those other protocols.
 
+## Quick start (official image, environment variables only)
+
+Images are published with every release as `ghcr.io/justlabv1/justai:relay-<version>`
+(`relay-latest` for the newest stable, `relay-beta` for betas). On the relay host you
+need only `compose.env.yaml` from this directory:
+
+```sh
+cat > .env <<EOT
+RELAY_SOURCES=bundestag=https://c13014-l.i.core.cdn.streamfarm.net/13014bundestag/live/3777parlamentsradio/live_de_128.mp3
+RELAY_TOKEN=$(openssl rand -hex 32)
+RELAY_IMAGE=ghcr.io/justlabv1/justai:relay-latest   # pin a version in production
+EOT
+chmod 600 .env
+docker compose -f compose.env.yaml up -d
+```
+
+Point your TLS ingress at `127.0.0.1:8080`, and give JustAI the same `RELAY_TOKEN`
+(see [Connect JustAI](#connect-justai)). Settings available as environment variables
+(flags override them):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `RELAY_SOURCES` | – | `id=https://url,id2=https://url2` (instead of `sources.json`) |
+| `RELAY_TOKEN` | – | Bearer token; several comma-separated for rotation (instead of the token file) |
+| `RELAY_SOURCES_FILE`, `RELAY_TOKEN_FILE` | `/etc/stream-relay/sources.json`, `/run/secrets/relay_token` | File-based alternatives |
+| `RELAY_HTTP` | `false` | `true` = plain HTTP behind your TLS ingress |
+| `RELAY_LISTEN` | `:8443` / `:8080` | Listen address |
+| `RELAY_TLS_CERT`, `RELAY_TLS_KEY` | `/etc/stream-relay/tls.crt`, `/run/secrets/tls_key` | Direct HTTPS |
+| `RELAY_MAX_CONNS`, `RELAY_MAX_CONNS_PER_IP` | `128`, `16` (`0` with HTTP) | Connection limits |
+
+Environment variables are easier to leak than files (`docker inspect`, crash
+reports). For tokens, prefer the file-based setup below when others can inspect
+containers on the host. If both are set, `RELAY_TOKEN` and `RELAY_SOURCES` win.
+
+### Build the image yourself
+
+Only needed for unreleased changes or air-gapped hosts. From the repository root:
+
+```sh
+docker build -f services/backend/Dockerfile --target stream-relay -t justai-stream-relay services/backend
+RELAY_IMAGE=justai-stream-relay docker compose up -d
+```
+
 ## Install the relay with direct HTTPS
 
 From this directory on the relay host:
@@ -38,11 +81,11 @@ From this directory on the relay host:
    incoming TCP 8443 at the host/network firewall to the application's egress IP
    (or corporate proxy egress IP). Docker publishing rules must also enforce this
    restriction; a host firewall rule that Docker bypasses is insufficient.
-5. Run `docker compose up -d --build`.
+5. Run `docker compose up -d` (pulls the official image; see the quick start for
+   pinning a version or building locally).
 
-The build reuses the backend's verified static FFmpeg build; compiling it can take
-several minutes. No public relay image is assumed. Update/rebuild alongside the
-backend to pick up security fixes.
+Update by pulling a newer image (`docker compose pull && docker compose up -d`) to
+pick up security fixes.
 
 The container runs without root, Linux capabilities or a writable root filesystem,
 with memory, CPU, process and file-descriptor limits. The public endpoint must use
@@ -66,7 +109,7 @@ For an ingress running directly on the same host, configure `sources.json` and
 `secrets/relay_token` as above, then use this **alternative standalone Compose file**:
 
 ```sh
-docker compose -f compose.ingress.yaml up -d --build
+docker compose -f compose.ingress.yaml up -d
 ```
 
 It binds HTTP to `127.0.0.1:8080` only (override the host port with
@@ -186,3 +229,58 @@ epoch and oldest/latest sequence; `latest` should increase about every five seco
 `Content-Length: 160044`. Requests without authentication must return HTTP 401.
 Finally run a transcription through the corporate proxy and check that recording,
 pause/resume, stop and reconnect behave correctly under the actual proxy policy.
+
+## Metrics and logs
+
+**Logs** are JSON lines on stdout (`docker compose logs relay`). Each request logs
+`request_id`, `remote`, `source`, `endpoint`, `status`, `bytes` and `duration`;
+upstream drops log `upstream session ended` with a `reason`
+(`eof`, `rejected`, `idle_timeout`, `error`), duration and segment count. Tokens,
+query strings (epoch) and upstream URLs/error text are never logged. `remote` is the
+TCP peer, so behind an ingress it is the ingress address. The JustAI backend sends an
+`X-Request-ID` header that the relay echoes and logs, to correlate both sides.
+
+**Metrics** are exposed at `GET /metrics` in Prometheus text format, on the same
+listener and **protected by the same bearer token**. Example scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: justai-stream-relay
+    scheme: https
+    authorization: {credentials_file: /etc/prometheus/relay_token}
+    static_configs: [{targets: ["relay.example.org:8443"]}]
+```
+
+| Metric | Meaning |
+| --- | --- |
+| `relay_http_requests_total{source,endpoint,code}` | Requests; `source="none"` for auth failures and unknown sources |
+| `relay_http_request_duration_seconds{endpoint}` | Latency histogram |
+| `relay_http_inflight_requests` | In-flight requests (503 `busy` above 32) |
+| `relay_upstream_up{source}` | 1 while audio is flowing |
+| `relay_upstream_segments_total{source}` | Segments produced |
+| `relay_upstream_sessions_total{source,reason}` | Upstream sessions ended, by reason |
+| `relay_upstream_last_segment_timestamp_seconds{source}` | Alert on `time() - x > 30` |
+| `relay_upstream_latest_sequence{source}` | Latest segment number |
+
+Useful alerts: `relay_upstream_up == 0`, a rising `code="401"` rate,
+`code="503"` (busy) or `reason="rejected"` sessions.
+
+## Abuse protection
+
+- **Failed-auth throttle:** after 20 failed attempts per minute from one address,
+  further failures get `429` for a minute and stop being logged individually
+  (counted in `relay_http_requests_total{code="429"}`; one warning marks the start).
+  A **valid token is never throttled**, so a bot behind the same ingress address
+  cannot lock out the real backend.
+- **Connection limits:** the relay closes connections beyond `--max-conns`
+  (default 128, keep it below the 256 file-descriptor limit) and beyond
+  `--max-conns-per-ip` (default 16 for direct HTTPS; off with `--http`, where every
+  peer is your ingress). Shed connections show up as
+  `relay_connections_rejected_total{reason="total|per_ip"}`.
+- **Log rotation:** both compose files cap container logs at 3 × 10 MB.
+- **Token rotation without downtime:** `secrets/relay_token` may contain up to four
+  tokens, one per line. Add the new token as a second line and restart the relay,
+  switch the backend to the new token, then remove the old line and restart again.
+
+These limits reduce, but do not replace, restricting TCP 8443 to the application's
+egress IP at the firewall.

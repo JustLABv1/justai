@@ -3,13 +3,15 @@
 name: justai-stream-relay
 services:
   relay:
-    build:
-      context: ../../services/backend
-      dockerfile: Dockerfile
-      target: stream-relay
+    # Official image; pin RELAY_IMAGE to a version (e.g. ...:relay-1.2.3) in production.
+    # To build locally instead, see "Build the image yourself" in the README.
+    image: ${RELAY_IMAGE:-ghcr.io/justlabv1/justai:relay-latest}
     command: ["--http", "--listen", ":8080"]
     restart: unless-stopped
     init: true
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
     user: "1001:1001"
     read_only: true
     cap_drop: [ALL]
