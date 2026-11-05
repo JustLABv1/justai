@@ -293,3 +293,26 @@ Useful alerts: `relay_upstream_up == 0`, a rising `code="401"` rate,
 
 These limits reduce, but do not replace, restricting TCP 8443 to the application's
 egress IP at the firewall.
+
+## Grafana dashboard
+
+`grafana/justai-relay.dashboard.json` is a ready-made dashboard for the metrics above
+(tested with Grafana 13.3 and Prometheus; it works with Alloy remote-writing the relay
+metrics to Prometheus). Import it via **Dashboards → New → Import**, or provision it
+from a folder. It uses a datasource variable, so no UID needs editing.
+
+- **Overview:** sources streaming, uptime, requests/s, 5xx ratio, failed auth/s,
+  shed connections and an in-flight gauge (max 32).
+- **Upstream sources:** state timeline, time since last segment (bar gauge),
+  segment-freshness status history, segments per minute, session endings by reason
+  and a per-source table.
+- **Traffic:** requests by status code and by source/endpoint, a request-duration
+  heatmap plus p50/p95/p99, egress bandwidth and in-flight requests.
+- **Abuse and limits:** failed authentication (401/429) and shed connections.
+- **Variables and annotations:** `job`, `instance` and `source` (multi, All);
+  annotations mark relay restarts and sources going down. The shared crosshair is on.
+
+The file uses the classic dashboard JSON (schema 41), which every current Grafana
+imports. It is not the new v2 schema (`v2beta1`), which is still in preview and cannot
+be rolled back once a dashboard is saved in it; Grafana can convert this dashboard
+itself if you enable Dynamic Dashboards.
