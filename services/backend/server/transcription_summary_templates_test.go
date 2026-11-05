@@ -129,11 +129,38 @@ func TestSummaryOmissionDecisionsPreserveSourcesAndRestorations(t *testing.T) {
 	if _, _, err = applySummaryOmissionDecisions(rows, []summaryOmissionDecision{{SegmentIDs: []string{uuid.NewString()}, Reason: "No"}}, nil); err == nil {
 		t.Fatal("accepted fabricated source ID")
 	}
-	if _, _, err = applySummaryOmissionDecisions(rows, []summaryOmissionDecision{decisions[0], decisions[0]}, nil); err == nil {
-		t.Fatal("accepted duplicate source IDs")
+	if _, _, err = applySummaryOmissionDecisions(rows, []summaryOmissionDecision{decisions[0], {SegmentIDs: []string{opening.String()}, Reason: "Different reason"}}, nil); err == nil {
+		t.Fatal("accepted conflicting exclusion explanations")
 	}
 	if _, err = validateSummaryRestorations(rows, []string{uuid.NewString()}); err == nil {
 		t.Fatal("accepted missing restored source")
+	}
+}
+
+func TestSummaryOmissionDecisionsDeduplicateIdenticalExclusions(t *testing.T) {
+	omitted, retained := uuid.New(), uuid.New()
+	rows := []transcriptionExportRow{
+		{SegmentID: omitted, Text: "The sitting is open.", EndOffsetMs: 1000},
+		{SegmentID: retained, Text: "A substantive contribution.", StartOffsetMs: 1000, EndOffsetMs: 2000},
+	}
+	for _, restore := range []bool{false, true} {
+		t.Run(fmt.Sprint("restore=", restore), func(t *testing.T) {
+			decisions := []summaryOmissionDecision{
+				{SegmentIDs: []string{omitted.String(), omitted.String()}, Reason: "Procedural"},
+				{SegmentIDs: []string{omitted.String()}, Reason: " Procedural "},
+			}
+			kept, audit, err := applySummaryOmissionDecisions(rows, decisions, map[string]bool{omitted.String(): restore})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if restore {
+				if len(kept) != 2 || !kept[0].SummaryRequired || len(audit) != 0 {
+					t.Fatalf("duplicate exclusions overrode restoration: kept=%+v audit=%+v", kept, audit)
+				}
+			} else if len(kept) != 1 || kept[0].SegmentID != retained || len(audit) != 1 || len(audit[0].SegmentIDs) != 1 || audit[0].Text != rows[0].Text {
+				t.Fatalf("duplicate exclusions changed source or audit: kept=%+v audit=%+v", kept, audit)
+			}
+		})
 	}
 }
 

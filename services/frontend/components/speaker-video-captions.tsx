@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 
-type CaptionRun = {
+export type CaptionRun = {
   id: string
   status: "queued" | "processing" | "completed" | "failed" | "cancelled"
   frames: { speakerId: string; label: string; offsetMs: number }[]
@@ -69,12 +69,23 @@ export function SpeakerVideoCaptions({
   speakers,
   onSpeakersChange,
   onSeek,
+  onRunChange,
+  selectedImage,
+  onSelectImage,
+  onResolveSuggestion,
 }: {
   sessionId: string
   available: boolean
   speakers: TranscriptionSpeaker[]
   onSpeakersChange: (speakers: TranscriptionSpeaker[]) => void
   onSeek: (offsetMs: number) => void
+  onRunChange: (run: CaptionRun | null) => void
+  selectedImage: { runId: string; index: number } | null
+  onSelectImage: (image: { runId: string; index: number } | null) => void
+  onResolveSuggestion: (
+    speaker: TranscriptionSpeaker,
+    accept: boolean
+  ) => Promise<void>
 }) {
   const { t } = useTranslations()
 
@@ -88,9 +99,15 @@ export function SpeakerVideoCaptions({
   const [busy, setBusy] = useState(false)
   const [loadingEndpoints, setLoadingEndpoints] = useState(false)
   const [error, setError] = useState("")
-  const [imageIndex, setImageIndex] = useState<number | null>(null)
-  const [imageURL, setImageURL] = useState("")
-  const [imageError, setImageError] = useState("")
+  const [imageState, setImageState] = useState<{
+    selection: typeof selectedImage
+    url: string
+    error: string
+  } | null>(null)
+  const imageURL =
+    imageState?.selection === selectedImage ? (imageState?.url ?? "") : ""
+  const imageError =
+    imageState?.selection === selectedImage ? (imageState?.error ?? "") : ""
   const appliedRun = useRef("")
   const changeRef = useRef(onSpeakersChange)
   useEffect(() => {
@@ -98,7 +115,13 @@ export function SpeakerVideoCaptions({
   }, [onSpeakersChange])
   const base = `/api/v1/transcription/sessions/${sessionId}`
   const runId = run?.id
+  const imageIndex =
+    selectedImage?.runId === runId ? (selectedImage?.index ?? null) : null
   const active = run?.status === "queued" || run?.status === "processing"
+
+  useEffect(() => {
+    onRunChange(run)
+  }, [run, onRunChange])
 
   const acceptRun = useCallback(
     async (next: CaptionRun | null, signal?: AbortSignal) => {
@@ -198,16 +221,21 @@ export function SpeakerVideoCaptions({
       .then((blob) => {
         if (controller.signal.aborted) return
         objectURL = URL.createObjectURL(blob)
-        setImageURL(objectURL)
+        setImageState({ selection: selectedImage, url: objectURL, error: "" })
       })
       .catch((error) => {
-        if (!controller.signal.aborted) setImageError(message(error))
+        if (!controller.signal.aborted)
+          setImageState({
+            selection: selectedImage,
+            url: "",
+            error: message(error),
+          })
       })
     return () => {
       controller.abort()
       if (objectURL) URL.revokeObjectURL(objectURL)
     }
-  }, [imageIndex, runId, base])
+  }, [imageIndex, runId, base, selectedImage])
 
   async function start() {
     setBusy(true)
@@ -244,6 +272,16 @@ export function SpeakerVideoCaptions({
   const analyzed = run?.observations.length ?? 0
   const total = run?.frames.length ?? 0
   const image = imageIndex === null ? null : run?.frames[imageIndex]
+  const imageSpeaker = speakers.find(
+    (speaker) => speaker.id === image?.speakerId
+  )
+  const imageSuggestion = run?.results.find(
+    (result) =>
+      result.speakerId === imageSpeaker?.id &&
+      result.name === imageSpeaker?.suggestedName &&
+      imageIndex !== null &&
+      result.frameIndices.includes(imageIndex)
+  )
   const observation =
     imageIndex === null
       ? null
@@ -408,9 +446,7 @@ export function SpeakerVideoCaptions({
                         size="sm"
                         variant="secondary"
                         onClick={() => {
-                          setImageURL("")
-                          setImageError("")
-                          setImageIndex(index)
+                          onSelectImage({ runId: run.id, index })
                         }}
                       >
                         <ImageIcon className="size-4" />
@@ -560,7 +596,7 @@ export function SpeakerVideoCaptions({
       <Dialog
         open={imageIndex !== null}
         onOpenChange={(value) => {
-          if (!value) setImageIndex(null)
+          if (!value) onSelectImage(null)
         }}
       >
         <DialogContent className="sm:max-w-3xl">
@@ -597,12 +633,36 @@ export function SpeakerVideoCaptions({
             variant="secondary"
             onClick={() => {
               if (image) onSeek(image.offsetMs)
-              setImageIndex(null)
+              onSelectImage(null)
               setOpen(false)
             }}
           >
             {t("Go to this moment in video")}
           </Button>
+          {imageSpeaker?.suggestedName && imageSuggestion ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-auto text-sm">
+                {imageSpeaker.suggestedName}
+              </span>
+              <Button
+                onClick={async () => {
+                  await onResolveSuggestion(imageSpeaker, true)
+                }}
+              >
+                {t("Accept name {value0}", {
+                  value0: imageSpeaker.suggestedName,
+                })}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={async () => {
+                  await onResolveSuggestion(imageSpeaker, false)
+                }}
+              >
+                {t("Dismiss suggestion")}
+              </Button>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

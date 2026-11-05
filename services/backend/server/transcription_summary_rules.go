@@ -79,8 +79,12 @@ func applySummaryOmissionDecisions(rows []transcriptionExportRow, decisions []su
 			if !available[id] {
 				return nil, nil, fmt.Errorf("the model referenced a passage outside this transcript window")
 			}
-			if _, duplicate := reasons[id]; duplicate {
-				return nil, nil, fmt.Errorf("the model returned duplicate exclusions")
+			if previous, duplicate := reasons[id]; duplicate {
+				if previous != reason {
+					return nil, nil, fmt.Errorf("the model returned conflicting exclusion explanations for the same passage")
+				}
+				// Repeated identical decisions do not change the selected source or audit.
+				continue
 			}
 			reasons[id] = reason
 		}

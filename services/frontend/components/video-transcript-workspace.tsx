@@ -5,7 +5,10 @@ import {
   useTranslatedConfig,
 } from "@/components/locale-provider"
 import Link from "next/link"
-import { SpeakerVideoCaptions } from "@/components/speaker-video-captions"
+import {
+  SpeakerVideoCaptions,
+  type CaptionRun,
+} from "@/components/speaker-video-captions"
 
 import {
   Bookmark,
@@ -21,6 +24,7 @@ import {
   FileVideo,
   GitBranch,
   GitMerge,
+  ImageIcon,
   LoaderCircle,
   MessageSquarePlus,
   MoreHorizontal,
@@ -410,6 +414,11 @@ export function TranscriptWorkspace({
         : "verbatim"
   )
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("review")
+  const [captionRun, setCaptionRun] = useState<CaptionRun | null>(null)
+  const [selectedCaptionImage, setSelectedCaptionImage] = useState<{
+    runId: string
+    index: number
+  } | null>(null)
   const [summaryRecordingOpen, setSummaryRecordingOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
@@ -3160,6 +3169,10 @@ export function TranscriptWorkspace({
                       updateSnapshot((current) => ({ ...current, speakers }))
                     }
                     onSeek={(offsetMs) => seekTo(offsetMs, false)}
+                    onRunChange={setCaptionRun}
+                    selectedImage={selectedCaptionImage}
+                    onSelectImage={setSelectedCaptionImage}
+                    onResolveSuggestion={resolveSpeakerSuggestion}
                   />
                 ) : null}
                 <div className="space-y-2">
@@ -3211,6 +3224,58 @@ export function TranscriptWorkspace({
                                     <p className="line-clamp-2 text-muted-foreground">
                                       {summary.speaker.suggestionEvidence}
                                     </p>
+                                  ) : null}
+                                  {mediaKind === "video" && captionRun ? (
+                                    <div className="mt-2 flex flex-wrap gap-1">
+                                      {captionRun.results
+                                        .filter(
+                                          (result) =>
+                                            result.speakerId ===
+                                              summary.speaker.id &&
+                                            result.name ===
+                                              summary.speaker.suggestedName
+                                        )
+                                        .flatMap(
+                                          (result) => result.frameIndices
+                                        )
+                                        .filter(
+                                          (index, position, indices) =>
+                                            indices.indexOf(index) === position
+                                        )
+                                        .map((index) => {
+                                          const frame = captionRun.frames[index]
+                                          if (!frame) return null
+                                          return (
+                                            <Button
+                                              key={index}
+                                              size="sm"
+                                              variant="secondary"
+                                              aria-label={t(
+                                                "Video caption at {value0}: {value1}",
+                                                {
+                                                  value0: formatVideoDuration(
+                                                    frame.offsetMs
+                                                  ),
+                                                  value1:
+                                                    summary.speaker
+                                                      .suggestedName ?? "",
+                                                }
+                                              )}
+                                              onClick={() =>
+                                                setSelectedCaptionImage({
+                                                  runId: captionRun.id,
+                                                  index,
+                                                })
+                                              }
+                                            >
+                                              <ImageIcon data-icon="inline-start" />
+                                              {formatVideoDuration(
+                                                frame.offsetMs
+                                              )}
+                                            </Button>
+                                          )
+                                        })}
+                                    </div>
                                   ) : null}
                                 </div>
                                 <Button
