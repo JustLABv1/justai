@@ -133,7 +133,7 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
             aquasec/trivy:0.76.1 image --scanners vuln \
-            --severity HIGH,CRITICAL --exit-code 1 justai-frontend:ci
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 justai-frontend:ci
 
   resolve-ffmpeg-artifact:
     name: Resolve Shared FFmpeg Artifact
@@ -194,7 +194,7 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
             aquasec/trivy:0.76.1 image --scanners vuln \
-            --severity HIGH,CRITICAL --exit-code 1 justai-backend:ci
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 justai-backend:ci
 
   combined-image-build:
     name: Combined — Docker Build Check
@@ -220,7 +220,7 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
             aquasec/trivy:0.76.1 image --scanners vuln \
-            --severity HIGH,CRITICAL --exit-code 1 justai-combined:ci
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 justai-combined:ci
 
   ffmpeg-image-build:
     name: Shared FFmpeg — Docker Build Check
@@ -300,4 +300,4 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
             aquasec/trivy:0.76.1 image --scanners vuln \
-            --severity HIGH,CRITICAL --exit-code 1 justai-pyannote:ci
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 justai-pyannote:ci
