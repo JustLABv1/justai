@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -22,6 +23,36 @@ type summaryOmissionDecision struct {
 }
 
 func requestSummaryJSON(ctx context.Context, endpoint provider.Endpoint, system, input string, target any) error {
+	ctx, cancel := context.WithTimeout(ctx, transcriptionInsightCallTimeout)
+	defer cancel()
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		prompt := system
+		if attempt > 0 {
+			prompt += "\nYour previous response was not valid JSON. Generate the complete response again from the original input. Return exactly one JSON object matching the requested schema, with no markdown, commentary, or trailing values. Escape all quotes inside strings."
+		}
+		// Validate the entire response before decoding into the caller's target.
+		// Never salvage a partial exclusion list from malformed or concatenated JSON.
+		var raw json.RawMessage
+		lastErr = requestSummaryJSONAttempt(ctx, endpoint, prompt, input, &raw)
+		if lastErr == nil {
+			if err := json.Unmarshal(raw, target); err != nil {
+				return fmt.Errorf("the model returned an invalid summary customization response: %w", err)
+			}
+			return nil
+		}
+		var syntaxErr *json.SyntaxError
+		if !errors.As(lastErr, &syntaxErr) {
+			return lastErr
+		}
+	}
+	return fmt.Errorf("the model returned invalid summary customization JSON after 3 attempts: %w", lastErr)
+}
+
+func requestSummaryJSONAttempt(ctx context.Context, endpoint provider.Endpoint, system, input string, target any) error {
 	callCtx, cancel := context.WithTimeout(ctx, transcriptionInsightCallTimeout)
 	defer cancel()
 	var output strings.Builder
