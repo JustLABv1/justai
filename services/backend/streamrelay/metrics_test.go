@@ -83,3 +83,37 @@ func TestUnknownSourcesDoNotCreateLabels(t *testing.T) {
 		t.Error("client-supplied source IDs must not become label values")
 	}
 }
+
+func TestHealthzIsUnauthenticatedAndMinimal(t *testing.T) {
+	r := testRelay(t)
+	var logs bytes.Buffer
+	r.SetLogger(slog.New(slog.NewJSONHandler(&logs, nil)))
+	for _, tc := range []struct {
+		method string
+		code   int
+		body   string
+	}{{"GET", 200, "ok\n"}, {"HEAD", 200, ""}, {"POST", 405, ""}} {
+		req := httptest.NewRequest(tc.method, "/healthz", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != tc.code || (tc.code == 200 && w.Body.String() != tc.body) {
+			t.Errorf("%s /healthz: %d %q", tc.method, w.Code, w.Body.String())
+		}
+	}
+	// Other paths still require auth, and the probe never feeds the failed-auth throttle.
+	for i := 0; i < authFailLimit+5; i++ {
+		httptest.NewRecorder()
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/healthz", nil))
+	}
+	if c := get(r, "", "192.0.2.5:1"); c != 401 {
+		t.Errorf("auth still required elsewhere: %d", c)
+	}
+	if strings.Contains(logs.String(), `"endpoint":"health","status":200`) {
+		t.Error("successful health probes must not be logged at info")
+	}
+	var m bytes.Buffer
+	r.metrics.write(&m)
+	if !strings.Contains(m.String(), `endpoint="health",code="200"`) {
+		t.Error("health probes should still be counted")
+	}
+}
