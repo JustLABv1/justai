@@ -137,6 +137,9 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	// Never log the Authorization header, query string (epoch) or raw path.
 	level := slog.LevelInfo
+	if rec.endpoint == "health" && rec.status == 200 {
+		level = slog.LevelDebug // frequent probes would drown real traffic
+	}
 	if rec.status == 401 || rec.status >= 500 {
 		level = slog.LevelWarn
 	}
@@ -155,6 +158,22 @@ func remoteHost(addr string) string {
 func (r *Relay) serve(w *recorder, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Unauthenticated liveness probe for uptime monitors and load balancers. It
+	// reveals nothing (no sources, versions or upstream state) and takes no slot.
+	if req.URL.Path == "/healthz" {
+		w.endpoint = "health"
+		if req.Method != http.MethodGet && req.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", 405)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Length", "3")
+		if req.Method == http.MethodGet {
+			_, _ = w.Write([]byte("ok\n"))
+		}
+		return
+	}
 	supplied := sha256.Sum256([]byte(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")))
 	valid := 0
 	for i := range r.tokens { // no early exit: constant work per configured token

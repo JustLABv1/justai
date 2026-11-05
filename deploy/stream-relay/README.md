@@ -240,6 +240,15 @@ query strings (epoch) and upstream URLs/error text are never logged. `remote` is
 TCP peer, so behind an ingress it is the ingress address. The JustAI backend sends an
 `X-Request-ID` header that the relay echoes and logs, to correlate both sides.
 
+**Health check:** `GET /healthz` (also `HEAD`) needs no token and returns `200 ok`
+whenever the process is serving. It reveals nothing else (no sources, versions or
+upstream state) and does not count toward the failed-auth throttle. Successful probes
+are logged at debug level only, so frequent monitoring does not flood the logs.
+Use it for Uptime Kuma ("HTTP(s)" monitor, expected status `200`), Docker or load
+balancer health checks. It proves the relay is reachable, not that audio is flowing;
+for that, add a keyword monitor on the authenticated `/metrics` endpoint that looks for
+`relay_upstream_up{source="<id>"} 1`.
+
 **Metrics** are exposed at `GET /metrics` in Prometheus text format, on the same
 listener and **protected by the same bearer token**. Example scrape config:
 
