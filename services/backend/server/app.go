@@ -233,6 +233,7 @@ func (a *App) Router() *gin.Engine {
 	protected.DELETE("/admin/mcp/servers/:id/icon", a.deletePlatformMCPServerIcon)
 	protected.POST("/admin/mcp/servers/:id/test", a.testPlatformMCPServer)
 	protected.GET("/admin/mcp/servers/:id/tools", a.discoverPlatformMCPTools)
+	protected.GET("/admin/audit/options", a.listPlatformAuditOptions)
 	protected.GET("/admin/audit", a.listPlatformAudit)
 	protected.GET("/admin/health", a.getPlatformHealth)
 

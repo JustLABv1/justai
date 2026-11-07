@@ -10,9 +10,7 @@ import { useCallback, useEffect, useState } from "react"
 import {
   Activity,
   BarChart3,
-  ChevronDown,
   Database,
-  SlidersHorizontal,
   Globe2,
   KeyRound,
   Megaphone,
@@ -22,7 +20,6 @@ import {
   ShieldCheck,
   UsersRound,
   Wrench,
-  X,
 } from "lucide-react"
 
 import { APIError, api } from "@/lib/api"
@@ -34,7 +31,6 @@ import type {
   PlatformSettings,
   User,
 } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import {
   PlatformControlsView,
@@ -42,35 +38,18 @@ import {
 } from "@/components/platform-controls-view"
 import { PlatformWorkspacesView } from "@/components/platform-workspaces-view"
 import { PlatformUsersView } from "@/components/platform-users-view"
+import { PlatformAuditView } from "@/components/platform-audit-view"
 import { PlatformHealthView } from "@/components/platform-health-view"
 import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
 import { MCPView } from "@/components/mcp-view"
 import { EndpointsView } from "@/components/endpoints-view"
 import { PlatformAnnouncementsView } from "@/components/platform-announcements-view"
 import { PlatformAuthenticationView } from "@/components/platform-authentication-view"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Page, PageActions, PageTitle } from "@/components/ui/page"
 import { Tabs } from "@/components/panelui/tabs"
 import { Button as PanelButton } from "@/components/panelui/button"
 import { Alert as PanelAlert } from "@/components/panelui/alert"
 import { PlatformAnalyticsView } from "@/components/platform-analytics-view"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-
 const tabsMessages: Array<{
   id: AdminTab
   label: string
@@ -574,7 +553,7 @@ export function PlatformAdminShell({
             </div>
           )}
           {activeTab === "audit" && (
-            <AuditView
+            <PlatformAuditView
               events={audit}
               page={listPage}
               pageSize={25}
@@ -590,336 +569,5 @@ export function PlatformAdminShell({
         </Tabs.Content>
       </Tabs>
     </Page>
-  )
-}
-
-function Pagination({
-  page,
-  compact = false,
-  pageSize,
-  total,
-  onPageChange,
-}: {
-  page: number
-  compact?: boolean
-  pageSize: number
-  total: number
-  onPageChange: (page: number) => void
-}) {
-  const { t } = useTranslations()
-
-  const pageCount = Math.max(1, Math.ceil(total / pageSize))
-  if (pageCount <= 1) return null
-  return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground",
-        !compact && "border-t pt-3"
-      )}
-    >
-      {!compact && (
-        <span className="min-w-0 flex-1">
-          {t("Page")} {page} {t("of")} {pageCount} · {total} total
-        </span>
-      )}
-      <div className="flex shrink-0 gap-1">
-        <Button
-          disabled={page <= 1}
-          onClick={() => onPageChange(Math.max(1, page - 1))}
-          size="sm"
-          variant="outline"
-        >
-          {t("Previous page")}
-        </Button>
-        <Button
-          disabled={page >= pageCount}
-          onClick={() => onPageChange(Math.min(pageCount, page + 1))}
-          size="sm"
-          variant="outline"
-        >
-          {t("Next page")}
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-function AuditView({
-  events,
-  filters,
-  onFiltersChange,
-  page,
-  pageSize,
-  total,
-  onPageChange,
-}: {
-  events: any[]
-  filters: Record<string, string>
-  onFiltersChange: (filters: Record<string, string>) => void
-  page: number
-  pageSize: number
-  total: number
-  onPageChange: (page: number) => void
-}) {
-  const { t, locale } = useTranslations()
-
-  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false)
-  const [selectedEvent, setSelectedEvent] = useState<any | null>(null)
-  const setFilter = (key: string, value: string) =>
-    onFiltersChange({ ...filters, [key]: value })
-  const advancedFilterCount = Object.entries(filters).filter(
-    ([key, value]) => key !== "search" && Boolean(value.trim())
-  ).length
-  const hasActiveFilters = Object.values(filters).some((value) =>
-    Boolean(value.trim())
-  )
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-3">
-        <Collapsible
-          className="flex flex-col gap-2"
-          onOpenChange={setMoreFiltersOpen}
-          open={moreFiltersOpen}
-        >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Input
-              aria-label={t("Audit search")}
-              className="min-w-0 flex-1"
-              onChange={(event) => setFilter("search", event.target.value)}
-              placeholder={t("Search actions or details")}
-              value={filters.search}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <CollapsibleTrigger
-                className="gap-1.5 sm:w-auto"
-                render={<Button size="sm" variant="outline" />}
-              >
-                <SlidersHorizontal data-icon="inline-start" />
-                {moreFiltersOpen ? t("Hide filters") : t("More filters")}
-                {advancedFilterCount > 0 ? (
-                  <span className="ml-0.5 rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">
-                    {advancedFilterCount}
-                  </span>
-                ) : null}
-                <ChevronDown
-                  aria-hidden="true"
-                  className={cn(
-                    "size-3.5 transition-transform",
-                    moreFiltersOpen && "rotate-180"
-                  )}
-                />
-              </CollapsibleTrigger>
-              {hasActiveFilters ? (
-                <Button
-                  className="shrink-0"
-                  onClick={() =>
-                    onFiltersChange({
-                      search: "",
-                      action: "",
-                      resourceType: "",
-                      actorId: "",
-                      organizationId: "",
-                      from: "",
-                      to: "",
-                    })
-                  }
-                  size="sm"
-                  variant="ghost"
-                >
-                  <X data-icon="inline-start" /> {t("Clear filters")}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-          <CollapsibleContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <Input
-              aria-label={t("Audit action")}
-              onChange={(event) => setFilter("action", event.target.value)}
-              placeholder={t("Action")}
-              value={filters.action}
-            />
-            <Input
-              aria-label={t("Audit resource type")}
-              onChange={(event) =>
-                setFilter("resourceType", event.target.value)
-              }
-              placeholder={t("Resource type")}
-              value={filters.resourceType}
-            />
-            <Input
-              aria-label={t("Audit actor")}
-              onChange={(event) => setFilter("actorId", event.target.value)}
-              placeholder={t("Actor user ID")}
-              value={filters.actorId}
-            />
-            <Input
-              aria-label={t("Audit organization")}
-              onChange={(event) =>
-                setFilter("organizationId", event.target.value)
-              }
-              placeholder={t("Organization ID")}
-              value={filters.organizationId}
-            />
-            <Input
-              aria-label={t("Audit from")}
-              onChange={(event) => setFilter("from", event.target.value)}
-              placeholder={t("From (YYYY-MM-DD)")}
-              value={filters.from}
-            />
-            <Input
-              aria-label={t("Audit to")}
-              onChange={(event) => setFilter("to", event.target.value)}
-              placeholder={t("To (YYYY-MM-DD)")}
-              value={filters.to}
-            />
-          </CollapsibleContent>
-        </Collapsible>
-        {events.map((event) => (
-          <button
-            className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border px-2 py-3 text-left text-xs transition-colors last:border-0 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
-            key={event.id}
-            onClick={() => setSelectedEvent(event)}
-            type="button"
-          >
-            <div className="min-w-0 flex-1 break-all">
-              <p className="font-medium">{event.action}</p>
-              <p className="text-muted-foreground">
-                {event.resourceType} · {event.resourceId ?? "—"}
-              </p>
-            </div>
-            <Badge
-              variant={
-                event.outcome && event.outcome !== "success"
-                  ? "destructive"
-                  : "secondary"
-              }
-            >
-              {t(
-                event.outcome && event.outcome !== "success"
-                  ? "Failed"
-                  : "Success"
-              )}
-            </Badge>
-            <time className="text-muted-foreground">
-              {event.createdAt
-                ? new Date(event.createdAt).toLocaleString(locale)
-                : ""}
-            </time>
-          </button>
-        ))}
-        {events.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            {t("No audit events found.")}
-          </p>
-        )}
-      </CardContent>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
-        <span aria-live="polite">
-          {total
-            ? t("{start}–{end} of {total}", {
-                start: (page - 1) * pageSize + 1,
-                end: Math.min((page - 1) * pageSize + events.length, total),
-                total,
-              })
-            : t("No audit events found.")}
-        </span>
-        <Pagination
-          page={page}
-          pageSize={pageSize}
-          total={total}
-          onPageChange={onPageChange}
-          compact
-        />
-      </div>
-      <Dialog
-        open={selectedEvent !== null}
-        onOpenChange={(open) => !open && setSelectedEvent(null)}
-      >
-        <DialogContent className="min-w-0 sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="break-all">
-              {selectedEvent?.action ?? t("Audit event")}
-            </DialogTitle>
-            <DialogDescription className="break-all">
-              {selectedEvent?.resourceType ?? "—"} ·{" "}
-              {selectedEvent?.resourceId ?? "No resource ID"}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-3 text-sm sm:grid-cols-2">
-            <AuditDetail label={t("Actor")} value={selectedEvent?.userId} />
-            <AuditDetail
-              label={t("Organization")}
-              value={selectedEvent?.organizationId}
-            />
-            <AuditDetail
-              label={t("Outcome")}
-              value={selectedEvent?.outcome ?? "success"}
-            />
-            <AuditDetail
-              label={t("Request ID")}
-              value={selectedEvent?.requestId}
-            />
-            <AuditDetail
-              label={t("IP address")}
-              value={selectedEvent?.ipAddress}
-            />
-            <AuditDetail
-              label={t("Time")}
-              value={
-                selectedEvent?.createdAt
-                  ? new Date(selectedEvent.createdAt).toLocaleString(locale)
-                  : undefined
-              }
-            />
-          </div>
-          {selectedEvent?.userAgent && (
-            <AuditDetail
-              label={t("User agent")}
-              value={selectedEvent.userAgent}
-            />
-          )}
-          <div>
-            <p className="mb-1 text-xs font-medium text-muted-foreground">
-              {t("Details")}
-            </p>
-            <pre className="max-h-72 overflow-auto rounded-lg bg-muted/50 p-3 text-xs break-words whitespace-pre-wrap">
-              {formatAuditDetails(selectedEvent?.details)}
-            </pre>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setSelectedEvent(null)} variant="outline">
-              {t("Close")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </Card>
-  )
-}
-
-function formatAuditDetails(value: unknown) {
-  if (value == null || value === "") return "No additional details."
-  if (typeof value === "string") {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2)
-    } catch {
-      return value
-    }
-  }
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
-function AuditDetail({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-xs break-words">
-        {value == null || value === "" ? "—" : String(value)}
-      </p>
-    </div>
   )
 }

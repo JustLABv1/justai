@@ -18,10 +18,12 @@ export function AnalyticsEntityFilter({
   value,
   label,
   onChange,
+  className,
 }: {
   kind: "users" | "workspaces"
   value: string
   label?: string
+  className?: string
   onChange: (value: string) => void
 }) {
   const { t } = useTranslations()
@@ -91,6 +93,7 @@ export function AnalyticsEntityFilter({
         render={
           <Button
             size="sm"
+            className={className}
             variant="outline"
             role="combobox"
             aria-expanded={open}

@@ -4604,4 +4604,13 @@ export const de = {
   "{healthy} healthy \u00b7 {unhealthy} need attention":
     "{healthy} funktionsfähig · {unhealthy} mit Handlungsbedarf",
   "Stale heartbeat": "Heartbeat veraltet",
+  "Audit log": "Audit-Protokoll",
+  "Inspect recorded platform actions and their request details.":
+    "Aufgezeichnete Plattformaktionen und die zugehörigen Anfragedetails prüfen.",
+  "Event metadata": "Ereignis-Metadaten",
+  "Select date": "Datum auswählen",
+  "All actions": "Alle Aktionen",
+  "All resource types": "Alle Ressourcentypen",
+  "Filter options could not be loaded.":
+    "Filteroptionen konnten nicht geladen werden.",
 } as const

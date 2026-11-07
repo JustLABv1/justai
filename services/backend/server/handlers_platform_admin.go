@@ -1109,6 +1109,37 @@ func (a *App) discoverPlatformMCPTools(c *gin.Context) {
 	}
 }
 
+// listPlatformAuditOptions returns catalog values across all audit pages.
+func (a *App) listPlatformAuditOptions(c *gin.Context) {
+	if !a.requirePlatformAdmin(c) {
+		return
+	}
+	rows, err := a.DB.QueryContext(c, `SELECT 'action' AS kind, action AS value FROM audit_events WHERE action <> '' GROUP BY action UNION ALL SELECT 'resourceType' AS kind, resource_type AS value FROM audit_events WHERE resource_type <> '' GROUP BY resource_type ORDER BY kind, value`)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	defer rows.Close()
+	actions, resourceTypes := []string{}, []string{}
+	for rows.Next() {
+		var kind, value string
+		if err := rows.Scan(&kind, &value); err != nil {
+			writeError(c, http.StatusInternalServerError, err)
+			return
+		}
+		if kind == "action" {
+			actions = append(actions, value)
+		} else {
+			resourceTypes = append(resourceTypes, value)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		writeError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"actions": actions, "resourceTypes": resourceTypes})
+}
+
 func (a *App) listPlatformAudit(c *gin.Context) {
 	if !a.requirePlatformAdmin(c) {
 		return
