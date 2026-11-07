@@ -6,7 +6,6 @@ import {
 } from "@/components/locale-provider"
 
 import {
-  memo,
   type ReactNode,
   useCallback,
   useEffect,
@@ -26,12 +25,9 @@ import {
   GitBranch,
   Link2,
   ListChecks,
-  Maximize2,
   MessageSquare,
-  Minimize2,
   MoreHorizontal,
   LockKeyhole,
-  Play,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -43,23 +39,6 @@ import {
   UserRound,
   X,
 } from "lucide-react"
-import {
-  applyNodeChanges,
-  Background,
-  Controls,
-  Handle,
-  MiniMap,
-  Position,
-  ReactFlow,
-  type Connection,
-  type Edge,
-  type Node,
-  type NodeChange,
-  type NodeProps,
-} from "@xyflow/react"
-
-import "@xyflow/react/dist/style.css"
-
 import { layoutAgentGraph } from "@/lib/agent-graph-layout"
 import {
   Table,
@@ -70,6 +49,8 @@ import {
   TableRow,
 } from "@/components/panelui/table"
 import { RunFiles } from "@/components/agent-run-files"
+import { Inspector } from "@/components/panelui/inspector"
+import { WorkflowEditor, WorkflowRunGraph } from "@/components/workflow-editor"
 import { AgentsPanel } from "@/components/agents-directory"
 import { api, resolveAPIURL } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
@@ -168,7 +149,6 @@ import {
 } from "@/components/panelui/select"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/panelui/switch"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/panelui/textarea"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
@@ -233,6 +213,12 @@ type FlowNodeData = {
   instruction: string
   status?: string
   selected?: boolean
+}
+
+type GraphNode = {
+  id: string
+  position: { x: number; y: number }
+  data: FlowNodeData
 }
 
 type DeleteTarget =
@@ -640,126 +626,6 @@ function parseDelimitedList(value: string) {
 
 function formatDelimitedList(value: string[] | undefined) {
   return (value ?? []).join(", ")
-}
-
-const AgentFlowNode = memo(function AgentFlowNode({
-  data,
-}: NodeProps<Node<FlowNodeData>>) {
-  return (
-    <div
-      className={cn(
-        "w-60 rounded-xl bg-card px-3 py-2 shadow-sm",
-        data.selected && "border-primary ring-2 ring-primary/20"
-      )}
-    >
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="size-2! bg-primary"
-      />
-      <div className="flex items-start gap-2">
-        <div className="rounded-lg bg-primary/10 p-1.5 text-primary">
-          <Bot data-icon="inline-start" />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-xs font-semibold">{data.label}</p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {data.agentName || "No agent selected"}
-          </p>
-        </div>
-      </div>
-      <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">
-        {data.instruction}
-      </p>
-      {data.status && (
-        <Badge className="mt-2" variant={badgeVariant(data.status)}>
-          {statusLabel(data.status)}
-        </Badge>
-      )}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="size-2! bg-primary"
-      />
-    </div>
-  )
-})
-
-const flowNodeTypes = { agent: AgentFlowNode }
-
-function WorkflowCanvas({
-  nodes,
-  edges,
-  disabled,
-  onConnect,
-  onSelectNode,
-  onPositionChange,
-}: {
-  nodes: Node<FlowNodeData>[]
-  edges: Edge[]
-  disabled: boolean
-  onConnect: (connection: Connection) => void
-  onSelectNode: (id: string) => void
-  onPositionChange: (id: string, position: { x: number; y: number }) => void
-}) {
-  // Keep pointer-move state inside the canvas. The parent owns the durable
-  // position snapshot, but does not re-render the editor on every drag frame.
-  const [localNodes, setLocalNodes] = useState(nodes)
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setLocalNodes((current) => {
-        const currentByID = new Map(current.map((node) => [node.id, node]))
-        const next = nodes.map((node) => {
-          const existing = currentByID.get(node.id)
-          return existing ? { ...existing, ...node } : node
-        })
-        const unchanged =
-          next.length === current.length &&
-          next.every((node, index) => {
-            const previous = current[index]
-            return (
-              previous.id === node.id &&
-              previous.position.x === node.position.x &&
-              previous.position.y === node.position.y &&
-              previous.data === node.data
-            )
-          })
-        return unchanged ? current : next
-      })
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [nodes])
-
-  const handleNodesChange = useCallback(
-    (changes: NodeChange<Node<FlowNodeData>>[]) => {
-      setLocalNodes((current) => applyNodeChanges(changes, current))
-    },
-    []
-  )
-
-  return (
-    <div className="h-[560px] min-h-0 w-full flex-1">
-      <ReactFlow
-        nodes={localNodes}
-        edges={edges}
-        nodeTypes={flowNodeTypes}
-        onNodesChange={handleNodesChange}
-        onConnect={onConnect}
-        nodesDraggable={!disabled}
-        nodesConnectable={!disabled}
-        onlyRenderVisibleElements
-        onNodeClick={(_, node) => onSelectNode(node.id)}
-        onNodeDragStop={(_, node) => onPositionChange(node.id, node.position)}
-        fitView
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background gap={20} size={1} />
-        <Controls />
-        <MiniMap pannable zoomable />
-      </ReactFlow>
-    </div>
-  )
 }
 
 function agentToSavedLabel(agent: Agent | undefined) {
@@ -1275,7 +1141,7 @@ export function AgentsView({
     setSelectedNodeId(nodes[0]?.id ?? "")
   }
 
-  function handleConnect(connection: Connection) {
+  function handleConnect(connection: { source: string; target: string }) {
     if (!workflowDraft || !connection.source || !connection.target) return
     if (
       workflowDraft.definition.edges.some(
@@ -1543,7 +1409,7 @@ export function AgentsView({
   const selectedNode = workflowDraft?.definition.nodes.find(
     (node) => node.id === selectedNodeId
   )
-  const graphNodes = useMemo<Node<FlowNodeData>[]>(() => {
+  const graphNodes = useMemo<GraphNode[]>(() => {
     if (!workflowDraft) return []
     const layout = layoutAgentGraph(
       workflowDraft.definition.nodes.map((node) => node.id),
@@ -1563,19 +1429,11 @@ export function AgentsView({
       },
     }))
   }, [agents, positions, selectedNodeId, workflowDraft])
-  const graphEdges = useMemo<Edge[]>(
-    () =>
-      workflowDraft?.definition.edges.map((edge) => ({
-        id: `${edge.from}-${edge.to}`,
-        source: edge.from,
-        target: edge.to,
-        animated: false,
-      })) ?? [],
-    [workflowDraft]
-  )
   const currentRunInputNames = workflowDraft
     ? workflowInputNames(workflowDraft.definition)
     : []
+
+  const editingWorkflow = activeTab === "workflows" && workflowDraft !== null
 
   return (
     <Page>
@@ -1633,54 +1491,60 @@ export function AgentsView({
         </PuAlert>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        {[
-          {
-            label: t("Agents"),
-            value: agents.length,
-            note: t("{value0} remote", {
-              value0: agents.filter((agent) => agent.kind === "remote").length,
-            }),
-            icon: Bot,
-          },
-          {
-            label: t("Workflows"),
-            value: workflows.length,
-            note: t("Reusable multi-step runs"),
-            icon: GitBranch,
-          },
-          {
-            label: t("Runs"),
-            value: runs.length,
-            note: t("{value0} running", {
-              value0: runs.filter((run) => run.status === "running").length,
-            }),
-            icon: Activity,
-          },
-        ].map(({ label, value, note, icon: Icon }) => (
-          <PuCard as="section" className="gap-0" key={label} size="sm">
-            <PuCard.Content className="flex items-start justify-between gap-3">
-              <Stat>
-                <Stat.Content>
-                  <Stat.Label>{label}</Stat.Label>
-                  <Stat.Value size="md">{value}</Stat.Value>
-                  <Stat.Description>{note}</Stat.Description>
-                </Stat.Content>
-              </Stat>
-              <Icon
-                aria-hidden="true"
-                className="size-4 shrink-0 text-muted-foreground"
-              />
-            </PuCard.Content>
-          </PuCard>
-        ))}
-      </div>
+      {!editingWorkflow && (
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            {
+              label: t("Agents"),
+              value: agents.length,
+              note: t("{value0} remote", {
+                value0: agents.filter((agent) => agent.kind === "remote")
+                  .length,
+              }),
+              icon: Bot,
+            },
+            {
+              label: t("Workflows"),
+              value: workflows.length,
+              note: t("Reusable multi-step runs"),
+              icon: GitBranch,
+            },
+            {
+              label: t("Runs"),
+              value: runs.length,
+              note: t("{value0} running", {
+                value0: runs.filter((run) => run.status === "running").length,
+              }),
+              icon: Activity,
+            },
+          ].map(({ label, value, note, icon: Icon }) => (
+            <PuCard as="section" className="gap-0" key={label} size="sm">
+              <PuCard.Content className="flex items-start justify-between gap-3">
+                <Stat>
+                  <Stat.Content>
+                    <Stat.Label>{label}</Stat.Label>
+                    <Stat.Value size="md">{value}</Stat.Value>
+                    <Stat.Description>{note}</Stat.Description>
+                  </Stat.Content>
+                </Stat>
+                <Icon
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-muted-foreground"
+                />
+              </PuCard.Content>
+            </PuCard>
+          ))}
+        </div>
+      )}
 
       <PuTabs
         onValueChange={(value) => onTabChange(value as AgentTab)}
         value={activeTab}
       >
-        <PuTabs.List aria-label={t("Agent workspace sections")}>
+        <PuTabs.List
+          aria-label={t("Agent workspace sections")}
+          className={editingWorkflow ? "hidden" : undefined}
+        >
           <PuTabs.Trigger value="agents">
             <Bot />
             {t("Agents")}
@@ -1726,7 +1590,6 @@ export function AgentsView({
             selectedNode={selectedNode}
             selectedNodeId={selectedNodeId}
             graphNodes={graphNodes}
-            graphEdges={graphEdges}
             validationMessage={validationMessage}
             validationTarget={validationTarget}
             validationTone={validationTone}
@@ -2627,7 +2490,6 @@ function WorkflowsPanel({
   selectedNode,
   selectedNodeId,
   graphNodes,
-  graphEdges,
   validationMessage,
   validationTarget,
   validationTone,
@@ -2659,8 +2521,7 @@ function WorkflowsPanel({
   knowledgeSources: KnowledgeSource[]
   selectedNode?: AgentWorkflowNode
   selectedNodeId: string
-  graphNodes: Node<FlowNodeData>[]
-  graphEdges: Edge[]
+  graphNodes: GraphNode[]
   validationMessage: string
   validationTarget: WorkflowValidationTarget
   validationTone: WorkflowValidationTone
@@ -2675,7 +2536,7 @@ function WorkflowsPanel({
   onSelectNode: (id: string) => void
   onAddNode: () => void
   onRemoveNode: () => void
-  onConnect: (connection: Connection) => void
+  onConnect: (connection: { source: string; target: string }) => void
   onPositionChange: (id: string, position: { x: number; y: number }) => void
   onValidate: () => void
   onSave: () => void
@@ -2688,51 +2549,6 @@ function WorkflowsPanel({
   const { t } = useTranslations()
 
   const [workflowQuery, setWorkflowQuery] = useState("")
-  const editorRef = useRef<HTMLDivElement>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [editorTab, setEditorTab] = useState("build")
-  const activeEditorTab = validationTarget
-    ? validationTarget === "name"
-      ? "settings"
-      : "build"
-    : editorTab
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(document.fullscreenElement === editorRef.current)
-    }
-    document.addEventListener("fullscreenchange", handleFullscreenChange)
-    return () =>
-      document.removeEventListener("fullscreenchange", handleFullscreenChange)
-  }, [])
-
-  useEffect(() => {
-    if (!isFullscreen) return
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    return () => {
-      document.body.style.overflow = previousOverflow
-    }
-  }, [isFullscreen])
-
-  const toggleFullscreen = useCallback(async () => {
-    const editor = editorRef.current
-    if (!editor) return
-    if (isFullscreen) {
-      setIsFullscreen(false)
-      if (document.fullscreenElement === editor) {
-        await document.exitFullscreen().catch(() => undefined)
-      }
-      return
-    }
-    setIsFullscreen(true)
-    try {
-      await editor.requestFullscreen()
-    } catch {
-      // Keep the fixed focus mode when the browser blocks the native API.
-    }
-  }, [isFullscreen])
-
   return (
     <div className={cn("grid gap-5", !draft && "grid-cols-1")}>
       {!draft && (
@@ -2888,340 +2704,119 @@ function WorkflowsPanel({
         </div>
       )}
       {draft ? (
-        <Card
-          ref={editorRef}
-          className={cn(
-            "min-w-0",
-            isFullscreen &&
-              "fixed inset-0 z-50 min-h-screen w-screen overflow-y-auto rounded-none bg-background py-6"
-          )}
-        >
-          <CardHeader
-            className={cn(
-              isFullscreen &&
-                "sticky top-0 z-10 border-b bg-background/95 backdrop-blur-sm"
-            )}
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={onClose}
-                  >
-                    {t("Workflows")}
-                  </Button>
-                  <CardTitle>
-                    {draft.id
-                      ? draft.name || "Edit workflow"
-                      : t("New workflow")}
-                  </CardTitle>
-                </div>
-                <CardDescription>
-                  {t(
-                    "Design the flow, configure each step, then validate and run."
-                  )}
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {draft.id && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
+        <WorkflowEditor
+          canDelete={Boolean(draft.id)}
+          description={draft.description}
+          disabled={disabled}
+          edges={draft.definition.edges}
+          graphKey={draft.id || "new"}
+          isNew={!draft.id}
+          maxNodes={16}
+          nodePanel={
+            <NodeInspector
+              node={selectedNode}
+              selectedNodeId={selectedNodeId}
+              agents={agents}
+              connections={connections}
+              workflowNodes={draft.definition.nodes}
+              mcpServers={mcpServers}
+              knowledgeSpaces={knowledgeSpaces}
+              knowledgeSources={knowledgeSources}
+              onUpdate={onUpdateNode}
+              onRemove={onRemoveNode}
+              disabled={disabled}
+            />
+          }
+          nodes={graphNodes.map((node) => ({
+            id: node.id,
+            position: node.position,
+            agentName: node.data.agentName,
+            instruction: node.data.instruction,
+            selected: Boolean(node.data.selected),
+            status: node.data.status,
+          }))}
+          onAddNode={onAddNode}
+          onAutoLayout={() => {
+            const layout = layoutAgentGraph(
+              draft.definition.nodes.map((node) => node.id),
+              draft.definition.edges
+            )
+            Object.entries(layout).forEach(([id, position]) =>
+              onPositionChange(id, position)
+            )
+          }}
+          onClose={onClose}
+          onConnect={onConnect}
+          onDelete={() => {
+            const workflow = workflows.find((item) => item.id === draft.id)
+            if (workflow) onDelete(workflow)
+          }}
+          onPositionChange={onPositionChange}
+          onRemoveEdge={(edge) =>
+            onUpdate({
+              definition: {
+                ...draft.definition,
+                edges: draft.definition.edges.filter(
+                  (candidate) =>
+                    candidate.from !== edge.from || candidate.to !== edge.to
+                ),
+              },
+            })
+          }
+          onRun={onRun}
+          onSave={onSave}
+          onSelectNode={onSelectNode}
+          onValidate={onValidate}
+          onValidationDismiss={onValidationDismiss}
+          saving={saving}
+          schedulePanel={
+            <ScheduleEditor
+              schedule={draft.schedule}
+              enabled={draft.enabled}
+              nextRunAt={
+                draft.id
+                  ? workflows.find((workflow) => workflow.id === draft.id)
+                      ?.nextRunAt
+                  : null
+              }
+              timezone={draft.timezone}
+              onScheduleChange={(schedule) => onUpdate({ schedule })}
+              onEnabledChange={(enabled) => onUpdate({ enabled })}
+              disabled={disabled}
+            />
+          }
+          settingsPanel={
+            <Inspector.Section>
+              <Inspector.SectionTitle>
+                {t("Workflow settings")}
+              </Inspector.SectionTitle>
+              <Inspector.SectionContent>
+                <Field data-invalid={validationTarget === "name"}>
+                  <FieldLabel htmlFor="workflow-name">{t("Name")}</FieldLabel>
+                  <Input
+                    id="workflow-name"
+                    aria-invalid={validationTarget === "name"}
+                    autoFocus={validationTarget === "name"}
+                    value={draft.name}
                     disabled={disabled}
-                    onClick={() => {
-                      const workflow = workflows.find(
-                        (item) => item.id === draft.id
-                      )
-                      if (workflow) onDelete(workflow)
-                    }}
-                  >
-                    <Trash2 data-icon="inline-start" />
-                    {t("Delete")}
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void toggleFullscreen()}
-                  aria-label={
-                    isFullscreen
-                      ? t("Exit full screen editor")
-                      : t("Open full screen editor")
-                  }
-                >
-                  {isFullscreen ? (
-                    <Minimize2 data-icon="inline-start" />
-                  ) : (
-                    <Maximize2 data-icon="inline-start" />
-                  )}
-                  <span className="hidden sm:inline">
-                    {isFullscreen ? t("Exit full screen") : t("Full screen")}
-                  </span>
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={onValidate}
-                  disabled={validating}
-                >
-                  <CheckCircle2 data-icon="inline-start" />
-                  {validating ? t("Validating…") : t("Validate")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={onSave}
-                  disabled={disabled || saving}
-                >
-                  <Check data-icon="inline-start" />
-                  {saving ? t("Saving…") : t("Save")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={onRun}
-                  disabled={disabled}
-                >
-                  <Play data-icon="inline-start" />
-                  {t("Run")}
-                </Button>
-              </div>
-            </div>
-            {validationMessage && (
-              <Alert
-                className="mt-3"
-                role={validationTone === "error" ? "alert" : "status"}
-                variant={validationTone === "error" ? "destructive" : undefined}
-              >
-                <ListChecks data-icon="inline-start" />
-                <AlertTitle>
-                  {validationTone === "error"
-                    ? t("Workflow needs attention")
-                    : validationTone === "success"
-                      ? t("Workflow ready")
-                      : t("Workflow setup")}
-                </AlertTitle>
-                <AlertDescription>{validationMessage}</AlertDescription>
-              </Alert>
-            )}
-          </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <Tabs
-              value={activeEditorTab}
-              onValueChange={(value) => {
-                setEditorTab(value)
-                if (validationTarget) onValidationDismiss()
-              }}
-            >
-              <TabsList
-                aria-label={t("Workflow editor sections")}
-                variant="line"
-              >
-                <TabsTrigger value="build">{t("Build")}</TabsTrigger>
-                <TabsTrigger value="settings">{t("Settings")}</TabsTrigger>
-                <TabsTrigger value="schedule">{t("Schedule")}</TabsTrigger>
-              </TabsList>
-              <TabsContent value="build" className="pt-4">
-                {" "}
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_23rem]">
-                  <div className="flex h-[620px] flex-col gap-2 overflow-hidden rounded-xl bg-muted/50">
-                    <div className="flex items-center justify-between border-b px-3 py-2">
-                      <div>
-                        <p className="text-xs font-medium">
-                          {t("Execution graph")}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {t(
-                            "Drag nodes; connect bottom handles to top handles."
-                          )}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={disabled}
-                          onClick={() => {
-                            const layout = layoutAgentGraph(
-                              draft.definition.nodes.map((node) => node.id),
-                              draft.definition.edges
-                            )
-                            Object.entries(layout).forEach(([id, position]) =>
-                              onPositionChange(id, position)
-                            )
-                          }}
-                        >
-                          {t("Auto layout")}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={onAddNode}
-                          disabled={
-                            disabled || draft.definition.nodes.length >= 16
-                          }
-                        >
-                          <Plus data-icon="inline-start" />
-                          {t("Agent node")}
-                        </Button>
-                      </div>
-                    </div>
-                    <WorkflowCanvas
-                      key={draft.id || "new"}
-                      nodes={graphNodes}
-                      edges={graphEdges}
-                      disabled={disabled}
-                      onConnect={onConnect}
-                      onSelectNode={onSelectNode}
-                      onPositionChange={onPositionChange}
-                    />
-                  </div>
-                  <div className="max-h-[min(46rem,calc(100vh-12rem))] overflow-y-auto pr-1">
-                    <InspectorSection
-                      title={t("Connections ({value0})", {
-                        value0: draft.definition.edges.length,
-                      })}
-                    >
-                      {draft.definition.edges.length ? (
-                        draft.definition.edges.map((edge) => (
-                          <div
-                            key={`${edge.from}-${edge.to}`}
-                            className="flex items-center justify-between gap-2 text-xs"
-                          >
-                            <span>
-                              {edge.from} → {edge.to}
-                            </span>
-                            <Button
-                              size="icon-sm"
-                              variant="ghost"
-                              disabled={disabled}
-                              aria-label={t(
-                                "Remove connection {value0} to {value1}",
-                                { value0: edge.from, value1: edge.to }
-                              )}
-                              onClick={() =>
-                                onUpdate({
-                                  definition: {
-                                    ...draft.definition,
-                                    edges: draft.definition.edges.filter(
-                                      (candidate) => candidate !== edge
-                                    ),
-                                  },
-                                })
-                              }
-                            >
-                              <X data-icon="inline-start" />
-                            </Button>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-xs text-muted-foreground">
-                          {t("Connect nodes using the handles on the canvas.")}
-                        </p>
+                    onChange={(event) => onUpdate({ name: event.target.value })}
+                    placeholder={t("Research then synthesize")}
+                  />
+                  {validationTarget === "name" && (
+                    <FieldDescription>
+                      {t(
+                        "Enter a name so this workflow can be saved and found later."
                       )}
-                    </InspectorSection>
-                    <NodeInspector
-                      node={selectedNode}
-                      selectedNodeId={selectedNodeId}
-                      agents={agents}
-                      connections={connections}
-                      workflowNodes={draft.definition.nodes}
-                      mcpServers={mcpServers}
-                      knowledgeSpaces={knowledgeSpaces}
-                      knowledgeSources={knowledgeSources}
-                      onUpdate={onUpdateNode}
-                      onRemove={onRemoveNode}
-                      disabled={disabled}
-                    />
-                  </div>
-                </div>
-              </TabsContent>
-              <TabsContent
-                value="settings"
-                className="flex flex-col gap-5 pt-4"
-              >
-                {" "}
-                <div className="grid gap-4 md:grid-cols-3">
-                  <Field data-invalid={validationTarget === "name"}>
-                    <FieldLabel htmlFor="workflow-name">{t("Name")}</FieldLabel>
-                    <Input
-                      id="workflow-name"
-                      aria-invalid={validationTarget === "name"}
-                      autoFocus={validationTarget === "name"}
-                      value={draft.name}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        onUpdate({ name: event.target.value })
-                      }
-                      placeholder={t("Research then synthesize")}
-                    />
-                    {validationTarget === "name" && (
-                      <FieldDescription>
-                        {t(
-                          "Enter a name so this workflow can be saved and found later."
-                        )}
-                      </FieldDescription>
-                    )}
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="workflow-visibility">
-                      {t("Visibility")}
-                    </FieldLabel>
-                    <Select
-                      value={draft.visibility}
-                      disabled={disabled}
-                      onValueChange={(value) =>
-                        onUpdate({
-                          visibility: (value ??
-                            "private") as WorkflowDraft["visibility"],
-                        })
-                      }
-                    >
-                      <SelectTrigger id="workflow-visibility">
-                        <SelectValue>
-                          {t(visibilityLabel(draft.visibility))}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem value="private">
-                            {t("Private")}
-                          </SelectItem>
-                          <SelectItem value="workspace">
-                            {t("Workspace shared")}
-                          </SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="workflow-timezone">
-                      {t("Timezone")}
-                    </FieldLabel>
-                    <Input
-                      id="workflow-timezone"
-                      value={draft.timezone}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        onUpdate({ timezone: event.target.value })
-                      }
-                      placeholder="Europe/Berlin"
-                    />
-                  </Field>
-                </div>
+                    </FieldDescription>
+                  )}
+                </Field>
                 <Field>
                   <FieldLabel htmlFor="workflow-description">
                     {t("Description")}
                   </FieldLabel>
-                  <Input
+                  <Textarea
                     id="workflow-description"
+                    minRows={2}
                     value={draft.description}
                     disabled={disabled}
                     onChange={(event) =>
@@ -3230,27 +2825,58 @@ function WorkflowsPanel({
                     placeholder={t("What this workflow produces")}
                   />
                 </Field>
-              </TabsContent>
-              <TabsContent value="schedule" className="pt-4">
-                {" "}
-                <ScheduleEditor
-                  schedule={draft.schedule}
-                  enabled={draft.enabled}
-                  nextRunAt={
-                    draft.id
-                      ? workflows.find((workflow) => workflow.id === draft.id)
-                          ?.nextRunAt
-                      : null
-                  }
-                  timezone={draft.timezone}
-                  onScheduleChange={(schedule) => onUpdate({ schedule })}
-                  onEnabledChange={(enabled) => onUpdate({ enabled })}
-                  disabled={disabled}
-                />
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
+                <Field>
+                  <FieldLabel htmlFor="workflow-visibility">
+                    {t("Visibility")}
+                  </FieldLabel>
+                  <Select
+                    value={draft.visibility}
+                    disabled={disabled}
+                    onValueChange={(value) =>
+                      onUpdate({
+                        visibility: (value ??
+                          "private") as WorkflowDraft["visibility"],
+                      })
+                    }
+                  >
+                    <SelectTrigger id="workflow-visibility">
+                      <SelectValue>
+                        {t(visibilityLabel(draft.visibility))}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="private">{t("Private")}</SelectItem>
+                        <SelectItem value="workspace">
+                          {t("Workspace shared")}
+                        </SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="workflow-timezone">
+                    {t("Timezone")}
+                  </FieldLabel>
+                  <Input
+                    id="workflow-timezone"
+                    value={draft.timezone}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      onUpdate({ timezone: event.target.value })
+                    }
+                    placeholder="Europe/Berlin"
+                  />
+                </Field>
+              </Inspector.SectionContent>
+            </Inspector.Section>
+          }
+          title={draft.name}
+          validating={validating}
+          validationMessage={validationMessage}
+          validationTarget={validationTarget}
+          validationTone={validationTone}
+        />
       ) : null}
     </div>
   )
@@ -3487,7 +3113,7 @@ function NodeInspector({
         </Field>
         <InspectorSection title={t("Safety & execution")}>
           {" "}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3">
             <Field>
               <FieldLabel htmlFor={`approval-${node.id}`}>
                 {t("Approval")}
@@ -3594,7 +3220,7 @@ function NodeInspector({
                       key={`${node.id}-binding-${index}`}
                       className="rounded-xl bg-muted/50 p-3"
                     >
-                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
+                      <div className="grid gap-3">
                         <Field>
                           <FieldLabel
                             htmlFor={`binding-name-${node.id}-${index}`}
@@ -3666,7 +3292,7 @@ function NodeInspector({
                         </Button>
                       </div>
                       {source === "node" && (
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <div className="mt-3 grid gap-3">
                           <Field>
                             <FieldLabel
                               htmlFor={`binding-node-${node.id}-${index}`}
@@ -4847,9 +4473,8 @@ function RunDetail({
     nodes.map((node) => node.nodeKey),
     workflow?.definition.edges ?? []
   )
-  const flowNodes: Node<FlowNodeData>[] = nodes.map((node) => ({
+  const flowNodes: GraphNode[] = nodes.map((node) => ({
     id: node.nodeKey,
-    type: "agent",
     position: runLayout[node.nodeKey],
     data: {
       label: node.nodeKey,
@@ -4860,11 +4485,10 @@ function RunDetail({
       status: node.status,
     },
   }))
-  const flowEdges: Edge[] =
+  const flowEdges =
     workflow?.definition.edges.map((edge) => ({
-      id: `${edge.from}-${edge.to}`,
-      source: edge.from,
-      target: edge.to,
+      from: edge.from,
+      to: edge.to,
     })) ?? []
 
   return (
@@ -5037,13 +4661,16 @@ function RunDetail({
         >
           {flowNodes.length > 0 && (
             <div className="mb-5 h-80 overflow-hidden rounded-xl bg-muted/50">
-              <WorkflowCanvas
-                nodes={flowNodes}
+              <WorkflowRunGraph
+                nodes={flowNodes.map((node) => ({
+                  id: node.id,
+                  position: node.position,
+                  agentName: node.data.agentName,
+                  instruction: node.data.instruction,
+                  selected: false,
+                  status: node.data.status,
+                }))}
                 edges={flowEdges}
-                disabled
-                onConnect={() => undefined}
-                onSelectNode={() => undefined}
-                onPositionChange={() => undefined}
               />
             </div>
           )}

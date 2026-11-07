@@ -4360,4 +4360,13 @@ export const de = {
     "Wähle einen fertigen Ablauf und passe ihn im Builder an.",
   nodes: "Knoten",
   "More actions for {value0}": "Weitere Aktionen für {value0}",
+  "Add agent node": "Agentenknoten hinzufügen",
+  Draft: "Entwurf",
+  "Edit workflow": "Workflow bearbeiten",
+  "Focus on the graph": "Auf den Graphen fokussieren",
+  "No agent selected": "Kein Agent ausgewählt",
+  "Show panels": "Panels anzeigen",
+  "Workflow inspector": "Workflow-Inspektor",
+  "Workflow tools": "Workflow-Werkzeuge",
+  Inspector: "Inspektor",
 } as const
