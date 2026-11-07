@@ -4424,4 +4424,5 @@ export const de = {
   "under 1 s": "unter 1 s",
   "{value0} min {value1} s": "{value0} Min. {value1} s",
   "Step {value0} of {value1}": "Schritt {value0} von {value1}",
+  Discard: "Verwerfen",
 } as const

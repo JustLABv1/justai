@@ -3,6 +3,7 @@
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { ImageIcon } from "lucide-react"
 import Image from "next/image"
 import { api } from "@/lib/api"
@@ -22,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/panelui/select"
 import { Switch } from "@/components/panelui/switch"
+import { Tooltip } from "@/components/panelui/tooltip"
 import { Progress } from "@/components/ui/progress"
 
 export type CaptionRun = {
@@ -71,6 +73,7 @@ export function SpeakerVideoCaptions({
   selectedImage,
   onSelectImage,
   onResolveSuggestion,
+  actionSlot,
 }: {
   sessionId: string
   available: boolean
@@ -84,6 +87,8 @@ export function SpeakerVideoCaptions({
     speaker: TranscriptionSpeaker,
     accept: boolean
   ) => Promise<void>
+  /** Where the quiet icon button goes when the full notice is not needed. */
+  actionSlot?: HTMLElement | null
 }) {
   const { t } = useTranslations()
 
@@ -287,6 +292,22 @@ export function SpeakerVideoCaptions({
   const failedImages =
     run?.observations.filter((item) => item.error).length ?? 0
 
+  // Only call attention to this when something is left to do or went wrong;
+  // a finished, clean run folds into a quiet icon button.
+  const unnamedSpeakers = speakers.some(
+    (speaker) => !speaker.displayName?.trim()
+  )
+  const needsAttention =
+    active ||
+    run?.status === "failed" ||
+    run?.status === "cancelled" ||
+    Boolean(run?.errorMessage) ||
+    failedImages > 0 ||
+    (run?.status === "completed" && !run.results.length) ||
+    (!run && unnamedSpeakers) ||
+    (Boolean(error) && !open)
+  const openLabel = run ? t("Review captions") : t("Read name captions")
+
   const statusLabel = active
     ? run?.status === "queued"
       ? t("Waiting to start")
@@ -299,59 +320,85 @@ export function SpeakerVideoCaptions({
 
   return (
     <>
-      <Alert tone="neutral" variant="plain">
-        <Alert.Icon>
-          <ImageIcon aria-hidden="true" />
-        </Alert.Icon>
-        <Alert.Title>{t("Names from video captions")}</Alert.Title>
-        <Alert.Description>
-          {t("Match printed name captions to speaker turns.")}
-        </Alert.Description>
-        {active ? (
-          <div role="status" className="mt-2 flex flex-col gap-2">
-            <p className="text-xs text-muted-foreground">
-              {run?.status === "queued"
-                ? t("Queued · waiting for an analysis worker")
-                : t(
-                    "Reading name captions · {value0} of {value1} images analyzed",
-                    { value0: analyzed, value1: total }
-                  )}
+      {needsAttention ? (
+        <Alert tone="neutral" variant="plain">
+          <Alert.Icon>
+            <ImageIcon aria-hidden="true" />
+          </Alert.Icon>
+          <Alert.Title>{t("Names from video captions")}</Alert.Title>
+          <Alert.Description>
+            {t("Match printed name captions to speaker turns.")}
+          </Alert.Description>
+          {active ? (
+            <div role="status" className="mt-2 flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                {run?.status === "queued"
+                  ? t("Queued · waiting for an analysis worker")
+                  : t(
+                      "Reading name captions · {value0} of {value1} images analyzed",
+                      { value0: analyzed, value1: total }
+                    )}
+              </p>
+              <Progress
+                aria-label={t("Name caption analysis")}
+                value={total ? (analyzed / total) * 100 : 0}
+              />
+            </div>
+          ) : null}
+          {!available && !active ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t(
+                "Analysis requires a completed video with an available source file."
+              )}
             </p>
-            <Progress
-              aria-label={t("Name caption analysis")}
-              value={total ? (analyzed / total) * 100 : 0}
-            />
-          </div>
-        ) : null}
-        {!available && !active ? (
-          <p className="mt-2 text-xs text-muted-foreground">
-            {t(
-              "Analysis requires a completed video with an available source file."
-            )}
-          </p>
-        ) : null}
-        {error && !open ? (
-          <p role="alert" className="mt-2 text-xs text-destructive">
-            {t(error)}
-          </p>
-        ) : null}
-        <Alert.Actions>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setLoadingEndpoints(true)
-              setOpen(true)
-            }}
-          >
-            {active
-              ? t("View analysis")
-              : run
-                ? t("Review captions")
-                : t("Read name captions")}
-          </Button>
-        </Alert.Actions>
-      </Alert>
+          ) : null}
+          {error && !open ? (
+            <p role="alert" className="mt-2 text-xs text-destructive">
+              {t(error)}
+            </p>
+          ) : null}
+          <Alert.Actions>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setLoadingEndpoints(true)
+                setOpen(true)
+              }}
+            >
+              {active
+                ? t("View analysis")
+                : run
+                  ? t("Review captions")
+                  : t("Read name captions")}
+            </Button>
+          </Alert.Actions>
+        </Alert>
+      ) : actionSlot ? (
+        createPortal(
+          <Tooltip.Provider>
+            <Tooltip>
+              <Tooltip.Trigger
+                render={
+                  <Button
+                    aria-label={openLabel}
+                    onClick={() => {
+                      setLoadingEndpoints(true)
+                      setOpen(true)
+                    }}
+                    size="icon-sm"
+                    variant="outline"
+                  />
+                }
+              >
+                <ImageIcon aria-hidden="true" />
+              </Tooltip.Trigger>
+              <Tooltip.Content>{openLabel}</Tooltip.Content>
+            </Tooltip>
+          </Tooltip.Provider>,
+          actionSlot
+        )
+      ) : null}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <Dialog.Content className="sm:max-w-xl">

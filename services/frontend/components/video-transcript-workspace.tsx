@@ -550,6 +550,8 @@ export function TranscriptWorkspace({
   const [identifyParticipants, setIdentifyParticipants] = useState("")
   const [identifyRunning, setIdentifyRunning] = useState(false)
   const [mediaPlaying, setMediaPlaying] = useState(false)
+  const [captionActionSlot, setCaptionActionSlot] =
+    useState<HTMLElement | null>(null)
   // The video is hidden by default on the Summary page, where people read, and
   // shown elsewhere. Each choice is remembered separately in this browser.
   const readVideoHidden = (key: string, fallback: boolean) => {
@@ -3528,6 +3530,10 @@ export function TranscriptWorkspace({
                             {t("Speakers")}
                           </CardTitle>
                           <div className="flex items-center gap-1">
+                            <span
+                              className="contents"
+                              ref={setCaptionActionSlot}
+                            />
                             <Button
                               disabled={!snapshot.session.grammarEndpointId}
                               onClick={() => setIdentifyOpen(true)}
@@ -3566,6 +3572,7 @@ export function TranscriptWorkspace({
                       <CardContent className="flex flex-col gap-2 px-4 pb-4">
                         {mediaKind === "video" ? (
                           <SpeakerVideoCaptions
+                            actionSlot={captionActionSlot}
                             key={snapshot.session.id}
                             sessionId={snapshot.session.id}
                             available={
@@ -3625,119 +3632,7 @@ export function TranscriptWorkspace({
                                         </Badge>
                                       ) : null}
                                     </div>
-                                    {summary.speaker.suggestedName ? (
-                                      <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2">
-                                        <div className="min-w-0 flex-1 text-[11px]">
-                                          <p className="truncate font-medium">
-                                            {t("Maybe")}{" "}
-                                            {summary.speaker.suggestedName}{" "}
-                                          </p>
-                                          {summary.speaker
-                                            .suggestionEvidence ? (
-                                            <p className="line-clamp-2 text-muted-foreground">
-                                              {
-                                                summary.speaker
-                                                  .suggestionEvidence
-                                              }
-                                            </p>
-                                          ) : null}
-                                          {mediaKind === "video" &&
-                                          captionRun ? (
-                                            <div className="mt-2 flex flex-wrap gap-1">
-                                              {captionRun.results
-                                                .filter(
-                                                  (result) =>
-                                                    result.speakerId ===
-                                                      summary.speaker.id &&
-                                                    result.name ===
-                                                      summary.speaker
-                                                        .suggestedName
-                                                )
-                                                .flatMap(
-                                                  (result) =>
-                                                    result.frameIndices
-                                                )
-                                                .filter(
-                                                  (index, position, indices) =>
-                                                    indices.indexOf(index) ===
-                                                    position
-                                                )
-                                                .map((index) => {
-                                                  const frame =
-                                                    captionRun.frames[index]
-                                                  if (!frame) return null
-                                                  return (
-                                                    <Button
-                                                      key={index}
-                                                      size="sm"
-                                                      variant="secondary"
-                                                      aria-label={t(
-                                                        "Video caption at {value0}: {value1}",
-                                                        {
-                                                          value0:
-                                                            formatVideoDuration(
-                                                              frame.offsetMs
-                                                            ),
-                                                          value1:
-                                                            summary.speaker
-                                                              .suggestedName ??
-                                                            "",
-                                                        }
-                                                      )}
-                                                      onClick={() =>
-                                                        setSelectedCaptionImage(
-                                                          {
-                                                            runId:
-                                                              captionRun.id,
-                                                            index,
-                                                          }
-                                                        )
-                                                      }
-                                                    >
-                                                      <ImageIcon data-icon="inline-start" />
-                                                      {formatVideoDuration(
-                                                        frame.offsetMs
-                                                      )}
-                                                    </Button>
-                                                  )
-                                                })}
-                                            </div>
-                                          ) : null}
-                                        </div>
-                                        <Button
-                                          aria-label={t(
-                                            "Accept name {value0}",
-                                            {
-                                              value0:
-                                                summary.speaker.suggestedName,
-                                            }
-                                          )}
-                                          onClick={() =>
-                                            void resolveSpeakerSuggestion(
-                                              summary.speaker,
-                                              true
-                                            )
-                                          }
-                                          size="icon-sm"
-                                          variant="default"
-                                        >
-                                          <Check />
-                                        </Button>
-                                        <Button
-                                          aria-label={t("Dismiss suggestion")}
-                                          onClick={() =>
-                                            void resolveSpeakerSuggestion(
-                                              summary.speaker,
-                                              false
-                                            )
-                                          }
-                                          size="icon-sm"
-                                          variant="ghost"
-                                        >
-                                          <Trash2 />
-                                        </Button>
-                                      </div>
-                                    ) : null}
+
                                     <p className="mt-1 text-[11px] text-muted-foreground">
                                       {t("{value0} speaking time", {
                                         value0: formatVideoDuration(
@@ -3783,6 +3678,102 @@ export function TranscriptWorkspace({
                                     </Button>
                                   </div>
                                 </div>
+                                {summary.speaker.suggestedName ? (
+                                  <div className="mt-2 flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                                    <div className="min-w-0 text-xs">
+                                      <p className="text-sm font-medium">
+                                        {t("Maybe")}{" "}
+                                        {summary.speaker.suggestedName}{" "}
+                                      </p>
+                                      {summary.speaker.suggestionEvidence ? (
+                                        <p className="mt-1 line-clamp-3 text-muted-foreground">
+                                          {summary.speaker.suggestionEvidence}
+                                        </p>
+                                      ) : null}
+                                      {mediaKind === "video" && captionRun ? (
+                                        <div className="mt-2 flex flex-wrap gap-1">
+                                          {captionRun.results
+                                            .filter(
+                                              (result) =>
+                                                result.speakerId ===
+                                                  summary.speaker.id &&
+                                                result.name ===
+                                                  summary.speaker.suggestedName
+                                            )
+                                            .flatMap(
+                                              (result) => result.frameIndices
+                                            )
+                                            .filter(
+                                              (index, position, indices) =>
+                                                indices.indexOf(index) ===
+                                                position
+                                            )
+                                            .map((index) => {
+                                              const frame =
+                                                captionRun.frames[index]
+                                              if (!frame) return null
+                                              return (
+                                                <Button
+                                                  key={index}
+                                                  size="sm"
+                                                  variant="secondary"
+                                                  aria-label={t(
+                                                    "Video caption at {value0}: {value1}",
+                                                    {
+                                                      value0:
+                                                        formatVideoDuration(
+                                                          frame.offsetMs
+                                                        ),
+                                                      value1:
+                                                        summary.speaker
+                                                          .suggestedName ?? "",
+                                                    }
+                                                  )}
+                                                  onClick={() =>
+                                                    setSelectedCaptionImage({
+                                                      runId: captionRun.id,
+                                                      index,
+                                                    })
+                                                  }
+                                                >
+                                                  <ImageIcon data-icon="inline-start" />
+                                                  {formatVideoDuration(
+                                                    frame.offsetMs
+                                                  )}
+                                                </Button>
+                                              )
+                                            })}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Button
+                                        onClick={() =>
+                                          void resolveSpeakerSuggestion(
+                                            summary.speaker,
+                                            true
+                                          )
+                                        }
+                                        size="sm"
+                                      >
+                                        <Check data-icon="inline-start" />
+                                        {t("Accept")}
+                                      </Button>
+                                      <Button
+                                        onClick={() =>
+                                          void resolveSpeakerSuggestion(
+                                            summary.speaker,
+                                            false
+                                          )
+                                        }
+                                        size="sm"
+                                        variant="ghost"
+                                      >
+                                        {t("Discard")}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : null}
                               </div>
                             )
                           })}

@@ -215,12 +215,17 @@ export function VideoProcessingOutput({
             </Frame.Content>
           </Frame.Row>
         )}
+        {(step === "transcription" || step === "grammar") &&
+        blocks.length > 0 ? (
+          <Frame.Row>
+            <Frame.Content>
+              <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                {t("Preview · text and speaker assignments may still change.")}
+              </Frame.Description>
+            </Frame.Content>
+          </Frame.Row>
+        ) : null}
       </Frame.Panel>
-      {(step === "transcription" || step === "grammar") && blocks.length > 0 ? (
-        <p className="px-1 pt-2 text-xs text-muted-foreground">
-          {t("Preview · text and speaker assignments may still change.")}
-        </p>
-      ) : null}
     </Frame>
   )
 }
