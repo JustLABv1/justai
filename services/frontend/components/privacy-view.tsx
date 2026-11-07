@@ -1,11 +1,12 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useState } from "react"
 import { Download } from "lucide-react"
 
 import { api } from "@/lib/api"
-import { notifyError, notifySuccess } from "@/lib/feedback"
+import { notifyError } from "@/lib/feedback"
 import type { PrivacySettings } from "@/lib/types"
 import { Alert } from "@/components/panelui/alert"
 import { Frame } from "@/components/panelui/frame"
@@ -90,7 +91,7 @@ export function PrivacyView() {
       setNotice(
         "Privacy settings saved. The retention worker will apply them automatically."
       )
-      notifySuccess("Privacy settings saved")
+
       setCleanupOpen(false)
     } catch (caught) {
       setError(
@@ -119,7 +120,6 @@ export function PrivacyView() {
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 0)
       setNotice("Your data export is ready.")
-      notifySuccess("Data export ready")
     } catch (caught) {
       setError(
         notifyError("Data export failed", caught, "The data export failed.")
@@ -149,7 +149,7 @@ export function PrivacyView() {
           { conversations, knowledge, transcripts }
         )
       )
-      notifySuccess("Retention cleanup complete")
+
       setCleanupOpen(false)
     } catch (caught) {
       setError(
@@ -229,11 +229,7 @@ export function PrivacyView() {
           )}
         </Alert>
       )}
-      {notice && (
-        <Alert tone="success" variant="plain">
-          <Alert.Description>{t(notice)}</Alert.Description>
-        </Alert>
-      )}
+      {notice && <ToastFeedback message={notice} type={"success"} />}
       <form onSubmit={(event) => void save(event)}>
         <Frame aria-busy={loading || saving}>
           <Frame.Header>

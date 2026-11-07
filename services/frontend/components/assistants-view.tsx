@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import {
   useTranslations,
@@ -11,7 +12,7 @@ import { Bot, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
 import { api } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { Endpoint, SavedAssistant } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -270,12 +271,7 @@ export function AssistantsView({
         </PageActions>
       </PageHeader>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertTitle>{t("Assistant action failed")}</AlertTitle>
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
-      )}
+      {error && <ToastFeedback message={error} type={"destructive"} />}
 
       {assistants.length === 0 ? (
         <Card className="min-h-80">
@@ -537,15 +533,7 @@ export function AssistantsView({
                 </Select>
               </Field>
             </FieldGroup>
-            {error && (
-              <p
-                aria-live="polite"
-                className="text-xs text-destructive"
-                role="alert"
-              >
-                {t(error)}
-              </p>
-            )}
+            {error && <ToastFeedback message={error} type={"destructive"} />}
             <DialogFooter>
               <Button
                 variant="outline"

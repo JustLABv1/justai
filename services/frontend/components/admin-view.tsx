@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
@@ -6,10 +7,10 @@ import { useEffect, useMemo, useState } from "react"
 import { BarChart3, Check, ShieldCheck } from "lucide-react"
 
 import { api } from "@/lib/api"
-import { notifyError, notifySuccess } from "@/lib/feedback"
+import { notifyError } from "@/lib/feedback"
 import type { AdminAnalyticsResponse, Endpoint, MCPServer } from "@/lib/types"
 import { AdminUsageCharts } from "@/components/admin-usage-charts"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -152,7 +153,6 @@ export function AdminView({
         defaults
       )
       setNotice("Workspace defaults saved.")
-      notifySuccess("Workspace defaults saved")
     } catch (caught) {
       setNotice(
         notifyError(
@@ -176,7 +176,6 @@ export function AdminView({
       })
       setGlobalDefaults(next)
       setNotice("Platform defaults saved.")
-      notifySuccess("Platform defaults saved")
     } catch (caught) {
       setNotice(
         notifyError(
@@ -217,12 +216,7 @@ export function AdminView({
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-5">
-      {notice && (
-        <Alert>
-          <AlertTitle>{t("Operations update")}</AlertTitle>
-          <AlertDescription>{t(notice)}</AlertDescription>
-        </Alert>
-      )}
+      {notice && <ToastFeedback message={notice} type={"info"} />}
 
       <Card size="sm" className="gap-0">
         <CardHeader className="border-b pb-4">

@@ -10,7 +10,7 @@ import {
   SelectItem,
 } from "@/components/panelui/select"
 import { useTranslations } from "@/components/locale-provider"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Bot,
   Camera,
@@ -44,7 +44,7 @@ import {
   buildHeatmapCalendar,
   type HeatmapCell,
 } from "@/components/panelui/heatmap-chart"
-import { Alert } from "@/components/panelui/alert"
+import { toast as profileToasts } from "@/components/ui/toast"
 import { Avatar } from "@/components/panelui/avatar"
 import { Stat } from "@/components/panelui/stat"
 import { Badge } from "@/components/panelui/badge"
@@ -210,8 +210,24 @@ export function ProfileView({
   const [identities, setIdentities] = useState<AccountIdentity[]>([])
   const [accountLoading, setAccountLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
-  const [notice, setNotice] = useState("")
+  const showErrorToast = useCallback(
+    (message: string) => {
+      if (message)
+        profileToasts.add({
+          title: t(message),
+          type: "destructive",
+          priority: "high",
+          timeout: 10000,
+        })
+    },
+    [t]
+  )
+  const showSuccessToast = useCallback(
+    (message: string) => {
+      if (message) profileToasts.add({ title: t(message), type: "success" })
+    },
+    [t]
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -229,14 +245,14 @@ export function ProfileView({
       .catch((caught) => {
         if (caught instanceof APIError && caught.code === "request_aborted")
           return
-        setError(
+        showErrorToast(
           caught instanceof Error
             ? caught.message
             : "Profile activity could not be loaded."
         )
       })
     return () => controller.abort()
-  }, [user.avatarVersion, user.id])
+  }, [user.avatarVersion, user.id, showErrorToast])
 
   useEffect(() => {
     let cancelled = false
@@ -251,7 +267,7 @@ export function ProfileView({
       })
       .catch((caught) => {
         if (!cancelled) {
-          setError(
+          showErrorToast(
             caught instanceof Error
               ? caught.message
               : "Account security details could not be loaded."
@@ -264,7 +280,7 @@ export function ProfileView({
     return () => {
       cancelled = true
     }
-  }, [user.id])
+  }, [user.id, showErrorToast])
 
   useEffect(() => {
     return () => {
@@ -277,14 +293,12 @@ export function ProfileView({
 
   function prepareAvatar(file: File | undefined) {
     if (!file) return
-    setError("")
-    setNotice("")
     if (file.size > 2 * 1024 * 1024) {
-      setError("Profile pictures are limited to 2 MB.")
+      showErrorToast("Profile pictures are limited to 2 MB.")
       return
     }
     if (!file.type.startsWith("image/")) {
-      setError("Choose a PNG, JPEG, GIF, or WebP image.")
+      showErrorToast("Choose a PNG, JPEG, GIF, or WebP image.")
       return
     }
     if (pendingAvatar) URL.revokeObjectURL(pendingAvatar.previewURL)
@@ -298,7 +312,6 @@ export function ProfileView({
   }
 
   async function uploadAvatar(file: File) {
-    setError("")
     setBusy(true)
     try {
       const body = new FormData()
@@ -324,10 +337,10 @@ export function ProfileView({
         avatarUrl: result.avatarUrl,
         avatarVersion: nextVersion,
       })
-      setNotice("Profile picture updated.")
+      showSuccessToast("Profile picture updated.")
       cancelAvatarPreview()
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "The profile picture could not be uploaded."
@@ -340,7 +353,6 @@ export function ProfileView({
 
   async function removeAvatar() {
     setBusy(true)
-    setError("")
     try {
       await api.delete("/api/v1/profile/avatar")
       setProfile((current) =>
@@ -350,9 +362,9 @@ export function ProfileView({
       setAvatarVersion("")
       onUserChange?.({ ...user, avatarUrl: "", avatarVersion: "" })
       setRemoveAvatarOpen(false)
-      setNotice("Profile picture removed.")
+      showSuccessToast("Profile picture removed.")
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "The profile picture could not be removed."
@@ -366,13 +378,11 @@ export function ProfileView({
     event.preventDefault()
     const nextName = displayName.trim()
     if (!nextName) {
-      setError("Display name is required.")
+      showErrorToast("Display name is required.")
       return
     }
     if (nextName === user.displayName) return
     setSavingName(true)
-    setError("")
-    setNotice("")
     try {
       const result = await api.patch<{ user: User }>("/api/v1/profile", {
         displayName: nextName,
@@ -380,9 +390,9 @@ export function ProfileView({
       setDisplayName(result.user.displayName)
       onUserChange?.({ ...user, ...result.user })
       setEditingName(false)
-      setNotice("Display name updated.")
+      showSuccessToast("Display name updated.")
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "Display name could not be updated."
@@ -395,13 +405,12 @@ export function ProfileView({
   async function revokeSession(session: AccountSession) {
     if (session.current) return
     setBusy(true)
-    setError("")
     try {
       await api.delete(`/api/v1/auth/sessions/${session.id}`)
       setSessions((current) => current.filter((item) => item.id !== session.id))
-      setNotice("Device signed out.")
+      showSuccessToast("Device signed out.")
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "Device could not be signed out."
@@ -413,13 +422,12 @@ export function ProfileView({
 
   async function revokeOtherSessions() {
     setBusy(true)
-    setError("")
     try {
       await api.post("/api/v1/auth/sessions/revoke-others")
       setSessions((current) => current.filter((session) => session.current))
-      setNotice("Other devices have been signed out.")
+      showSuccessToast("Other devices have been signed out.")
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "Other devices could not be signed out."
@@ -487,17 +495,6 @@ export function ProfileView({
           </PageDescription>
         </PageHeading>
       </PageHeader>
-      {error && (
-        <Alert tone="destructive" variant="plain">
-          <Alert.Description>{t(error)}</Alert.Description>
-        </Alert>
-      )}
-      {notice && (
-        <Alert aria-live="polite" tone="success" variant="plain">
-          <Check />
-          <Alert.Description>{t(notice)}</Alert.Description>
-        </Alert>
-      )}
       <Card>
         <CardContent className="flex flex-col gap-5 sm:flex-row sm:items-center">
           <div className="relative self-start">

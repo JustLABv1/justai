@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -546,11 +547,7 @@ export function EndpointsView({
           )}
         </div>
       )}
-      {notice && (
-        <div className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-          {t(notice)}
-        </div>
-      )}
+      {notice && <ToastFeedback message={notice} type={"destructive"} />}
 
       <EndpointTable
         endpoints={endpoints}

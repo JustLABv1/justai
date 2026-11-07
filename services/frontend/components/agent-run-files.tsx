@@ -1,11 +1,12 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { useState } from "react"
 import { api } from "@/lib/api"
 import { downloadFile } from "@/lib/download-file"
 import type { AgentArtifact, AgentRun, KnowledgeSpace } from "@/lib/types"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -96,15 +97,9 @@ export function RunFiles({ run }: { run: AgentRun }) {
           {t("Download files or keep a copy in your knowledge storage.")}
         </p>
       </div>
-      {notice && (
-        <p role="status" className="text-sm">
-          {t(notice)}
-        </p>
-      )}
+      {notice && <ToastFeedback message={notice} type={"success"} />}
       {error && !selected && (
-        <Alert variant="destructive">
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
+        <ToastFeedback message={error} type={"destructive"} />
       )}
       {run.artifacts.map((file) => (
         <div
@@ -170,11 +165,7 @@ export function RunFiles({ run }: { run: AgentRun }) {
               {t("as an original file and index its readable content.")}
             </DialogDescription>
           </DialogHeader>
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{t(error)}</AlertDescription>
-            </Alert>
-          )}
+          {error && <ToastFeedback message={error} type={"destructive"} />}
           <Field>
             <FieldLabel>{t("Destination folder")}</FieldLabel>
             <Select

@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import {
@@ -629,9 +630,7 @@ export function EndpointCreationWizard({
                   </PuAlert>
                 ) : null}
                 {notice && (
-                  <PuAlert tone="destructive" variant="plain">
-                    <PuAlert.Description>{notice}</PuAlert.Description>
-                  </PuAlert>
+                  <ToastFeedback message={notice} type={"destructive"} />
                 )}
               </Sheet.Body>
             </fieldset>
@@ -1761,15 +1760,7 @@ function ReviewStep({
 
   return (
     <div className="flex flex-col gap-5">
-      {notice && (
-        <PuAlert tone="destructive" variant="plain">
-          <PuAlert.Icon>
-            <CircleAlert />
-          </PuAlert.Icon>
-          <PuAlert.Title>{t("Endpoint could not be saved")}</PuAlert.Title>
-          <PuAlert.Description>{t(notice)}</PuAlert.Description>
-        </PuAlert>
-      )}
+      {notice && <ToastFeedback message={notice} type={"destructive"} />}
 
       {validationMessage && (
         <PuAlert tone="destructive" variant="plain">

@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useState } from "react"
@@ -6,7 +7,7 @@ import { Brain, Plus, Power, Trash2 } from "lucide-react"
 
 import { api } from "@/lib/api"
 import type { Memory } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -192,12 +193,7 @@ export function MemoryView() {
         )}
       </div>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertTitle>{t("Memory action failed")}</AlertTitle>
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
-      )}
+      {error && <ToastFeedback message={error} type={"destructive"} />}
 
       <Card>
         <CardHeader>

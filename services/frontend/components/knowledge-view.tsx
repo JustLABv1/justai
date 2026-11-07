@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import {
@@ -27,7 +28,7 @@ import {
 
 import { APIError, api } from "@/lib/api"
 import type { KnowledgeSource } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -424,13 +425,7 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
           }}
         />
 
-        {notice && (
-          <Alert>
-            <Search aria-hidden="true" />
-            <AlertTitle>{t("Knowledge pipeline")}</AlertTitle>
-            <AlertDescription>{t(notice)}</AlertDescription>
-          </Alert>
-        )}
+        {notice && <ToastFeedback message={notice} type={"info"} />}
 
         <div className="grid gap-3 md:grid-cols-3">
           <Metric

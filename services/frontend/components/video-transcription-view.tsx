@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { Frame } from "@/components/panelui/frame"
@@ -1249,12 +1250,7 @@ export function VideoTranscriptionView({
 
   return (
     <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
-      {error && (
-        <Alert className="shrink-0" variant="destructive">
-          <AlertTitle>{t("Video transcription needs attention")}</AlertTitle>
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
-      )}
+      {error && <ToastFeedback message={error} type={"destructive"} />}
 
       {!sessionId && !snapshot && !createOpen ? (
         <VideoTranscriptionLibrary

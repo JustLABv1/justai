@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -195,9 +196,7 @@ export function TemplatesView() {
         </PageActions>
       </PageHeader>
       {error && !editor && !remove && (
-        <Alert tone="destructive" variant="plain">
-          <Alert.Description>{t(error)}</Alert.Description>
-        </Alert>
+        <ToastFeedback message={error} type={"destructive"} />
       )}
       {templates.length > SEARCH_FROM && (
         <Input.Group className="w-full sm:w-80">
@@ -352,11 +351,7 @@ export function TemplatesView() {
             )}
           />
           <Dialog.Body>
-            {error && (
-              <Alert tone="destructive" variant="plain">
-                <Alert.Description>{t(error)}</Alert.Description>
-              </Alert>
-            )}
+            {error && <ToastFeedback message={error} type={"destructive"} />}
             <Field>
               <FieldLabel>{t("Name")}</FieldLabel>
               <Input

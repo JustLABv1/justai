@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { UsageAdminCard } from "@/components/usage-admin-card"
 import { Spinner } from "@/components/panelui/spinner"
@@ -16,7 +17,7 @@ import type {
   OrganizationMember,
   User,
 } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
 import { MemberDirectoryRow } from "@/components/member-directory-row"
 import { Frame } from "@/components/panelui/frame"
 import { Button } from "@/components/panelui/button"
@@ -491,10 +492,7 @@ export function SettingsView({
   return (
     <div className="w-full space-y-5">
       {actionError && (
-        <Alert aria-live="polite" role="alert" variant="destructive">
-          <AlertTitle>{t("Could not save changes")}</AlertTitle>
-          <AlertDescription>{t(actionError)}</AlertDescription>
-        </Alert>
+        <ToastFeedback message={actionError} type={"destructive"} />
       )}
 
       {activeOrganization && section === "workspace" && (
@@ -872,9 +870,7 @@ export function SettingsView({
             </DialogHeader>
             <DialogBody>
               {actionError && (
-                <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertDescription>{t(actionError)}</AlertDescription>
-                </Alert>
+                <ToastFeedback message={actionError} type={"destructive"} />
               )}
               <FieldGroup>
                 <Field>
@@ -937,9 +933,7 @@ export function SettingsView({
             </DialogHeader>
             <DialogBody>
               {actionError && (
-                <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertDescription>{t(actionError)}</AlertDescription>
-                </Alert>
+                <ToastFeedback message={actionError} type={"destructive"} />
               )}
               <Field>
                 <FieldLabel htmlFor="rename-workspace-name">
@@ -990,9 +984,7 @@ export function SettingsView({
             </DialogHeader>
             <DialogBody>
               {actionError && (
-                <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertDescription>{t(actionError)}</AlertDescription>
-                </Alert>
+                <ToastFeedback message={actionError} type={"destructive"} />
               )}
               <FieldGroup>
                 <Field>

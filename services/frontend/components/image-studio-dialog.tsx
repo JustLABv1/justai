@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
@@ -182,12 +183,7 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
             </AlertDescription>
           </Alert>
         )}
-        {error && (
-          <Alert aria-live="polite" role="alert" variant="destructive">
-            <AlertTitle>{t("Image action failed")}</AlertTitle>
-            <AlertDescription>{t(error)}</AlertDescription>
-          </Alert>
-        )}
+        {error && <ToastFeedback message={error} type={"destructive"} />}
 
         <form onSubmit={(event) => void submit(event)}>
           <Tabs onValueChange={changeMode} value={mode}>

@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
@@ -353,9 +354,7 @@ export function SpeakerVideoCaptions({
             </p>
           ) : null}
           {error && !open ? (
-            <p role="alert" className="mt-2 text-xs text-destructive">
-              {t(error)}
-            </p>
+            <ToastFeedback message={error} type="destructive" />
           ) : null}
           <Alert.Actions>
             <Button

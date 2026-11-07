@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -17,7 +18,7 @@ import {
 import { api } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { Note } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -341,12 +342,7 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
           </Button>
         </div>
 
-        {error && (
-          <Alert aria-live="polite" role="alert" variant="destructive">
-            <AlertTitle>{t("Notes action failed")}</AlertTitle>
-            <AlertDescription>{t(error)}</AlertDescription>
-          </Alert>
-        )}
+        {error && <ToastFeedback message={error} type={"destructive"} />}
 
         <div className="grid min-h-[34rem] gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
           <Card className="min-h-0 overflow-hidden">

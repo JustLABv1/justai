@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
@@ -25,7 +26,7 @@ import {
 import { api } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { AdminOIDCProvider } from "@/lib/types"
-import { Alert } from "@/components/panelui/alert"
+
 import { Badge } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
 import { Menu } from "@/components/panelui/menu"
@@ -237,10 +238,7 @@ export function PlatformAuthenticationView({
   return (
     <div className="flex flex-col gap-5">
       {error && !dialogOpen && (
-        <Alert tone="destructive" variant="plain" role="alert">
-          <Alert.Title>{t("Authentication request failed")}</Alert.Title>
-          <Alert.Description>{t(error)}</Alert.Description>
-        </Alert>
+        <ToastFeedback message={error} type={"destructive"} />
       )}
       <Frame>
         <Frame.Header>
@@ -483,12 +481,7 @@ export function PlatformAuthenticationView({
             onSubmit={(event) => void save(event)}
           >
             <Sheet.Body className="flex flex-col gap-5">
-              {error && (
-                <Alert tone="destructive" variant="plain" role="alert">
-                  <Alert.Title>{t("Could not save provider")}</Alert.Title>
-                  <Alert.Description>{t(error)}</Alert.Description>
-                </Alert>
-              )}
+              {error && <ToastFeedback message={error} type={"destructive"} />}
               <Frame variant="band">
                 <Frame.Header>
                   <Frame.Title>{t("Provider details")}</Frame.Title>

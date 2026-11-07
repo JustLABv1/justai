@@ -1,14 +1,9 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { setSeasonsDisabled, useSeasonsDisabled } from "@/lib/season-preference"
-import {
-  Fragment,
-  useMemo,
-  useState,
-  type ComponentType,
-  type SVGProps,
-} from "react"
+import { useMemo, useState, type ComponentType, type SVGProps } from "react"
 import {
   Archive,
   ChevronDown,
@@ -66,7 +61,7 @@ import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
 import { LanguageMenu } from "@/components/language-switcher"
 import { ThemeMenu } from "@/components/theme-switcher"
-import { Alert } from "@/components/panelui/alert"
+
 import { Avatar } from "@/components/panelui/avatar"
 import { Badge } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
@@ -439,11 +434,7 @@ export function FocusWorkspaceSidebar({
       role="region"
     >
       {actionError && (
-        <Alert className="shrink-0" tone="destructive" variant="plain">
-          <Alert.Description className="text-xs">
-            {t(actionError)}
-          </Alert.Description>
-        </Alert>
+        <ToastFeedback message={actionError} type={"destructive"} />
       )}
 
       {historyMode === "chat" ? (

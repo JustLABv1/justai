@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
@@ -7,7 +8,7 @@ import { ExternalLink, Globe2, Plus, Search } from "lucide-react"
 
 import { api } from "@/lib/api"
 import type { WebSearchResult } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -139,12 +140,7 @@ export function WebSearchDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {error && (
-          <Alert aria-live="polite" role="alert" variant="destructive">
-            <AlertTitle>{t("Web action failed")}</AlertTitle>
-            <AlertDescription>{t(error)}</AlertDescription>
-          </Alert>
-        )}
+        {error && <ToastFeedback message={error} type={"destructive"} />}
 
         <form
           className="flex items-center gap-2"

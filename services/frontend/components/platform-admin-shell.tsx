@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import {
@@ -442,12 +443,7 @@ export function PlatformAdminShell({
         </Tabs.List>
 
         <Tabs.Content key={activeTab} value={activeTab} className="min-w-0">
-          {error && (
-            <PanelAlert className="mb-4" tone="destructive" variant="plain">
-              <PanelAlert.Title>{t("Admin request failed")}</PanelAlert.Title>
-              <PanelAlert.Description>{t(error)}</PanelAlert.Description>
-            </PanelAlert>
-          )}
+          {error && <ToastFeedback message={error} type={"destructive"} />}
 
           {activeTab === "overview" && (
             <PlatformAdminDashboard

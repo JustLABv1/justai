@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import {
@@ -7,14 +8,7 @@ import {
 } from "@/components/locale-provider"
 
 import { downloadFile } from "@/lib/download-file"
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   Brain,
@@ -60,8 +54,7 @@ import type {
   TranscriptionSession,
   WorkspaceProject,
 } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Alert as PuAlert } from "@/components/panelui/alert"
+
 import { Badge } from "@/components/panelui/badge"
 import { Checkbox } from "@/components/panelui/checkbox"
 import { Chip } from "@/components/panelui/chip"
@@ -1534,17 +1527,10 @@ export function KnowledgeWorkspace({
       </PageHeader>
 
       {(error || notice) && (
-        <PuAlert
-          aria-live="polite"
-          role={error ? "alert" : "status"}
-          tone={error ? "destructive" : "success"}
-          variant="plain"
-        >
-          <PuAlert.Title>
-            {error ? t("Knowledge action failed") : t("Knowledge updated")}
-          </PuAlert.Title>
-          <PuAlert.Description>{error || notice}</PuAlert.Description>
-        </PuAlert>
+        <ToastFeedback
+          message={error || notice}
+          type={error ? "destructive" : "success"}
+        />
       )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -2687,12 +2673,7 @@ export function KnowledgeWorkspace({
               </DialogDescription>
             </DialogHeader>
             <DialogBody>
-              {error && (
-                <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertTitle>{t("Could not create folder")}</AlertTitle>
-                  <AlertDescription>{t(error)}</AlertDescription>
-                </Alert>
-              )}
+              {error && <ToastFeedback message={error} type={"destructive"} />}
               <div className="flex flex-col gap-3 py-4">
                 <Label htmlFor="space-name">{t("Name")}</Label>
                 <Input
@@ -2781,12 +2762,7 @@ export function KnowledgeWorkspace({
               </DialogDescription>
             </DialogHeader>
             <DialogBody>
-              {error && (
-                <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertTitle>{t("Could not save note")}</AlertTitle>
-                  <AlertDescription>{t(error)}</AlertDescription>
-                </Alert>
-              )}
+              {error && <ToastFeedback message={error} type={"destructive"} />}
               <div className="flex flex-col gap-3 py-4">
                 <Label htmlFor="knowledge-note-title">{t("Title")}</Label>
                 <Input
@@ -2834,12 +2810,7 @@ export function KnowledgeWorkspace({
               </DialogDescription>
             </DialogHeader>
             <DialogBody>
-              {error && (
-                <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertTitle>{t("Could not save memory")}</AlertTitle>
-                  <AlertDescription>{t(error)}</AlertDescription>
-                </Alert>
-              )}
+              {error && <ToastFeedback message={error} type={"destructive"} />}
               <div className="py-4">
                 <Label htmlFor="knowledge-memory-content">{t("Memory")}</Label>
                 <Textarea
@@ -2879,12 +2850,7 @@ export function KnowledgeWorkspace({
               </DialogDescription>
             </DialogHeader>
             <DialogBody>
-              {error && (
-                <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertTitle>{t("Could not import transcript")}</AlertTitle>
-                  <AlertDescription>{t(error)}</AlertDescription>
-                </Alert>
-              )}
+              {error && <ToastFeedback message={error} type={"destructive"} />}
               <div className="flex flex-col gap-3 py-4">
                 <Label htmlFor="knowledge-transcript-session">
                   {t("Transcript")}
@@ -2979,12 +2945,7 @@ export function KnowledgeWorkspace({
               </DialogDescription>
             </DialogHeader>
             <DialogBody>
-              {error && (
-                <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertTitle>{t("Could not index URL")}</AlertTitle>
-                  <AlertDescription>{t(error)}</AlertDescription>
-                </Alert>
-              )}
+              {error && <ToastFeedback message={error} type={"destructive"} />}
               <div className="flex flex-col gap-3 py-4">
                 <Label htmlFor="knowledge-url">{t("URL")}</Label>
                 <Input

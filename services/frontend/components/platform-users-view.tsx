@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from "react"
 import {
@@ -13,7 +14,7 @@ import {
 import { useTranslations } from "@/components/locale-provider"
 import { MemberDirectoryRow } from "@/components/member-directory-row"
 import { Frame } from "@/components/panelui/frame"
-import { Alert } from "@/components/panelui/alert"
+
 import { Badge } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
 import { Input } from "@/components/panelui/input"
@@ -226,9 +227,7 @@ export function PlatformUsersView({
   return (
     <>
       {actionError && !detail && (
-        <Alert tone="destructive" variant="plain">
-          <Alert.Description>{t(actionError)}</Alert.Description>
-        </Alert>
+        <ToastFeedback message={actionError} type={"destructive"} />
       )}
       <Frame>
         <Frame.Header>
@@ -467,9 +466,7 @@ export function PlatformUsersView({
           </Sheet.Header>
           <Sheet.Body className="flex flex-col gap-5">
             {actionError && (
-              <Alert tone="destructive" variant="plain">
-                <Alert.Description>{t(actionError)}</Alert.Description>
-              </Alert>
+              <ToastFeedback message={actionError} type={"destructive"} />
             )}
             {loadingDetail ? (
               <p className="text-sm text-muted-foreground">

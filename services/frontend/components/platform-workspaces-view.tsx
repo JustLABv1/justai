@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from "react"
 import {
@@ -15,7 +16,7 @@ import { MemberDirectoryRow } from "@/components/member-directory-row"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 import { Frame } from "@/components/panelui/frame"
 import { Avatar } from "@/components/panelui/avatar"
-import { Alert } from "@/components/panelui/alert"
+
 import { Badge } from "@/components/panelui/badge"
 import { Button } from "@/components/panelui/button"
 import { Input } from "@/components/panelui/input"
@@ -132,9 +133,7 @@ export function PlatformWorkspacesView({
   return (
     <>
       {actionError && (
-        <Alert tone="destructive" variant="plain">
-          <Alert.Description>{t(actionError)}</Alert.Description>
-        </Alert>
+        <ToastFeedback message={actionError} type={"destructive"} />
       )}
       <Frame>
         <Frame.Header>

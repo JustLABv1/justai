@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
@@ -254,10 +255,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
   return (
     <div className="flex flex-col gap-4">
       {error && !dialogOpen && (
-        <Alert role="alert" tone="destructive" variant="plain">
-          <Alert.Title>{t("Announcement request failed")}</Alert.Title>
-          <Alert.Description>{t(error)}</Alert.Description>
-        </Alert>
+        <ToastFeedback message={error} type={"destructive"} />
       )}
 
       <Frame>
@@ -470,12 +468,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
             onSubmit={(event) => void save(event)}
           >
             <Sheet.Body className="flex flex-col gap-5">
-              {error && (
-                <Alert role="alert" tone="destructive" variant="plain">
-                  <Alert.Title>{t("Could not save announcement")}</Alert.Title>
-                  <Alert.Description>{t(error)}</Alert.Description>
-                </Alert>
-              )}
+              {error && <ToastFeedback message={error} type={"destructive"} />}
               <Frame variant="band">
                 <Frame.Header>
                   <Frame.Title>{t("Message & appearance")}</Frame.Title>

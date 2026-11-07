@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { LanguageSwitcher } from "@/components/language-switcher"
@@ -319,11 +320,7 @@ export function LoginForm({
                       )}
 
                     {error && (
-                      <Alert variant="destructive">
-                        <ShieldCheck aria-hidden="true" />
-                        <AlertTitle>{t("Could not continue")}</AlertTitle>
-                        <AlertDescription>{t(error)}</AlertDescription>
-                      </Alert>
+                      <ToastFeedback message={error} type={"destructive"} />
                     )}
 
                     <Field className={styles.authSubmitField}>

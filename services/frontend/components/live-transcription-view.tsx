@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { ChoiceCards } from "@/components/panelui/choice-cards"
@@ -2194,7 +2195,9 @@ export function LiveTranscriptionView({
 
   return (
     <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
-      {error && !dialogOpen ? <DialogError message={error} /> : null}
+      {error && !dialogOpen ? (
+        <ToastFeedback message={error} type="destructive" />
+      ) : null}
 
       {!sessionId && !createOpen ? (
         <VideoTranscriptionLibrary

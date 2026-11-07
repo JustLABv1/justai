@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
@@ -587,11 +588,7 @@ export function MCPView({
           )}
         </Alert>
       )}
-      {notice && (
-        <Alert tone="info" variant="plain">
-          <Alert.Description>{t(notice)}</Alert.Description>
-        </Alert>
-      )}
+      {notice && <ToastFeedback message={notice} type={"info"} />}
       <div className="flex flex-col gap-4">
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem_11rem]">
           <div className="min-w-0">
@@ -1146,9 +1143,7 @@ export function MCPView({
             <fieldset disabled={saving} className="contents">
               <Sheet.Body className="flex flex-col gap-5">
                 {dialogError && (
-                  <Alert tone="destructive" variant="plain">
-                    <Alert.Description>{t(dialogError)}</Alert.Description>
-                  </Alert>
+                  <ToastFeedback message={dialogError} type={"destructive"} />
                 )}
                 <div className="flex flex-col gap-6">
                   <Frame variant="band">

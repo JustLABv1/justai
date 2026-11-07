@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import {
   useTranslations,
@@ -74,7 +75,7 @@ import type {
   MCPServer,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Alert as PuAlert } from "@/components/panelui/alert"
 import { Card as PuCard } from "@/components/panelui/card"
 import { Frame } from "@/components/panelui/frame"
@@ -1476,15 +1477,7 @@ export function AgentsView({
         </PageActions>
       </PageHeader>
 
-      {error && (
-        <PuAlert aria-live="polite" role="alert" tone="destructive">
-          <PuAlert.Icon>
-            <CircleAlert />
-          </PuAlert.Icon>
-          <PuAlert.Title>{t("Agent workspace needs attention")}</PuAlert.Title>
-          <PuAlert.Description>{t(error)}</PuAlert.Description>
-        </PuAlert>
-      )}
+      {error && <ToastFeedback message={error} type={"destructive"} />}
 
       {!editingWorkflow && (
         <div className="grid gap-3 sm:grid-cols-3">
@@ -1641,12 +1634,7 @@ export function AgentsView({
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
-            {error && (
-              <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>{t("Could not save native agent")}</AlertTitle>
-                <AlertDescription>{t(error)}</AlertDescription>
-              </Alert>
-            )}
+            {error && <ToastFeedback message={error} type={"destructive"} />}
             <form
               id="agent-native-form"
               onSubmit={(event) => void saveNative(event)}
@@ -1939,12 +1927,7 @@ export function AgentsView({
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
-            {error && (
-              <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>{t("Could not save remote agent")}</AlertTitle>
-                <AlertDescription>{t(error)}</AlertDescription>
-              </Alert>
-            )}
+            {error && <ToastFeedback message={error} type={"destructive"} />}
             <form
               id="agent-remote-form"
               onSubmit={(event) => void saveRemote(event)}
@@ -4125,11 +4108,7 @@ function RunsPanel({
   const pageRuns = filteredRuns.slice(currentPage * 25, (currentPage + 1) * 25)
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
-      )}
+      {error && <ToastFeedback message={error} type={"destructive"} />}
       <div className="flex flex-wrap items-center gap-3">
         <Input.Group className="w-full sm:w-80">
           <Input.Addon>
@@ -4372,11 +4351,7 @@ function RunsPanel({
             key={selectedID}
             className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6"
           >
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{t(error)}</AlertDescription>
-              </Alert>
-            )}
+            {error && <ToastFeedback message={error} type={"destructive"} />}
             {showDetail && (detail || selectedSummary) ? (
               <RunDetail
                 run={detail ?? selectedSummary!}

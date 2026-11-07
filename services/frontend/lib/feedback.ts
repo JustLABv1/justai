@@ -17,7 +17,9 @@ export function notifyError(title: string, caught: unknown, fallback: string) {
   toast.add({
     title,
     description,
-    type: "error",
+    type: "destructive",
+    priority: "high",
+    timeout: 10000,
   })
   return description
 }

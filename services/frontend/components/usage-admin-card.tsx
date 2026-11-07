@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useCallback, useEffect, useState, type ReactNode } from "react"
 
@@ -246,11 +247,7 @@ export function UsageAdminCard({
           )}
         </Alert>
       )}
-      {notice && (
-        <Alert tone="success" variant="plain">
-          <Alert.Description>{t(notice)}</Alert.Description>
-        </Alert>
-      )}
+      {notice && <ToastFeedback message={notice} type={"success"} />}
       <Frame variant="band">
         <Frame.Header>
           <Frame.Title>{t("Workspace default")}</Frame.Title>
@@ -377,9 +374,7 @@ export function UsageAdminCard({
                 </Field>
               )}
               {dialogError && (
-                <Alert tone="destructive" variant="plain">
-                  <Alert.Description>{t(dialogError)}</Alert.Description>
-                </Alert>
+                <ToastFeedback message={dialogError} type={"destructive"} />
               )}
             </Dialog.Body>
             <Dialog.Footer>
