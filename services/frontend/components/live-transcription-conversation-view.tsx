@@ -41,10 +41,9 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -192,20 +191,18 @@ export function LiveTranscriptionConversationView({
                 <X data-icon="inline-start" /> {t("Cancel scheduled capture")}
               </AlertDialogTrigger>
               <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>
-                    {t("Cancel scheduled capture?")}
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {t(
-                      "The stream will no longer start automatically at the scheduled time."
-                    )}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
+                <AlertDialogTitle>
+                  {t("Cancel scheduled capture?")}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t(
+                    "The stream will no longer start automatically at the scheduled time."
+                  )}
+                </AlertDialogDescription>
                 <AlertDialogFooter>
                   <AlertDialogCancel>{t("Keep scheduled")}</AlertDialogCancel>
                   <AlertDialogAction
-                    variant="destructive"
+                    tone="destructive"
                     onClick={() => void onStopSession()}
                   >
                     {t("Cancel capture")}
@@ -334,20 +331,18 @@ export function LiveTranscriptionConversationView({
               <Square data-icon="inline-start" /> {t("End session")}
             </AlertDialogTrigger>
             <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {t("End this transcription?")}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t(
-                    "The live feed will stop for everyone. The transcript collected so far will be kept."
-                  )}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
+              <AlertDialogTitle>
+                {t("End this transcription?")}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(
+                  "The live feed will stop for everyone. The transcript collected so far will be kept."
+                )}
+              </AlertDialogDescription>
               <AlertDialogFooter>
                 <AlertDialogCancel>{t("Keep session live")}</AlertDialogCancel>
                 <AlertDialogAction
-                  variant="destructive"
+                  tone="destructive"
                   onClick={() => void onStopSession()}
                 >
                   {t("End session")}
@@ -376,22 +371,20 @@ export function LiveTranscriptionConversationView({
                   <Square /> {t("End session")}
                 </AlertDialogTrigger>
                 <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>
-                      {t("End this transcription?")}
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>
-                      {t(
-                        "The live feed will stop for everyone. The transcript collected so far will be kept."
-                      )}
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
+                  <AlertDialogTitle>
+                    {t("End this transcription?")}
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {t(
+                      "The live feed will stop for everyone. The transcript collected so far will be kept."
+                    )}
+                  </AlertDialogDescription>
                   <AlertDialogFooter>
                     <AlertDialogCancel>
                       {t("Keep session live")}
                     </AlertDialogCancel>
                     <AlertDialogAction
-                      variant="destructive"
+                      tone="destructive"
                       onClick={() => void onStopSession()}
                     >
                       {t("End session")}

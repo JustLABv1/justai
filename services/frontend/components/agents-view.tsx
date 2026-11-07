@@ -29,6 +29,7 @@ import {
   Maximize2,
   MessageSquare,
   Minimize2,
+  MoreHorizontal,
   LockKeyhole,
   Play,
   Plus,
@@ -104,6 +105,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Alert as PuAlert } from "@/components/panelui/alert"
 import { Card as PuCard } from "@/components/panelui/card"
 import { Frame } from "@/components/panelui/frame"
+import { Menu } from "@/components/panelui/menu"
 import { Stat } from "@/components/panelui/stat"
 import { Tabs as PuTabs } from "@/components/panelui/tabs"
 import { Badge } from "@/components/panelui/badge"
@@ -2736,8 +2738,8 @@ function WorkflowsPanel({
       {!draft && (
         <div className="flex flex-col gap-8">
           <section className="flex flex-col gap-4">
-            {workflows.length > 0 && (
-              <Input.Group className="w-full sm:w-80">
+            {workflows.length > 5 && (
+              <Input.Group className="w-full self-end sm:w-80">
                 <Input.Addon>
                   <Search aria-hidden="true" />
                 </Input.Addon>
@@ -2785,6 +2787,37 @@ function WorkflowsPanel({
                   .map((workflow) => (
                     <PuCard as="article" className="h-full" key={workflow.id}>
                       <PuCard.Header>
+                        <PuCard.Action>
+                          <Menu>
+                            <Menu.Trigger
+                              render={
+                                <Button
+                                  aria-label={t("More actions for {value0}", {
+                                    value0: workflow.name,
+                                  })}
+                                  disabled={disabled}
+                                  size="icon-sm"
+                                  variant="ghost"
+                                />
+                              }
+                            >
+                              <MoreHorizontal />
+                            </Menu.Trigger>
+                            <Menu.Content align="end">
+                              <Menu.Item onClick={() => onOpen(workflow)}>
+                                {t("Open builder")}
+                              </Menu.Item>
+                              <Menu.Separator />
+                              <Menu.Item
+                                onClick={() => onDelete(workflow)}
+                                variant="destructive"
+                              >
+                                <Trash2 />
+                                {t("Delete")}
+                              </Menu.Item>
+                            </Menu.Content>
+                          </Menu>
+                        </PuCard.Action>
                         <PuCard.Title className="truncate">
                           {workflow.name}
                         </PuCard.Title>
@@ -2811,20 +2844,8 @@ function WorkflowsPanel({
                           )}
                         </p>
                       </PuCard.Content>
-                      <PuCard.Footer variant="panel">
+                      <PuCard.Footer className="justify-end" variant="panel">
                         <Button
-                          aria-label={t("Delete {value0}", {
-                            value0: workflow.name,
-                          })}
-                          disabled={disabled}
-                          onClick={() => onDelete(workflow)}
-                          size="icon-sm"
-                          variant="ghost"
-                        >
-                          <Trash2 />
-                        </Button>
-                        <Button
-                          className="ms-auto"
                           onClick={() => onOpen(workflow)}
                           size="sm"
                           variant="outline"

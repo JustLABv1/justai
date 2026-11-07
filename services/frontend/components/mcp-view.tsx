@@ -32,9 +32,8 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import {
   Card,
   CardContent,
@@ -917,23 +916,21 @@ export function MCPView({
         }}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Remove MCP server?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("Remove “")}
-              {removeTarget?.name}
-              {t(
-                "”? Existing conversations keep their messages, but this server and its tools will no longer be available for new calls."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Remove MCP server?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("Remove “")}
+            {removeTarget?.name}
+            {t(
+              "”? Existing conversations keep their messages, but this server and its tools will no longer be available for new calls."
+            )}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={Boolean(busyId)}>
               {t("Cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={!removeTarget || Boolean(busyId)}
-              variant="destructive"
+              tone="destructive"
               onClick={() => {
                 const target = removeTarget
                 setRemoveTarget(null)

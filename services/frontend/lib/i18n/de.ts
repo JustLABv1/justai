@@ -4359,4 +4359,5 @@ export const de = {
   "Pick a ready-made graph and adjust it in the builder.":
     "Wähle einen fertigen Ablauf und passe ihn im Builder an.",
   nodes: "Knoten",
+  "More actions for {value0}": "Weitere Aktionen für {value0}",
 } as const

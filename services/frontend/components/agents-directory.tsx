@@ -5,6 +5,7 @@ import {
   Bot,
   CircleAlert,
   KeyRound,
+  MoreHorizontal,
   Link2,
   Plus,
   RefreshCw,
@@ -21,6 +22,7 @@ import { Button } from "@/components/panelui/button"
 import { Card } from "@/components/panelui/card"
 import { Frame } from "@/components/panelui/frame"
 import { Input } from "@/components/panelui/input"
+import { Menu } from "@/components/panelui/menu"
 import { Spinner } from "@/components/panelui/spinner"
 import { Switch } from "@/components/panelui/switch"
 import type { Agent, AgentConnection } from "@/lib/types"
@@ -49,6 +51,8 @@ function statusText(status: string) {
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
+
+const SEARCH_FROM = 5
 
 /** The agents of a workspace as cards, and the encrypted connections the remote ones use. */
 export function AgentsPanel({
@@ -94,8 +98,9 @@ export function AgentsPanel({
   return (
     <div className="flex flex-col gap-10">
       <section className="flex flex-col gap-4">
-        {agents.length > 0 && (
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* A few cards need no search; it appears once the list grows. */}
+        {agents.length > SEARCH_FROM && (
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <Input.Group className="w-full sm:w-72">
               <Input.Addon>
                 <Search aria-hidden="true" />
@@ -174,6 +179,36 @@ export function AgentsPanel({
                               : t("Native JustAI agent"))}
                         </Card.Description>
                       </div>
+                      <Menu>
+                        <Menu.Trigger
+                          render={
+                            <Button
+                              aria-label={t("More actions for {value0}", {
+                                value0: agent.name,
+                              })}
+                              className="-me-1 -mt-1 shrink-0"
+                              disabled={disabled}
+                              size="icon-sm"
+                              variant="ghost"
+                            />
+                          }
+                        >
+                          <MoreHorizontal />
+                        </Menu.Trigger>
+                        <Menu.Content align="end">
+                          <Menu.Item onClick={() => onEdit(agent)}>
+                            {t("Configure")}
+                          </Menu.Item>
+                          <Menu.Separator />
+                          <Menu.Item
+                            onClick={() => onDelete(agent)}
+                            variant="destructive"
+                          >
+                            <Trash2 />
+                            {t("Delete")}
+                          </Menu.Item>
+                        </Menu.Content>
+                      </Menu>
                     </div>
                   </Card.Header>
                   <Card.Content className="flex flex-col gap-3">
@@ -228,18 +263,8 @@ export function AgentsPanel({
                         : t("No delegation targets configured.")}
                     </p>
                   </Card.Content>
-                  <Card.Footer variant="panel">
+                  <Card.Footer className="justify-end" variant="panel">
                     <Button
-                      aria-label={t("Delete {value0}", { value0: agent.name })}
-                      disabled={disabled}
-                      onClick={() => onDelete(agent)}
-                      size="icon-sm"
-                      variant="ghost"
-                    >
-                      <Trash2 />
-                    </Button>
-                    <Button
-                      className="ms-auto"
                       disabled={disabled}
                       onClick={() => onEdit(agent)}
                       size="sm"

@@ -41,9 +41,8 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import {
   Select,
   SelectContent,
@@ -618,23 +617,21 @@ export function EndpointsView({
         }}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Remove endpoint?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("Remove “")}
-              {removeTarget?.name}
-              {t(
-                "”? Existing conversations keep their stored messages, but new requests will no longer route here."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Remove endpoint?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("Remove “")}
+            {removeTarget?.name}
+            {t(
+              "”? Existing conversations keep their stored messages, but new requests will no longer route here."
+            )}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={Boolean(busyId)}>
               {t("Cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={!removeTarget || Boolean(busyId)}
-              variant="destructive"
+              tone="destructive"
               onClick={() => {
                 const target = removeTarget
                 setRemoveTarget(null)

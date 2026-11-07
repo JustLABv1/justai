@@ -35,9 +35,8 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -831,25 +830,21 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
           }}
         >
           <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {t("Remove knowledge source?")}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("Remove “")}
-                {removeTarget?.title}
-                {t(
-                  "” from Knowledge? Existing messages keep their stored citations, but this source will no longer be available for new retrievals."
-                )}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
+            <AlertDialogTitle>{t("Remove knowledge source?")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("Remove “")}
+              {removeTarget?.title}
+              {t(
+                "” from Knowledge? Existing messages keep their stored citations, but this source will no longer be available for new retrievals."
+              )}
+            </AlertDialogDescription>
             <AlertDialogFooter>
               <AlertDialogCancel disabled={Boolean(busyId)}>
                 {t("Cancel")}
               </AlertDialogCancel>
               <AlertDialogAction
                 disabled={!removeTarget || Boolean(busyId)}
-                variant="destructive"
+                tone="destructive"
                 onClick={() => {
                   const target = removeTarget
                   setRemoveTarget(null)

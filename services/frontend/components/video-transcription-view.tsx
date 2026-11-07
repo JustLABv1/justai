@@ -40,9 +40,8 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import {
   Card,
   CardContent,
@@ -2448,14 +2447,12 @@ export function VideoTranscriptionView({
 
       <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Cancel this video?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(
-                "This stops the upload and cancels transcription. A completed upload is retained so you can still view the source or retry it."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Cancel this video?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(
+              "This stops the upload and cancels transcription. A completed upload is retained so you can still view the source or retry it."
+            )}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("Keep processing")}</AlertDialogCancel>
             <AlertDialogAction
@@ -2478,14 +2475,12 @@ export function VideoTranscriptionView({
         open={skipSpeakerOpen}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Skip speaker separation?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(
-                "The transcript and timestamps will be kept, but this video will not receive automatic speaker labels."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Skip speaker separation?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(
+              "The transcript and timestamps will be kept, but this video will not receive automatic speaker labels."
+            )}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={skipSpeakerInFlight}>
               {t("Keep speaker separation")}

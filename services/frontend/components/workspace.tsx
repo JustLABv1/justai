@@ -25,9 +25,8 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -630,11 +629,9 @@ export function Workspace({
       ? `${activeView}:${route.settingsTab}:${route.targetId ?? ""}`
       : activeView === "admin"
         ? `${activeView}:${route.adminTab}`
-        : activeView === "agents"
-          ? `${activeView}:${route.agentTab}`
-          : activeView === "notes"
-            ? `${activeView}:${route.targetId ?? ""}`
-            : activeView
+        : activeView === "notes"
+          ? `${activeView}:${route.targetId ?? ""}`
+          : activeView
 
   const chatAgents = useMemo<SavedAssistant[]>(
     () => [
@@ -1451,25 +1448,23 @@ export function Workspace({
         open={deleteTarget !== null}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("Delete")}{" "}
-              {deleteTarget?.kind === "conversation"
-                ? "chat"
-                : t("live transcription")}
-              ?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              “{deleteTarget?.title}
-              {t(
-                "” and its stored data will be permanently removed. This action cannot be undone."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>
+            {t("Delete")}{" "}
+            {deleteTarget?.kind === "conversation"
+              ? "chat"
+              : t("live transcription")}
+            ?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            “{deleteTarget?.title}
+            {t(
+              "” and its stored data will be permanently removed. This action cannot be undone."
+            )}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              variant="destructive"
+              tone="destructive"
               onClick={() => void confirmDelete()}
             >
               {t("Delete permanently")}

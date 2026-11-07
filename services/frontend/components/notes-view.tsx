@@ -25,9 +25,8 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -590,14 +589,12 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
         }}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Discard unsaved changes?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("Your changes to “")}
-              {selected?.title || t("Untitled note")}
-              {t("” have not been saved. Switching notes will discard them.")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Discard unsaved changes?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("Your changes to “")}
+            {selected?.title || t("Untitled note")}
+            {t("” have not been saved. Switching notes will discard them.")}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("Keep editing")}</AlertDialogCancel>
             <AlertDialogAction
@@ -614,14 +611,12 @@ export function NotesView({ onUseInChat, onNotesChange }: NotesViewProps) {
 
       <AlertDialog open={discardCreateOpen} onOpenChange={setDiscardCreateOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Start a new note?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(
-                "Save your current note first, or discard the unsaved changes to continue with a new note."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Start a new note?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(
+              "Save your current note first, or discard the unsaved changes to continue with a new note."
+            )}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("Keep editing")}</AlertDialogCancel>
             <AlertDialogAction
