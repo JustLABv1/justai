@@ -1,0 +1,17 @@
+favicon-48.png: valid PNG
+justai-app-icon-512.png: valid PNG
+justai-mono-6b5144-512.png: valid PNG
+apple-touch-icon.png: valid PNG
+favicon-16.png: valid PNG
+icon-192.png: valid PNG
+justai-horizontal-1600.png: valid PNG
+justai-black-512.png: valid PNG
+justai-white-512.png: valid PNG
+justai-square-512.png: valid PNG
+justai-mono-f3d7b5-512.png: valid PNG
+maskable-512.png: valid PNG
+favicon-32.png: valid PNG
+justai-favicon-512.png: valid PNG
+icon-512.png: valid PNG
+ICO: 16/32/48 verified
+Transparent symbol PNG: alpha verified

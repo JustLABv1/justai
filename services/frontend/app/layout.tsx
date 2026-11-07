@@ -15,9 +15,6 @@ import {
 export const metadata: Metadata = {
   title: "JustAI",
   description: "JustLAB workspace for endpoints, chat, MCP, and RAG.",
-  icons: {
-    icon: "/images/logos/justai-logo.svg",
-  },
 }
 
 export default async function RootLayout({

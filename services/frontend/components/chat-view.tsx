@@ -4566,9 +4566,9 @@ export function ChatView({
               aria-hidden="true"
               className="chat-history-loading-logo relative size-14"
             >
-              <BrandMark className="absolute inset-0 size-full text-primary/25" />
+              <BrandMark className="absolute inset-0 size-full text-[var(--brand-foreground)]/25" />
               <span className="chat-history-loading-logo-sheen absolute inset-0">
-                <BrandMark className="size-full text-primary" />
+                <BrandMark className="size-full" />
               </span>
             </div>
             <p className="font-medium text-foreground">

@@ -7,7 +7,7 @@ import { ArrowRight, KeyRound, ShieldCheck } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { AuroraBackdrop } from "@/components/aurora-backdrop"
-import { BrandMark } from "@/components/brand-mark"
+import { BrandMark, BrandWordmark } from "@/components/brand-mark"
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Field,
@@ -155,7 +155,7 @@ export function LoginForm({
                 className={initialSetup ? "size-16" : "size-10 rounded-xl"}
                 cropped={initialSetup}
               />
-              {!initialSetup && <p className={styles.authBrandName}>JustAI</p>}
+              {!initialSetup && <BrandWordmark className="h-6" />}
             </div>
 
             <div className={styles.authIntro}>

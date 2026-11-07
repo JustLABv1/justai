@@ -1,7 +1,10 @@
 # JustAI
 
 <p align="center">
-  <img src="services/frontend/public/images/logos/justai-logo.svg" alt="JustAI logo" width="96" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="services/frontend/public/images/logos/justai-logo-horizontal-dark.svg" />
+    <img src="services/frontend/public/images/logos/justai-logo-horizontal.svg" alt="JustAI" width="320" />
+  </picture>
 </p>
 
 JustAI is the JustLAB workspace for routing chat, transcription, retrieval, and MCP tools through one local-first surface.

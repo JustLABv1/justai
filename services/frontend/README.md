@@ -1,5 +1,10 @@
 # JustAI frontend
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="public/images/logos/justai-logo-horizontal-dark.svg" />
+  <img src="public/images/logos/justai-logo-horizontal.svg" alt="JustAI" width="280" />
+</picture>
+
 The JustAI frontend is a Next.js 16 App Router application for chat, agents,
 workflows, knowledge, integrations, and transcription. It talks to the Go
 backend through `/api/v1`; browser code should use the helpers in `lib/api.ts`

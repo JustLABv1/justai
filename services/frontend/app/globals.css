@@ -6,6 +6,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --brand-foreground: #6b5144;
   --background: #f7f7f7;
   --foreground: #202020;
   --card: #ffffff;
@@ -83,6 +84,7 @@
 }
 
 .dark {
+  --brand-foreground: #f3d7b5;
   --background: #141414;
   --foreground: #f5f5f5;
   --card: #1a1a1a;
@@ -372,7 +374,7 @@
   position: relative;
   display: inline-block;
   flex: none;
-  color: var(--primary);
+  color: var(--brand-foreground);
   transition:
     transform 180ms var(--motion-ease-out),
     filter 180ms ease,
@@ -382,7 +384,7 @@
 .justai-chat-mark::after {
   position: absolute;
   inset: -12%;
-  border: 1px solid color-mix(in oklab, var(--primary) 42%, transparent);
+  border: 1px solid color-mix(in oklab, var(--brand-foreground) 42%, transparent);
   border-radius: 50%;
   content: "";
   opacity: 0;
@@ -391,7 +393,7 @@
 
 .justai-chat-mark[data-state="thinking"] {
   filter: drop-shadow(
-    0 0 8px color-mix(in oklab, var(--primary) 40%, transparent)
+    0 0 8px color-mix(in oklab, var(--brand-foreground) 40%, transparent)
   );
   animation: justai-mark-focus 1.35s var(--motion-ease-in-out) infinite;
 }
