@@ -17,9 +17,11 @@ import {
   CircleAlert,
   FileText,
   FileVideo,
+  MessageSquarePlus,
   Pause,
   Pencil,
   Play,
+  Plus,
   RefreshCw,
   Search,
   SkipForward,
@@ -67,6 +69,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogBody,
 } from "@/components/panelui/dialog"
 import {
   Field,
@@ -200,6 +203,7 @@ export function VideoTranscriptionView({
     string | null
   >(null)
   const [error, setError] = useState("")
+  const [chatStarting, setChatStarting] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [createStep, setCreateStep] = useState(0)
   const [title, setTitle] = useState("Video transcript")
@@ -991,6 +995,22 @@ export function VideoTranscriptionView({
   const interrupted = ["failed", "cancelled"].includes(
     snapshot?.videoUpload?.status ?? ""
   )
+  const startChatFromHeader = async () => {
+    if (!snapshot || chatStarting) return
+    setChatStarting(true)
+    try {
+      await onStartChat(snapshot.session.id)
+      setError("")
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : t("A chat could not be started from this transcript.")
+      )
+    } finally {
+      setChatStarting(false)
+    }
+  }
   const showProcessingView =
     isVideoProcessing ||
     (interrupted && partialTranscriptSession !== snapshot?.session.id)
@@ -1275,6 +1295,24 @@ export function VideoTranscriptionView({
                     <span>{cancelLabel}</span>
                   </Button>
                 ) : null}
+                {snapshot && !showProcessingView ? (
+                  <Button
+                    className="flex-1 sm:flex-none"
+                    disabled={chatStarting || !snapshot.segments.length}
+                    onClick={() => void startChatFromHeader()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {chatStarting ? (
+                      <Spinner data-icon="inline-start" />
+                    ) : (
+                      <MessageSquarePlus data-icon="inline-start" />
+                    )}
+                    <span>
+                      {chatStarting ? t("Starting chat…") : t("Ask about this")}
+                    </span>
+                  </Button>
+                ) : null}
                 <Button
                   className="flex-1 sm:flex-none"
                   onClick={() => {
@@ -1284,8 +1322,8 @@ export function VideoTranscriptionView({
                   size="sm"
                   variant="outline"
                 >
-                  <Upload data-icon="inline-start" />
-                  <span>{t("Add recording")}</span>
+                  <Plus data-icon="inline-start" />
+                  <span>{t("New transcription")}</span>
                 </Button>
               </>
             }
@@ -1923,6 +1961,7 @@ export function VideoTranscriptionView({
                 onError={setError}
                 onRefreshPlayback={refreshVideoPlayback}
                 onRenameSpeaker={openSpeakerRename}
+                hideAskAction
                 onStartChat={onStartChat}
                 onSnapshotChange={(updater) =>
                   setSnapshot((current) =>
@@ -2405,25 +2444,27 @@ export function VideoTranscriptionView({
               )}
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="video-speaker-name">
-                {t("Speaker name")}
-              </FieldLabel>
-              <Input
-                autoFocus
-                id="video-speaker-name"
-                onChange={(event) => setSpeakerName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault()
-                    void saveSpeakerName()
-                  }
-                }}
-                value={speakerName}
-              />
-            </Field>
-          </FieldGroup>
+          <DialogBody>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="video-speaker-name">
+                  {t("Speaker name")}
+                </FieldLabel>
+                <Input
+                  autoFocus
+                  id="video-speaker-name"
+                  onChange={(event) => setSpeakerName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault()
+                      void saveSpeakerName()
+                    }
+                  }}
+                  value={speakerName}
+                />
+              </Field>
+            </FieldGroup>
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={speakerRenameSaving}

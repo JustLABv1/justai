@@ -42,6 +42,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogBody,
 } from "@/components/panelui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/panelui/button"
@@ -2968,49 +2969,51 @@ export function LiveTranscriptionView({
               )}
             </DialogDescription>
           </DialogHeader>
-          {error ? <DialogError message={error} /> : null}
-          <FieldGroup>
-            <Field>
-              <FieldLabel>{t("Source name")}</FieldLabel>
-              <Input
-                id="stream-source-name"
-                onChange={(event) => setStreamName(event.target.value)}
-                value={streamName}
+          <DialogBody>
+            {error ? <DialogError message={error} /> : null}
+            <FieldGroup>
+              <Field>
+                <FieldLabel>{t("Source name")}</FieldLabel>
+                <Input
+                  id="stream-source-name"
+                  onChange={(event) => setStreamName(event.target.value)}
+                  value={streamName}
+                />
+              </Field>
+              <Field>
+                <FieldLabel>{t("Livestream link")}</FieldLabel>
+                <Input
+                  id="stream-source-url"
+                  onChange={(event) => setStreamURL(event.target.value)}
+                  placeholder="https://www.bundestag.de/mediathek/live"
+                  type="url"
+                  value={streamURL}
+                />
+                <FieldDescription>
+                  {t(
+                    "Paste a livestream webpage or direct stream link. The link is stored encrypted and checked again when capture starts."
+                  )}
+                </FieldDescription>
+              </Field>
+              {streamCheckFeedback}
+              <StreamScheduleFields
+                end={streamScheduledEnd}
+                idPrefix="stream-source"
+                onEndChange={setStreamScheduledEnd}
+                onScheduledChange={(checked) => {
+                  setStreamScheduled(checked)
+                  if (checked && !streamScheduledStart) {
+                    setStreamScheduledStart(
+                      localDateTimeValue(new Date(Date.now() + 15 * 60_000))
+                    )
+                  }
+                }}
+                onStartChange={setStreamScheduledStart}
+                scheduled={streamScheduled}
+                start={streamScheduledStart}
               />
-            </Field>
-            <Field>
-              <FieldLabel>{t("Livestream link")}</FieldLabel>
-              <Input
-                id="stream-source-url"
-                onChange={(event) => setStreamURL(event.target.value)}
-                placeholder="https://www.bundestag.de/mediathek/live"
-                type="url"
-                value={streamURL}
-              />
-              <FieldDescription>
-                {t(
-                  "Paste a livestream webpage or direct stream link. The link is stored encrypted and checked again when capture starts."
-                )}
-              </FieldDescription>
-            </Field>
-            {streamCheckFeedback}
-            <StreamScheduleFields
-              end={streamScheduledEnd}
-              idPrefix="stream-source"
-              onEndChange={setStreamScheduledEnd}
-              onScheduledChange={(checked) => {
-                setStreamScheduled(checked)
-                if (checked && !streamScheduledStart) {
-                  setStreamScheduledStart(
-                    localDateTimeValue(new Date(Date.now() + 15 * 60_000))
-                  )
-                }
-              }}
-              onStartChange={setStreamScheduledStart}
-              scheduled={streamScheduled}
-              start={streamScheduledStart}
-            />
-          </FieldGroup>
+            </FieldGroup>
+          </DialogBody>
           <DialogFooter>
             <Button
               onClick={() => {
@@ -3069,126 +3072,138 @@ export function LiveTranscriptionView({
           </DialogHeader>
           {error ? <DialogError message={error} /> : null}
           {botSetup ? (
-            <div className="flex flex-col gap-4">
-              <div className="rounded-xl bg-muted/50 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">{t("Ingest token")}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {t(
-                        "This is shown once. Store it in the adapter’s secret manager."
-                      )}
-                    </p>
+            <>
+              <DialogBody>
+                <div className="rounded-xl bg-muted/50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">{t("Ingest token")}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t(
+                          "This is shown once. Store it in the adapter’s secret manager."
+                        )}
+                      </p>
+                    </div>
+                    <Button
+                      aria-label={t("Copy bot ingest token")}
+                      onClick={() => void copyBotToken()}
+                      size="icon-sm"
+                      variant="outline"
+                    >
+                      <Copy />
+                    </Button>
                   </div>
-                  <Button
-                    aria-label={t("Copy bot ingest token")}
-                    onClick={() => void copyBotToken()}
-                    size="icon-sm"
-                    variant="outline"
-                  >
-                    <Copy />
-                  </Button>
+                  <code className="mt-3 block overflow-x-auto rounded-lg bg-background p-3 text-xs break-all">
+                    {botSetup.token}
+                  </code>
                 </div>
-                <code className="mt-3 block overflow-x-auto rounded-lg bg-background p-3 text-xs break-all">
-                  {botSetup.token}
-                </code>
-              </div>
-              <div className="rounded-xl border bg-background p-4 text-sm">
-                <p className="font-medium">{t("Adapter setup")}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {t(
-                    "Give the adapter the ingest token above. It will exchange it for a short-lived connection and begin sending meeting audio."
-                  )}
-                </p>
-              </div>
-              <Collapsible>
-                <CollapsibleTrigger
-                  render={
-                    <Button className="w-fit" size="sm" variant="ghost" />
-                  }
-                >
-                  {t("Advanced protocol details")}
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2 flex flex-col gap-2 rounded-xl border bg-muted/30 p-4 text-xs text-muted-foreground">
-                  <p>
-                    1. POST to <code>{botSetup.ticketPath}</code> with
-                    <code> Authorization: Bearer &lt;token&gt;</code>.
+                <div className="rounded-xl border bg-background p-4 text-sm">
+                  <p className="font-medium">{t("Adapter setup")}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t(
+                      "Give the adapter the ingest token above. It will exchange it for a short-lived connection and begin sending meeting audio."
+                    )}
                   </p>
-                  <p>
-                    2. Open{" "}
-                    <code>{botSetup.streamPath}?ticket=&lt;ticket&gt;</code>.
-                  </p>
-                  <p>
-                    3. Read the <code>streamId</code> from{" "}
-                    <code>transport.ready</code>. Use its{" "}
-                    <code>uploadToken</code> as <code>X-Stream-Token</code>,
-                    POST sequenced <code>transcription.start</code> to{" "}
-                    <code>/events</code>, and batched PCM16 frames to{" "}
-                    <code>/audio</code> using the{" "}
-                    <code>{botSetup.protocol}</code> format.
-                  </p>
-                </CollapsibleContent>
-              </Collapsible>
+                </div>
+                <Collapsible>
+                  <CollapsibleTrigger
+                    render={
+                      <Button className="w-fit" size="sm" variant="ghost" />
+                    }
+                  >
+                    {t("Advanced protocol details")}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2 flex flex-col gap-2 rounded-xl border bg-muted/30 p-4 text-xs text-muted-foreground">
+                    <p>
+                      1. POST to <code>{botSetup.ticketPath}</code> with
+                      <code> Authorization: Bearer &lt;token&gt;</code>.
+                    </p>
+                    <p>
+                      2. Open{" "}
+                      <code>{botSetup.streamPath}?ticket=&lt;ticket&gt;</code>.
+                    </p>
+                    <p>
+                      3. Read the <code>streamId</code> from{" "}
+                      <code>transport.ready</code>. Use its{" "}
+                      <code>uploadToken</code> as <code>X-Stream-Token</code>,
+                      POST sequenced <code>transcription.start</code> to{" "}
+                      <code>/events</code>, and batched PCM16 frames to{" "}
+                      <code>/audio</code> using the{" "}
+                      <code>{botSetup.protocol}</code> format.
+                    </p>
+                  </CollapsibleContent>
+                </Collapsible>
+              </DialogBody>
               <DialogFooter>
                 <Button onClick={() => setBotDialogOpen(false)}>
                   {t("Done")}
                 </Button>
               </DialogFooter>
-            </div>
+            </>
           ) : (
-            <FieldGroup>
-              <Field>
-                <FieldLabel>{t("Source name")}</FieldLabel>
-                <Input
-                  id="bot-source-name"
-                  onChange={(event) => setBotName(event.target.value)}
-                  value={botName}
-                />
-              </Field>
-              <Field>
-                <FieldLabel>{t("Meeting platform")}</FieldLabel>
-                <Select
-                  onValueChange={(value) => setBotPlatform(value ?? "generic")}
-                  value={botPlatform}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={t("Choose a platform")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectGroupLabel>{t("Adapter type")}</SelectGroupLabel>
-                      <SelectItem value="generic">
-                        {t("Custom / desktop adapter")}
-                      </SelectItem>
-                      <SelectItem value="zoom">Zoom</SelectItem>
-                      <SelectItem value="google-meet">Google Meet</SelectItem>
-                      <SelectItem value="microsoft-teams">
-                        Microsoft Teams
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel>
-                  {t("Meeting URL")}{" "}
-                  <span className="text-muted-foreground">
-                    {t("(optional)")}
-                  </span>
-                </FieldLabel>
-                <Input
-                  id="bot-meeting-url"
-                  onChange={(event) => setBotMeetingURL(event.target.value)}
-                  placeholder="https://…"
-                  type="url"
-                  value={botMeetingURL}
-                />
-                <FieldDescription>
-                  {t(
-                    "Saved encrypted for the adapter configuration; JustAI does not automatically sign in to third-party meetings."
-                  )}
-                </FieldDescription>
-              </Field>
+            <>
+              <DialogBody>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel>{t("Source name")}</FieldLabel>
+                    <Input
+                      id="bot-source-name"
+                      onChange={(event) => setBotName(event.target.value)}
+                      value={botName}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel>{t("Meeting platform")}</FieldLabel>
+                    <Select
+                      onValueChange={(value) =>
+                        setBotPlatform(value ?? "generic")
+                      }
+                      value={botPlatform}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={t("Choose a platform")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectGroupLabel>
+                            {t("Adapter type")}
+                          </SelectGroupLabel>
+                          <SelectItem value="generic">
+                            {t("Custom / desktop adapter")}
+                          </SelectItem>
+                          <SelectItem value="zoom">Zoom</SelectItem>
+                          <SelectItem value="google-meet">
+                            Google Meet
+                          </SelectItem>
+                          <SelectItem value="microsoft-teams">
+                            Microsoft Teams
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel>
+                      {t("Meeting URL")}{" "}
+                      <span className="text-muted-foreground">
+                        {t("(optional)")}
+                      </span>
+                    </FieldLabel>
+                    <Input
+                      id="bot-meeting-url"
+                      onChange={(event) => setBotMeetingURL(event.target.value)}
+                      placeholder="https://…"
+                      type="url"
+                      value={botMeetingURL}
+                    />
+                    <FieldDescription>
+                      {t(
+                        "Saved encrypted for the adapter configuration; JustAI does not automatically sign in to third-party meetings."
+                      )}
+                    </FieldDescription>
+                  </Field>
+                </FieldGroup>
+              </DialogBody>
               <DialogFooter>
                 <Button
                   onClick={() => setBotDialogOpen(false)}
@@ -3212,7 +3227,7 @@ export function LiveTranscriptionView({
                   )}
                 </Button>
               </DialogFooter>
-            </FieldGroup>
+            </>
           )}
         </DialogContent>
       </Dialog>
@@ -3233,51 +3248,53 @@ export function LiveTranscriptionView({
               )}
             </DialogDescription>
           </DialogHeader>
-          {error ? <DialogError message={error} /> : null}
-          {snapshot?.session.joinCode ? (
-            <div className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/50 p-3">
-              <code className="min-w-0 flex-1 text-xs break-all text-muted-foreground">
-                {new URL(
-                  transcriptionJoinPath(snapshot.session.joinCode),
-                  typeof window === "undefined"
-                    ? "http://localhost"
-                    : window.location.origin
-                ).toString()}
-              </code>
-              <Button
-                aria-label={t("Copy room link")}
-                onClick={() => void copyJoinLink()}
-                size="icon-sm"
-                variant="outline"
-              >
-                {joinLinkCopied ? <Check /> : <Copy />}
-              </Button>
-            </div>
-          ) : null}
-          <div className="flex items-center justify-between rounded-xl bg-muted/50 p-4">
-            <span className="font-mono text-2xl font-semibold tracking-[0.32em]">
-              {snapshot?.session.joinCode ?? "--------"}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={() => void rotateJoinCode()}
-                size="sm"
-                variant="outline"
-              >
-                {t("New code")}
-              </Button>
-              {snapshot?.session.joinCode && (
+          <DialogBody>
+            {error ? <DialogError message={error} /> : null}
+            {snapshot?.session.joinCode ? (
+              <div className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/50 p-3">
+                <code className="min-w-0 flex-1 text-xs break-all text-muted-foreground">
+                  {new URL(
+                    transcriptionJoinPath(snapshot.session.joinCode),
+                    typeof window === "undefined"
+                      ? "http://localhost"
+                      : window.location.origin
+                  ).toString()}
+                </code>
                 <Button
-                  aria-label={t("Copy room code")}
-                  onClick={() => void copyJoinCode()}
+                  aria-label={t("Copy room link")}
+                  onClick={() => void copyJoinLink()}
                   size="icon-sm"
                   variant="outline"
                 >
-                  {copied ? <Check /> : <Copy />}
+                  {joinLinkCopied ? <Check /> : <Copy />}
                 </Button>
-              )}
+              </div>
+            ) : null}
+            <div className="flex items-center justify-between rounded-xl bg-muted/50 p-4">
+              <span className="font-mono text-2xl font-semibold tracking-[0.32em]">
+                {snapshot?.session.joinCode ?? "--------"}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => void rotateJoinCode()}
+                  size="sm"
+                  variant="outline"
+                >
+                  {t("New code")}
+                </Button>
+                {snapshot?.session.joinCode && (
+                  <Button
+                    aria-label={t("Copy room code")}
+                    onClick={() => void copyJoinCode()}
+                    size="icon-sm"
+                    variant="outline"
+                  >
+                    {copied ? <Check /> : <Copy />}
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          </DialogBody>
           <DialogFooter>
             <Button onClick={() => setShareOpen(false)}>{t("Done")}</Button>
           </DialogFooter>
@@ -3302,20 +3319,22 @@ export function LiveTranscriptionView({
               )}
             </DialogDescription>
           </DialogHeader>
-          {error ? <DialogError message={error} /> : null}
-          <FieldGroup>
-            <Field>
-              <FieldLabel>{t("Name")}</FieldLabel>
-              <Input
-                autoFocus
-                id="workspace-speaker-name"
-                onChange={(event) =>
-                  setWorkspaceSpeakerName(event.target.value)
-                }
-                value={workspaceSpeakerName}
-              />
-            </Field>
-          </FieldGroup>
+          <DialogBody>
+            {error ? <DialogError message={error} /> : null}
+            <FieldGroup>
+              <Field>
+                <FieldLabel>{t("Name")}</FieldLabel>
+                <Input
+                  autoFocus
+                  id="workspace-speaker-name"
+                  onChange={(event) =>
+                    setWorkspaceSpeakerName(event.target.value)
+                  }
+                  value={workspaceSpeakerName}
+                />
+              </Field>
+            </FieldGroup>
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={workspaceSpeakerSaving}

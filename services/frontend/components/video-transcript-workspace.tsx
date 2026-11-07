@@ -63,6 +63,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogBody,
 } from "@/components/panelui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/panelui/input"
@@ -157,6 +158,8 @@ export type TranscriptWorkspaceProps = {
   onRefreshPlayback: () => Promise<void>
   onRenameSpeaker: (speaker: TranscriptionSpeaker) => void
   onStartChat: (sessionId: string) => Promise<void>
+  /** Hide the "Ask about this" button when the page offers it elsewhere. */
+  hideAskAction?: boolean
   onError: (value: string) => void
   mediaKind?: TranscriptWorkspaceMediaKind
 }
@@ -492,6 +495,7 @@ export function TranscriptWorkspace({
   onRefreshPlayback,
   onRenameSpeaker,
   onStartChat,
+  hideAskAction = false,
   onError,
   mediaKind = "video",
 }: VideoTranscriptWorkspaceProps) {
@@ -2505,21 +2509,23 @@ export function TranscriptWorkspace({
                       ) : null}
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2">
-                      <Button
-                        disabled={chatStarting || !snapshot.segments.length}
-                        onClick={() => void startChat()}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        {chatStarting ? (
-                          <Spinner data-icon="inline-start" />
-                        ) : (
-                          <MessageSquarePlus data-icon="inline-start" />
-                        )}
-                        {chatStarting
-                          ? t("Starting chat…")
-                          : t("Ask about this")}
-                      </Button>
+                      {hideAskAction ? null : (
+                        <Button
+                          disabled={chatStarting || !snapshot.segments.length}
+                          onClick={() => void startChat()}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {chatStarting ? (
+                            <Spinner data-icon="inline-start" />
+                          ) : (
+                            <MessageSquarePlus data-icon="inline-start" />
+                          )}
+                          {chatStarting
+                            ? t("Starting chat…")
+                            : t("Ask about this")}
+                        </Button>
+                      )}
                       <Button
                         aria-label={t("Download")}
                         disabled={!snapshot.segments.length}
@@ -2923,7 +2929,7 @@ export function TranscriptWorkspace({
                         return (
                           <div
                             className={cn(
-                              "group grid w-full grid-cols-1 gap-1 rounded-lg px-2.5 py-3 text-left transition-colors sm:grid-cols-[4.5rem_minmax(0,1fr)] sm:gap-3",
+                              "group flex w-full flex-col gap-1.5 rounded-xl px-3 py-2.5 text-left transition-colors",
                               active
                                 ? "bg-primary/10 ring-1 ring-primary/30"
                                 : "hover:bg-muted/50"
@@ -2935,33 +2941,34 @@ export function TranscriptWorkspace({
                               else messageRefs.current.delete(message.id)
                             }}
                           >
-                            <button
-                              aria-current={active ? "true" : undefined}
-                              aria-label={t("Jump to {value0}", {
-                                value0: formatVideoTimestamp(
-                                  message.startOffsetMs
-                                ),
-                              })}
-                              disabled={!canSeek}
-                              className={cn(
-                                "flex h-fit items-start gap-1 rounded-sm pt-0.5 text-left font-mono text-[11px] tabular-nums",
-                                active
-                                  ? "text-primary"
-                                  : "text-muted-foreground"
-                              )}
-                              onClick={() => seekTo(message.startOffsetMs)}
-                              type="button"
-                            >
-                              {active ? (
-                                <Play
-                                  aria-hidden="true"
-                                  className="mt-0.5 size-3 fill-current"
-                                />
-                              ) : null}
-                              {formatVideoTimestamp(message.startOffsetMs)}
-                            </button>
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  aria-current={active ? "true" : undefined}
+                                  aria-label={t("Jump to {value0}", {
+                                    value0: formatVideoTimestamp(
+                                      message.startOffsetMs
+                                    ),
+                                  })}
+                                  disabled={!canSeek}
+                                  className={cn(
+                                    "flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-left font-mono text-[11px] tabular-nums transition-colors hover:bg-muted",
+                                    active
+                                      ? "text-primary"
+                                      : "text-muted-foreground"
+                                  )}
+                                  onClick={() => seekTo(message.startOffsetMs)}
+                                  type="button"
+                                >
+                                  {active ? (
+                                    <Play
+                                      aria-hidden="true"
+                                      className="mt-0.5 size-3 fill-current"
+                                    />
+                                  ) : null}
+                                  {formatVideoTimestamp(message.startOffsetMs)}
+                                </button>
+
                                 {speaker ? (
                                   <Button
                                     aria-label={t("Rename {value0}", {
@@ -3968,119 +3975,123 @@ export function TranscriptWorkspace({
               )}
             </DialogDescription>
           </DialogHeader>
-          {workflowLoading ? (
-            <p className="text-sm text-muted-foreground">
-              {t("Loading workflows…")}
-            </p>
-          ) : workflowChoices.length === 0 ? (
-            workflowError ? null : (
+          <DialogBody>
+            {workflowLoading ? (
               <p className="text-sm text-muted-foreground">
-                {t("No saved workflows are available. Create one in")}{" "}
+                {t("Loading workflows…")}
+              </p>
+            ) : workflowChoices.length === 0 ? (
+              workflowError ? null : (
+                <p className="text-sm text-muted-foreground">
+                  {t("No saved workflows are available. Create one in")}{" "}
+                  <Link
+                    className="text-primary underline"
+                    href="/agents?tab=workflows"
+                  >
+                    {t("Agent workflows")}
+                  </Link>
+                  .
+                </p>
+              )
+            ) : (
+              <div className="space-y-4">
+                <Select
+                  items={workflowChoices.map((item) => ({
+                    value: item.id,
+                    label: item.name,
+                  }))}
+                  onValueChange={(value) => {
+                    const next = workflowChoices.find(
+                      (item) => item.id === value
+                    )
+                    setWorkflowId(value ?? "")
+                    setWorkflowFields(
+                      next
+                        ? transcriptionWorkflowPrefill(next, workflowSource())
+                        : {}
+                    )
+                    setWorkflowRunId("")
+                    setWorkflowError("")
+                  }}
+                  value={workflowId}
+                >
+                  <SelectTrigger aria-label={t("Workflow")} className="w-full">
+                    <SelectValue placeholder={t("Choose a workflow")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workflowChoices.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedWorkflow?.description ? (
+                  <p className="text-xs text-muted-foreground">
+                    {selectedWorkflow.description}
+                  </p>
+                ) : null}
+                {workflowInputFields.map((name) => (
+                  <label className="block space-y-1.5" key={name}>
+                    <span className="text-xs font-medium">{name}</span>
+                    <Textarea
+                      onChange={(event) =>
+                        setWorkflowFields((current) => ({
+                          ...current,
+                          [name]: event.target.value,
+                        }))
+                      }
+                      rows={name.toLowerCase().includes("transcript") ? 6 : 3}
+                      value={workflowFields[name] ?? ""}
+                    />
+                  </label>
+                ))}
+                {workflowInputFields.length === 0 ? (
+                  <p className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
+                    {t(
+                      "This workflow has no named input fields. It receives the structured transcript context directly."
+                    )}
+                  </p>
+                ) : null}
+                {workflowTranscriptTruncated ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-300">
+                    {t("The transcript exceeds")}{" "}
+                    {TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT.toLocaleString(
+                      locale
+                    )}{" "}
+                    {t(
+                      "characters. The run includes the opening excerpt and all generated insights."
+                    )}
+                  </p>
+                ) : null}
+                {selectedWorkflow?.visibility === "workspace" ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t(
+                      "Workspace members can inspect this workflow run and its input."
+                    )}
+                  </p>
+                ) : null}
+              </div>
+            )}
+            {workflowError ? (
+              <p className="text-sm text-destructive" role="alert">
+                {t(workflowError)}
+              </p>
+            ) : null}
+            {workflowRunId ? (
+              <p className="text-sm" role="status">
+                {t("Workflow started.")}{" "}
                 <Link
                   className="text-primary underline"
-                  href="/agents?tab=workflows"
+                  href={
+                    "/agents?tab=runs&run=" + encodeURIComponent(workflowRunId)
+                  }
                 >
-                  {t("Agent workflows")}
+                  {t("Open run")}
                 </Link>
-                .
               </p>
-            )
-          ) : (
-            <div className="space-y-4">
-              <Select
-                items={workflowChoices.map((item) => ({
-                  value: item.id,
-                  label: item.name,
-                }))}
-                onValueChange={(value) => {
-                  const next = workflowChoices.find((item) => item.id === value)
-                  setWorkflowId(value ?? "")
-                  setWorkflowFields(
-                    next
-                      ? transcriptionWorkflowPrefill(next, workflowSource())
-                      : {}
-                  )
-                  setWorkflowRunId("")
-                  setWorkflowError("")
-                }}
-                value={workflowId}
-              >
-                <SelectTrigger aria-label={t("Workflow")} className="w-full">
-                  <SelectValue placeholder={t("Choose a workflow")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {workflowChoices.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {selectedWorkflow?.description ? (
-                <p className="text-xs text-muted-foreground">
-                  {selectedWorkflow.description}
-                </p>
-              ) : null}
-              {workflowInputFields.map((name) => (
-                <label className="block space-y-1.5" key={name}>
-                  <span className="text-xs font-medium">{name}</span>
-                  <Textarea
-                    onChange={(event) =>
-                      setWorkflowFields((current) => ({
-                        ...current,
-                        [name]: event.target.value,
-                      }))
-                    }
-                    rows={name.toLowerCase().includes("transcript") ? 6 : 3}
-                    value={workflowFields[name] ?? ""}
-                  />
-                </label>
-              ))}
-              {workflowInputFields.length === 0 ? (
-                <p className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
-                  {t(
-                    "This workflow has no named input fields. It receives the structured transcript context directly."
-                  )}
-                </p>
-              ) : null}
-              {workflowTranscriptTruncated ? (
-                <p className="text-xs text-amber-600 dark:text-amber-300">
-                  {t("The transcript exceeds")}{" "}
-                  {TRANSCRIPTION_WORKFLOW_TRANSCRIPT_LIMIT.toLocaleString(
-                    locale
-                  )}{" "}
-                  {t(
-                    "characters. The run includes the opening excerpt and all generated insights."
-                  )}
-                </p>
-              ) : null}
-              {selectedWorkflow?.visibility === "workspace" ? (
-                <p className="text-xs text-muted-foreground">
-                  {t(
-                    "Workspace members can inspect this workflow run and its input."
-                  )}
-                </p>
-              ) : null}
-            </div>
-          )}
-          {workflowError ? (
-            <p className="text-sm text-destructive" role="alert">
-              {t(workflowError)}
-            </p>
-          ) : null}
-          {workflowRunId ? (
-            <p className="text-sm" role="status">
-              {t("Workflow started.")}{" "}
-              <Link
-                className="text-primary underline"
-                href={
-                  "/agents?tab=runs&run=" + encodeURIComponent(workflowRunId)
-                }
-              >
-                {t("Open run")}
-              </Link>
-            </p>
-          ) : null}
+            ) : null}
+          </DialogBody>
           <DialogFooter>
             <Button
               onClick={() => setWorkflowDialogOpen(false)}
@@ -4126,38 +4137,40 @@ export function TranscriptWorkspace({
               {t("in the")} {mediaKind === "video" ? "video" : "transcript"}.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <Select
-              items={[
-                { value: "comment", label: "Comment" },
-                { value: "bookmark", label: "Bookmark" },
-              ]}
-              onValueChange={(value) =>
-                setAnnotationKind(
-                  (value as "bookmark" | "comment") ?? "comment"
-                )
-              }
-              value={annotationKind}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="comment">{t("Comment")}</SelectItem>
-                <SelectItem value="bookmark">{t("Bookmark")}</SelectItem>
-              </SelectContent>
-            </Select>
-            <Textarea
-              autoFocus={annotationKind === "comment"}
-              onChange={(event) => setAnnotationNote(event.target.value)}
-              placeholder={
-                annotationKind === "bookmark"
-                  ? t("Optional note")
-                  : t("What should be reviewed here?")
-              }
-              value={annotationNote}
-            />
-          </div>
+          <DialogBody>
+            <div className="space-y-3">
+              <Select
+                items={[
+                  { value: "comment", label: "Comment" },
+                  { value: "bookmark", label: "Bookmark" },
+                ]}
+                onValueChange={(value) =>
+                  setAnnotationKind(
+                    (value as "bookmark" | "comment") ?? "comment"
+                  )
+                }
+                value={annotationKind}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="comment">{t("Comment")}</SelectItem>
+                  <SelectItem value="bookmark">{t("Bookmark")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Textarea
+                autoFocus={annotationKind === "comment"}
+                onChange={(event) => setAnnotationNote(event.target.value)}
+                placeholder={
+                  annotationKind === "bookmark"
+                    ? t("Optional note")
+                    : t("What should be reviewed here?")
+                }
+                value={annotationNote}
+              />
+            </div>
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={annotationSaving}
@@ -4199,20 +4212,24 @@ export function TranscriptWorkspace({
               )}
             </DialogDescription>
           </DialogHeader>
-          <Field>
-            <FieldLabel>{t("Participants (optional)")}</FieldLabel>
-            <Textarea
-              onChange={(event) => setIdentifyParticipants(event.target.value)}
-              placeholder={"Anna Schmidt, Project lead\nBen Weber, Developer"}
-              rows={5}
-              value={identifyParticipants}
-            />
-            <p className="text-[11px] text-muted-foreground">
-              {t(
-                "One person per line, optionally followed by a comma and a role. Without a list only names spoken in the transcript are used."
-              )}
-            </p>
-          </Field>
+          <DialogBody>
+            <Field>
+              <FieldLabel>{t("Participants (optional)")}</FieldLabel>
+              <Textarea
+                onChange={(event) =>
+                  setIdentifyParticipants(event.target.value)
+                }
+                placeholder={"Anna Schmidt, Project lead\nBen Weber, Developer"}
+                rows={5}
+                value={identifyParticipants}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {t(
+                  "One person per line, optionally followed by a comma and a role. Without a list only names spoken in the transcript are used."
+                )}
+              </p>
+            </Field>
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={identifyRunning}
@@ -4251,64 +4268,66 @@ export function TranscriptWorkspace({
               )}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <p className="mb-1 text-xs font-medium">
-                {t("Merge this speaker")}
-              </p>
-              <Select
-                items={snapshot.speakers
-                  .filter((speaker) => speaker.id !== mergeTargetId)
-                  .map((speaker) => ({
-                    value: speaker.id,
-                    label: speakerName(speaker),
-                  }))}
-                onValueChange={(value) => setMergeSourceId(value ?? "")}
-                value={mergeSourceId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={t("Source")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {snapshot.speakers
+          <DialogBody>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <p className="mb-1 text-xs font-medium">
+                  {t("Merge this speaker")}
+                </p>
+                <Select
+                  items={snapshot.speakers
                     .filter((speaker) => speaker.id !== mergeTargetId)
-                    .map((speaker) => (
-                      <SelectItem key={speaker.id} value={speaker.id}>
-                        {speakerName(speaker)}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <p className="mb-1 text-xs font-medium">
-                {t("Keep this speaker")}
-              </p>
-              <Select
-                items={snapshot.speakers
-                  .filter((speaker) => speaker.id !== mergeSourceId)
-                  .map((speaker) => ({
-                    value: speaker.id,
-                    label: speakerName(speaker),
-                  }))}
-                onValueChange={(value) => setMergeTargetId(value ?? "")}
-                value={mergeTargetId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={t("Target")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {snapshot.speakers
+                    .map((speaker) => ({
+                      value: speaker.id,
+                      label: speakerName(speaker),
+                    }))}
+                  onValueChange={(value) => setMergeSourceId(value ?? "")}
+                  value={mergeSourceId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={t("Source")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {snapshot.speakers
+                      .filter((speaker) => speaker.id !== mergeTargetId)
+                      .map((speaker) => (
+                        <SelectItem key={speaker.id} value={speaker.id}>
+                          {speakerName(speaker)}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium">
+                  {t("Keep this speaker")}
+                </p>
+                <Select
+                  items={snapshot.speakers
                     .filter((speaker) => speaker.id !== mergeSourceId)
-                    .map((speaker) => (
-                      <SelectItem key={speaker.id} value={speaker.id}>
-                        {speakerName(speaker)}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+                    .map((speaker) => ({
+                      value: speaker.id,
+                      label: speakerName(speaker),
+                    }))}
+                  onValueChange={(value) => setMergeTargetId(value ?? "")}
+                  value={mergeTargetId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={t("Target")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {snapshot.speakers
+                      .filter((speaker) => speaker.id !== mergeSourceId)
+                      .map((speaker) => (
+                        <SelectItem key={speaker.id} value={speaker.id}>
+                          {speakerName(speaker)}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          </div>
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={mergeSaving}

@@ -4377,4 +4377,14 @@ export const de = {
   Play: "Abspielen",
   "Summary actions": "Zusammenfassungsaktionen",
   "Audio playback": "Audiowiedergabe",
+  "Download as {value0}": "Als {value0} herunterladen",
+  "There is no summary yet.": "Es gibt noch keine Zusammenfassung.",
+  "The main text of the summary.": "Der Haupttext der Zusammenfassung.",
+  "Sections with their own short summary.":
+    "Abschnitte mit eigener Kurzfassung.",
+  "The subjects that came up.": "Die besprochenen Themen.",
+  "Tasks and decisions to follow up.":
+    "Aufgaben und Entscheidungen zum Nachverfolgen.",
+  "Summary overview": "Überblick",
+  "New transcription": "Neue Transkription",
 } as const

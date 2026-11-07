@@ -11,6 +11,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogBody,
 } from "@/components/panelui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/panelui/input"
@@ -198,123 +199,127 @@ export function SummaryTemplateEditor({
             )}
           </DialogDescription>
         </DialogHeader>
-        {draft ? (
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="team-summary-template-name">
-                {t("Template name")}
-              </FieldLabel>
-              <Input
-                id="team-summary-template-name"
-                maxLength={120}
-                value={draft.name}
-                onChange={(event) =>
-                  onChange({ ...draft, name: event.target.value })
-                }
-                placeholder={t("For example: Plenary debate")}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="team-summary-template-style">
-                {t("What should the summary focus on?")}
-              </FieldLabel>
-              <Textarea
-                id="team-summary-template-style"
-                maxLength={4000}
-                value={draft.instructions}
-                onChange={(event) =>
-                  onChange({ ...draft, instructions: event.target.value })
-                }
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="team-summary-template-rules">
-                {t("What should be left out?")}
-              </FieldLabel>
-              <Textarea
-                id="team-summary-template-rules"
-                className="min-h-40"
-                maxLength={6000}
-                value={draft.exclusionRules}
-                onChange={(event) =>
-                  onChange({ ...draft, exclusionRules: event.target.value })
-                }
-                placeholder={t(
-                  "For example: Leave out purely organizational openings and closings. Keep substantive statements, including from the chair."
-                )}
-              />
-            </Field>
-            <details className="rounded-lg bg-muted p-3">
-              <summary className="cursor-pointer text-sm font-medium">
-                {t("File and appearance")}
-              </summary>
-              <FieldGroup className="mt-3">
-                <Field>
-                  <FieldLabel>{t("File format")}</FieldLabel>
-                  <Select
-                    value={draft.format}
-                    onValueChange={(value) =>
-                      onChange({ ...draft, format: value ?? "pdf" })
-                    }
-                    items={[
-                      { value: "pdf", label: "PDF" },
-                      { value: "docx", label: "Word" },
-                      { value: "md", label: "Markdown" },
-                      { value: "txt", label: t("Plain text") },
-                      { value: "json", label: "JSON" },
-                    ]}
-                  >
-                    <SelectTrigger aria-label={t("File format")}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="pdf">PDF</SelectItem>
-                        <SelectItem value="docx">Word</SelectItem>
-                        <SelectItem value="md">Markdown</SelectItem>
-                        <SelectItem value="txt">{t("Plain text")}</SelectItem>
-                        <SelectItem value="json">JSON</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <div className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      ["summary", "Summary"],
-                      ["chapters", "Chapters"],
-                      ["topics", "Topics"],
-                      ["actionItems", "Action items"],
-                      ["boldSpeakers", "Highlight speaker names"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <Button
-                      key={key}
-                      size="sm"
-                      variant={draft[key] ? "secondary" : "ghost"}
-                      aria-pressed={draft[key]}
-                      onClick={() => onChange({ ...draft, [key]: !draft[key] })}
+        <DialogBody>
+          {draft ? (
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="team-summary-template-name">
+                  {t("Template name")}
+                </FieldLabel>
+                <Input
+                  id="team-summary-template-name"
+                  maxLength={120}
+                  value={draft.name}
+                  onChange={(event) =>
+                    onChange({ ...draft, name: event.target.value })
+                  }
+                  placeholder={t("For example: Plenary debate")}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="team-summary-template-style">
+                  {t("What should the summary focus on?")}
+                </FieldLabel>
+                <Textarea
+                  id="team-summary-template-style"
+                  maxLength={4000}
+                  value={draft.instructions}
+                  onChange={(event) =>
+                    onChange({ ...draft, instructions: event.target.value })
+                  }
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="team-summary-template-rules">
+                  {t("What should be left out?")}
+                </FieldLabel>
+                <Textarea
+                  id="team-summary-template-rules"
+                  className="min-h-40"
+                  maxLength={6000}
+                  value={draft.exclusionRules}
+                  onChange={(event) =>
+                    onChange({ ...draft, exclusionRules: event.target.value })
+                  }
+                  placeholder={t(
+                    "For example: Leave out purely organizational openings and closings. Keep substantive statements, including from the chair."
+                  )}
+                />
+              </Field>
+              <details className="rounded-lg bg-muted p-3">
+                <summary className="cursor-pointer text-sm font-medium">
+                  {t("File and appearance")}
+                </summary>
+                <FieldGroup className="mt-3">
+                  <Field>
+                    <FieldLabel>{t("File format")}</FieldLabel>
+                    <Select
+                      value={draft.format}
+                      onValueChange={(value) =>
+                        onChange({ ...draft, format: value ?? "pdf" })
+                      }
+                      items={[
+                        { value: "pdf", label: "PDF" },
+                        { value: "docx", label: "Word" },
+                        { value: "md", label: "Markdown" },
+                        { value: "txt", label: t("Plain text") },
+                        { value: "json", label: "JSON" },
+                      ]}
                     >
-                      {t(label)}
-                    </Button>
-                  ))}
-                </div>
-              </FieldGroup>
-            </details>
-            {suggested ? (
-              <p className="text-sm text-muted-foreground">
-                {t(
-                  "Check the proposed rule carefully. It is only shared with the team when you save."
-                )}
-              </p>
-            ) : null}
-            {error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {t(error)}
-              </p>
-            ) : null}
-          </FieldGroup>
-        ) : null}
+                      <SelectTrigger aria-label={t("File format")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="pdf">PDF</SelectItem>
+                          <SelectItem value="docx">Word</SelectItem>
+                          <SelectItem value="md">Markdown</SelectItem>
+                          <SelectItem value="txt">{t("Plain text")}</SelectItem>
+                          <SelectItem value="json">JSON</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        ["summary", "Summary"],
+                        ["chapters", "Chapters"],
+                        ["topics", "Topics"],
+                        ["actionItems", "Action items"],
+                        ["boldSpeakers", "Highlight speaker names"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <Button
+                        key={key}
+                        size="sm"
+                        variant={draft[key] ? "secondary" : "ghost"}
+                        aria-pressed={draft[key]}
+                        onClick={() =>
+                          onChange({ ...draft, [key]: !draft[key] })
+                        }
+                      >
+                        {t(label)}
+                      </Button>
+                    ))}
+                  </div>
+                </FieldGroup>
+              </details>
+              {suggested ? (
+                <p className="text-sm text-muted-foreground">
+                  {t(
+                    "Check the proposed rule carefully. It is only shared with the team when you save."
+                  )}
+                </p>
+              ) : null}
+              {error ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {t(error)}
+                </p>
+              ) : null}
+            </FieldGroup>
+          ) : null}
+        </DialogBody>
         <DialogFooter>
           {draft?.id ? (
             <Button

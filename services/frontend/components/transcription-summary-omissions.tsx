@@ -1,7 +1,9 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
+import { Alert } from "@/components/panelui/alert"
 import { Button } from "@/components/panelui/button"
+import { EyeOff } from "lucide-react"
 import { type SummaryOmission } from "@/lib/transcription-summary-standard"
 
 export function SummaryOmissionReview({
@@ -19,6 +21,67 @@ export function SummaryOmissionReview({
 }) {
   const { t } = useTranslations()
   if (!omissions.length) return null
+  const label =
+    omissions.length === 1
+      ? t("1 contribution left out · Review")
+      : t("{value0} contributions left out · Review", {
+          value0: omissions.length,
+        })
+  const list = (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-muted-foreground">
+        {t(
+          "These passages matched the template rules. Restore a passage to include it when creating the summary again."
+        )}
+      </p>
+      {omissions.map((omission, index) => (
+        <div
+          key={omission.segmentIds.join("-")}
+          className="flex flex-col gap-2 rounded-xl bg-background p-3"
+        >
+          <p className="text-xs text-muted-foreground">
+            {omission.speaker ? `${omission.speaker} · ` : ""}
+            {Math.floor(omission.startOffsetMs / 60000)}:
+            {String(Math.floor(omission.startOffsetMs / 1000) % 60).padStart(
+              2,
+              "0"
+            )}
+          </p>
+          <p className="text-sm leading-6">{omission.text}</p>
+          <p className="text-xs text-muted-foreground">{omission.reason}</p>
+          <Button
+            className="self-start"
+            size="sm"
+            variant="outline"
+            disabled={
+              disabled ||
+              omission.segmentIds.every((id) => restoredIds.includes(id))
+            }
+            onClick={() => onRestore(omission.segmentIds)}
+            aria-label={t("Restore contribution {value0}", {
+              value0: index + 1,
+            })}
+          >
+            {t(
+              omission.segmentIds.every((id) => restoredIds.includes(id))
+                ? "Will be included next time"
+                : "Include in summary"
+            )}
+          </Button>
+        </div>
+      ))}
+    </div>
+  )
+  if (!compact)
+    return (
+      <Alert tone="warning" variant="plain">
+        <Alert.Icon>
+          <EyeOff aria-hidden="true" />
+        </Alert.Icon>
+        <Alert.Title>{label}</Alert.Title>
+        <Alert.Details label={t("Review")}>{list}</Alert.Details>
+      </Alert>
+    )
   return (
     <details
       className={

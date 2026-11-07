@@ -32,6 +32,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogBody,
 } from "@/components/panelui/dialog"
 import {
   Field,
@@ -484,38 +485,39 @@ export function SpeakerDetailDialog({
             )}
           </DialogDescription>
         </DialogHeader>
-
-        <SpeakerForm
-          onOpenChange={onOpenChange}
-          onSave={onSave}
-          speaker={speaker}
-        >
-          <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted/50 p-3">
-            <DetailStat label={t("Role")} value={speaker.role} />
-            <DetailStat label={t("Last spoke")} value={speaker.lastSpoke} />
-            <DetailStat label={t("Confidence")} value={speaker.confidence} />
-            <DetailStat label={t("Words")} value={String(speaker.words)} />
-          </div>
-          <Separator />
-          <div className="flex items-start gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
-              <Mic2 data-icon="inline-start" />
+        <DialogBody>
+          <SpeakerForm
+            onOpenChange={onOpenChange}
+            onSave={onSave}
+            speaker={speaker}
+          >
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted/50 p-3">
+              <DetailStat label={t("Role")} value={speaker.role} />
+              <DetailStat label={t("Last spoke")} value={speaker.lastSpoke} />
+              <DetailStat label={t("Confidence")} value={speaker.confidence} />
+              <DetailStat label={t("Words")} value={String(speaker.words)} />
             </div>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold">{speaker.source}</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
-                {speaker.device} · {speaker.location}
-              </p>
-              <div className="mt-2 flex items-center gap-2">
-                <SignalBars accent={speaker.accent} value={speaker.signal} />
-                <span className="text-[11px] text-muted-foreground">
-                  {speaker.signal}
-                  {t("% audio level")}
-                </span>
+            <Separator />
+            <div className="flex items-start gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
+                <Mic2 data-icon="inline-start" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold">{speaker.source}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {speaker.device} · {speaker.location}
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <SignalBars accent={speaker.accent} value={speaker.signal} />
+                  <span className="text-[11px] text-muted-foreground">
+                    {speaker.signal}
+                    {t("% audio level")}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        </SpeakerForm>
+          </SpeakerForm>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   )
