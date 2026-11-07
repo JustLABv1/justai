@@ -287,6 +287,9 @@ func (a *App) assistantUIChat(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, err)
 		return
 	}
+	if !a.enforceUsageLimit(c, organizationID, principal.UserID) {
+		return
+	}
 	// Keep the conversation's route as soon as the turn is accepted. This lets
 	// a user leave and reopen while a stream is in progress (or after a failed
 	// provider response) without falling back to the workspace default.

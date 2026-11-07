@@ -1,5 +1,6 @@
 "use client"
 
+import { ProfileUsageSection } from "@/components/profile-usage-section"
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -766,6 +767,7 @@ export function ProfileView({
           </div>
         )}
       </PageSection>
+      <ProfileUsageSection />
       {profile ? (
         <ActivityHeatmap activity={profile.activity} />
       ) : (

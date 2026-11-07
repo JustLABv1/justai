@@ -1,5 +1,6 @@
 "use client"
 
+import { UsageAdminCard } from "@/components/usage-admin-card"
 import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -559,6 +560,10 @@ export function SettingsView({
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {activeOrganization && isMembersSection && canManageMembers && (
+        <UsageAdminCard organizationId={activeOrganization.id} />
       )}
 
       {activeOrganization && isMembersSection && (

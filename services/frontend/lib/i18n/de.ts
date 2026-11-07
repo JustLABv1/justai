@@ -1,7 +1,8 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
   "LiteLLM API key": "LiteLLM-API-Schlüssel",
-  "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.": "Den LiteLLM-Schlüssel ohne Bearer eingeben. Wird als x-litellm-api-key: Bearer <key> gesendet.",
+  "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.":
+    "Den LiteLLM-Schlüssel ohne Bearer eingeben. Wird als x-litellm-api-key: Bearer <key> gesendet.",
   eventId: "Protokolleintrag-ID",
   "{count} recorded event": "{count} erfasstes Ereignis",
   "{count} failed MCP calls": "{count} fehlgeschlagene MCP-Aufrufe",
@@ -4295,4 +4296,57 @@ export const de = {
   "All recordings": "Alle Aufnahmen",
   "search is limited to 200 characters":
     "Die Suche darf höchstens 200 Zeichen enthalten.",
+  "Usage and limits": "Nutzung und Limits",
+  "Tokens each member used this month. A limit stops new answers once it is reached, until the month resets.":
+    "Tokens, die jedes Mitglied in diesem Monat verbraucht hat. Ist ein Limit erreicht, gibt es bis zum Monatswechsel keine neuen Antworten.",
+  "Default monthly limit per member": "Standard-Monatslimit pro Mitglied",
+  "Applies to everyone without a personal limit. Leave empty or enter 0 for no limit.":
+    "Gilt für alle ohne persönliches Limit. Leer lassen oder 0 eingeben für kein Limit.",
+  "No limit": "Kein Limit",
+  tokens: "Tokens",
+  "Members this month": "Mitglieder in diesem Monat",
+  "Loading usage…": "Nutzung wird geladen…",
+  personal: "persönlich",
+  "Used of the monthly limit": "Vom Monatslimit verbraucht",
+  "Set limit": "Limit festlegen",
+  "Monthly limit": "Monatslimit",
+  "Custom limit": "Eigenes Limit",
+  "Monthly limit in tokens": "Monatslimit in Tokens",
+  "Enter the limit as a whole number of tokens.":
+    "Das Limit als ganze Zahl von Tokens eingeben.",
+  "Usage could not be loaded.": "Die Nutzung konnte nicht geladen werden.",
+  "The limit could not be saved.": "Das Limit konnte nicht gespeichert werden.",
+  "Monthly usage": "Monatliche Nutzung",
+  "This month": "Diesen Monat",
+  "Resets on {value0}.": "Wird am {value0} zurückgesetzt.",
+  "Start with": "Beginne mit",
+  "Waiting for the model…": "Warte auf das Modell…",
+  "Writing the answer…": "Antwort wird geschrieben…",
+  "Add files": "Dateien hinzufügen",
+  Dismiss: "Schließen",
+  "No matching Storage files.": "Keine passenden Speicherdateien.",
+  "No Storage files, notes or transcriptions to reference yet.":
+    "Noch keine Speicherdateien, Notizen oder Transkriptionen zum Verweisen.",
+  "Monthly usage limit reached": "Monatliches Nutzungslimit erreicht",
+  "You have used your token budget for this month. It resets on {value0}, or a workspace admin can raise it.":
+    "Du hast dein Token-Budget für diesen Monat aufgebraucht. Es wird am {value0} zurückgesetzt, oder ein Workspace-Admin kann es erhöhen.",
+  "You have used your token budget for this month.":
+    "Du hast dein Token-Budget für diesen Monat aufgebraucht.",
+  "Monthly usage limit reached. Answers resume on {value0}.":
+    "Monatliches Nutzungslimit erreicht. Antworten sind ab dem {value0} wieder möglich.",
+  "Something went wrong.": "Etwas ist schiefgelaufen.",
+  Usage: "Nutzung",
+  "Tokens your conversations used, counted per month.":
+    "Tokens, die deine Unterhaltungen verbraucht haben, pro Monat gezählt.",
+  "Tokens this month": "Tokens in diesem Monat",
+  "Requests this month": "Anfragen in diesem Monat",
+  "Active days (last 30)": "Aktive Tage (letzte 30)",
+  "of {value0} · resets on {value1}":
+    "von {value0} · wird am {value1} zurückgesetzt",
+  "No limit · resets on {value0}":
+    "Kein Limit · wird am {value0} zurückgesetzt",
+  "No usage in the last 30 days.": "Keine Nutzung in den letzten 30 Tagen.",
+  "Tokens per day, last 30 days": "Tokens pro Tag, letzte 30 Tage",
+  "Tokens per day": "Tokens pro Tag",
+  "Usage this month": "Nutzung in diesem Monat",
 } as const

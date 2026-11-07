@@ -69,6 +69,18 @@ func SupportsToolCalling(endpoint Endpoint) bool {
 // StreamChatWithTools streams an OpenAI Chat Completions response and
 // normalizes streamed text and tool calls for the server turn runner.
 func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolChatOptions, onEvent func(ToolChatEvent) error) error {
+	delivered := false
+	err := streamChatWithToolsOnce(ctx, endpoint, options, func(event ToolChatEvent) error {
+		delivered = true
+		return onEvent(event)
+	}, true)
+	if err != nil && !delivered && rejectsStreamOptions(err) {
+		return streamChatWithToolsOnce(ctx, endpoint, options, onEvent, false)
+	}
+	return err
+}
+
+func streamChatWithToolsOnce(ctx context.Context, endpoint Endpoint, options ToolChatOptions, onEvent func(ToolChatEvent) error, includeUsage bool) error {
 	if !SupportsToolCalling(endpoint) {
 		return fmt.Errorf("provider %s does not expose compatible tool calling", endpoint.ProviderType)
 	}
@@ -133,6 +145,9 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 		"temperature": endpoint.Temperature,
 		"max_tokens":  endpoint.MaxOutputTokens,
 	}
+	if includeUsage {
+		payload["stream_options"] = map[string]any{"include_usage": true}
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -168,6 +183,7 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 		} `json:"function"`
 	}
 	accumulators := map[int]*accumulator{}
+	var finalUsage *Usage
 	seenContent := false
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
@@ -199,8 +215,8 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 			continue
 		}
-		if chunk.Usage != nil && options.OnUsage != nil {
-			options.OnUsage(Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, TotalTokens: chunk.Usage.TotalTokens})
+		if chunk.Usage != nil {
+			finalUsage = &Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, TotalTokens: chunk.Usage.TotalTokens}
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -238,6 +254,11 @@ func StreamChatWithTools(ctx context.Context, endpoint Endpoint, options ToolCha
 	}
 	if err := scanner.Err(); err != nil {
 		return err
+	}
+	// Reported once per call, so a gateway that repeats cumulative usage in
+	// every chunk is not counted more than once.
+	if finalUsage != nil && options.OnUsage != nil {
+		options.OnUsage(*finalUsage)
 	}
 	if len(accumulators) == 0 {
 		if !seenContent {

@@ -22,6 +22,7 @@ import {
   History,
   Pencil,
   AudioLines,
+  Gauge,
   Mic,
   MicOff,
   Plug,
@@ -39,7 +40,6 @@ import {
   AuiConfig,
   ComposerPrimitive,
   type ExportedMessageRepository,
-  ErrorPrimitive,
   McpAppRenderer,
   McpAppsRemoteHost,
   type MessageFormatAdapter,
@@ -91,6 +91,9 @@ import { BrandMark } from "@/components/brand-mark"
 import { ChatBrandMark } from "@/components/chat-brand-mark"
 import { EndpointBadge } from "@/components/endpoint-badge"
 import { Button } from "@/components/ui/button"
+import { UsageIndicator } from "@/components/usage-indicator"
+import { Progress } from "@/components/ui/progress"
+import { usageLimitReached, useUsage } from "@/lib/use-usage"
 import { Menu } from "@/components/panelui/menu"
 import { Message } from "@/components/panelui/message"
 import { Prompt, type PromptCommandItem } from "@/components/panelui/prompt"
@@ -1269,6 +1272,110 @@ function UserMessage() {
   )
 }
 
+/** Servers answer errors as JSON: show the sentence in it, not the JSON. */
+function readChatError(error: unknown): { code?: string; message: string } {
+  const fromObject = (value: unknown): { code?: string; message?: string } => {
+    if (!value || typeof value !== "object") return {}
+    const record = value as Record<string, unknown>
+    const message =
+      typeof record.message === "string"
+        ? record.message
+        : typeof record.error === "string"
+          ? record.error
+          : undefined
+    return {
+      code: typeof record.code === "string" ? record.code : undefined,
+      message,
+    }
+  }
+  let found = fromObject(error)
+  const text = typeof error === "string" ? error : found.message
+  if (text) {
+    try {
+      const parsed = fromObject(JSON.parse(text))
+      if (parsed.message)
+        found = { code: parsed.code ?? found.code, message: parsed.message }
+    } catch {
+      // Not JSON: it is already a sentence.
+    }
+  }
+  return {
+    code: found.code,
+    message: found.message ?? text ?? "Something went wrong.",
+  }
+}
+
+function ChatErrorNotice() {
+  const { t, locale } = useTranslations()
+  const status = useAuiState((state) => state.message.status)
+  const { code, message } = readChatError(
+    status?.type === "incomplete" && status.reason === "error"
+      ? status.error
+      : undefined
+  )
+  const limitReached = code === "usage_limit_reached"
+  const usage = useUsage(limitReached)
+
+  if (!limitReached) {
+    return (
+      <div
+        className="mt-2 flex max-w-4xl items-center rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+        role="alert"
+      >
+        {t(message)}
+      </div>
+    )
+  }
+
+  const resets = usage
+    ? new Intl.DateTimeFormat(locale, {
+        day: "numeric",
+        month: "long",
+        timeZone: "UTC",
+      }).format(new Date(usage.periodEnd))
+    : null
+  const number = new Intl.NumberFormat(locale)
+  return (
+    <div
+      className="mt-3 flex max-w-xl items-start gap-3 rounded-2xl border bg-card p-4"
+      role="alert"
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,var(--warning)_16%,transparent)] text-[var(--warning)]">
+        <Gauge aria-hidden="true" className="size-4.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm leading-6 font-medium">
+          {t("Monthly usage limit reached")}
+        </p>
+        <p className="text-sm leading-6 text-muted-foreground">
+          {resets
+            ? t(
+                "You have used your token budget for this month. It resets on {value0}, or a workspace admin can raise it.",
+                { value0: resets }
+              )
+            : t("You have used your token budget for this month.")}
+        </p>
+        {usage && usage.monthlyTokenLimit !== null && (
+          <div className="mt-3 grid gap-1.5">
+            <Progress
+              aria-label={t("Used of the monthly limit")}
+              className="gap-0 [&_[data-slot=progress-indicator]]:bg-[var(--warning)]"
+              value={Math.min(
+                100,
+                (usage.totalTokens / Math.max(1, usage.monthlyTokenLimit)) * 100
+              )}
+            />
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {number.format(usage.totalTokens)} /{" "}
+              {number.format(usage.monthlyTokenLimit)} {t("tokens")}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function AssistantMessage({ isLatest }: { isLatest: boolean }) {
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
   const startsWithTool = useAuiState(
@@ -1297,9 +1404,7 @@ function AssistantMessage({ isLatest }: { isLatest: boolean }) {
           </div>
           <MessageAttachments />
           <MessagePrimitive.Error>
-            <ErrorPrimitive.Root className="mt-2 flex max-w-4xl items-center rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              <ErrorPrimitive.Message />
-            </ErrorPrimitive.Root>
+            <ChatErrorNotice />
           </MessagePrimitive.Error>
           {!isStreamingMessage ? (
             <div className="flex w-full items-center gap-2">
@@ -2267,11 +2372,12 @@ function Composer({
   voiceError?: string | null
   onVoiceErrorClear?: () => void
 }) {
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
 
   const voiceControls = useVoiceControls()
   const voiceVolume = useVoiceVolume()
   const isThreadRunning = useAuiState((state) => state.thread.isRunning)
+  const usage = useUsage(isThreadRunning)
   const composerAnchor = useRef<HTMLDivElement | null>(null)
   const hasThreadMessages = useAuiState(
     (state) => state.thread.messages.length > 0
@@ -2712,7 +2818,21 @@ function Composer({
               }
             : emptyCommandsText
               ? { text: emptyCommandsText }
-              : null
+              : usageLimitReached(usage)
+                ? {
+                    text: t(
+                      "Monthly usage limit reached. Answers resume on {value0}.",
+                      {
+                        value0: new Intl.DateTimeFormat(locale, {
+                          day: "numeric",
+                          month: "long",
+                          timeZone: "UTC",
+                        }).format(new Date(usage!.periodEnd)),
+                      }
+                    ),
+                    error: true,
+                  }
+                : null
 
   return (
     <div
@@ -3068,6 +3188,7 @@ function Composer({
                             onSelect={onModelSelect}
                             compact={compact}
                           />
+                          <UsageIndicator usage={usage} />
 
                           {isThreadRunning ? (
                             <ComposerPrimitive.Cancel

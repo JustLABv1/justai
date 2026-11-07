@@ -134,7 +134,9 @@ func (a *App) recordChatRunUsage(ctx context.Context, runID uuid.UUID, usage pro
 	}
 	_, err := a.DB.ExecContext(ctx, `
 		UPDATE chat_runs
-		SET input_tokens = $2, output_tokens = $3, total_tokens = $4
+		SET input_tokens = COALESCE(input_tokens, 0) + $2,
+		    output_tokens = COALESCE(output_tokens, 0) + $3,
+		    total_tokens = COALESCE(total_tokens, 0) + CASE WHEN $4 > 0 THEN $4 ELSE $2 + $3 END
 		WHERE id = $1
 	`, runID, usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 	return err
