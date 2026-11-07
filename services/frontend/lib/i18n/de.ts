@@ -1919,7 +1919,7 @@ export const de = {
   "HTTP Basic / auth header": "HTTP Basic / Authentifizierungsheader",
   "mTLS certificate": "mTLS-Zertifikat",
   Username: "Benutzername",
-  "Client secret": "Client-Geheimnis",
+  "Client secret": "Client-Secret",
   "Client certificate": "Client-Zertifikat",
   "Private key": "Privater Schlüssel",
   "Trust read-only operations": "Leseoperationen vertrauen",
@@ -2933,12 +2933,12 @@ export const de = {
   "Authentication request failed": "Authentifizierungsanfrage fehlgeschlagen",
   "OIDC providers": "OIDC-Anbieter",
   "Platform-wide identity providers shown on the login page. Provider secrets are encrypted and never returned to the browser.":
-    "Plattformweite Identitätsanbieter auf der Anmeldeseite. Anbieter-Geheimnisse werden verschlüsselt und nie an den Browser zurückgegeben.",
+    "Plattformweite Identitätsanbieter auf der Anmeldeseite. Client-Secrets werden verschlüsselt und nie an den Browser zurückgegeben.",
   "Add identity provider": "Identitätsanbieter hinzufügen",
   "Refresh OIDC providers": "OIDC-Anbieter aktualisieren",
   "Loading providers…": "Anbieter werden geladen…",
   "No OIDC providers configured.": "Keine OIDC-Anbieter konfiguriert.",
-  "Secret configured": "Geheimnis konfiguriert",
+  "Secret configured": "Client-Secret hinterlegt",
   "Edit OIDC provider": "OIDC-Anbieter bearbeiten",
   "Add OIDC provider": "OIDC-Anbieter hinzufügen",
   "Use the issuer URL from the provider’s OpenID Connect discovery configuration.":
@@ -3906,7 +3906,7 @@ export const de = {
   "Display name, slug, issuer, client ID, and redirect URL are required.":
     "Anzeigename, Kurzkennung, Issuer, Client-ID und Weiterleitungs-URL sind erforderlich.",
   "A client secret is required for a new provider.":
-    "Für einen neuen Anbieter ist ein Client-Geheimnis erforderlich.",
+    "Für einen neuen Anbieter ist ein Client-Secret erforderlich.",
   "Identity provider could not be saved":
     "Identitätsanbieter konnte nicht gespeichert werden",
   "Provider could not be saved.": "Anbieter konnte nicht gespeichert werden.",
@@ -4579,4 +4579,21 @@ export const de = {
   "Type the server name to confirm": "Zur Bestätigung den Servernamen eingeben",
   "OAuth authorization is managed from the owning workspace or personal account.":
     "Die OAuth-Autorisierung wird im zugehörigen Workspace oder persönlichen Konto verwaltet.",
+  "Feature changes are saved automatically and apply across the platform.":
+    "Funktionsänderungen werden automatisch gespeichert und gelten für die gesamte Plattform.",
+  "Manage OpenID Connect providers for platform sign-in.":
+    "OpenID-Connect-Anbieter für die Plattformanmeldung verwalten.",
+  "Provider details": "Anbieterdetails",
+  "Client credentials": "Client-Zugangsdaten",
+  "Sign-in configuration": "Anmeldekonfiguration",
+  "Leave blank to preserve the existing client secret.":
+    "Leer lassen, um das vorhandene Client-Secret beizubehalten.",
+  "Manage platform messages and their publishing schedule.":
+    "Plattformmeldungen und deren Veröffentlichungszeitplan verwalten.",
+  "Message & appearance": "Nachricht und Darstellung",
+  Schedule: "Zeitplan",
+  "Times are shown in your local time zone.":
+    "Die Zeiten werden in deiner lokalen Zeitzone angezeigt.",
+  "Your announcement will appear here.":
+    "Deine Ankündigung wird hier angezeigt.",
 } as const

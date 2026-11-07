@@ -6,12 +6,11 @@ import {
   useTranslatedConfig,
 } from "@/components/locale-provider"
 
-import { type ReactNode, useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   Activity,
   AlertTriangle,
   BarChart3,
-  CheckCircle2,
   ChevronDown,
   Database,
   SlidersHorizontal,
@@ -38,8 +37,13 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { notifyError, notifySuccess } from "@/lib/feedback"
+import {
+  PlatformControlsView,
+  type PlatformControlKey,
+} from "@/components/platform-controls-view"
 import { PlatformWorkspacesView } from "@/components/platform-workspaces-view"
 import { PlatformUsersView } from "@/components/platform-users-view"
+import { PlatformHealthView } from "@/components/platform-health-view"
 import { PlatformAdminDashboard } from "@/components/platform-admin-dashboard"
 import { MCPView } from "@/components/mcp-view"
 import { EndpointsView } from "@/components/endpoints-view"
@@ -50,7 +54,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -58,7 +61,6 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Page, PageActions, PageTitle } from "@/components/ui/page"
-import { SettingsRow, SettingsSection } from "@/components/ui/settings"
 import { Tabs } from "@/components/panelui/tabs"
 import { Button as PanelButton } from "@/components/panelui/button"
 import { Alert as PanelAlert } from "@/components/panelui/alert"
@@ -68,8 +70,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogContent,
@@ -103,11 +103,6 @@ function settingLabel(key: string) {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/^./, (value) => value.toUpperCase())
 }
-
-type PlatformControlKey = Exclude<
-  keyof PlatformSettings,
-  "maintenanceMessage" | "updatedAt"
->
 
 function readAdminParam(key: string, fallback = "") {
   if (typeof window === "undefined") return fallback
@@ -490,7 +485,7 @@ export function PlatformAdminShell({
             />
           )}
           {activeTab === "controls" && (
-            <ControlsView
+            <PlatformControlsView
               settings={settings}
               savingMaintenance={savingMaintenance}
               savingControl={savingControl}
@@ -575,7 +570,7 @@ export function PlatformAdminShell({
               createRequest={mcpCreateRequest}
             />
           )}
-          {activeTab === "health" && <HealthView health={health} />}
+          {activeTab === "health" && <PlatformHealthView health={health} />}
           {activeTab === "analytics" && (
             <div className="flex flex-col gap-4">
               <PlatformAnalyticsView
@@ -603,139 +598,6 @@ export function PlatformAdminShell({
         </Tabs.Content>
       </Tabs>
     </Page>
-  )
-}
-
-function ControlsView({
-  settings,
-  savingMaintenance,
-  savingControl,
-  onChange,
-  onToggle,
-  onSave,
-}: {
-  settings: PlatformSettings
-  savingMaintenance: boolean
-  savingControl: PlatformControlKey | null
-  onChange: (settings: PlatformSettings) => void
-  onToggle: (key: PlatformControlKey, value: boolean) => void
-  onSave: () => void
-}) {
-  const { t } = useTranslations()
-
-  const controls: Array<[PlatformControlKey, string, string]> = [
-    ["loginEnabled", "Login", "Allow existing users to sign in."],
-    [
-      "localAuthEnabled",
-      "Local password auth",
-      "Allow password login and password account creation.",
-    ],
-    ["signupEnabled", "Signup", "Allow new password and OIDC provisioning."],
-    ["aiEnabled", "AI chat", "Allow model requests and text chat."],
-    [
-      "agentsEnabled",
-      t("Agents"),
-      "Allow agent runs, delegation, and workflow scheduling.",
-    ],
-    ["voiceEnabled", t("Voice"), "Allow realtime voice and speech synthesis."],
-    [
-      "transcriptionEnabled",
-      t("Transcription"),
-      "Allow rooms, capture, and processing.",
-    ],
-    ["mcpEnabled", "MCP", "Allow MCP discovery, attachment, and execution."],
-    [
-      "knowledgeEnabled",
-      t("Knowledge"),
-      "Allow source upload, indexing, and retrieval.",
-    ],
-    [
-      "attachmentsEnabled",
-      "Attachments",
-      "Allow file, URL, and text attachments.",
-    ],
-  ]
-  return (
-    <div className="flex flex-col gap-4">
-      {[
-        {
-          title: "Access & registration",
-          description: "Control how people sign in and create accounts.",
-          keys: ["loginEnabled", "localAuthEnabled", "signupEnabled"],
-        },
-        {
-          title: "AI & processing",
-          description: "Choose which AI and processing features are available.",
-          keys: [
-            "aiEnabled",
-            "agentsEnabled",
-            "voiceEnabled",
-            "transcriptionEnabled",
-          ],
-        },
-        {
-          title: "Tools & content",
-          description:
-            "Control access to integrations, knowledge, and attachments.",
-          keys: ["mcpEnabled", "knowledgeEnabled", "attachmentsEnabled"],
-        },
-      ].map((group) => (
-        <SettingsSection
-          key={group.title}
-          description={t(group.description)}
-          title={t(group.title)}
-        >
-          {controls
-            .filter(([key]) => group.keys.includes(key))
-            .map(([key, label, description]) => (
-              <SettingsRow
-                description={t(description)}
-                htmlFor={`platform-control-${key}`}
-                key={key}
-                label={t(label)}
-              >
-                <div className="flex items-center gap-2">
-                  {savingControl === key && (
-                    <span className="text-xs text-muted-foreground">
-                      {t("Saving…")}
-                    </span>
-                  )}
-                  <Switch
-                    checked={Boolean(settings[key])}
-                    disabled={savingControl !== null}
-                    id={`platform-control-${key}`}
-                    onCheckedChange={(checked) => onToggle(key, checked)}
-                  />
-                </div>
-              </SettingsRow>
-            ))}
-        </SettingsSection>
-      ))}
-      <SettingsSection
-        description={t("Shown when a feature is unavailable.")}
-        footer={
-          <Button disabled={savingMaintenance} onClick={onSave}>
-            {t(savingMaintenance ? "Saving…" : "Save maintenance message")}
-          </Button>
-        }
-        title={t("Maintenance message")}
-      >
-        <SettingsRow
-          description={t("Visible to anyone who hits a disabled capability.")}
-          htmlFor="platform-maintenance-message"
-          label={t("Message")}
-        >
-          <Textarea
-            id="platform-maintenance-message"
-            onChange={(event) =>
-              onChange({ ...settings, maintenanceMessage: event.target.value })
-            }
-            placeholder={t("We’re performing maintenance…")}
-            value={settings.maintenanceMessage}
-          />
-        </SettingsRow>
-      </SettingsSection>
-    </div>
   )
 }
 
@@ -786,357 +648,6 @@ function Pagination({
           {t("Next page")}
         </Button>
       </div>
-    </div>
-  )
-}
-
-type HealthState = "healthy" | "warning" | "down" | "unknown"
-
-function healthState(value: any): HealthState {
-  if (typeof value === "boolean") return value ? "healthy" : "down"
-  if (!value || typeof value !== "object") return "unknown"
-
-  const failures = Number(value.recentFailures ?? value.failures ?? 0)
-  if (value.ok === false) return "down"
-  if (failures > 0) return "warning"
-  if (value.ok === true) return "healthy"
-
-  const signals = Object.values(value).filter(
-    (item): item is boolean => typeof item === "boolean"
-  )
-  if (signals.length > 0) return signals.every(Boolean) ? "healthy" : "down"
-  return "unknown"
-}
-
-function HealthStatusBadge({ state }: { state: HealthState }) {
-  const { t } = useTranslations()
-
-  const Icon =
-    state === "healthy"
-      ? CheckCircle2
-      : state === "unknown"
-        ? Activity
-        : AlertTriangle
-  const label =
-    state === "healthy"
-      ? t("Operational")
-      : state === "warning"
-        ? t("Degraded")
-        : state === "down"
-          ? t("Unavailable")
-          : t("Unknown")
-  const variant =
-    state === "healthy"
-      ? "success"
-      : state === "down"
-        ? "destructive"
-        : state === "warning"
-          ? "warning"
-          : "secondary"
-  return (
-    <Badge variant={variant}>
-      <Icon data-icon="inline-start" />
-      {label}
-    </Badge>
-  )
-}
-
-function HealthMetric({
-  label,
-  value,
-  detail,
-}: {
-  label: string
-  value: string
-  detail?: string
-}) {
-  const { t } = useTranslations()
-  return (
-    <div className="min-w-0 py-1">
-      <p className="text-xs text-muted-foreground">{t(label)}</p>
-      <p className="mt-1 text-base font-semibold tracking-tight">{t(value)}</p>
-      {detail && (
-        <p className="mt-0.5 text-xs text-muted-foreground">{t(detail)}</p>
-      )}
-    </div>
-  )
-}
-
-function HealthPanel({
-  title,
-  description,
-  icon: Icon,
-  state,
-  children,
-}: {
-  title: string
-  description: string
-  icon: typeof Activity
-  state: HealthState
-  children: ReactNode
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-            <Icon aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <CardTitle className="text-base">{title}</CardTitle>
-            <CardDescription>{description}</CardDescription>
-          </div>
-        </div>
-        <CardAction>
-          <HealthStatusBadge state={state} />
-        </CardAction>
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
-  )
-}
-
-function HealthView({ health }: { health: Record<string, any> | null }) {
-  const { t, locale } = useTranslations()
-
-  if (!health) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("Service health")}</CardTitle>
-          <CardDescription>
-            {t(
-              "Runtime checks for the platform services and background workers."
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="py-8 text-sm text-muted-foreground">
-          {t("Loading health checks…")}
-        </CardContent>
-      </Card>
-    )
-  }
-
-  const database = health?.database ?? {}
-  const providers = health?.providers ?? {}
-  const mcp = health?.mcp ?? {}
-  const agents = health?.agents ?? {}
-  const workers = health?.workers ?? {}
-  const providerFailures = Number(providers.recentFailures ?? 0)
-  const mcpFailures = Number(mcp.failures ?? 0)
-  const states = [
-    healthState(database),
-    healthState(providers),
-    healthState(mcp),
-    healthState(agents),
-    healthState(workers),
-  ]
-  const overallState = states.includes("down")
-    ? "down"
-    : states.includes("warning")
-      ? "warning"
-      : states.includes("unknown")
-        ? "unknown"
-        : "healthy"
-  const checkedAt =
-    typeof health?.checkedAt === "string" ? new Date(health.checkedAt) : null
-  const checkedLabel =
-    checkedAt && !Number.isNaN(checkedAt.getTime())
-      ? checkedAt.toLocaleTimeString(locale, {
-          hour: "2-digit",
-          minute: "2-digit",
-        })
-      : null
-  const enabledProviders = Number(providers.enabled ?? 0)
-  const totalProviders = Number(providers.total ?? 0)
-  const enabledMcp = Number(mcp.enabled ?? 0)
-  const totalMcp = Number(mcp.total ?? 0)
-  const workerDetails = Array.isArray(workers.details) ? workers.details : []
-  const workerEntries = [
-    ["RAG worker", workers.rag],
-    ["Transcription worker", workers.transcription],
-    ["Agent worker", workers.agents],
-  ] as const
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>{t("Service health")}</CardTitle>
-            <CardDescription>
-              {t(
-                "Runtime checks for the platform services and background workers."
-              )}
-            </CardDescription>
-          </div>
-          <CardAction className="flex flex-col items-end gap-1.5">
-            <HealthStatusBadge state={overallState} />
-            {checkedLabel && (
-              <span className="text-xs text-muted-foreground">
-                {t("Checked at")} {checkedLabel}
-              </span>
-            )}
-          </CardAction>
-        </CardHeader>
-      </Card>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <HealthPanel
-          description={t("PostgreSQL connectivity and readiness.")}
-          icon={Database}
-          state={healthState(database)}
-          title={t("Database")}
-        >
-          <HealthMetric
-            detail="Primary application store"
-            label={t("Connection")}
-            value={database.ok ? "Connected" : "Unavailable"}
-          />
-        </HealthPanel>
-        <HealthPanel
-          description={t(
-            "Configured model endpoints and recent request failures."
-          )}
-          icon={Globe2}
-          state={healthState(providers)}
-          title={t("Providers")}
-        >
-          <div className="grid gap-2 sm:grid-cols-2">
-            <HealthMetric
-              detail={t("{count} configured", { count: totalProviders })}
-              label={t("Enabled")}
-              value={`${enabledProviders} / ${totalProviders}`}
-            />
-            <HealthMetric
-              detail="Last hour"
-              label={t("Recent failures")}
-              value={String(providerFailures)}
-            />
-          </div>
-        </HealthPanel>
-        <HealthPanel
-          description={t("Connected tool servers and MCP execution.")}
-          icon={Wrench}
-          state={healthState(mcp)}
-          title="MCP"
-        >
-          <div className="grid gap-2 sm:grid-cols-2">
-            <HealthMetric
-              detail={t("{count} configured", { count: totalMcp })}
-              label={t("Enabled")}
-              value={`${enabledMcp} / ${totalMcp}`}
-            />
-            <HealthMetric
-              detail="Across configured servers"
-              label={t("Failures")}
-              value={String(mcpFailures)}
-            />
-          </div>
-        </HealthPanel>
-        <HealthPanel
-          description={t(
-            "Agent execution, durable runs, and approval backlog."
-          )}
-          icon={Activity}
-          state={healthState(agents)}
-          title={t("Agents")}
-        >
-          <div className="grid gap-2 sm:grid-cols-3">
-            <HealthMetric
-              detail="Native and remote"
-              label={t("Configured")}
-              value={String(agents.total ?? 0)}
-            />
-            <HealthMetric
-              detail="Currently active"
-              label={t("Runs")}
-              value={String(agents.activeRuns ?? 0)}
-            />
-            <HealthMetric
-              detail="Awaiting a decision"
-              label={t("Approvals")}
-              value={String(agents.pendingApprovals ?? 0)}
-            />
-          </div>
-        </HealthPanel>
-        <HealthPanel
-          description={t(
-            "Background jobs that keep retrieval and transcription moving."
-          )}
-          icon={Activity}
-          state={healthState(workers)}
-          title={t("Workers")}
-        >
-          <div className="grid gap-2 sm:grid-cols-2">
-            {workerEntries.map(([label, value]) => (
-              <div
-                className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2.5"
-                key={label}
-              >
-                <span className="text-sm">{t(label)}</span>
-                <Badge variant={value ? "success" : "destructive"}>
-                  {value ? t("Online") : t("Offline")}
-                </Badge>
-              </div>
-            ))}
-          </div>
-          {workerDetails.length > 0 && (
-            <details className="mt-3 border-t border-border pt-3">
-              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-                {t("Heartbeat diagnostics")}
-              </summary>
-              <div className="mt-3 flex max-h-64 flex-col gap-2 overflow-y-auto">
-                {workerDetails.map((worker: any, index: number) => (
-                  <div
-                    className="flex flex-wrap items-center justify-between gap-2 text-xs"
-                    key={`${worker.name}-${worker.instanceId ?? index}`}
-                  >
-                    <span className="font-medium">
-                      {String(worker.name)
-                        .replace(/[-_]/g, " ")
-                        .replace(/^./, (value) => value.toUpperCase())}
-                      {worker.instanceId
-                        ? ` · ${String(worker.instanceId).slice(0, 8)}`
-                        : ""}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {worker.heartbeatAgeSeconds >= 0
-                        ? t("{value0}s since heartbeat", {
-                            value0: worker.heartbeatAgeSeconds,
-                          })
-                        : worker.started
-                          ? t("Awaiting heartbeat")
-                          : t("Not started")}
-                      {worker.lastError ? ` · ${worker.lastError}` : ""}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </details>
-          )}
-        </HealthPanel>
-      </div>
-
-      {(providerFailures > 0 || mcpFailures > 0) && (
-        <Alert variant="destructive">
-          <AlertTriangle />
-          <AlertTitle>{t("Recent service failures")}</AlertTitle>
-          <AlertDescription>
-            {providerFailures > 0 &&
-              t("{value0} provider {value1} recorded in the last hour.", {
-                value0: providerFailures,
-                value1: t(providerFailures === 1 ? "failure" : "failures"),
-              })}
-            {providerFailures > 0 && mcpFailures > 0 && " "}
-            {mcpFailures > 0 &&
-              t("{value0} MCP {value1} reported.", {
-                value0: mcpFailures,
-                value1: t(mcpFailures === 1 ? "failure" : "failures"),
-              })}
-          </AlertDescription>
-        </Alert>
-      )}
     </div>
   )
 }
