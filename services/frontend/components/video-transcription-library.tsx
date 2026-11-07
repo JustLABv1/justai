@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
@@ -10,29 +11,17 @@ import {
   ChevronRight,
   FileText,
   FileVideo,
-  LoaderCircle,
   Search,
   Upload,
 } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Alert } from "@/components/panelui/alert"
+import { Badge, type BadgeProps } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
+import { Card } from "@/components/panelui/card"
+import { Chip } from "@/components/panelui/chip"
+import { Input } from "@/components/panelui/input"
+import { SectionHeading } from "@/components/section-heading"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VideoTranscriptionThumbnail } from "@/components/video-transcription-thumbnail"
 import { api } from "@/lib/api"
@@ -46,8 +35,36 @@ import {
   videoLibraryStep,
   videoLibraryFilter,
   VIDEO_LIBRARY_FILTERS,
+  type VideoTranscriptionLibraryItem,
   type VideoTranscriptionLibraryPage,
 } from "@/lib/video-transcription-library"
+
+function statusTone(
+  status: VideoTranscriptionLibraryItem["status"]
+): BadgeProps["variant"] {
+  if (status === "completed") return "success"
+  if (status === "failed") return "destructive"
+  if (status === "live") return "info"
+  if (status === "paused" || status === "waiting") return "warning"
+  if (status === "cancelled") return "secondary"
+  return "info"
+}
+
+const FILTER_LABELS = {
+  all: "All recordings",
+  pending: "In progress",
+  completed: "Ready",
+  failed: "Failed",
+  cancelled: "Cancelled",
+} as const
+
+const FILTER_TONES = {
+  all: "primary",
+  pending: "info",
+  completed: "success",
+  failed: "destructive",
+  cancelled: "primary",
+} as const
 
 export function VideoTranscriptionLibrary({
   onCreate,
@@ -173,118 +190,78 @@ export function VideoTranscriptionLibrary({
       aria-labelledby="video-library-title"
       className="mx-auto flex w-full max-w-7xl flex-col gap-6"
     >
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1
-            id="video-library-title"
-            className="text-xl font-semibold tracking-tight"
-          >
-            {t(kind === "live" ? "Your live sessions" : "Your recordings")}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("Pick up where you left off, or add a new recording.")}
-          </p>
-        </div>
-        <Button onClick={onCreate}>
-          {kind === "live" ? (
-            <Mic data-icon="inline-start" />
-          ) : (
-            <Upload data-icon="inline-start" />
-          )}
-          {t(kind === "live" ? "New live session" : "Add recording")}
-        </Button>
-      </header>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative w-full sm:max-w-sm">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-          />
+      <SectionHeading
+        actions={
+          <Button onClick={onCreate}>
+            {kind === "live" ? (
+              <Mic data-icon="inline-start" />
+            ) : (
+              <Upload data-icon="inline-start" />
+            )}
+            {t(kind === "live" ? "New live session" : "Add recording")}
+          </Button>
+        }
+        description={t("Pick up where you left off, or add a new recording.")}
+        id="video-library-title"
+        title={t(kind === "live" ? "Your live sessions" : "Your recordings")}
+      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Input.Group className="w-full sm:w-80">
+          <Input.Addon>
+            <Search aria-hidden="true" />
+          </Input.Addon>
           <Input
             aria-label={t("Search recordings")}
             placeholder={t("Search recordings")}
-            className="pl-9"
             maxLength={200}
             value={searchText}
             onChange={(event) =>
               setSearch({ basis: query, text: event.target.value })
             }
           />
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {data && data.counts.failed > 0 && filter !== "failed" ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-destructive hover:text-destructive"
-              onClick={() =>
-                router.push(libraryPath(1, searchText, "failed"), {
-                  scroll: false,
-                })
-              }
-            >
-              {t("Failed")}{" "}
-              <span className="tabular-nums">{data.counts.failed}</span>
-            </Button>
-          ) : null}
-          <Select
-            value={filter}
-            onValueChange={(value) => {
-              if (value)
-                router.push(
-                  libraryPath(1, searchText, videoLibraryFilter(value)),
-                  { scroll: false }
-                )
-            }}
-          >
-            <SelectTrigger
-              aria-label={t("Filter recordings")}
-              className="min-w-44"
-            >
-              <SelectValue>
-                {t(
-                  {
-                    all: "All recordings",
-                    pending: "In progress",
-                    completed: "Ready",
-                    failed: "Failed",
-                    cancelled: "Cancelled",
-                  }[filter]
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {VIDEO_LIBRARY_FILTERS.filter(
-                (value) => kind !== "live" || value !== "cancelled"
-              ).map((value) => (
-                <SelectItem key={value} value={value}>
-                  {t(
-                    {
-                      all: "All recordings",
-                      pending: "In progress",
-                      completed: "Ready",
-                      failed: "Failed",
-                      cancelled: "Cancelled",
-                    }[value]
-                  )}
-                  {data ? ` (${data.counts[value]})` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        </Input.Group>
+        <Chip.Group
+          aria-label={t("Filter recordings")}
+          multiple={false}
+          onValueChange={(value) => {
+            const next = videoLibraryFilter((value[0] as string) ?? "all")
+            router.push(libraryPath(1, searchText, next), { scroll: false })
+          }}
+          value={[filter]}
+        >
+          {VIDEO_LIBRARY_FILTERS.filter(
+            (value) => kind !== "live" || value !== "cancelled"
+          )
+            .filter(
+              (value) =>
+                value === "all" ||
+                value === filter ||
+                !data ||
+                data.counts[value] > 0
+            )
+            .map((value) => (
+              <Chip
+                color={FILTER_TONES[value]}
+                key={value}
+                size="sm"
+                value={value}
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  {t(FILTER_LABELS[value])}
+                  {data ? (
+                    <span className="text-muted-foreground tabular-nums">
+                      {data.counts[value]}
+                    </span>
+                  ) : null}
+                </span>
+              </Chip>
+            ))}
+        </Chip.Group>
       </div>
-      {data ? (
-        <p className="-mt-3 text-sm text-muted-foreground" role="status">
-          {data.total === 1
-            ? t("1 recording")
-            : t("{value0} recordings", { value0: data.total })}
-        </p>
-      ) : null}
       {error ? (
-        <Alert variant="destructive">
-          <AlertTitle>{t("Your recordings could not be loaded.")}</AlertTitle>
-          <AlertDescription>{t(error)}</AlertDescription>
+        <Alert tone="destructive">
+          <Alert.Title>{t("Your recordings could not be loaded.")}</Alert.Title>
+          <Alert.Description>{t(error)}</Alert.Description>
           <Button
             className="mt-3 justify-self-start"
             size="sm"
@@ -299,10 +276,10 @@ export function VideoTranscriptionLibrary({
         <div
           role="status"
           aria-label={t("Loading recordings…")}
-          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),22rem))] gap-5"
+          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-5"
         >
           {Array.from({ length: 8 }, (_, index) => (
-            <Card key={index} className="gap-0 p-0">
+            <Card key={index} className="gap-0 overflow-hidden p-0">
               <Skeleton className="aspect-video w-full rounded-none motion-reduce:animate-none" />
               <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
                 <Skeleton className="h-4 w-4/5 motion-reduce:animate-none" />
@@ -315,7 +292,7 @@ export function VideoTranscriptionLibrary({
       ) : null}
       {data?.items.length ? (
         <>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),22rem))] gap-5">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-5">
             {data.items.map((item) => (
               <Link
                 key={item.id}
@@ -325,12 +302,12 @@ export function VideoTranscriptionLibrary({
                   item.id
                 )}
                 prefetch={false}
-                className="group w-full rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="group w-full rounded-[22px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <Card className="h-full gap-0 p-0">
+                <Card className="h-full gap-0 overflow-hidden p-0 transition-shadow group-hover:shadow-md">
                   {kind === "live" ? (
                     <div className="flex aspect-video items-center justify-center bg-muted text-muted-foreground">
-                      <AudioLines aria-hidden="true" className="size-12" />
+                      <AudioLines aria-hidden="true" className="size-10" />
                     </div>
                   ) : (
                     <VideoTranscriptionThumbnail
@@ -363,24 +340,25 @@ export function VideoTranscriptionLibrary({
                     <div className="flex items-center gap-2">
                       <Badge
                         className="min-w-0 whitespace-normal"
-                        variant={
-                          item.status === "failed" ? "destructive" : "secondary"
+                        dot={
+                          !(
+                            videoLibraryPending(item.status) &&
+                            !["live", "paused", "waiting"].includes(item.status)
+                          )
                         }
+                        variant={statusTone(item.status)}
                       >
                         {videoLibraryPending(item.status) &&
                         !["live", "paused", "waiting"].includes(item.status) ? (
-                          <LoaderCircle className="size-3 animate-spin" />
+                          <Spinner className="size-3" />
                         ) : null}
                         {t(videoLibraryStep(item))}
                       </Badge>
                       {item.hasSummary ? (
-                        <FileText
-                          className="size-3.5 text-muted-foreground"
-                          aria-label={t("With summary")}
-                          role="img"
-                        >
-                          <title>{t("With summary")}</title>
-                        </FileText>
+                        <Badge size="sm" variant="outline">
+                          <FileText aria-hidden="true" />
+                          {t("With summary")}
+                        </Badge>
                       ) : null}
                     </div>
                   </div>
@@ -403,7 +381,7 @@ export function VideoTranscriptionLibrary({
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
-                  variant="secondary"
+                  variant="outline"
                   disabled={data.page <= 1}
                   onClick={() => changePage(data.page - 1)}
                   aria-label={t("Previous page")}
@@ -419,7 +397,7 @@ export function VideoTranscriptionLibrary({
                 </span>
                 <Button
                   size="sm"
-                  variant="secondary"
+                  variant="outline"
                   disabled={data.page >= pageCount}
                   onClick={() => changePage(data.page + 1)}
                   aria-label={t("Next page")}
@@ -432,42 +410,50 @@ export function VideoTranscriptionLibrary({
           ) : null}
         </>
       ) : data && !error ? (
-        <Empty className="min-h-64 border-0">
-          <EmptyHeader>
-            <FileVideo className="mb-2 size-8 text-muted-foreground" />
-            <EmptyTitle>
-              {t(
-                query || filter !== "all"
-                  ? "No recordings found"
-                  : "Your first recording starts here"
+        <Card className="border-dashed">
+          <Card.Content className="flex min-h-64 flex-col items-center justify-center gap-4 text-center">
+            <span className="rounded-full bg-muted p-3 text-muted-foreground">
+              {kind === "live" ? (
+                <Mic aria-hidden="true" className="size-6" />
+              ) : (
+                <FileVideo aria-hidden="true" className="size-6" />
               )}
-            </EmptyTitle>
-            <EmptyDescription>
-              {t(
-                query || filter !== "all"
-                  ? "Try a different name or clear the search."
-                  : kind === "live"
-                    ? "Start a live session to capture a conversation and create a summary."
-                    : "Add a video to turn it into text and a summary you can share."
-              )}
-            </EmptyDescription>
-          </EmptyHeader>
-          {query || filter !== "all" ? (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setSearch({ basis: query, text: "" })
-                router.replace(libraryPath(1), { scroll: false })
-              }}
-            >
-              {t("Clear filters")}
-            </Button>
-          ) : (
-            <Button variant="secondary" onClick={onCreate}>
-              {t(kind === "live" ? "New live session" : "Add recording")}
-            </Button>
-          )}
-        </Empty>
+            </span>
+            <div className="flex flex-col gap-1">
+              <p className="font-medium">
+                {t(
+                  query || filter !== "all"
+                    ? "No recordings found"
+                    : "Your first recording starts here"
+                )}
+              </p>
+              <p className="max-w-sm text-sm text-muted-foreground">
+                {t(
+                  query || filter !== "all"
+                    ? "Try a different name or clear the search."
+                    : kind === "live"
+                      ? "Start a live session to capture a conversation and create a summary."
+                      : "Add a video to turn it into text and a summary you can share."
+                )}
+              </p>
+            </div>
+            {query || filter !== "all" ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setSearch({ basis: query, text: "" })
+                  router.replace(libraryPath(1), { scroll: false })
+                }}
+              >
+                {t("Clear filters")}
+              </Button>
+            ) : (
+              <Button variant="secondary" onClick={onCreate}>
+                {t(kind === "live" ? "New live session" : "Add recording")}
+              </Button>
+            )}
+          </Card.Content>
+        </Card>
       ) : null}
     </section>
   )

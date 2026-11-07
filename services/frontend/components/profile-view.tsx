@@ -1,13 +1,20 @@
 "use client"
 
-import { LanguageSwitcher } from "@/components/language-switcher"
+import { ProfileUsageSection } from "@/components/profile-usage-section"
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+} from "@/components/panelui/select"
 import { useTranslations } from "@/components/locale-provider"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Bot,
   Camera,
   Check,
-  Clock3,
   Flame,
   KeyRound,
   Link2,
@@ -31,21 +38,25 @@ import type {
   ProfileData,
   User,
 } from "@/lib/types"
-import { cn } from "@/lib/utils"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Frame } from "@/components/panelui/frame"
+import {
+  HeatmapChart,
+  buildHeatmapCalendar,
+  type HeatmapCell,
+} from "@/components/panelui/heatmap-chart"
+import { toast as profileToasts } from "@/components/ui/toast"
+import { Avatar } from "@/components/panelui/avatar"
+import { Stat } from "@/components/panelui/stat"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/panelui/card"
 import {
   Page,
   PageDescription,
@@ -54,17 +65,10 @@ import {
   PageSection,
   PageTitle,
 } from "@/components/ui/page"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import { Dialog } from "@/components/panelui/dialog"
+import { Input } from "@/components/panelui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { avatarToneFor, initialsFor, versionedAvatarURL } from "@/lib/identity"
+import { versionedAvatarURL } from "@/lib/identity"
 
 type ProfileViewProps = {
   user: User
@@ -105,117 +109,75 @@ function deviceLabel(userAgent: string) {
 
 function ActivityHeatmap({ activity }: { activity: ProfileData["activity"] }) {
   const { t, locale } = useTranslations()
-  const dayFormatter = new Intl.DateTimeFormat(locale, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
-
-  const days = useMemo(() => {
-    const counts = new Map(activity.map((day) => [day.date, day.count]))
+  const calendar = useMemo(() => {
     const end = new Date()
     end.setHours(12, 0, 0, 0)
     const start = new Date(end)
-    start.setDate(start.getDate() - 364 - start.getDay())
-    const result: Array<{ date: Date; key: string; count: number }> = []
-    const cursor = new Date(start)
-    while (cursor <= end) {
-      const key = dateKey(cursor)
-      result.push({ date: new Date(cursor), key, count: counts.get(key) ?? 0 })
-      cursor.setDate(cursor.getDate() + 1)
-    }
-    return result
+    start.setDate(start.getDate() - 364)
+    return buildHeatmapCalendar(
+      activity.map((day) => ({
+        date: new Date(`${day.date}T12:00:00`),
+        count: day.count,
+      })),
+      { start, end, weekStartDay: 1 }
+    )
   }, [activity])
-  const max = Math.max(1, ...days.map((day) => day.count))
-  const total = activity.reduce((sum, day) => sum + day.count, 0)
-
+  const formatCell = (cell: HeatmapCell) =>
+    cell.date
+      ? t("{value0} actions on {value1}", {
+          value0: cell.count,
+          value1: cell.date.toLocaleDateString(locale, {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          }),
+        })
+      : ""
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle className="text-base">{t("Your year in JustAI")}</CardTitle>
-        <CardDescription>
-          {total.toLocaleString(locale)} {t("actions across the last 365 days")}
-        </CardDescription>
-        <CardAction>
+    <Frame variant="band">
+      <Frame.Header>
+        <Frame.Title>{t("Your year in JustAI")}</Frame.Title>
+        <Frame.Description>
+          {activity
+            .reduce((sum, day) => sum + day.count, 0)
+            .toLocaleString(locale)}{" "}
+          {t("actions across the last 365 days")}
+        </Frame.Description>
+        <Frame.Action>
           <Badge variant="secondary">
             {activity.filter((day) => day.count > 0).length} {t("active days")}
           </Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto pb-1">
-          <div className="mx-auto flex w-max min-w-[720px] gap-2">
-            <div className="grid grid-rows-7 gap-1 pt-5 text-[10px] leading-3 text-muted-foreground">
-              <span />
-              <span>{t("Mon")}</span>
-              <span />
-              <span>{t("Wed")}</span>
-              <span />
-              <span>{t("Fri")}</span>
-              <span />
-            </div>
-            <div>
-              <div className="mb-2 flex justify-between text-[10px] text-muted-foreground">
-                <span>{dayFormatter.format(days[0]?.date ?? new Date())}</span>
-                <span>{t("Today")}</span>
-              </div>
-              <div
-                className="grid grid-flow-col grid-rows-7 gap-1"
-                aria-label={t("Activity over the last year")}
-              >
-                {days.map((day) => {
-                  const ratio = day.count / max
-                  const level =
-                    day.count === 0
-                      ? 0
-                      : ratio > 0.66
-                        ? 4
-                        : ratio > 0.33
-                          ? 3
-                          : ratio > 0.12
-                            ? 2
-                            : 1
-                  return (
-                    <span
-                      aria-label={t("{value0} actions on {value1}", {
-                        value0: day.count,
-                        value1: dayFormatter.format(day.date),
-                      })}
-                      className={cn(
-                        "size-2.5 rounded-[3px] bg-muted sm:size-3",
-                        level === 1 && "bg-primary/25",
-                        level === 2 && "bg-primary/45",
-                        level === 3 && "bg-primary/70",
-                        level === 4 && "bg-primary"
-                      )}
-                      key={day.key}
-                      role="img"
-                      title={t("{value0} actions on {value1}", {
-                        value0: day.count,
-                        value1: dayFormatter.format(day.date),
-                      })}
-                    />
-                  )
-                })}
-              </div>
-            </div>
-          </div>
+        </Frame.Action>
+      </Frame.Header>
+      <Frame.Panel className="p-4">
+        <div className="overflow-x-auto">
+          <HeatmapChart
+            data={calendar}
+            weekStartDay={1}
+            color="primary"
+            label={t("Activity over the last year")}
+            formatCellLabel={formatCell}
+            animationDuration={0}
+          >
+            <HeatmapChart.XAxis
+              formatLabel={(date) =>
+                date.toLocaleDateString(locale, { month: "short" })
+              }
+            />
+            <HeatmapChart.YAxis
+              labels={Array.from({ length: 7 }, (_, index) =>
+                new Date(2026, 0, 5 + index).toLocaleDateString(locale, {
+                  weekday: "short",
+                })
+              )}
+            />
+            <HeatmapChart.Cells />
+            <HeatmapChart.Tooltip formatLabel={formatCell} />
+            <HeatmapChart.Legend lessLabel={t("Less")} moreLabel={t("More")} />
+          </HeatmapChart>
         </div>
-        <div className="mt-4 flex items-center justify-end gap-1.5 text-[10px] text-muted-foreground">
-          <span>{t("Less")}</span>
-          {[
-            "bg-muted",
-            "bg-primary/25",
-            "bg-primary/45",
-            "bg-primary/70",
-            "bg-primary",
-          ].map((color) => (
-            <span className={cn("size-2.5 rounded-[3px]", color)} key={color} />
-          ))}
-          <span>{t("More")}</span>
-        </div>
-      </CardContent>
-    </Card>
+      </Frame.Panel>
+    </Frame>
   )
 }
 
@@ -224,7 +186,7 @@ export function ProfileView({
   organization,
   onUserChange,
 }: ProfileViewProps) {
-  const { t, locale } = useTranslations()
+  const { t, locale, setLocale } = useTranslations()
   const dayFormatter = new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
@@ -248,8 +210,24 @@ export function ProfileView({
   const [identities, setIdentities] = useState<AccountIdentity[]>([])
   const [accountLoading, setAccountLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
-  const [notice, setNotice] = useState("")
+  const showErrorToast = useCallback(
+    (message: string) => {
+      if (message)
+        profileToasts.add({
+          title: t(message),
+          type: "destructive",
+          priority: "high",
+          timeout: 10000,
+        })
+    },
+    [t]
+  )
+  const showSuccessToast = useCallback(
+    (message: string) => {
+      if (message) profileToasts.add({ title: t(message), type: "success" })
+    },
+    [t]
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -267,14 +245,14 @@ export function ProfileView({
       .catch((caught) => {
         if (caught instanceof APIError && caught.code === "request_aborted")
           return
-        setError(
+        showErrorToast(
           caught instanceof Error
             ? caught.message
             : "Profile activity could not be loaded."
         )
       })
     return () => controller.abort()
-  }, [user.avatarVersion, user.id])
+  }, [user.avatarVersion, user.id, showErrorToast])
 
   useEffect(() => {
     let cancelled = false
@@ -289,7 +267,7 @@ export function ProfileView({
       })
       .catch((caught) => {
         if (!cancelled) {
-          setError(
+          showErrorToast(
             caught instanceof Error
               ? caught.message
               : "Account security details could not be loaded."
@@ -302,7 +280,7 @@ export function ProfileView({
     return () => {
       cancelled = true
     }
-  }, [user.id])
+  }, [user.id, showErrorToast])
 
   useEffect(() => {
     return () => {
@@ -310,20 +288,17 @@ export function ProfileView({
     }
   }, [pendingAvatar])
 
-  const initials = initialsFor(user.displayName)
   const avatarSrc = versionedAvatarURL(avatarURL, avatarVersion)
   const streak = profile ? calculateStreak(profile.activity) : 0
 
   function prepareAvatar(file: File | undefined) {
     if (!file) return
-    setError("")
-    setNotice("")
     if (file.size > 2 * 1024 * 1024) {
-      setError("Profile pictures are limited to 2 MB.")
+      showErrorToast("Profile pictures are limited to 2 MB.")
       return
     }
     if (!file.type.startsWith("image/")) {
-      setError("Choose a PNG, JPEG, GIF, or WebP image.")
+      showErrorToast("Choose a PNG, JPEG, GIF, or WebP image.")
       return
     }
     if (pendingAvatar) URL.revokeObjectURL(pendingAvatar.previewURL)
@@ -337,7 +312,6 @@ export function ProfileView({
   }
 
   async function uploadAvatar(file: File) {
-    setError("")
     setBusy(true)
     try {
       const body = new FormData()
@@ -363,10 +337,10 @@ export function ProfileView({
         avatarUrl: result.avatarUrl,
         avatarVersion: nextVersion,
       })
-      setNotice("Profile picture updated.")
+      showSuccessToast("Profile picture updated.")
       cancelAvatarPreview()
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "The profile picture could not be uploaded."
@@ -379,7 +353,6 @@ export function ProfileView({
 
   async function removeAvatar() {
     setBusy(true)
-    setError("")
     try {
       await api.delete("/api/v1/profile/avatar")
       setProfile((current) =>
@@ -389,9 +362,9 @@ export function ProfileView({
       setAvatarVersion("")
       onUserChange?.({ ...user, avatarUrl: "", avatarVersion: "" })
       setRemoveAvatarOpen(false)
-      setNotice("Profile picture removed.")
+      showSuccessToast("Profile picture removed.")
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "The profile picture could not be removed."
@@ -405,13 +378,11 @@ export function ProfileView({
     event.preventDefault()
     const nextName = displayName.trim()
     if (!nextName) {
-      setError("Display name is required.")
+      showErrorToast("Display name is required.")
       return
     }
     if (nextName === user.displayName) return
     setSavingName(true)
-    setError("")
-    setNotice("")
     try {
       const result = await api.patch<{ user: User }>("/api/v1/profile", {
         displayName: nextName,
@@ -419,9 +390,9 @@ export function ProfileView({
       setDisplayName(result.user.displayName)
       onUserChange?.({ ...user, ...result.user })
       setEditingName(false)
-      setNotice("Display name updated.")
+      showSuccessToast("Display name updated.")
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "Display name could not be updated."
@@ -434,13 +405,12 @@ export function ProfileView({
   async function revokeSession(session: AccountSession) {
     if (session.current) return
     setBusy(true)
-    setError("")
     try {
       await api.delete(`/api/v1/auth/sessions/${session.id}`)
       setSessions((current) => current.filter((item) => item.id !== session.id))
-      setNotice("Device signed out.")
+      showSuccessToast("Device signed out.")
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "Device could not be signed out."
@@ -452,13 +422,12 @@ export function ProfileView({
 
   async function revokeOtherSessions() {
     setBusy(true)
-    setError("")
     try {
       await api.post("/api/v1/auth/sessions/revoke-others")
       setSessions((current) => current.filter((session) => session.current))
-      setNotice("Other devices have been signed out.")
+      showSuccessToast("Other devices have been signed out.")
     } catch (caught) {
-      setError(
+      showErrorToast(
         caught instanceof Error
           ? caught.message
           : "Other devices could not be signed out."
@@ -486,7 +455,7 @@ export function ProfileView({
         },
         {
           label: t("Longest streak"),
-          value: `${profile.stats.longestStreak ?? streak} days`,
+          value: `${profile.stats.longestStreak ?? streak} ${(profile.stats.longestStreak ?? streak) === 1 ? t("day") : t("days")}`,
           icon: Flame,
         },
         {
@@ -526,41 +495,20 @@ export function ProfileView({
           </PageDescription>
         </PageHeading>
       </PageHeader>
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
-      )}
-      {notice && (
-        <Alert aria-live="polite">
-          <Check />
-          <AlertDescription>{t(notice)}</AlertDescription>
-        </Alert>
-      )}
       <Card>
         <CardContent className="flex flex-col gap-5 sm:flex-row sm:items-center">
           <div className="relative self-start">
-            <Avatar className="size-20!">
-              {avatarSrc && (
-                <AvatarImage
-                  src={resolveAPIURL(avatarSrc)}
-                  alt={t("{value0}'s profile picture", {
-                    value0: user.displayName,
-                  })}
-                />
-              )}
-              <AvatarFallback
-                className={cn("text-xl font-medium", avatarToneFor(user.id))}
-              >
-                {initials}
-              </AvatarFallback>
-            </Avatar>
+            <Avatar
+              className="size-20!"
+              name={user.displayName}
+              src={avatarSrc ? resolveAPIURL(avatarSrc) : undefined}
+            />
             <Button
               aria-label={t("Upload profile picture")}
               className="absolute -right-0.5 -bottom-0.5 size-7! rounded-full [&_svg]:size-3.5!"
               disabled={busy}
               onClick={() => inputRef.current?.click()}
-              size="icon-xs"
+              size="icon-sm"
             >
               <Camera aria-hidden="true" />
             </Button>
@@ -594,7 +542,7 @@ export function ProfileView({
                   <Button
                     aria-label={t("Save display name")}
                     disabled={savingName || !displayName.trim()}
-                    size="icon-xs"
+                    size="icon-sm"
                     type="submit"
                   >
                     <Check />
@@ -606,7 +554,7 @@ export function ProfileView({
                       setDisplayName(user.displayName)
                       setEditingName(false)
                     }}
-                    size="icon-xs"
+                    size="icon-sm"
                     type="button"
                     variant="ghost"
                   >
@@ -621,7 +569,7 @@ export function ProfileView({
                   <Button
                     aria-label={t("Edit display name")}
                     onClick={() => setEditingName(true)}
-                    size="icon-xs"
+                    size="icon-sm"
                     variant="ghost"
                   >
                     <Pencil />
@@ -648,7 +596,7 @@ export function ProfileView({
                 : t("Loading membership details…")}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 sm:self-start">
+          <div className="flex flex-wrap items-center gap-2 sm:self-start">
             <Button
               disabled={busy}
               onClick={() => inputRef.current?.click()}
@@ -672,36 +620,69 @@ export function ProfileView({
           </div>
         </CardContent>
       </Card>
-      <div className="flex justify-end">
-        <LanguageSwitcher />
-      </div>
+      <Frame>
+        <Frame.Panel>
+          <Frame.Row className="flex-wrap gap-3">
+            <Frame.Content>
+              <Frame.Title as="p">{t("Language")}</Frame.Title>
+              <Frame.Description>
+                {t("Choose the language used throughout JustAI.")}
+              </Frame.Description>
+            </Frame.Content>
+            <Frame.Actions>
+              <Select
+                value={locale}
+                onValueChange={(value) => {
+                  if (value === "de" || value === "en") setLocale(value)
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-40"
+                  aria-label={t("Choose language")}
+                >
+                  <SelectValue>
+                    {locale === "de" ? "Deutsch" : "English"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="de">Deutsch</SelectItem>
+                    <SelectItem value="en">English</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Frame.Actions>
+          </Frame.Row>
+        </Frame.Panel>
+      </Frame>
       <Dialog
         open={Boolean(pendingAvatar)}
         onOpenChange={(open) => {
           if (!open && !busy) cancelAvatarPreview()
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("Preview profile picture")}</DialogTitle>
-            <DialogDescription>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>{t("Preview profile picture")}</Dialog.Title>
+            <Dialog.Description>
               {t(
                 "The square crop keeps your face centered in account menus and member lists."
               )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="mx-auto flex size-48 items-center justify-center overflow-hidden rounded-full bg-muted">
-            {pendingAvatar && (
-              <Avatar className="size-48">
-                <AvatarImage
-                  alt={t("Profile picture preview")}
-                  className="size-full object-cover"
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Body>
+            <div className="mx-auto flex size-48 items-center justify-center overflow-hidden rounded-full bg-muted">
+              {pendingAvatar && (
+                <Avatar
+                  className="size-48!"
+                  name={user.displayName}
                   src={pendingAvatar.previewURL}
                 />
-              </Avatar>
-            )}
-          </div>
-          <DialogFooter>
+              )}
+            </div>
+          </Dialog.Body>
+          <Dialog.Footer>
             <Button
               disabled={busy}
               onClick={cancelAvatarPreview}
@@ -719,8 +700,8 @@ export function ProfileView({
               <Check data-icon="inline-start" />
               {busy ? t("Uploading…") : t("Use this photo")}
             </Button>
-          </DialogFooter>
-        </DialogContent>
+          </Dialog.Footer>
+        </Dialog.Content>
       </Dialog>
       <ConfirmActionDialog
         confirmLabel={t("Remove photo")}
@@ -739,21 +720,15 @@ export function ProfileView({
       >
         {profile ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {statCards.map(({ label, value, icon: Icon }) => (
+            {statCards.map(({ label, value }) => (
               <Card size="sm" key={label}>
-                <CardHeader>
-                  <CardDescription>{label}</CardDescription>
-                  <CardAction>
-                    <Icon
-                      className="size-4 text-muted-foreground"
-                      aria-hidden="true"
-                    />
-                  </CardAction>
-                </CardHeader>
                 <CardContent>
-                  <p className="font-heading text-2xl font-semibold tracking-tight">
-                    {value}
-                  </p>
+                  <Stat>
+                    <Stat.Content>
+                      <Stat.Label>{label}</Stat.Label>
+                      <Stat.Value size="sm">{value}</Stat.Value>
+                    </Stat.Content>
+                  </Stat>
                 </CardContent>
               </Card>
             ))}
@@ -766,84 +741,88 @@ export function ProfileView({
           </div>
         )}
       </PageSection>
+      <ProfileUsageSection />
       {profile ? (
         <ActivityHeatmap activity={profile.activity} />
       ) : (
         <Skeleton className="h-56 rounded-2xl" />
       )}
       {profile && (
-        <div className="grid gap-3 md:grid-cols-3">
-          <Card size="sm">
-            <CardHeader>
-              <Sparkles className="mb-2 size-5 text-primary" />
-              <CardTitle>
-                {profile.stats.conversations.toLocaleString(locale)}{" "}
-                {t("conversations")}
-              </CardTitle>
-              <CardDescription>
-                {t("Threads you have started and shaped.")}
-              </CardDescription>
-            </CardHeader>
-          </Card>
-          <Card size="sm">
-            <CardHeader>
-              <Clock3 className="mb-2 size-5 text-primary" />
-              <CardTitle>
-                {profile.stats.transcriptionMinutes.toLocaleString(locale)}{" "}
-                {t("minutes captured")}
-              </CardTitle>
-              <CardDescription>
-                {t("Time turned into searchable transcripts.")}
-              </CardDescription>
-            </CardHeader>
-          </Card>
-          <Card size="sm">
-            <CardHeader>
-              <Flame className="mb-2 size-5 text-primary" />
-              <CardTitle>
-                {profile.activity.filter((day) => day.count > 0).length}{" "}
-                {t("active days")}
-              </CardTitle>
-              <CardDescription>
-                {t("Days you made something happen this year.")}
-              </CardDescription>
-            </CardHeader>
-          </Card>
-          <Card size="sm">
-            <CardHeader>
-              <Bot className="mb-2 size-5 text-primary" />
-              <CardTitle>
-                {profile.stats.favoriteAgent || "No favorite agent yet"}
-              </CardTitle>
-              <CardDescription>
-                {t("Most-used saved agent by conversation.")}
-              </CardDescription>
-            </CardHeader>
-          </Card>
-          <Card size="sm">
-            <CardHeader>
-              <KeyRound className="mb-2 size-5 text-primary" />
-              <CardTitle>
-                {profile.stats.favoriteModel || "No model preference yet"}
-              </CardTitle>
-              <CardDescription>
-                {t("Model used most often in completed runs.")}
-              </CardDescription>
-            </CardHeader>
-          </Card>
-          <Card size="sm">
-            <CardHeader>
-              <Sparkles className="mb-2 size-5 text-primary" />
-              <CardTitle>
-                {profile.stats.milestones?.length
-                  ? profile.stats.milestones.join(" · ")
-                  : t("First milestone ahead")}
-              </CardTitle>
-              <CardDescription>
-                {t("Milestones based on your activity this year.")}
-              </CardDescription>
-            </CardHeader>
-          </Card>
+        <div className="flex flex-col gap-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              {
+                label: t("conversations"),
+                value: profile.stats.conversations,
+                description: t("Threads you have started and shaped."),
+              },
+              {
+                label: t("minutes captured"),
+                value: profile.stats.transcriptionMinutes,
+                description: t("Time turned into searchable transcripts."),
+              },
+              {
+                label: t("active days"),
+                value: profile.activity.filter((day) => day.count > 0).length,
+                description: t("Days you made something happen this year."),
+              },
+            ].map((item) => (
+              <Frame variant="band" key={item.label}>
+                <Frame.Panel className="flex h-full flex-col gap-3 p-4">
+                  <Stat>
+                    <Stat.Content>
+                      <Stat.Label>{item.label}</Stat.Label>
+                      <Stat.Value size="lg">
+                        {item.value.toLocaleString(locale)}
+                      </Stat.Value>
+                    </Stat.Content>
+                  </Stat>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {item.description}
+                  </p>
+                </Frame.Panel>
+              </Frame>
+            ))}
+          </div>
+          <Frame>
+            <Frame.Panel>
+              {[
+                {
+                  label: t("Favorite agent"),
+                  value:
+                    profile.stats.favoriteAgent || t("No favorite agent yet"),
+                  description: t("Most-used saved agent by conversation."),
+                },
+                {
+                  label: t("Favorite model"),
+                  value:
+                    profile.stats.favoriteModel || t("No model preference yet"),
+                  description: t("Model used most often in completed runs."),
+                },
+                {
+                  label: t("Milestones"),
+                  value: profile.stats.milestones?.length
+                    ? profile.stats.milestones.join(" · ")
+                    : t("First milestone ahead"),
+                  description: t(
+                    "Milestones based on your activity this year."
+                  ),
+                },
+              ].map((item) => (
+                <Frame.Row key={item.label} className="flex-wrap gap-y-2 py-4">
+                  <Frame.Content>
+                    <Frame.Title as="p">{item.label}</Frame.Title>
+                    <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                      {item.description}
+                    </Frame.Description>
+                  </Frame.Content>
+                  <p className="max-w-full text-sm font-medium break-words sm:max-w-[50%]">
+                    {item.value}
+                  </p>
+                </Frame.Row>
+              ))}
+            </Frame.Panel>
+          </Frame>
         </div>
       )}
       <PageSection
@@ -853,20 +832,14 @@ export function ProfileView({
         )}
       >
         <div className="grid items-start gap-3 lg:grid-cols-2">
-          <Card className="h-full" size="sm">
-            <CardHeader>
-              <CardTitle>{t("Sessions and devices")}</CardTitle>
-              <CardDescription>
+          <Frame className="h-full">
+            <Frame.Header>
+              <Frame.Title>{t("Sessions and devices")}</Frame.Title>
+              <Frame.Description>
                 {t("Review devices with access to your account.")}
-              </CardDescription>
-              <CardAction>
-                <MonitorSmartphone
-                  aria-hidden="true"
-                  className="size-4 text-muted-foreground"
-                />
-              </CardAction>
-            </CardHeader>
-            <CardContent>
+              </Frame.Description>
+            </Frame.Header>
+            <Frame.Panel className="px-4 pb-4">
               {accountLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Skeleton className="size-8 rounded-full" />{" "}
@@ -917,9 +890,9 @@ export function ProfileView({
                   ))}
                 </div>
               )}
-            </CardContent>
-            <CardFooter className="flex-wrap justify-between gap-2 border-t">
-              <Button onClick={() => void logout()} size="sm" variant="outline">
+            </Frame.Panel>
+            <Frame.Footer className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Button onClick={() => void logout()} size="sm" variant="ghost">
                 <LogOut data-icon="inline-start" />
                 {t("Sign out")}
               </Button>
@@ -927,24 +900,18 @@ export function ProfileView({
                 disabled={busy || accountLoading || sessions.length < 2}
                 onClick={() => void revokeOtherSessions()}
                 size="sm"
-                variant="ghost"
+                variant="outline"
               >
                 {t("Sign out other devices")}
               </Button>
-            </CardFooter>
-          </Card>
+            </Frame.Footer>
+          </Frame>
           <Card className="h-full" size="sm">
             <CardHeader>
               <CardTitle>{t("Linked sign-in methods")}</CardTitle>
               <CardDescription>
                 {t("Identity providers connected to your account.")}
               </CardDescription>
-              <CardAction>
-                <Link2
-                  aria-hidden="true"
-                  className="size-4 text-muted-foreground"
-                />
-              </CardAction>
             </CardHeader>
             <CardContent>
               {accountLoading ? (

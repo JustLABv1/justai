@@ -1,7 +1,8 @@
 /** English source messages are stable translation keys. Keep placeholders identical. */
 export const de = {
   "LiteLLM API key": "LiteLLM-API-Schlüssel",
-  "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.": "Den LiteLLM-Schlüssel ohne Bearer eingeben. Wird als x-litellm-api-key: Bearer <key> gesendet.",
+  "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.":
+    "Den LiteLLM-Schlüssel ohne Bearer eingeben. Wird als x-litellm-api-key: Bearer <key> gesendet.",
   eventId: "Protokolleintrag-ID",
   "{count} recorded event": "{count} erfasstes Ereignis",
   "{count} failed MCP calls": "{count} fehlgeschlagene MCP-Aufrufe",
@@ -652,6 +653,7 @@ export const de = {
   "Platform admin": "Plattformverwaltung",
   Profile: "Profil",
   "Sign out": "Abmelden",
+  "Disable seasons": "Jahreszeiten deaktivieren",
   "Recent chats": "Letzte Chats",
   "New chat": "Neuer Chat",
   "Your conversations will appear here.":
@@ -1917,7 +1919,7 @@ export const de = {
   "HTTP Basic / auth header": "HTTP Basic / Authentifizierungsheader",
   "mTLS certificate": "mTLS-Zertifikat",
   Username: "Benutzername",
-  "Client secret": "Client-Geheimnis",
+  "Client secret": "Client-Secret",
   "Client certificate": "Client-Zertifikat",
   "Private key": "Privater Schlüssel",
   "Trust read-only operations": "Leseoperationen vertrauen",
@@ -2931,12 +2933,12 @@ export const de = {
   "Authentication request failed": "Authentifizierungsanfrage fehlgeschlagen",
   "OIDC providers": "OIDC-Anbieter",
   "Platform-wide identity providers shown on the login page. Provider secrets are encrypted and never returned to the browser.":
-    "Plattformweite Identitätsanbieter auf der Anmeldeseite. Anbieter-Geheimnisse werden verschlüsselt und nie an den Browser zurückgegeben.",
+    "Plattformweite Identitätsanbieter auf der Anmeldeseite. Client-Secrets werden verschlüsselt und nie an den Browser zurückgegeben.",
   "Add identity provider": "Identitätsanbieter hinzufügen",
   "Refresh OIDC providers": "OIDC-Anbieter aktualisieren",
   "Loading providers…": "Anbieter werden geladen…",
   "No OIDC providers configured.": "Keine OIDC-Anbieter konfiguriert.",
-  "Secret configured": "Geheimnis konfiguriert",
+  "Secret configured": "Client-Secret hinterlegt",
   "Edit OIDC provider": "OIDC-Anbieter bearbeiten",
   "Add OIDC provider": "OIDC-Anbieter hinzufügen",
   "Use the issuer URL from the provider’s OpenID Connect discovery configuration.":
@@ -3904,7 +3906,7 @@ export const de = {
   "Display name, slug, issuer, client ID, and redirect URL are required.":
     "Anzeigename, Kurzkennung, Issuer, Client-ID und Weiterleitungs-URL sind erforderlich.",
   "A client secret is required for a new provider.":
-    "Für einen neuen Anbieter ist ein Client-Geheimnis erforderlich.",
+    "Für einen neuen Anbieter ist ein Client-Secret erforderlich.",
   "Identity provider could not be saved":
     "Identitätsanbieter konnte nicht gespeichert werden",
   "Provider could not be saved.": "Anbieter konnte nicht gespeichert werden.",
@@ -4295,4 +4297,337 @@ export const de = {
   "All recordings": "Alle Aufnahmen",
   "search is limited to 200 characters":
     "Die Suche darf höchstens 200 Zeichen enthalten.",
+  "Usage and limits": "Nutzung und Limits",
+  "Tokens each member used this month. A limit stops new answers once it is reached, until the month resets.":
+    "Tokens, die jedes Mitglied in diesem Monat verbraucht hat. Ist ein Limit erreicht, gibt es bis zum Monatswechsel keine neuen Antworten.",
+  "Default monthly limit per member": "Standard-Monatslimit pro Mitglied",
+  "Applies to everyone without a personal limit. Leave empty or enter 0 for no limit.":
+    "Gilt für alle ohne persönliches Limit. Leer lassen oder 0 eingeben für kein Limit.",
+  "No limit": "Kein Limit",
+  tokens: "Tokens",
+  "Members this month": "Mitglieder in diesem Monat",
+  "Loading usage…": "Nutzung wird geladen…",
+  personal: "persönlich",
+  "Used of the monthly limit": "Vom Monatslimit verbraucht",
+  "Set limit": "Limit festlegen",
+  "Monthly limit": "Monatslimit",
+  "Custom limit": "Eigenes Limit",
+  "Monthly limit in tokens": "Monatslimit in Tokens",
+  "Enter the limit as a whole number of tokens.":
+    "Das Limit als ganze Zahl von Tokens eingeben.",
+  "Usage could not be loaded.": "Die Nutzung konnte nicht geladen werden.",
+  "The limit could not be saved.": "Das Limit konnte nicht gespeichert werden.",
+  "Monthly usage": "Monatliche Nutzung",
+  "This month": "Diesen Monat",
+  "Resets on {value0}.": "Wird am {value0} zurückgesetzt.",
+  "Start with": "Beginne mit",
+  "Waiting for the model…": "Warte auf das Modell…",
+  "Writing the answer…": "Antwort wird geschrieben…",
+  "Add files": "Dateien hinzufügen",
+  Dismiss: "Schließen",
+  "No matching Storage files.": "Keine passenden Speicherdateien.",
+  "No Storage files, notes or transcriptions to reference yet.":
+    "Noch keine Speicherdateien, Notizen oder Transkriptionen zum Verweisen.",
+  "Monthly usage limit reached": "Monatliches Nutzungslimit erreicht",
+  "You have used your token budget for this month. It resets on {value0}, or a workspace admin can raise it.":
+    "Du hast dein Token-Budget für diesen Monat aufgebraucht. Es wird am {value0} zurückgesetzt, oder ein Workspace-Admin kann es erhöhen.",
+  "You have used your token budget for this month.":
+    "Du hast dein Token-Budget für diesen Monat aufgebraucht.",
+  "Monthly usage limit reached. Answers resume on {value0}.":
+    "Monatliches Nutzungslimit erreicht. Antworten sind ab dem {value0} wieder möglich.",
+  "Something went wrong.": "Etwas ist schiefgelaufen.",
+  Usage: "Nutzung",
+  "Tokens your conversations used, counted per month.":
+    "Tokens, die deine Unterhaltungen verbraucht haben, pro Monat gezählt.",
+  "Tokens this month": "Tokens in diesem Monat",
+  "Requests this month": "Anfragen in diesem Monat",
+  "Active days (last 30)": "Aktive Tage (letzte 30)",
+  "of {value0} · resets on {value1}":
+    "von {value0} · wird am {value1} zurückgesetzt",
+  "No limit · resets on {value0}":
+    "Kein Limit · wird am {value0} zurückgesetzt",
+  "No usage in the last 30 days.": "Keine Nutzung in den letzten 30 Tagen.",
+  "Tokens per day, last 30 days": "Tokens pro Tag, letzte 30 Tage",
+  "Tokens per day": "Tokens pro Tag",
+  "Usage this month": "Nutzung in diesem Monat",
+  "{value0} remote": "{value0} remote",
+  "Reusable multi-step runs": "Wiederverwendbare mehrstufige Abläufe",
+  "{value0} running": "{value0} laufend",
+  Remote: "Remote",
+  "Filter agents by kind": "Agenten nach Art filtern",
+  "Reusable workflow": "Wiederverwendbarer Workflow",
+  "Open builder": "Builder öffnen",
+  "Pick a ready-made graph and adjust it in the builder.":
+    "Wähle einen fertigen Ablauf und passe ihn im Builder an.",
+  nodes: "Knoten",
+  "More actions for {value0}": "Weitere Aktionen für {value0}",
+  "Add agent node": "Agentenknoten hinzufügen",
+  Draft: "Entwurf",
+  "Edit workflow": "Workflow bearbeiten",
+  "Focus on the graph": "Auf den Graphen fokussieren",
+  "No agent selected": "Kein Agent ausgewählt",
+  "Show panels": "Panels anzeigen",
+  "Workflow inspector": "Workflow-Inspektor",
+  "Workflow tools": "Workflow-Werkzeuge",
+  Inspector: "Inspektor",
+  "Open conversation": "Unterhaltung öffnen",
+  "Resize side panel": "Seitenleiste in der Größe ändern",
+  "Hide video": "Video ausblenden",
+  "Show video": "Video einblenden",
+  Play: "Abspielen",
+  "Summary actions": "Zusammenfassungsaktionen",
+  "Audio playback": "Audiowiedergabe",
+  "Download as {value0}": "Als {value0} herunterladen",
+  "There is no summary yet.": "Es gibt noch keine Zusammenfassung.",
+  "The main text of the summary.": "Der Haupttext der Zusammenfassung.",
+  "Sections with their own short summary.":
+    "Abschnitte mit eigener Kurzfassung.",
+  "The subjects that came up.": "Die besprochenen Themen.",
+  "Tasks and decisions to follow up.":
+    "Aufgaben und Entscheidungen zum Nachverfolgen.",
+  "Summary overview": "Überblick",
+  "New transcription": "Neue Transkription",
+  Replace: "Ersetzen",
+  "Remove video": "Video entfernen",
+  "Drop your video here or click to browse":
+    "Zieh dein Video hierher oder klicke zum Auswählen",
+  "Choose a video to continue.": "Wähle ein Video, um fortzufahren.",
+  "Select a transcription endpoint.": "Wähle einen Transkriptions-Endpunkt.",
+  "Start transcription": "Transkription starten",
+  "You can follow the progress on the next page.":
+    "Den Fortschritt siehst du auf der nächsten Seite.",
+  "Your video is sent securely.": "Dein Video wird sicher übertragen.",
+  "Who is talking is labelled in the text.":
+    "Wer spricht, wird im Text gekennzeichnet.",
+  "Wording is cleaned up; the original stays.":
+    "Formulierungen werden geglättet; das Original bleibt erhalten.",
+  "Create one once the transcript is ready.":
+    "Erstelle sie, sobald das Transkript fertig ist.",
+  "No endpoint selected": "Kein Endpunkt ausgewählt",
+  "Detect automatically": "Automatisch erkennen",
+  "{value0} / {value1} MB uploaded": "{value0} / {value1} MB hochgeladen",
+  "{value0} / {value1} audio blocks transcribed":
+    "{value0} / {value1} Audioblöcke transkribiert",
+  "{value0} / {value1} caption images analyzed":
+    "{value0} / {value1} Einblendungsbilder analysiert",
+  "{value0} / {value1} text blocks polished":
+    "{value0} / {value1} Textblöcke geglättet",
+  "Waiting for caption analysis · {value0} images selected":
+    "Warte auf die Einblendungsanalyse · {value0} Bilder ausgewählt",
+  "{value0} s": "{value0} s",
+  "{value0} min": "{value0} Min.",
+  "{value0} h {value1} min": "{value0} Std. {value1} Min.",
+  "{value0} elapsed": "{value0} vergangen",
+  "about {value0} left": "noch etwa {value0}",
+  "Estimating the remaining time…": "Restzeit wird geschätzt …",
+  "{value0} in progress": "{value0} läuft",
+  "under 1 s": "unter 1 s",
+  "{value0} min {value1} s": "{value0} Min. {value1} s",
+  "Step {value0} of {value1}": "Schritt {value0} von {value1}",
+  Discard: "Verwerfen",
+  "No file chosen": "Keine Datei ausgewählt",
+  "Current original": "Aktuelles Original",
+  "Word, Excel, PowerPoint, PDF and more":
+    "Word, Excel, PowerPoint, PDF und mehr",
+  "Remove file": "Datei entfernen",
+  "Choose file": "Datei auswählen",
+  "File or URL": "Datei oder URL",
+  Note: "Notiz",
+  "Select {value0}": "{value0} auswählen",
+  "Clear selection": "Auswahl aufheben",
+  "Remove yourself from this workspace.": "Entferne dich aus diesem Workspace.",
+  "Hide this workspace without deleting its content.":
+    "Blendet diesen Workspace aus, ohne seine Inhalte zu löschen.",
+  "Permanently remove it and its content. This cannot be undone.":
+    "Entfernt ihn und seine Inhalte endgültig. Das kann nicht rückgängig gemacht werden.",
+  "Save server": "Server speichern",
+  "{value0} endpoints · {value1} active": "{value0} Endpunkte · {value1} aktiv",
+  "Tested {value0}": "Getestet am {value0}",
+  Images: "Bilder",
+  Speech: "Sprache",
+  Multimodal: "Multimodal",
+  "Endpoint pagination": "Endpunkt-Seitennavigation",
+  "Text-to-speech": "Sprachausgabe",
+  Own: "Eigene",
+  "Check & save": "Prüfen & speichern",
+  "What do you want to connect?": "Was möchtest du verbinden?",
+  "Where is it, and who may use it?": "Wo läuft es, und wer darf es nutzen?",
+  "Check the connection, then save.": "Verbindung prüfen, dann speichern.",
+  "Language model": "Sprachmodell",
+  "Chat, vision, embeddings, images, transcription and speech.":
+    "Chat, Bildverständnis, Embeddings, Bilder, Transkription und Sprache.",
+  "Tells speakers apart in transcriptions.":
+    "Unterscheidet Sprecher in Transkriptionen.",
+  "Logo, routing, models, timeouts and defaults.":
+    "Logo, Routing, Modelle, Zeitlimits und Standards.",
+  Behavior: "Verhalten",
+  "Save anyway": "Trotzdem speichern",
+  "Choose the model used for chat.": "Wähle das Modell für Chats.",
+  "A dedicated pyannote.audio speaker-diarization service.":
+    "Ein eigener pyannote.audio-Dienst zur Sprechertrennung.",
+  "Selected at request time": "Wird bei der Anfrage ausgewählt",
+  "Service-selected pipeline": "Wird vom Dienst ausgewählt",
+  "Saving checks the connection first. You can also test it here.":
+    "Beim Speichern wird die Verbindung zuerst geprüft. Du kannst sie auch hier testen.",
+  "LiteLLM, vLLM, LM Studio, OpenRouter, or another gateway.":
+    "LiteLLM, vLLM, LM Studio, OpenRouter oder ein anderes Gateway.",
+  "Verification skipped": "Überprüfung übersprungen",
+  "You can save this endpoint without a successful preflight. JustAI will use the saved connection as configured.":
+    "Du kannst diesen Endpunkt ohne erfolgreiche Verbindungsprüfung speichern. JustAI verwendet die Verbindung wie eingerichtet.",
+  "Optional capabilities, API routing and runtime limits.":
+    "Optionale Funktionen, API-Routing und Laufzeitgrenzen.",
+  "Choose discovered model": "Erkanntes Modell auswählen",
+  "Browse models": "Modelle durchsuchen",
+  "Choose whether this endpoint is available and used by default for new chats.":
+    "Lege fest, ob dieser Endpunkt verfügbar ist und standardmäßig für neue Chats verwendet wird.",
+  "{count} of {total} servers": "{count} von {total} Servern",
+  "{count} tools": "{count} Tools",
+  "Manual attachment": "Manuell hinzufügen",
+  "Authorization needed": "Anmeldung erforderlich",
+  "Discovered tools": "Erkannte Tools",
+  "Hide tools": "Tools ausblenden",
+  "View tools": "Tools ansehen",
+  "Last tested {value0}": "Zuletzt getestet: {value0}",
+  "No matching MCP servers": "Keine passenden MCP-Server",
+  "Try another search or reset the filters.":
+    "Versuche eine andere Suche oder setze die Filter zurück.",
+  "Connect a remote MCP server to bring its tools into your chats.":
+    "Verbinde einen MCP-Server, um seine Tools in deinen Chats zu verwenden.",
+  "Platform-managed servers can only be edited in the platform catalog.":
+    "Von der Plattform verwaltete Server können nur im Plattformkatalog bearbeitet werden.",
+  "Connect a remote server and choose how its tools are available in your workspace.":
+    "Verbinde einen Server und lege fest, wie seine Tools in deinem Workspace verfügbar sind.",
+  "Tool access": "Tool-Zugriff",
+  "OAuth overrides": "OAuth-Anpassungen",
+  "Usually discovered automatically. Change only when your provider requires it.":
+    "Wird normalerweise automatisch erkannt. Nur ändern, wenn dein Anbieter es erfordert.",
+  "Suggest relevant tools in chats. Calls still require approval.":
+    "Passende Tools in Chats vorschlagen. Aufrufe erfordern weiterhin eine Freigabe.",
+  "Paste the remote MCP URL provided by your service.":
+    "Füge die MCP-URL deines Anbieters ein.",
+  "Connect server": "Server verbinden",
+  "{count} tools discovered.": "{count} Tools erkannt.",
+  "{value0} responded successfully.": "{value0} hat erfolgreich geantwortet.",
+  "Connection verified. {count} tools discovered.":
+    "Verbindung geprüft. {count} Tools erkannt.",
+  "The server was saved, but verification needs attention.":
+    "Der Server wurde gespeichert, aber die Verbindung konnte nicht bestätigt werden.",
+  "Authorize OAuth to verify the connection.":
+    "Melde dich per OAuth an, um die Verbindung zu prüfen.",
+  "{value0} was saved.": "{value0} wurde gespeichert.",
+  "Allowed tools (optional)": "Erlaubte Tools (optional)",
+  "Enter tool names separated by commas. Leave empty to allow all tools under the approval policy.":
+    "Tool-Namen durch Kommas trennen. Leer lassen, um alle Tools gemäß den Freigaberegeln zu erlauben.",
+  "Only fill these in if automatic sign-in setup fails.":
+    "Nur ausfüllen, wenn die automatische Einrichtung der Anmeldung fehlschlägt.",
+  "Monthly token allowance": "Monatliches Token-Budget",
+  "Applies to members without a personal limit.":
+    "Gilt für Mitglieder ohne persönliches Limit.",
+  "Leave empty or enter 0 for no limit.":
+    "Leer lassen oder 0 eingeben für kein Limit.",
+  "Save default": "Standard speichern",
+  "Usage resets each month. Members at their limit cannot start new answers.":
+    "Die Nutzung wird monatlich zurückgesetzt. Bei erreichtem Limit sind keine neuen Antworten möglich.",
+  "{count} members": "{count} Mitglieder",
+  "{count} member": "{count} Mitglied",
+  "No member usage yet this month.":
+    "Noch keine Mitgliedernutzung in diesem Monat.",
+  "Monthly tokens": "Monatliche Tokens",
+  "Monthly limit reached": "Monatslimit erreicht",
+  "Personal setting": "Persönliche Einstellung",
+  "Set limit for {value0}": "Limit für {value0} festlegen",
+  "This member has no monthly token cap.":
+    "Für dieses Mitglied gilt kein monatliches Token-Limit.",
+  "Set a monthly token allowance for this member.":
+    "Ein monatliches Token-Budget für dieses Mitglied festlegen.",
+  "Default limit saved.": "Standardlimit gespeichert.",
+  "Member limit saved.": "Mitgliedslimit gespeichert.",
+  "You have unsaved changes.": "Du hast ungespeicherte Änderungen.",
+  "Saved retention settings are applied automatically.":
+    "Gespeicherte Aufbewahrungsregeln werden automatisch angewendet.",
+  "Download a copy of your personal data as JSON.":
+    "Lade eine Kopie deiner persönlichen Daten als JSON herunter.",
+  "Clean up old data": "Alte Daten bereinigen",
+  "Apply your saved retention settings now.":
+    "Wende deine gespeicherten Aufbewahrungsregeln jetzt an.",
+  "Data older than your saved retention limits will be permanently removed. Data with a retention of 0 is kept.":
+    "Daten, die älter als die gespeicherten Aufbewahrungsfristen sind, werden dauerhaft entfernt. Daten mit einer Frist von 0 bleiben erhalten.",
+  "Cleanup complete: {conversations} archived chats, {knowledge} knowledge sources, and {transcripts} transcripts removed.":
+    "Bereinigung abgeschlossen: {conversations} archivierte Chats, {knowledge} Wissensquellen und {transcripts} Transkripte entfernt.",
+  "Updated {value0}": "Aktualisiert: {value0}",
+  "Last 30 days · daily requests": "Letzte 30 Tage · tägliche Anfragen",
+  "Daily platform requests over the last 30 days":
+    "Tägliche Plattformanfragen der letzten 30 Tage",
+  "Platform inventory": "Plattformbestand",
+  "Manage people, workspaces and connections.":
+    "Personen, Workspaces und Verbindungen verwalten.",
+  "Manage accounts and access across the platform.":
+    "Konten und Zugriffsrechte auf der gesamten Plattform verwalten.",
+  "Changing platform administrator access affects every workspace and platform control.":
+    "Änderungen am Plattformadministratorzugriff betreffen alle Workspaces und die gesamte Plattformverwaltung.",
+  "{count} user": "{count} Person",
+  "{count} users": "{count} Personen",
+  "Workspace directory": "Workspace-Verzeichnis",
+  "Manage workspaces, members and access across the platform.":
+    "Workspaces, Mitglieder und Zugriffsrechte auf der gesamten Plattform verwalten.",
+  "{count} workspace": "{count} Workspace",
+  "{count} workspaces": "{count} Workspaces",
+  "A workspace or user ID is required for this scope.":
+    "Für diesen Bereich ist eine Workspace- oder Benutzer-ID erforderlich.",
+  "Assign this server to a specific workspace or user.":
+    "Diesen Server einem bestimmten Workspace oder Benutzer zuweisen.",
+  "Type the server name to confirm": "Zur Bestätigung den Servernamen eingeben",
+  "OAuth authorization is managed from the owning workspace or personal account.":
+    "Die OAuth-Autorisierung wird im zugehörigen Workspace oder persönlichen Konto verwaltet.",
+  "Feature changes are saved automatically and apply across the platform.":
+    "Funktionsänderungen werden automatisch gespeichert und gelten für die gesamte Plattform.",
+  "Manage OpenID Connect providers for platform sign-in.":
+    "OpenID-Connect-Anbieter für die Plattformanmeldung verwalten.",
+  "Provider details": "Anbieterdetails",
+  "Client credentials": "Client-Zugangsdaten",
+  "Sign-in configuration": "Anmeldekonfiguration",
+  "Leave blank to preserve the existing client secret.":
+    "Leer lassen, um das vorhandene Client-Secret beizubehalten.",
+  "Manage platform messages and their publishing schedule.":
+    "Plattformmeldungen und deren Veröffentlichungszeitplan verwalten.",
+  "Message & appearance": "Nachricht und Darstellung",
+  "Times are shown in your local time zone.":
+    "Die Zeiten werden in deiner lokalen Zeitzone angezeigt.",
+  "Your announcement will appear here.":
+    "Deine Ankündigung wird hier angezeigt.",
+  "Worker instances and the time since their last reported heartbeat.":
+    "Worker-Instanzen und die Zeit seit ihrem letzten gemeldeten Heartbeat.",
+  "Worker instances": "Worker-Instanzen",
+  "Heartbeat received": "Heartbeat empfangen",
+  "Last heartbeat": "Letzter Heartbeat",
+  "Worker type": "Worker-Typ",
+  "{healthy} healthy \u00b7 {unhealthy} need attention":
+    "{healthy} funktionsfähig · {unhealthy} mit Handlungsbedarf",
+  "Stale heartbeat": "Heartbeat veraltet",
+  "Audit log": "Audit-Protokoll",
+  "Inspect recorded platform actions and their request details.":
+    "Aufgezeichnete Plattformaktionen und die zugehörigen Anfragedetails prüfen.",
+  "Event metadata": "Ereignis-Metadaten",
+  "Select date": "Datum auswählen",
+  "All actions": "Alle Aktionen",
+  "All resource types": "Alle Ressourcentypen",
+  "Filter options could not be loaded.":
+    "Filteroptionen konnten nicht geladen werden.",
+  "Favorite agent": "Bevorzugter Agent",
+  "Favorite model": "Bevorzugtes Modell",
+  Milestones: "Meilensteine",
+  "No favorite agent yet": "Noch kein bevorzugter Agent",
+  "No model preference yet": "Noch kein bevorzugtes Modell",
+  "Choose the language used throughout JustAI.":
+    "Wähle die Sprache für die gesamte JustAI-Oberfläche.",
+  "Hello, {name}": "Hallo, {name}",
+  "Hello there": "Hallo",
+  "Welcome back, {name}": "Willkommen zurück, {name}",
+  "What shall we work on, {name}?": "Was gehen wir heute an, {name}?",
+  "What’s on your mind, {name}?": "Was beschäftigt dich, {name}?",
+  "Ready for your next idea, {name}?": "Bereit für deine nächste Idee, {name}?",
+  "Good morning, {name}": "Guten Morgen, {name}",
+  "Good afternoon, {name}": "Guten Tag, {name}",
+  "Good evening, {name}": "Guten Abend, {name}",
+  "Your name": "Dein Name",
 } as const

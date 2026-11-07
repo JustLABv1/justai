@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import {
   useTranslations,
@@ -6,7 +7,6 @@ import {
 } from "@/components/locale-provider"
 
 import {
-  memo,
   type ReactNode,
   useCallback,
   useEffect,
@@ -24,17 +24,15 @@ import {
   Clock3,
   Cloud,
   GitBranch,
-  KeyRound,
   Link2,
   ListChecks,
-  Maximize2,
   MessageSquare,
-  Minimize2,
+  MoreHorizontal,
   LockKeyhole,
-  Play,
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   ShieldCheck,
   Sparkles,
   Terminal,
@@ -42,33 +40,11 @@ import {
   UserRound,
   X,
 } from "lucide-react"
-import {
-  applyNodeChanges,
-  Background,
-  Controls,
-  Handle,
-  MiniMap,
-  Position,
-  ReactFlow,
-  type Connection,
-  type Edge,
-  type Node,
-  type NodeChange,
-  type NodeProps,
-} from "@xyflow/react"
-
-import "@xyflow/react/dist/style.css"
-
 import { layoutAgentGraph } from "@/lib/agent-graph-layout"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { RunFiles } from "@/components/agent-run-files"
+import { Inspector } from "@/components/panelui/inspector"
+import { WorkflowEditor, WorkflowRunGraph } from "@/components/workflow-editor"
+import { AgentsPanel } from "@/components/agents-directory"
 import { api, resolveAPIURL } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import { StaticAssistantMarkdown } from "@/components/assistant-ui/markdown-text"
@@ -99,26 +75,33 @@ import type {
   MCPServer,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert as PuAlert } from "@/components/panelui/alert"
+import { Card as PuCard } from "@/components/panelui/card"
+import { Frame } from "@/components/panelui/frame"
+import { Menu } from "@/components/panelui/menu"
+import { Stat } from "@/components/panelui/stat"
+import { Tabs as PuTabs } from "@/components/panelui/tabs"
+import { Badge } from "@/components/panelui/badge"
+import { Chip } from "@/components/panelui/chip"
+import { Checkbox } from "@/components/panelui/checkbox"
+import { Button } from "@/components/panelui/button"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+} from "@/components/panelui/dialog"
 import {
   Field,
   FieldDescription,
@@ -127,8 +110,7 @@ import {
   FieldSet,
   FieldLegend,
 } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import { FilterBar } from "@/components/ui/filter-bar"
+import { Input } from "@/components/panelui/input"
 import {
   Page,
   PageActions,
@@ -143,7 +125,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetDescription,
-} from "@/components/ui/sheet"
+} from "@/components/panelui/sheet"
 import { Progress } from "@/components/ui/progress"
 import {
   Collapsible,
@@ -157,11 +139,10 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@/components/panelui/select"
 import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/panelui/switch"
+import { Textarea } from "@/components/panelui/textarea"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 type AgentsViewProps = {
@@ -225,6 +206,12 @@ type FlowNodeData = {
   instruction: string
   status?: string
   selected?: boolean
+}
+
+type GraphNode = {
+  id: string
+  position: { x: number; y: number }
+  data: FlowNodeData
 }
 
 type DeleteTarget =
@@ -494,21 +481,24 @@ function cloneWorkflow(workflow: AgentWorkflow): WorkflowDraft {
 
 function badgeVariant(
   status: string
-): "default" | "secondary" | "destructive" | "outline" {
+):
+  | "default"
+  | "secondary"
+  | "destructive"
+  | "outline"
+  | "success"
+  | "info"
+  | "warning" {
   if (
-    [
-      "failed",
-      "cancelled",
-      "disabled",
-      "degraded",
-      "expired",
-      "rejected",
-    ].includes(status)
+    ["failed", "disabled", "degraded", "expired", "rejected"].includes(status)
   )
     return "destructive"
-  if (["completed", "approved", "ready"].includes(status)) return "default"
-  if (["running", "waiting_approval", "pending", "queued"].includes(status))
-    return "secondary"
+  if (["completed", "approved", "ready", "active", "enabled"].includes(status))
+    return "success"
+  if (status === "running") return "info"
+  if (["waiting_approval", "pending", "queued"].includes(status))
+    return "warning"
+  if (status === "cancelled") return "secondary"
   return "outline"
 }
 
@@ -632,126 +622,6 @@ function parseDelimitedList(value: string) {
 
 function formatDelimitedList(value: string[] | undefined) {
   return (value ?? []).join(", ")
-}
-
-const AgentFlowNode = memo(function AgentFlowNode({
-  data,
-}: NodeProps<Node<FlowNodeData>>) {
-  return (
-    <div
-      className={cn(
-        "w-60 rounded-xl bg-card px-3 py-2 shadow-sm",
-        data.selected && "border-primary ring-2 ring-primary/20"
-      )}
-    >
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="size-2! bg-primary"
-      />
-      <div className="flex items-start gap-2">
-        <div className="rounded-lg bg-primary/10 p-1.5 text-primary">
-          <Bot data-icon="inline-start" />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-xs font-semibold">{data.label}</p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {data.agentName || "No agent selected"}
-          </p>
-        </div>
-      </div>
-      <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">
-        {data.instruction}
-      </p>
-      {data.status && (
-        <Badge className="mt-2" variant={badgeVariant(data.status)}>
-          {statusLabel(data.status)}
-        </Badge>
-      )}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="size-2! bg-primary"
-      />
-    </div>
-  )
-})
-
-const flowNodeTypes = { agent: AgentFlowNode }
-
-function WorkflowCanvas({
-  nodes,
-  edges,
-  disabled,
-  onConnect,
-  onSelectNode,
-  onPositionChange,
-}: {
-  nodes: Node<FlowNodeData>[]
-  edges: Edge[]
-  disabled: boolean
-  onConnect: (connection: Connection) => void
-  onSelectNode: (id: string) => void
-  onPositionChange: (id: string, position: { x: number; y: number }) => void
-}) {
-  // Keep pointer-move state inside the canvas. The parent owns the durable
-  // position snapshot, but does not re-render the editor on every drag frame.
-  const [localNodes, setLocalNodes] = useState(nodes)
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setLocalNodes((current) => {
-        const currentByID = new Map(current.map((node) => [node.id, node]))
-        const next = nodes.map((node) => {
-          const existing = currentByID.get(node.id)
-          return existing ? { ...existing, ...node } : node
-        })
-        const unchanged =
-          next.length === current.length &&
-          next.every((node, index) => {
-            const previous = current[index]
-            return (
-              previous.id === node.id &&
-              previous.position.x === node.position.x &&
-              previous.position.y === node.position.y &&
-              previous.data === node.data
-            )
-          })
-        return unchanged ? current : next
-      })
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [nodes])
-
-  const handleNodesChange = useCallback(
-    (changes: NodeChange<Node<FlowNodeData>>[]) => {
-      setLocalNodes((current) => applyNodeChanges(changes, current))
-    },
-    []
-  )
-
-  return (
-    <div className="h-[560px] min-h-0 w-full flex-1">
-      <ReactFlow
-        nodes={localNodes}
-        edges={edges}
-        nodeTypes={flowNodeTypes}
-        onNodesChange={handleNodesChange}
-        onConnect={onConnect}
-        nodesDraggable={!disabled}
-        nodesConnectable={!disabled}
-        onlyRenderVisibleElements
-        onNodeClick={(_, node) => onSelectNode(node.id)}
-        onNodeDragStop={(_, node) => onPositionChange(node.id, node.position)}
-        fitView
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background gap={20} size={1} />
-        <Controls />
-        <MiniMap pannable zoomable />
-      </ReactFlow>
-    </div>
-  )
 }
 
 function agentToSavedLabel(agent: Agent | undefined) {
@@ -1267,7 +1137,7 @@ export function AgentsView({
     setSelectedNodeId(nodes[0]?.id ?? "")
   }
 
-  function handleConnect(connection: Connection) {
+  function handleConnect(connection: { source: string; target: string }) {
     if (!workflowDraft || !connection.source || !connection.target) return
     if (
       workflowDraft.definition.edges.some(
@@ -1535,7 +1405,7 @@ export function AgentsView({
   const selectedNode = workflowDraft?.definition.nodes.find(
     (node) => node.id === selectedNodeId
   )
-  const graphNodes = useMemo<Node<FlowNodeData>[]>(() => {
+  const graphNodes = useMemo<GraphNode[]>(() => {
     if (!workflowDraft) return []
     const layout = layoutAgentGraph(
       workflowDraft.definition.nodes.map((node) => node.id),
@@ -1555,32 +1425,26 @@ export function AgentsView({
       },
     }))
   }, [agents, positions, selectedNodeId, workflowDraft])
-  const graphEdges = useMemo<Edge[]>(
-    () =>
-      workflowDraft?.definition.edges.map((edge) => ({
-        id: `${edge.from}-${edge.to}`,
-        source: edge.from,
-        target: edge.to,
-        animated: false,
-      })) ?? [],
-    [workflowDraft]
-  )
   const currentRunInputNames = workflowDraft
     ? workflowInputNames(workflowDraft.definition)
     : []
 
+  const editingWorkflow = activeTab === "workflows" && workflowDraft !== null
+
   return (
     <Page>
       {disabled && (
-        <Alert role="status">
-          <ShieldCheck data-icon="inline-start" />
-          <AlertTitle>{t("Agents are disabled")}</AlertTitle>
-          <AlertDescription>
+        <PuAlert role="status" tone="info">
+          <PuAlert.Icon>
+            <ShieldCheck />
+          </PuAlert.Icon>
+          <PuAlert.Title>{t("Agents are disabled")}</PuAlert.Title>
+          <PuAlert.Description>
             {t(
               "The platform administrator disabled new agent runs and scheduling. Existing agents, workflows, and run history remain inspectable."
             )}
-          </AlertDescription>
-        </Alert>
+          </PuAlert.Description>
+        </PuAlert>
       )}
       <PageHeader>
         <PageHeading>
@@ -1594,61 +1458,95 @@ export function AgentsView({
         <PageActions>
           {activeTab === "agents" && !disabled && (
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => openRemote()}>
-                <Link2 data-icon="inline-start" />
+              <Button onClick={() => openRemote()} variant="outline">
+                <Link2 />
                 {t("Connect remote")}
               </Button>
               <Button onClick={() => openNative()}>
-                <Plus data-icon="inline-start" />
+                <Plus />
                 {t("New native agent")}
               </Button>
             </div>
           )}
           {activeTab === "workflows" && !disabled && (
             <Button onClick={() => openWorkflow()}>
-              <Plus data-icon="inline-start" />
+              <Plus />
               {t("New workflow")}
             </Button>
           )}
         </PageActions>
       </PageHeader>
 
-      {error && (
-        <Alert aria-live="polite" role="alert" variant="destructive">
-          <CircleAlert data-icon="inline-start" />
-          <AlertTitle>{t("Agent workspace needs attention")}</AlertTitle>
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
+      {error && <ToastFeedback message={error} type={"destructive"} />}
+
+      {!editingWorkflow && (
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            {
+              label: t("Agents"),
+              value: agents.length,
+              note: t("{value0} remote", {
+                value0: agents.filter((agent) => agent.kind === "remote")
+                  .length,
+              }),
+              icon: Bot,
+            },
+            {
+              label: t("Workflows"),
+              value: workflows.length,
+              note: t("Reusable multi-step runs"),
+              icon: GitBranch,
+            },
+            {
+              label: t("Runs"),
+              value: runs.length,
+              note: t("{value0} running", {
+                value0: runs.filter((run) => run.status === "running").length,
+              }),
+              icon: Activity,
+            },
+          ].map(({ label, value, note, icon: Icon }) => (
+            <PuCard as="section" className="gap-0" key={label} size="sm">
+              <PuCard.Content className="flex items-start justify-between gap-3">
+                <Stat>
+                  <Stat.Content>
+                    <Stat.Label>{label}</Stat.Label>
+                    <Stat.Value size="md">{value}</Stat.Value>
+                    <Stat.Description>{note}</Stat.Description>
+                  </Stat.Content>
+                </Stat>
+                <Icon
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-muted-foreground"
+                />
+              </PuCard.Content>
+            </PuCard>
+          ))}
+        </div>
       )}
 
-      <Tabs
-        value={activeTab}
+      <PuTabs
         onValueChange={(value) => onTabChange(value as AgentTab)}
+        value={activeTab}
       >
-        <TabsList
+        <PuTabs.List
           aria-label={t("Agent workspace sections")}
-          variant="line"
-          className="w-full justify-start border-b pb-0"
+          className={editingWorkflow ? "hidden" : undefined}
         >
-          <TabsTrigger value="agents">
-            <Bot data-icon="inline-start" />
-            {t("Agents")}{" "}
-            <span className="ml-1 text-muted-foreground">{agents.length}</span>
-          </TabsTrigger>
-          <TabsTrigger value="workflows">
-            <GitBranch data-icon="inline-start" />
-            {t("Workflows")}{" "}
-            <span className="ml-1 text-muted-foreground">
-              {workflows.length}
-            </span>
-          </TabsTrigger>
-          <TabsTrigger value="runs">
-            <Activity data-icon="inline-start" />
-            {t("Runs")}{" "}
-            <span className="ml-1 text-muted-foreground">{runs.length}</span>
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="agents" className="pt-6">
+          <PuTabs.Trigger value="agents">
+            <Bot />
+            {t("Agents")}
+          </PuTabs.Trigger>
+          <PuTabs.Trigger value="workflows">
+            <GitBranch />
+            {t("Workflows")}
+          </PuTabs.Trigger>
+          <PuTabs.Trigger value="runs">
+            <Activity />
+            {t("Runs")}
+          </PuTabs.Trigger>
+        </PuTabs.List>
+        <PuTabs.Content value="agents" className="pt-1">
           {loading && !agents.length ? (
             <LoadingState label={t("Loading agents…")} />
           ) : (
@@ -1660,13 +1558,15 @@ export function AgentsView({
               onTest={testConnection}
               onToggleConnection={toggleConnection}
               onDeleteConnection={deleteConnection}
+              onCreateNative={() => openNative()}
+              onConnectRemote={() => openRemote()}
               testingConnectionId={testingConnectionId}
               updatingConnectionId={updatingConnectionId}
               disabled={disabled}
             />
           )}
-        </TabsContent>
-        <TabsContent value="workflows" className="pt-6">
+        </PuTabs.Content>
+        <PuTabs.Content value="workflows" className="pt-1">
           <WorkflowsPanel
             workflows={workflows}
             draft={workflowDraft}
@@ -1678,7 +1578,6 @@ export function AgentsView({
             selectedNode={selectedNode}
             selectedNodeId={selectedNodeId}
             graphNodes={graphNodes}
-            graphEdges={graphEdges}
             validationMessage={validationMessage}
             validationTarget={validationTarget}
             validationTone={validationTone}
@@ -1703,8 +1602,8 @@ export function AgentsView({
             onValidationDismiss={() => setValidationTarget(null)}
             disabled={disabled}
           />
-        </TabsContent>
-        <TabsContent value="runs" className="pt-6">
+        </PuTabs.Content>
+        <PuTabs.Content value="runs" className="pt-1">
           <RunsPanel
             nextCursor={runsCursor}
             onCursorChange={setRunsCursor}
@@ -1714,8 +1613,8 @@ export function AgentsView({
             workflows={workflows}
             disabled={disabled}
           />
-        </TabsContent>
-      </Tabs>
+        </PuTabs.Content>
+      </PuTabs>
 
       <Dialog
         open={nativeOpen}
@@ -1723,7 +1622,7 @@ export function AgentsView({
           if (!saving) setNativeOpen(open)
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>
               {editingAgent ? t("Edit native agent") : t("Create native agent")}
@@ -1734,262 +1633,273 @@ export function AgentsView({
               )}
             </DialogDescription>
           </DialogHeader>
-          {error && (
-            <Alert aria-live="polite" role="alert" variant="destructive">
-              <AlertTitle>{t("Could not save native agent")}</AlertTitle>
-              <AlertDescription>{t(error)}</AlertDescription>
-            </Alert>
-          )}
-          <form onSubmit={(event) => void saveNative(event)}>
-            <FieldGroup>
-              <div className="grid gap-4 sm:grid-cols-2">
+          <DialogBody>
+            {error && <ToastFeedback message={error} type={"destructive"} />}
+            <form
+              id="agent-native-form"
+              onSubmit={(event) => void saveNative(event)}
+            >
+              <FieldGroup>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="native-agent-name">
+                      {t("Name")}
+                    </FieldLabel>
+                    <Input
+                      id="native-agent-name"
+                      value={nativeForm.name}
+                      onChange={(event) =>
+                        setNativeForm({
+                          ...nativeForm,
+                          name: event.target.value,
+                        })
+                      }
+                      placeholder={t("Research lead")}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="native-agent-visibility">
+                      {t("Visibility")}
+                    </FieldLabel>
+                    <Select
+                      value={nativeForm.visibility}
+                      onValueChange={(value) =>
+                        setNativeForm({
+                          ...nativeForm,
+                          visibility: (value ??
+                            "private") as NativeAgentForm["visibility"],
+                        })
+                      }
+                    >
+                      <SelectTrigger id="native-agent-visibility">
+                        <SelectValue>
+                          {t(visibilityLabel(nativeForm.visibility))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="private">
+                            {t("Private")}
+                          </SelectItem>
+                          <SelectItem value="workspace">
+                            {t("Workspace shared")}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
                 <Field>
-                  <FieldLabel htmlFor="native-agent-name">
-                    {t("Name")}
+                  <FieldLabel htmlFor="native-agent-description">
+                    {t("Description")}
                   </FieldLabel>
                   <Input
-                    id="native-agent-name"
-                    value={nativeForm.name}
+                    id="native-agent-description"
+                    value={nativeForm.description}
                     onChange={(event) =>
-                      setNativeForm({ ...nativeForm, name: event.target.value })
+                      setNativeForm({
+                        ...nativeForm,
+                        description: event.target.value,
+                      })
                     }
-                    placeholder={t("Research lead")}
+                    placeholder={t("What this agent is good at")}
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="native-agent-visibility">
-                    {t("Visibility")}
+                  <FieldLabel htmlFor="native-agent-instructions">
+                    {t("Instructions")}
                   </FieldLabel>
-                  <Select
-                    value={nativeForm.visibility}
-                    onValueChange={(value) =>
+                  <Textarea
+                    id="native-agent-instructions"
+                    rows={7}
+                    value={nativeForm.instructions}
+                    onChange={(event) =>
                       setNativeForm({
                         ...nativeForm,
-                        visibility: (value ??
-                          "private") as NativeAgentForm["visibility"],
+                        instructions: event.target.value,
                       })
                     }
-                  >
-                    <SelectTrigger id="native-agent-visibility">
-                      <SelectValue>
-                        {t(visibilityLabel(nativeForm.visibility))}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="private">{t("Private")}</SelectItem>
-                        <SelectItem value="workspace">
-                          {t("Workspace shared")}
-                        </SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
+                    placeholder={t("Act as a careful research editor…")}
+                  />
+                  <FieldDescription>
+                    {t(
+                      "These instructions are versioned. Existing conversations keep their pinned version."
+                    )}
+                  </FieldDescription>
                 </Field>
-              </div>
-              <Field>
-                <FieldLabel htmlFor="native-agent-description">
-                  {t("Description")}
-                </FieldLabel>
-                <Input
-                  id="native-agent-description"
-                  value={nativeForm.description}
-                  onChange={(event) =>
-                    setNativeForm({
-                      ...nativeForm,
-                      description: event.target.value,
-                    })
-                  }
-                  placeholder={t("What this agent is good at")}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="native-agent-instructions">
-                  {t("Instructions")}
-                </FieldLabel>
-                <Textarea
-                  id="native-agent-instructions"
-                  rows={7}
-                  value={nativeForm.instructions}
-                  onChange={(event) =>
-                    setNativeForm({
-                      ...nativeForm,
-                      instructions: event.target.value,
-                    })
-                  }
-                  placeholder={t("Act as a careful research editor…")}
-                />
-                <FieldDescription>
-                  {t(
-                    "These instructions are versioned. Existing conversations keep their pinned version."
-                  )}
-                </FieldDescription>
-              </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="native-agent-endpoint">
-                    {t("Chat endpoint")}
-                  </FieldLabel>
-                  <Select
-                    value={nativeForm.endpointId || "default"}
-                    onValueChange={(value) =>
-                      setNativeForm({
-                        ...nativeForm,
-                        endpointId: value === "default" ? "" : (value ?? ""),
-                      })
-                    }
-                  >
-                    <SelectTrigger id="native-agent-endpoint">
-                      <SelectValue>
-                        {nativeForm.endpointId
-                          ? (endpoints.find(
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="native-agent-endpoint">
+                      {t("Chat endpoint")}
+                    </FieldLabel>
+                    <Select
+                      value={nativeForm.endpointId || "default"}
+                      onValueChange={(value) =>
+                        setNativeForm({
+                          ...nativeForm,
+                          endpointId: value === "default" ? "" : (value ?? ""),
+                        })
+                      }
+                    >
+                      <SelectTrigger id="native-agent-endpoint">
+                        <SelectValue>
+                          {nativeForm.endpointId
+                            ? (endpoints.find(
+                                (endpoint) =>
+                                  endpoint.id === nativeForm.endpointId
+                              )?.name ?? "Selected endpoint")
+                            : t("Workspace default")}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="default">
+                            {t("Workspace default")}
+                          </SelectItem>
+                          {endpoints
+                            .filter(
                               (endpoint) =>
-                                endpoint.id === nativeForm.endpointId
-                            )?.name ?? "Selected endpoint")
-                          : t("Workspace default")}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="default">
-                          {t("Workspace default")}
-                        </SelectItem>
-                        {endpoints
-                          .filter(
-                            (endpoint) =>
-                              endpoint.enabled && endpoint.capabilities?.chat
-                          )
-                          .map((endpoint) => (
-                            <SelectItem key={endpoint.id} value={endpoint.id}>
-                              {endpoint.name}
-                            </SelectItem>
-                          ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="native-agent-model">
-                    {t("Model override")}
-                  </FieldLabel>
-                  <Input
-                    id="native-agent-model"
-                    value={nativeForm.model}
-                    onChange={(event) =>
-                      setNativeForm({
-                        ...nativeForm,
-                        model: event.target.value,
-                      })
-                    }
-                    placeholder={t("Use endpoint default")}
-                  />
-                </Field>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field orientation="horizontal">
-                  <Switch
-                    aria-label={t("Use memory")}
-                    checked={nativeForm.useMemory}
-                    onCheckedChange={(checked) =>
-                      setNativeForm({ ...nativeForm, useMemory: checked })
-                    }
-                  />
-                  <div>
-                    <FieldLabel>{t("Use memory")}</FieldLabel>
-                    <FieldDescription>
-                      {t("Include the user’s approved persistent preferences.")}
-                    </FieldDescription>
-                  </div>
-                </Field>
-                <Field orientation="horizontal">
-                  <Switch
-                    aria-label={t("Use deep context")}
-                    checked={nativeForm.deepContext}
-                    onCheckedChange={(checked) =>
-                      setNativeForm({ ...nativeForm, deepContext: checked })
-                    }
-                  />
-                  <div>
-                    <FieldLabel>{t("Deep context")}</FieldLabel>
-                    <FieldDescription>
-                      {t("Use attached workspace context when available.")}
-                    </FieldDescription>
-                  </div>
-                </Field>
-              </div>
-              <FieldSet>
-                <FieldLegend variant="label">
-                  {t("Delegation allowlist")}
-                </FieldLegend>
-                <FieldDescription>
-                  {t("Only these agents may be selected by")}{" "}
-                  <code>delegate_agent</code>.
-                </FieldDescription>
-                {agents.filter((agent) => agent.id !== editingAgent?.id)
-                  .length ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {agents
-                      .filter((agent) => agent.id !== editingAgent?.id)
-                      .map((agent) => (
-                        <label
-                          key={agent.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm has-[:checked]:border-primary/50 has-[:checked]:bg-primary/[0.06]"
-                        >
-                          <input
-                            className="size-4 accent-primary"
-                            type="checkbox"
-                            checked={nativeForm.delegationAgentIds.includes(
-                              agent.id
-                            )}
-                            onChange={() =>
-                              setNativeForm((current) => ({
-                                ...current,
-                                delegationAgentIds:
-                                  current.delegationAgentIds.includes(agent.id)
-                                    ? current.delegationAgentIds.filter(
-                                        (id) => id !== agent.id
-                                      )
-                                    : [...current.delegationAgentIds, agent.id],
-                              }))
-                            }
-                          />
-                          <span className="truncate">{agent.name}</span>
-                          <Badge className="ml-auto" variant="outline">
-                            {agent.kind}
-                          </Badge>
-                        </label>
-                      ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {t("Create another agent to enable delegation.")}
-                  </p>
-                )}
-              </FieldSet>
-            </FieldGroup>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => setNativeOpen(false)}
-              >
-                {t("Cancel")}
-              </Button>
-              <Button
-                disabled={
-                  saving ||
-                  !nativeForm.name.trim() ||
-                  !nativeForm.instructions.trim()
-                }
-                type="submit"
-              >
-                {saving
-                  ? t("Saving…")
-                  : editingAgent
-                    ? t("Save changes")
-                    : t("Create agent")}
-              </Button>
-            </DialogFooter>
-          </form>
+                                endpoint.enabled && endpoint.capabilities?.chat
+                            )
+                            .map((endpoint) => (
+                              <SelectItem key={endpoint.id} value={endpoint.id}>
+                                {endpoint.name}
+                              </SelectItem>
+                            ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="native-agent-model">
+                      {t("Model override")}
+                    </FieldLabel>
+                    <Input
+                      id="native-agent-model"
+                      value={nativeForm.model}
+                      onChange={(event) =>
+                        setNativeForm({
+                          ...nativeForm,
+                          model: event.target.value,
+                        })
+                      }
+                      placeholder={t("Use endpoint default")}
+                    />
+                  </Field>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field orientation="horizontal">
+                    <Switch
+                      aria-label={t("Use memory")}
+                      checked={nativeForm.useMemory}
+                      onCheckedChange={(checked) =>
+                        setNativeForm({ ...nativeForm, useMemory: checked })
+                      }
+                    />
+                    <div>
+                      <FieldLabel>{t("Use memory")}</FieldLabel>
+                      <FieldDescription>
+                        {t(
+                          "Include the user’s approved persistent preferences."
+                        )}
+                      </FieldDescription>
+                    </div>
+                  </Field>
+                  <Field orientation="horizontal">
+                    <Switch
+                      aria-label={t("Use deep context")}
+                      checked={nativeForm.deepContext}
+                      onCheckedChange={(checked) =>
+                        setNativeForm({ ...nativeForm, deepContext: checked })
+                      }
+                    />
+                    <div>
+                      <FieldLabel>{t("Deep context")}</FieldLabel>
+                      <FieldDescription>
+                        {t("Use attached workspace context when available.")}
+                      </FieldDescription>
+                    </div>
+                  </Field>
+                </div>
+                <FieldSet>
+                  <FieldLegend variant="label">
+                    {t("Delegation allowlist")}
+                  </FieldLegend>
+                  <FieldDescription>
+                    {t("Only these agents may be selected by")}{" "}
+                    <code>delegate_agent</code>.
+                  </FieldDescription>
+                  {agents.filter((agent) => agent.id !== editingAgent?.id)
+                    .length ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {agents
+                        .filter((agent) => agent.id !== editingAgent?.id)
+                        .map((agent) => (
+                          <label
+                            key={agent.id}
+                            className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm has-[:checked]:border-primary/50 has-[:checked]:bg-primary/[0.06]"
+                          >
+                            <Checkbox
+                              checked={nativeForm.delegationAgentIds.includes(
+                                agent.id
+                              )}
+                              onCheckedChange={() =>
+                                setNativeForm((current) => ({
+                                  ...current,
+                                  delegationAgentIds:
+                                    current.delegationAgentIds.includes(
+                                      agent.id
+                                    )
+                                      ? current.delegationAgentIds.filter(
+                                          (id) => id !== agent.id
+                                        )
+                                      : [
+                                          ...current.delegationAgentIds,
+                                          agent.id,
+                                        ],
+                                }))
+                              }
+                            />
+                            <span className="truncate">{agent.name}</span>
+                            <Badge className="ml-auto" variant="outline">
+                              {agent.kind}
+                            </Badge>
+                          </label>
+                        ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {t("Create another agent to enable delegation.")}
+                    </p>
+                  )}
+                </FieldSet>
+              </FieldGroup>
+            </form>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setNativeOpen(false)}
+            >
+              {t("Cancel")}
+            </Button>
+            <Button
+              disabled={
+                saving ||
+                !nativeForm.name.trim() ||
+                !nativeForm.instructions.trim()
+              }
+              form="agent-native-form"
+              type="submit"
+            >
+              {saving
+                ? t("Saving…")
+                : editingAgent
+                  ? t("Save changes")
+                  : t("Create agent")}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -2003,7 +1913,7 @@ export function AgentsView({
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>
               {editingAgent
@@ -2016,400 +1926,406 @@ export function AgentsView({
               )}
             </DialogDescription>
           </DialogHeader>
-          {error && (
-            <Alert aria-live="polite" role="alert" variant="destructive">
-              <AlertTitle>{t("Could not save remote agent")}</AlertTitle>
-              <AlertDescription>{t(error)}</AlertDescription>
-            </Alert>
-          )}
-          <form onSubmit={(event) => void saveRemote(event)}>
-            <FieldGroup>
-              <div className="grid gap-4 sm:grid-cols-2">
+          <DialogBody>
+            {error && <ToastFeedback message={error} type={"destructive"} />}
+            <form
+              id="agent-remote-form"
+              onSubmit={(event) => void saveRemote(event)}
+            >
+              <FieldGroup>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="remote-agent-name">
+                      {t("Display name")}
+                    </FieldLabel>
+                    <Input
+                      id="remote-agent-name"
+                      value={remoteForm.name}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          name: event.target.value,
+                        })
+                      }
+                      placeholder={t("Vendor research agent")}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="remote-agent-visibility">
+                      {t("Visibility")}
+                    </FieldLabel>
+                    <Select
+                      value={remoteForm.visibility}
+                      onValueChange={(value) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          visibility: (value ??
+                            "private") as RemoteAgentForm["visibility"],
+                          connectionScope:
+                            value === "workspace"
+                              ? "organization"
+                              : remoteForm.connectionScope,
+                        })
+                      }
+                    >
+                      <SelectTrigger id="remote-agent-visibility">
+                        <SelectValue>
+                          {t(visibilityLabel(remoteForm.visibility))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="private">
+                            {t("Private")}
+                          </SelectItem>
+                          <SelectItem value="workspace">
+                            {t("Workspace shared")}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="remote-connection-scope">
+                      {t("Connection scope")}
+                    </FieldLabel>
+                    <Select
+                      value={remoteForm.connectionScope}
+                      disabled={remoteForm.visibility === "workspace"}
+                      onValueChange={(value) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          connectionScope: (value ??
+                            "user") as RemoteAgentForm["connectionScope"],
+                        })
+                      }
+                    >
+                      <SelectTrigger id="remote-connection-scope">
+                        <SelectValue>
+                          {t(connectionScopeLabel(remoteForm.connectionScope))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="user">
+                            {t("Private connection")}
+                          </SelectItem>
+                          <SelectItem value="organization">
+                            {t("Workspace connection")}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                      {t(
+                        "Workspace agents require a workspace connection. Shared connections are managed by owners and admins."
+                      )}
+                    </FieldDescription>
+                  </Field>
+                </div>
                 <Field>
-                  <FieldLabel htmlFor="remote-agent-name">
-                    {t("Display name")}
+                  <FieldLabel htmlFor="remote-agent-url">
+                    {t("A2A endpoint URL")}
                   </FieldLabel>
-                  <Input
-                    id="remote-agent-name"
-                    value={remoteForm.name}
-                    onChange={(event) =>
-                      setRemoteForm({ ...remoteForm, name: event.target.value })
-                    }
-                    placeholder={t("Vendor research agent")}
-                  />
+                  <div className="flex gap-2">
+                    <Input
+                      id="remote-agent-url"
+                      value={remoteForm.endpointUrl}
+                      onChange={(event) =>
+                        setRemoteForm({
+                          ...remoteForm,
+                          endpointUrl: event.target.value,
+                        })
+                      }
+                      placeholder="https://agent.example/a2a"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void discoverRemote()}
+                      disabled={discovering || !remoteForm.endpointUrl.trim()}
+                    >
+                      <Cloud
+                        className={discovering ? "animate-pulse" : ""}
+                        data-icon="inline-start"
+                      />
+                      {discovering ? t("Discovering…") : t("Discover")}
+                    </Button>
+                  </div>
+                  <FieldDescription>
+                    {t(
+                      "Private network targets are controlled by the backend safe-dial policy."
+                    )}
+                  </FieldDescription>
                 </Field>
+                {discoveryMessage && (
+                  <Alert aria-live="polite" role="status">
+                    <Cloud data-icon="inline-start" />
+                    <AlertDescription>{discoveryMessage}</AlertDescription>
+                  </Alert>
+                )}
                 <Field>
-                  <FieldLabel htmlFor="remote-agent-visibility">
-                    {t("Visibility")}
+                  <FieldLabel htmlFor="remote-authentication">
+                    {t("Authentication")}
                   </FieldLabel>
                   <Select
-                    value={remoteForm.visibility}
+                    value={remoteForm.authType}
                     onValueChange={(value) =>
                       setRemoteForm({
                         ...remoteForm,
-                        visibility: (value ??
-                          "private") as RemoteAgentForm["visibility"],
-                        connectionScope:
-                          value === "workspace"
-                            ? "organization"
-                            : remoteForm.connectionScope,
+                        authType: (value ??
+                          "none") as RemoteAgentForm["authType"],
                       })
                     }
                   >
-                    <SelectTrigger id="remote-agent-visibility">
+                    <SelectTrigger id="remote-authentication">
                       <SelectValue>
-                        {t(visibilityLabel(remoteForm.visibility))}
+                        {t(authTypeLabel(remoteForm.authType))}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="private">{t("Private")}</SelectItem>
-                        <SelectItem value="workspace">
-                          {t("Workspace shared")}
+                        <SelectItem value="none">
+                          {t("No authentication")}
+                        </SelectItem>
+                        <SelectItem value="api_key">{t("API key")}</SelectItem>
+                        <SelectItem value="http">
+                          {t("HTTP Basic / auth header")}
+                        </SelectItem>
+                        <SelectItem value="oauth2">OAuth2</SelectItem>
+                        <SelectItem value="oidc">OIDC</SelectItem>
+                        <SelectItem value="mtls">
+                          {t("mTLS certificate")}
                         </SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field>
-                  <FieldLabel htmlFor="remote-connection-scope">
-                    {t("Connection scope")}
-                  </FieldLabel>
-                  <Select
-                    value={remoteForm.connectionScope}
-                    disabled={remoteForm.visibility === "workspace"}
-                    onValueChange={(value) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        connectionScope: (value ??
-                          "user") as RemoteAgentForm["connectionScope"],
-                      })
-                    }
-                  >
-                    <SelectTrigger id="remote-connection-scope">
-                      <SelectValue>
-                        {t(connectionScopeLabel(remoteForm.connectionScope))}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="user">
-                          {t("Private connection")}
-                        </SelectItem>
-                        <SelectItem value="organization">
-                          {t("Workspace connection")}
-                        </SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    {t(
-                      "Workspace agents require a workspace connection. Shared connections are managed by owners and admins."
-                    )}
-                  </FieldDescription>
-                </Field>
-              </div>
-              <Field>
-                <FieldLabel htmlFor="remote-agent-url">
-                  {t("A2A endpoint URL")}
-                </FieldLabel>
-                <div className="flex gap-2">
-                  <Input
-                    id="remote-agent-url"
-                    value={remoteForm.endpointUrl}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        endpointUrl: event.target.value,
-                      })
-                    }
-                    placeholder="https://agent.example/a2a"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void discoverRemote()}
-                    disabled={discovering || !remoteForm.endpointUrl.trim()}
-                  >
-                    <Cloud
-                      className={discovering ? "animate-pulse" : ""}
-                      data-icon="inline-start"
-                    />
-                    {discovering ? t("Discovering…") : t("Discover")}
-                  </Button>
-                </div>
-                <FieldDescription>
-                  {t(
-                    "Private network targets are controlled by the backend safe-dial policy."
-                  )}
-                </FieldDescription>
-              </Field>
-              {discoveryMessage && (
-                <Alert aria-live="polite" role="status">
-                  <Cloud data-icon="inline-start" />
-                  <AlertDescription>{discoveryMessage}</AlertDescription>
-                </Alert>
-              )}
-              <Field>
-                <FieldLabel htmlFor="remote-authentication">
-                  {t("Authentication")}
-                </FieldLabel>
-                <Select
-                  value={remoteForm.authType}
-                  onValueChange={(value) =>
-                    setRemoteForm({
-                      ...remoteForm,
-                      authType: (value ??
-                        "none") as RemoteAgentForm["authType"],
-                    })
-                  }
-                >
-                  <SelectTrigger id="remote-authentication">
-                    <SelectValue>
-                      {t(authTypeLabel(remoteForm.authType))}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="none">
-                        {t("No authentication")}
-                      </SelectItem>
-                      <SelectItem value="api_key">{t("API key")}</SelectItem>
-                      <SelectItem value="http">
-                        {t("HTTP Basic / auth header")}
-                      </SelectItem>
-                      <SelectItem value="oauth2">OAuth2</SelectItem>
-                      <SelectItem value="oidc">OIDC</SelectItem>
-                      <SelectItem value="mtls">
-                        {t("mTLS certificate")}
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-              {remoteForm.authType === "api_key" && (
-                <Field>
-                  <FieldLabel htmlFor="remote-api-key">
-                    {t("API key")}
-                  </FieldLabel>
-                  <Input
-                    id="remote-api-key"
-                    type="password"
-                    value={remoteForm.credential}
-                    onChange={(event) =>
-                      setRemoteForm({
-                        ...remoteForm,
-                        credential: event.target.value,
-                      })
-                    }
-                    autoComplete="new-password"
-                  />
-                </Field>
-              )}
-              {remoteForm.authType === "http" && (
-                <div className="grid gap-4 sm:grid-cols-2">
+                {remoteForm.authType === "api_key" && (
                   <Field>
-                    <FieldLabel htmlFor="remote-username">
-                      {t("Username")}
+                    <FieldLabel htmlFor="remote-api-key">
+                      {t("API key")}
                     </FieldLabel>
                     <Input
-                      id="remote-username"
-                      value={remoteForm.username}
-                      onChange={(event) =>
-                        setRemoteForm({
-                          ...remoteForm,
-                          username: event.target.value,
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="remote-password">
-                      {t("Password")}
-                    </FieldLabel>
-                    <Input
-                      id="remote-password"
+                      id="remote-api-key"
                       type="password"
-                      value={remoteForm.password}
+                      value={remoteForm.credential}
                       onChange={(event) =>
                         setRemoteForm({
                           ...remoteForm,
-                          password: event.target.value,
+                          credential: event.target.value,
                         })
                       }
                       autoComplete="new-password"
                     />
                   </Field>
-                </div>
-              )}
-              {(remoteForm.authType === "oauth2" ||
-                remoteForm.authType === "oidc") && (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="remote-oauth-client">
-                      {t("Client ID")}
-                    </FieldLabel>
-                    <Input
-                      id="remote-oauth-client"
-                      value={remoteForm.oauthClientId}
-                      onChange={(event) =>
-                        setRemoteForm({
-                          ...remoteForm,
-                          oauthClientId: event.target.value,
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="remote-oauth-scopes">
-                      {t("Scopes")}
-                    </FieldLabel>
-                    <Input
-                      id="remote-oauth-scopes"
-                      value={remoteForm.oauthScopes}
-                      onChange={(event) =>
-                        setRemoteForm({
-                          ...remoteForm,
-                          oauthScopes: event.target.value,
-                        })
-                      }
-                      placeholder="openid agent:run"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="remote-oauth-auth">
-                      {t("Authorization URL")}
-                    </FieldLabel>
-                    <Input
-                      id="remote-oauth-auth"
-                      value={remoteForm.oauthAuthorizationUrl}
-                      onChange={(event) =>
-                        setRemoteForm({
-                          ...remoteForm,
-                          oauthAuthorizationUrl: event.target.value,
-                        })
-                      }
-                      placeholder="https://idp.example/authorize"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="remote-oauth-token">
-                      {t("Token URL")}
-                    </FieldLabel>
-                    <Input
-                      id="remote-oauth-token"
-                      value={remoteForm.oauthTokenUrl}
-                      onChange={(event) =>
-                        setRemoteForm({
-                          ...remoteForm,
-                          oauthTokenUrl: event.target.value,
-                        })
-                      }
-                      placeholder="https://idp.example/token"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="remote-client-secret">
-                      {t("Client secret")}
-                    </FieldLabel>
-                    <Input
-                      id="remote-client-secret"
-                      type="password"
-                      value={remoteForm.clientSecret}
-                      onChange={(event) =>
-                        setRemoteForm({
-                          ...remoteForm,
-                          clientSecret: event.target.value,
-                        })
-                      }
-                      autoComplete="new-password"
-                    />
-                  </Field>
-                </div>
-              )}
-              {remoteForm.authType === "mtls" && (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="remote-certificate">
-                      {t("Client certificate")}
-                    </FieldLabel>
-                    <Textarea
-                      id="remote-certificate"
-                      rows={5}
-                      value={remoteForm.certificate}
-                      onChange={(event) =>
-                        setRemoteForm({
-                          ...remoteForm,
-                          certificate: event.target.value,
-                        })
-                      }
-                      placeholder="-----BEGIN CERTIFICATE-----"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="remote-private-key">
-                      {t("Private key")}
-                    </FieldLabel>
-                    <Textarea
-                      id="remote-private-key"
-                      rows={5}
-                      value={remoteForm.privateKey}
-                      onChange={(event) =>
-                        setRemoteForm({
-                          ...remoteForm,
-                          privateKey: event.target.value,
-                        })
-                      }
-                      placeholder="-----BEGIN PRIVATE KEY-----"
-                    />
-                  </Field>
-                </div>
-              )}
-              <Field orientation="horizontal">
-                <Switch
-                  aria-label={t("Trust read-only operations")}
-                  checked={remoteForm.trustedReadOnly}
-                  onCheckedChange={(checked) =>
-                    setRemoteForm({ ...remoteForm, trustedReadOnly: checked })
-                  }
-                />
-                <div>
-                  <FieldLabel>{t("Trust read-only operations")}</FieldLabel>
-                  <FieldDescription>
-                    {t(
-                      "Only enable this for a connection you control. Otherwise remote runs pause for approval."
-                    )}
-                  </FieldDescription>
-                </div>
-              </Field>
-            </FieldGroup>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => setRemoteOpen(false)}
-              >
-                {t("Cancel")}
-              </Button>
-              <Button
-                disabled={
-                  saving ||
-                  !remoteForm.name.trim() ||
-                  !remoteForm.endpointUrl.trim()
-                }
-                type="submit"
-              >
-                <LockKeyhole data-icon="inline-start" />
-                {saving
-                  ? editingAgent
-                    ? t("Saving…")
-                    : t("Connecting…")
-                  : editingAgent
-                    ? t("Save changes")
-                    : t("Save encrypted connection")}
-              </Button>
-            </DialogFooter>
-          </form>
+                )}
+                {remoteForm.authType === "http" && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="remote-username">
+                        {t("Username")}
+                      </FieldLabel>
+                      <Input
+                        id="remote-username"
+                        value={remoteForm.username}
+                        onChange={(event) =>
+                          setRemoteForm({
+                            ...remoteForm,
+                            username: event.target.value,
+                          })
+                        }
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="remote-password">
+                        {t("Password")}
+                      </FieldLabel>
+                      <Input
+                        id="remote-password"
+                        type="password"
+                        value={remoteForm.password}
+                        onChange={(event) =>
+                          setRemoteForm({
+                            ...remoteForm,
+                            password: event.target.value,
+                          })
+                        }
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                  </div>
+                )}
+                {(remoteForm.authType === "oauth2" ||
+                  remoteForm.authType === "oidc") && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="remote-oauth-client">
+                        {t("Client ID")}
+                      </FieldLabel>
+                      <Input
+                        id="remote-oauth-client"
+                        value={remoteForm.oauthClientId}
+                        onChange={(event) =>
+                          setRemoteForm({
+                            ...remoteForm,
+                            oauthClientId: event.target.value,
+                          })
+                        }
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="remote-oauth-scopes">
+                        {t("Scopes")}
+                      </FieldLabel>
+                      <Input
+                        id="remote-oauth-scopes"
+                        value={remoteForm.oauthScopes}
+                        onChange={(event) =>
+                          setRemoteForm({
+                            ...remoteForm,
+                            oauthScopes: event.target.value,
+                          })
+                        }
+                        placeholder="openid agent:run"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="remote-oauth-auth">
+                        {t("Authorization URL")}
+                      </FieldLabel>
+                      <Input
+                        id="remote-oauth-auth"
+                        value={remoteForm.oauthAuthorizationUrl}
+                        onChange={(event) =>
+                          setRemoteForm({
+                            ...remoteForm,
+                            oauthAuthorizationUrl: event.target.value,
+                          })
+                        }
+                        placeholder="https://idp.example/authorize"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="remote-oauth-token">
+                        {t("Token URL")}
+                      </FieldLabel>
+                      <Input
+                        id="remote-oauth-token"
+                        value={remoteForm.oauthTokenUrl}
+                        onChange={(event) =>
+                          setRemoteForm({
+                            ...remoteForm,
+                            oauthTokenUrl: event.target.value,
+                          })
+                        }
+                        placeholder="https://idp.example/token"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="remote-client-secret">
+                        {t("Client secret")}
+                      </FieldLabel>
+                      <Input
+                        id="remote-client-secret"
+                        type="password"
+                        value={remoteForm.clientSecret}
+                        onChange={(event) =>
+                          setRemoteForm({
+                            ...remoteForm,
+                            clientSecret: event.target.value,
+                          })
+                        }
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                  </div>
+                )}
+                {remoteForm.authType === "mtls" && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="remote-certificate">
+                        {t("Client certificate")}
+                      </FieldLabel>
+                      <Textarea
+                        id="remote-certificate"
+                        rows={5}
+                        value={remoteForm.certificate}
+                        onChange={(event) =>
+                          setRemoteForm({
+                            ...remoteForm,
+                            certificate: event.target.value,
+                          })
+                        }
+                        placeholder="-----BEGIN CERTIFICATE-----"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="remote-private-key">
+                        {t("Private key")}
+                      </FieldLabel>
+                      <Textarea
+                        id="remote-private-key"
+                        rows={5}
+                        value={remoteForm.privateKey}
+                        onChange={(event) =>
+                          setRemoteForm({
+                            ...remoteForm,
+                            privateKey: event.target.value,
+                          })
+                        }
+                        placeholder="-----BEGIN PRIVATE KEY-----"
+                      />
+                    </Field>
+                  </div>
+                )}
+                <Field orientation="horizontal">
+                  <Switch
+                    aria-label={t("Trust read-only operations")}
+                    checked={remoteForm.trustedReadOnly}
+                    onCheckedChange={(checked) =>
+                      setRemoteForm({ ...remoteForm, trustedReadOnly: checked })
+                    }
+                  />
+                  <div>
+                    <FieldLabel>{t("Trust read-only operations")}</FieldLabel>
+                    <FieldDescription>
+                      {t(
+                        "Only enable this for a connection you control. Otherwise remote runs pause for approval."
+                      )}
+                    </FieldDescription>
+                  </div>
+                </Field>
+              </FieldGroup>
+            </form>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setRemoteOpen(false)}
+            >
+              {t("Cancel")}
+            </Button>
+            <Button
+              disabled={
+                saving ||
+                !remoteForm.name.trim() ||
+                !remoteForm.endpointUrl.trim()
+              }
+              form="agent-remote-form"
+              type="submit"
+            >
+              <LockKeyhole data-icon="inline-start" />
+              {saving
+                ? editingAgent
+                  ? t("Saving…")
+                  : t("Connecting…")
+                : editingAgent
+                  ? t("Save changes")
+                  : t("Save encrypted connection")}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -2419,7 +2335,7 @@ export function AgentsView({
           if (!running) setRunDialogOpen(open)
         }}
       >
-        <DialogContent className="max-h-[min(720px,calc(100svh-2rem))] overflow-y-auto sm:max-w-lg">
+        <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{t("Run workflow")}</DialogTitle>
             <DialogDescription>
@@ -2428,53 +2344,58 @@ export function AgentsView({
               )}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={(event) => void runWorkflow(runInput, event)}>
-            {currentRunInputNames.length ? (
-              <FieldGroup>
-                {currentRunInputNames.map((name) => (
-                  <Field key={name}>
-                    <FieldLabel htmlFor={`workflow-run-input-${name}`}>
-                      {name}
-                    </FieldLabel>
-                    <Textarea
-                      id={`workflow-run-input-${name}`}
-                      rows={3}
-                      value={runInput[name] ?? ""}
-                      onChange={(event) =>
-                        setRunInput((current) => ({
-                          ...current,
-                          [name]: event.target.value,
-                        }))
-                      }
-                      placeholder={t("Enter a value")}
-                    />
-                  </Field>
-                ))}
-              </FieldGroup>
-            ) : (
-              <Alert>
-                <ListChecks data-icon="inline-start" />
-                <AlertDescription>
-                  {t(
-                    "This workflow has no declared inputs. Add a “Workflow input” binding to a node if the run should accept a value."
-                  )}
-                </AlertDescription>
-              </Alert>
-            )}
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setRunDialogOpen(false)}
-                type="button"
-                disabled={running}
-              >
-                {t("Cancel")}
-              </Button>
-              <Button type="submit" disabled={running}>
-                {running ? t("Starting…") : t("Start run")}
-              </Button>
-            </DialogFooter>
-          </form>
+          <DialogBody>
+            <form
+              id="agent-run-form"
+              onSubmit={(event) => void runWorkflow(runInput, event)}
+            >
+              {currentRunInputNames.length ? (
+                <FieldGroup>
+                  {currentRunInputNames.map((name) => (
+                    <Field key={name}>
+                      <FieldLabel htmlFor={`workflow-run-input-${name}`}>
+                        {name}
+                      </FieldLabel>
+                      <Textarea
+                        id={`workflow-run-input-${name}`}
+                        rows={3}
+                        value={runInput[name] ?? ""}
+                        onChange={(event) =>
+                          setRunInput((current) => ({
+                            ...current,
+                            [name]: event.target.value,
+                          }))
+                        }
+                        placeholder={t("Enter a value")}
+                      />
+                    </Field>
+                  ))}
+                </FieldGroup>
+              ) : (
+                <Alert>
+                  <ListChecks data-icon="inline-start" />
+                  <AlertDescription>
+                    {t(
+                      "This workflow has no declared inputs. Add a “Workflow input” binding to a node if the run should accept a value."
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+            </form>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRunDialogOpen(false)}
+              type="button"
+              disabled={running}
+            >
+              {t("Cancel")}
+            </Button>
+            <Button form="agent-run-form" type="submit" disabled={running}>
+              {running ? t("Starting…") : t("Start run")}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -2536,297 +2457,6 @@ function LoadingState({ label }: { label: string }) {
   )
 }
 
-function AgentsPanel({
-  agents,
-  connections,
-  onEdit,
-  onDelete,
-  onTest,
-  onToggleConnection,
-  onDeleteConnection,
-  testingConnectionId,
-  updatingConnectionId,
-  disabled = false,
-}: {
-  agents: Agent[]
-  connections: AgentConnection[]
-  onEdit: (agent: Agent) => void
-  onDelete: (agent: Agent) => void
-  onTest: (connection: AgentConnection) => void
-  onToggleConnection: (connection: AgentConnection, enabled: boolean) => void
-  onDeleteConnection: (connection: AgentConnection) => void
-  testingConnectionId: string
-  updatingConnectionId: string
-  disabled?: boolean
-}) {
-  const { t } = useTranslations()
-
-  const [query, setQuery] = useState("")
-  const visibleAgents = agents.filter((agent) =>
-    `${agent.name} ${agent.description} ${agent.kind}`
-      .toLowerCase()
-      .includes(query.toLowerCase())
-  )
-  return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">{t("Agent directory")}</h2>
-          <p className="text-sm text-muted-foreground">
-            {t("Reusable specialists and connected remote agents.")}
-          </p>
-        </div>
-        <Input
-          aria-label={t("Search agents")}
-          placeholder={t("Search agents…")}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          className="max-w-sm"
-        />
-      </div>
-      {agents.length > 0 && !visibleAgents.length && (
-        <p className="text-sm text-muted-foreground">
-          {t("No agents match your search.")}
-        </p>
-      )}
-      {agents.length ? (
-        <div className="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-          {visibleAgents.map((agent) => {
-            const connection = connections.find(
-              (item) => item.id === agent.connectionId
-            )
-            return (
-              <Card key={agent.id} className="h-fit">
-                <CardHeader>
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={cn(
-                        "rounded-xl p-2",
-                        agent.kind === "remote"
-                          ? "bg-secondary text-secondary-foreground"
-                          : "bg-primary/10 text-primary"
-                      )}
-                    >
-                      <Bot />
-                    </div>
-                    <div className="min-w-0">
-                      <CardTitle className="truncate text-base">
-                        {agent.name}
-                      </CardTitle>
-                      <CardDescription className="mt-1 line-clamp-2">
-                        {agent.description ||
-                          (agent.kind === "remote"
-                            ? t("Connected A2A agent")
-                            : t("Native JustAI agent"))}
-                      </CardDescription>
-                    </div>
-                    <CardAction className="ml-auto shrink-0">
-                      <Badge variant={badgeVariant(agent.status)}>
-                        {agent.kind === "remote" ? "A2A" : t("Native")} ·{" "}
-                        {statusLabel(agent.status)}
-                      </Badge>
-                    </CardAction>
-                  </div>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-4 text-sm">
-                  <div className="flex flex-wrap gap-2">
-                    {agent.kind === "remote" ? (
-                      <>
-                        <Badge variant="outline">
-                          <Link2 data-icon="inline-start" />
-                          {connection?.authType ?? "A2A"}
-                        </Badge>
-                        {agent.credentialConfigured ? (
-                          <Badge variant="outline">
-                            <KeyRound data-icon="inline-start" />
-                            {t("Credential saved")}
-                          </Badge>
-                        ) : (
-                          <Badge variant="destructive">
-                            {t("Credential missing")}
-                          </Badge>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <Badge variant="outline">
-                          <ShieldCheck data-icon="inline-start" />
-                          {t("JustAI runtime")}
-                        </Badge>
-                        {agent.useMemory && (
-                          <Badge variant="outline">{t("Memory")}</Badge>
-                        )}
-                        {agent.deepContext && (
-                          <Badge variant="outline">{t("Deep context")}</Badge>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  {agent.kind === "remote" && connection?.lastError && (
-                    <Alert variant="destructive">
-                      <CircleAlert data-icon="inline-start" />
-                      <AlertDescription>
-                        {connection.lastError}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  {agent.delegationAgentIds?.length ? (
-                    <p className="text-xs text-muted-foreground">
-                      {t("Can delegate to")} {agent.delegationAgentIds.length}{" "}
-                      {t("allowlisted agent")}
-                      {agent.delegationAgentIds.length === 1 ? "" : "s"}.
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      {t("No delegation targets configured.")}
-                    </p>
-                  )}
-                </CardContent>
-                <CardFooter className="justify-between gap-2 border-t">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={disabled}
-                    onClick={() => onDelete(agent)}
-                    aria-label={t("Delete {value0}", { value0: agent.name })}
-                  >
-                    <Trash2 data-icon="inline-start" />
-                    {t("Delete")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={disabled}
-                    onClick={() => onEdit(agent)}
-                  >
-                    {t("Configure")}
-                  </Button>
-                </CardFooter>
-              </Card>
-            )
-          })}
-        </div>
-      ) : (
-        <Card className="border-dashed">
-          <CardContent className="flex min-h-64 flex-col items-center justify-center text-center">
-            <div className="rounded-full bg-muted p-3">
-              <Bot />
-            </div>
-            <h2 className="mt-4 font-medium">{t("No agents yet")}</h2>
-            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-              {t(
-                "Create a native specialist or connect an A2A agent. Both can be selected in chat and placed in workflows."
-              )}
-            </p>
-          </CardContent>
-        </Card>
-      )}
-      <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="font-medium">{t("Connections")}</h2>
-            <p className="text-sm text-muted-foreground">
-              {t(
-                "Encrypted remote access shared by the workspace or kept personal."
-              )}
-            </p>
-          </div>
-          <Badge variant="outline">
-            {connections.length} {t("configured")}
-          </Badge>
-        </div>
-        {connections.length ? (
-          <div className="grid gap-3 md:grid-cols-2">
-            {connections.map((connection) => (
-              <Card key={connection.id} size="sm">
-                <CardContent className="flex items-center gap-3">
-                  <div className="rounded-lg bg-muted p-2">
-                    <Link2 />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{connection.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {connection.endpointUrl}
-                    </p>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      <Badge
-                        variant={connection.enabled ? "secondary" : "outline"}
-                      >
-                        {connection.enabled ? t("Enabled") : t("Disabled")}
-                      </Badge>
-                      <Badge
-                        variant={
-                          connection.lastError ? "destructive" : "outline"
-                        }
-                      >
-                        {connection.lastError
-                          ? t("Needs attention")
-                          : connection.lastTestedAt
-                            ? t("Tested")
-                            : t("Not tested")}
-                      </Badge>
-                      {connection.trustedReadOnly && (
-                        <Badge variant="outline">
-                          {t("Trusted read-only")}
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Switch
-                      checked={connection.enabled}
-                      disabled={disabled || Boolean(updatingConnectionId)}
-                      onCheckedChange={(checked) =>
-                        onToggleConnection(connection, checked)
-                      }
-                      aria-label={t("Enable {value0}", {
-                        value0: connection.name,
-                      })}
-                    />
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      disabled={disabled || Boolean(testingConnectionId)}
-                      onClick={() => onTest(connection)}
-                      aria-label={t("Test {value0}", {
-                        value0: connection.name,
-                      })}
-                    >
-                      <RefreshCw
-                        className={
-                          testingConnectionId === connection.id
-                            ? "animate-spin"
-                            : ""
-                        }
-                        data-icon="inline-start"
-                      />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      disabled={disabled}
-                      onClick={() => onDeleteConnection(connection)}
-                      aria-label={t("Delete {value0}", {
-                        value0: connection.name,
-                      })}
-                    >
-                      <Trash2 data-icon="inline-start" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-            {t("No remote connections configured.")}
-          </p>
-        )}
-      </section>
-    </div>
-  )
-}
-
 function WorkflowsPanel({
   workflows,
   draft,
@@ -2838,7 +2468,6 @@ function WorkflowsPanel({
   selectedNode,
   selectedNodeId,
   graphNodes,
-  graphEdges,
   validationMessage,
   validationTarget,
   validationTone,
@@ -2870,8 +2499,7 @@ function WorkflowsPanel({
   knowledgeSources: KnowledgeSource[]
   selectedNode?: AgentWorkflowNode
   selectedNodeId: string
-  graphNodes: Node<FlowNodeData>[]
-  graphEdges: Edge[]
+  graphNodes: GraphNode[]
   validationMessage: string
   validationTarget: WorkflowValidationTarget
   validationTone: WorkflowValidationTone
@@ -2886,7 +2514,7 @@ function WorkflowsPanel({
   onSelectNode: (id: string) => void
   onAddNode: () => void
   onRemoveNode: () => void
-  onConnect: (connection: Connection) => void
+  onConnect: (connection: { source: string; target: string }) => void
   onPositionChange: (id: string, position: { x: number; y: number }) => void
   onValidate: () => void
   onSave: () => void
@@ -2899,466 +2527,274 @@ function WorkflowsPanel({
   const { t } = useTranslations()
 
   const [workflowQuery, setWorkflowQuery] = useState("")
-  const editorRef = useRef<HTMLDivElement>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [editorTab, setEditorTab] = useState("build")
-  const activeEditorTab = validationTarget
-    ? validationTarget === "name"
-      ? "settings"
-      : "build"
-    : editorTab
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(document.fullscreenElement === editorRef.current)
-    }
-    document.addEventListener("fullscreenchange", handleFullscreenChange)
-    return () =>
-      document.removeEventListener("fullscreenchange", handleFullscreenChange)
-  }, [])
-
-  useEffect(() => {
-    if (!isFullscreen) return
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    return () => {
-      document.body.style.overflow = previousOverflow
-    }
-  }, [isFullscreen])
-
-  const toggleFullscreen = useCallback(async () => {
-    const editor = editorRef.current
-    if (!editor) return
-    if (isFullscreen) {
-      setIsFullscreen(false)
-      if (document.fullscreenElement === editor) {
-        await document.exitFullscreen().catch(() => undefined)
-      }
-      return
-    }
-    setIsFullscreen(true)
-    try {
-      await editor.requestFullscreen()
-    } catch {
-      // Keep the fixed focus mode when the browser blocks the native API.
-    }
-  }, [isFullscreen])
-
   return (
     <div className={cn("grid gap-5", !draft && "grid-cols-1")}>
       {!draft && (
-        <Card className="h-fit max-h-[calc(100vh-13rem)] overflow-y-auto">
-          <CardHeader>
-            <CardTitle>{t("Workflow library")}</CardTitle>
-            <CardDescription>
-              {t(
-                "Reusable workflows for your team. Select a workflow to open the builder."
-              )}
-            </CardDescription>
-            <Input
-              aria-label={t("Search workflows")}
-              placeholder={t("Search workflows…")}
-              value={workflowQuery}
-              onChange={(event) => setWorkflowQuery(event.target.value)}
-              className="mt-3 max-w-md"
-            />
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {workflows
-              .filter((workflow) =>
-                `${workflow.name} ${workflow.description}`
-                  .toLowerCase()
-                  .includes(workflowQuery.toLowerCase())
-              )
-              .map((workflow) => (
-                <button
-                  key={workflow.id}
-                  className={cn(
-                    "rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-left transition-colors hover:border-border hover:bg-muted/65",
-                    "focus-visible:border-primary"
-                  )}
-                  onClick={() => onOpen(workflow)}
-                >
-                  <span className="block truncate text-sm font-medium">
-                    {workflow.name}
-                  </span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {workflow.definition.nodes.length} {t("nodes ·")}{" "}
-                    {workflowScheduleDescription(workflow.schedule)}
-                  </span>
-                  <span className="block text-xs text-muted-foreground">
-                    {t("Next run:")}{" "}
-                    {formatWorkflowNextRun(
-                      workflow.nextRunAt,
-                      workflow.timezone
-                    )}
-                  </span>
-                </button>
-              ))}
-            {!workflows.length && (
-              <p className="py-5 text-center text-xs text-muted-foreground">
-                {t("No saved workflows.")}
-              </p>
+        <div className="flex flex-col gap-8">
+          <section className="flex flex-col gap-4">
+            {workflows.length > 5 && (
+              <Input.Group className="w-full self-end sm:w-80">
+                <Input.Addon>
+                  <Search aria-hidden="true" />
+                </Input.Addon>
+                <Input
+                  aria-label={t("Search workflows")}
+                  onChange={(event) => setWorkflowQuery(event.target.value)}
+                  placeholder={t("Search workflows…")}
+                  value={workflowQuery}
+                />
+              </Input.Group>
             )}
-            <div className="mt-2 border-t pt-5 md:col-span-2 xl:col-span-3">
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
-                <Sparkles className="size-3.5 text-primary" />
-                {t("Start from a template")}
-              </p>
-              <div className="grid gap-3 md:grid-cols-3">
-                {workflowTemplates.map((template) => (
-                  <button
-                    key={template.id}
-                    className="rounded-lg border border-border/50 bg-muted/25 px-2.5 py-2 text-left text-xs transition-colors hover:border-border hover:bg-muted/60"
-                    onClick={() => onOpenTemplate(template.id)}
-                    type="button"
-                  >
-                    <span className="block font-medium">{template.name}</span>
-                    <span className="mt-0.5 block text-muted-foreground">
-                      {template.description}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      {draft ? (
-        <Card
-          ref={editorRef}
-          className={cn(
-            "min-w-0",
-            isFullscreen &&
-              "fixed inset-0 z-50 min-h-screen w-screen overflow-y-auto rounded-none bg-background py-6"
-          )}
-        >
-          <CardHeader
-            className={cn(
-              isFullscreen &&
-                "sticky top-0 z-10 border-b bg-background/95 backdrop-blur-sm"
-            )}
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={onClose}
-                  >
-                    {t("Workflows")}
-                  </Button>
-                  <CardTitle>
-                    {draft.id
-                      ? draft.name || "Edit workflow"
-                      : t("New workflow")}
-                  </CardTitle>
-                </div>
-                <CardDescription>
-                  {t(
-                    "Design the flow, configure each step, then validate and run."
-                  )}
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {draft.id && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={disabled}
-                    onClick={() => {
-                      const workflow = workflows.find(
-                        (item) => item.id === draft.id
-                      )
-                      if (workflow) onDelete(workflow)
-                    }}
-                  >
-                    <Trash2 data-icon="inline-start" />
-                    {t("Delete")}
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void toggleFullscreen()}
-                  aria-label={
-                    isFullscreen
-                      ? t("Exit full screen editor")
-                      : t("Open full screen editor")
-                  }
-                >
-                  {isFullscreen ? (
-                    <Minimize2 data-icon="inline-start" />
-                  ) : (
-                    <Maximize2 data-icon="inline-start" />
-                  )}
-                  <span className="hidden sm:inline">
-                    {isFullscreen ? t("Exit full screen") : t("Full screen")}
-                  </span>
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={onValidate}
-                  disabled={validating}
-                >
-                  <CheckCircle2 data-icon="inline-start" />
-                  {validating ? t("Validating…") : t("Validate")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={onSave}
-                  disabled={disabled || saving}
-                >
-                  <Check data-icon="inline-start" />
-                  {saving ? t("Saving…") : t("Save")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={onRun}
-                  disabled={disabled}
-                >
-                  <Play data-icon="inline-start" />
-                  {t("Run")}
-                </Button>
-              </div>
-            </div>
-            {validationMessage && (
-              <Alert
-                className="mt-3"
-                role={validationTone === "error" ? "alert" : "status"}
-                variant={validationTone === "error" ? "destructive" : undefined}
-              >
-                <ListChecks data-icon="inline-start" />
-                <AlertTitle>
-                  {validationTone === "error"
-                    ? t("Workflow needs attention")
-                    : validationTone === "success"
-                      ? t("Workflow ready")
-                      : t("Workflow setup")}
-                </AlertTitle>
-                <AlertDescription>{validationMessage}</AlertDescription>
-              </Alert>
-            )}
-          </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <Tabs
-              value={activeEditorTab}
-              onValueChange={(value) => {
-                setEditorTab(value)
-                if (validationTarget) onValidationDismiss()
-              }}
-            >
-              <TabsList
-                aria-label={t("Workflow editor sections")}
-                variant="line"
-              >
-                <TabsTrigger value="build">{t("Build")}</TabsTrigger>
-                <TabsTrigger value="settings">{t("Settings")}</TabsTrigger>
-                <TabsTrigger value="schedule">{t("Schedule")}</TabsTrigger>
-              </TabsList>
-              <TabsContent value="build" className="pt-4">
-                {" "}
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_23rem]">
-                  <div className="flex h-[620px] flex-col gap-2 overflow-hidden rounded-xl bg-muted/50">
-                    <div className="flex items-center justify-between border-b px-3 py-2">
-                      <div>
-                        <p className="text-xs font-medium">
-                          {t("Execution graph")}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {t(
-                            "Drag nodes; connect bottom handles to top handles."
-                          )}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={disabled}
-                          onClick={() => {
-                            const layout = layoutAgentGraph(
-                              draft.definition.nodes.map((node) => node.id),
-                              draft.definition.edges
-                            )
-                            Object.entries(layout).forEach(([id, position]) =>
-                              onPositionChange(id, position)
-                            )
-                          }}
-                        >
-                          {t("Auto layout")}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={onAddNode}
-                          disabled={
-                            disabled || draft.definition.nodes.length >= 16
-                          }
-                        >
-                          <Plus data-icon="inline-start" />
-                          {t("Agent node")}
-                        </Button>
-                      </div>
-                    </div>
-                    <WorkflowCanvas
-                      key={draft.id || "new"}
-                      nodes={graphNodes}
-                      edges={graphEdges}
-                      disabled={disabled}
-                      onConnect={onConnect}
-                      onSelectNode={onSelectNode}
-                      onPositionChange={onPositionChange}
-                    />
+            {workflows.length === 0 ? (
+              <PuCard className="border-dashed">
+                <PuCard.Content className="flex min-h-56 flex-col items-center justify-center gap-4 text-center">
+                  <GitBranch
+                    aria-hidden="true"
+                    className="size-6 text-muted-foreground"
+                  />
+                  <div className="grid max-w-md gap-1.5">
+                    <h2 className="text-base font-semibold">
+                      {t("Create a custom workflow")}
+                    </h2>
+                    <p className="text-sm text-muted-foreground">
+                      {t(
+                        "Start with a node, add a second agent, connect them, and run a parallel or fan-in graph with durable progress."
+                      )}
+                    </p>
                   </div>
-                  <div className="max-h-[min(46rem,calc(100vh-12rem))] overflow-y-auto pr-1">
-                    <InspectorSection
-                      title={t("Connections ({value0})", {
-                        value0: draft.definition.edges.length,
-                      })}
-                    >
-                      {draft.definition.edges.length ? (
-                        draft.definition.edges.map((edge) => (
-                          <div
-                            key={`${edge.from}-${edge.to}`}
-                            className="flex items-center justify-between gap-2 text-xs"
-                          >
-                            <span>
-                              {edge.from} → {edge.to}
-                            </span>
-                            <Button
-                              size="icon-sm"
-                              variant="ghost"
-                              disabled={disabled}
-                              aria-label={t(
-                                "Remove connection {value0} to {value1}",
-                                { value0: edge.from, value1: edge.to }
-                              )}
-                              onClick={() =>
-                                onUpdate({
-                                  definition: {
-                                    ...draft.definition,
-                                    edges: draft.definition.edges.filter(
-                                      (candidate) => candidate !== edge
-                                    ),
-                                  },
-                                })
+                  {!disabled && (
+                    <Button onClick={() => onOpen()}>
+                      <Plus />
+                      {t("New workflow")}
+                    </Button>
+                  )}
+                </PuCard.Content>
+              </PuCard>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {workflows
+                  .filter((workflow) =>
+                    `${workflow.name} ${workflow.description}`
+                      .toLowerCase()
+                      .includes(workflowQuery.toLowerCase())
+                  )
+                  .map((workflow) => (
+                    <PuCard as="article" className="h-full" key={workflow.id}>
+                      <PuCard.Header>
+                        <PuCard.Action>
+                          <Menu>
+                            <Menu.Trigger
+                              render={
+                                <Button
+                                  aria-label={t("More actions for {value0}", {
+                                    value0: workflow.name,
+                                  })}
+                                  disabled={disabled}
+                                  size="icon-sm"
+                                  variant="ghost"
+                                />
                               }
                             >
-                              <X data-icon="inline-start" />
-                            </Button>
-                          </div>
-                        ))
-                      ) : (
+                              <MoreHorizontal />
+                            </Menu.Trigger>
+                            <Menu.Content align="end">
+                              <Menu.Item onClick={() => onOpen(workflow)}>
+                                {t("Open builder")}
+                              </Menu.Item>
+                              <Menu.Separator />
+                              <Menu.Item
+                                onClick={() => onDelete(workflow)}
+                                variant="destructive"
+                              >
+                                <Trash2 />
+                                {t("Delete")}
+                              </Menu.Item>
+                            </Menu.Content>
+                          </Menu>
+                        </PuCard.Action>
+                        <PuCard.Title className="truncate">
+                          {workflow.name}
+                        </PuCard.Title>
+                        <PuCard.Description className="line-clamp-2">
+                          {workflow.description || t("Reusable workflow")}
+                        </PuCard.Description>
+                      </PuCard.Header>
+                      <PuCard.Content className="flex flex-col gap-3">
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge variant="outline">
+                            <GitBranch />
+                            {workflow.definition.nodes.length} {t("nodes")}
+                          </Badge>
+                          <Badge variant="secondary">
+                            <Clock3 />
+                            {workflowScheduleDescription(workflow.schedule)}
+                          </Badge>
+                        </div>
                         <p className="text-xs text-muted-foreground">
-                          {t("Connect nodes using the handles on the canvas.")}
+                          {t("Next run:")}{" "}
+                          {formatWorkflowNextRun(
+                            workflow.nextRunAt,
+                            workflow.timezone
+                          )}
                         </p>
+                      </PuCard.Content>
+                      <PuCard.Footer className="justify-end" variant="panel">
+                        <Button
+                          onClick={() => onOpen(workflow)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          {t("Open builder")}
+                        </Button>
+                      </PuCard.Footer>
+                    </PuCard>
+                  ))}
+              </div>
+            )}
+          </section>
+          <Frame>
+            <Frame.Header>
+              <Frame.Title>{t("Start from a template")}</Frame.Title>
+              <Frame.Description>
+                {t("Pick a ready-made graph and adjust it in the builder.")}
+              </Frame.Description>
+            </Frame.Header>
+            <Frame.Panel>
+              {workflowTemplates.map((template) => (
+                <Frame.Row
+                  chevron
+                  key={template.id}
+                  onClick={() => onOpenTemplate(template.id)}
+                >
+                  <Frame.Media>
+                    <Sparkles aria-hidden="true" />
+                  </Frame.Media>
+                  <Frame.Content>
+                    <Frame.Title as="p">{template.name}</Frame.Title>
+                    <Frame.Description>
+                      {template.description}
+                    </Frame.Description>
+                  </Frame.Content>
+                </Frame.Row>
+              ))}
+            </Frame.Panel>
+          </Frame>
+        </div>
+      )}
+      {draft ? (
+        <WorkflowEditor
+          canDelete={Boolean(draft.id)}
+          description={draft.description}
+          disabled={disabled}
+          edges={draft.definition.edges}
+          graphKey={draft.id || "new"}
+          isNew={!draft.id}
+          maxNodes={16}
+          nodePanel={
+            <NodeInspector
+              node={selectedNode}
+              selectedNodeId={selectedNodeId}
+              agents={agents}
+              connections={connections}
+              workflowNodes={draft.definition.nodes}
+              mcpServers={mcpServers}
+              knowledgeSpaces={knowledgeSpaces}
+              knowledgeSources={knowledgeSources}
+              onUpdate={onUpdateNode}
+              onRemove={onRemoveNode}
+              disabled={disabled}
+            />
+          }
+          nodes={graphNodes.map((node) => ({
+            id: node.id,
+            position: node.position,
+            agentName: node.data.agentName,
+            instruction: node.data.instruction,
+            selected: Boolean(node.data.selected),
+            status: node.data.status,
+          }))}
+          onAddNode={onAddNode}
+          onAutoLayout={() => {
+            const layout = layoutAgentGraph(
+              draft.definition.nodes.map((node) => node.id),
+              draft.definition.edges
+            )
+            Object.entries(layout).forEach(([id, position]) =>
+              onPositionChange(id, position)
+            )
+          }}
+          onClose={onClose}
+          onConnect={onConnect}
+          onDelete={() => {
+            const workflow = workflows.find((item) => item.id === draft.id)
+            if (workflow) onDelete(workflow)
+          }}
+          onPositionChange={onPositionChange}
+          onRemoveEdge={(edge) =>
+            onUpdate({
+              definition: {
+                ...draft.definition,
+                edges: draft.definition.edges.filter(
+                  (candidate) =>
+                    candidate.from !== edge.from || candidate.to !== edge.to
+                ),
+              },
+            })
+          }
+          onRun={onRun}
+          onSave={onSave}
+          onSelectNode={onSelectNode}
+          onValidate={onValidate}
+          onValidationDismiss={onValidationDismiss}
+          saving={saving}
+          schedulePanel={
+            <ScheduleEditor
+              schedule={draft.schedule}
+              enabled={draft.enabled}
+              nextRunAt={
+                draft.id
+                  ? workflows.find((workflow) => workflow.id === draft.id)
+                      ?.nextRunAt
+                  : null
+              }
+              timezone={draft.timezone}
+              onScheduleChange={(schedule) => onUpdate({ schedule })}
+              onEnabledChange={(enabled) => onUpdate({ enabled })}
+              disabled={disabled}
+            />
+          }
+          settingsPanel={
+            <Inspector.Section>
+              <Inspector.SectionTitle>
+                {t("Workflow settings")}
+              </Inspector.SectionTitle>
+              <Inspector.SectionContent>
+                <Field data-invalid={validationTarget === "name"}>
+                  <FieldLabel htmlFor="workflow-name">{t("Name")}</FieldLabel>
+                  <Input
+                    id="workflow-name"
+                    aria-invalid={validationTarget === "name"}
+                    autoFocus={validationTarget === "name"}
+                    value={draft.name}
+                    disabled={disabled}
+                    onChange={(event) => onUpdate({ name: event.target.value })}
+                    placeholder={t("Research then synthesize")}
+                  />
+                  {validationTarget === "name" && (
+                    <FieldDescription>
+                      {t(
+                        "Enter a name so this workflow can be saved and found later."
                       )}
-                    </InspectorSection>
-                    <NodeInspector
-                      node={selectedNode}
-                      selectedNodeId={selectedNodeId}
-                      agents={agents}
-                      connections={connections}
-                      workflowNodes={draft.definition.nodes}
-                      mcpServers={mcpServers}
-                      knowledgeSpaces={knowledgeSpaces}
-                      knowledgeSources={knowledgeSources}
-                      onUpdate={onUpdateNode}
-                      onRemove={onRemoveNode}
-                      disabled={disabled}
-                    />
-                  </div>
-                </div>
-              </TabsContent>
-              <TabsContent
-                value="settings"
-                className="flex flex-col gap-5 pt-4"
-              >
-                {" "}
-                <div className="grid gap-4 md:grid-cols-3">
-                  <Field data-invalid={validationTarget === "name"}>
-                    <FieldLabel htmlFor="workflow-name">{t("Name")}</FieldLabel>
-                    <Input
-                      id="workflow-name"
-                      aria-invalid={validationTarget === "name"}
-                      autoFocus={validationTarget === "name"}
-                      value={draft.name}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        onUpdate({ name: event.target.value })
-                      }
-                      placeholder={t("Research then synthesize")}
-                    />
-                    {validationTarget === "name" && (
-                      <FieldDescription>
-                        {t(
-                          "Enter a name so this workflow can be saved and found later."
-                        )}
-                      </FieldDescription>
-                    )}
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="workflow-visibility">
-                      {t("Visibility")}
-                    </FieldLabel>
-                    <Select
-                      value={draft.visibility}
-                      disabled={disabled}
-                      onValueChange={(value) =>
-                        onUpdate({
-                          visibility: (value ??
-                            "private") as WorkflowDraft["visibility"],
-                        })
-                      }
-                    >
-                      <SelectTrigger id="workflow-visibility">
-                        <SelectValue>
-                          {t(visibilityLabel(draft.visibility))}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem value="private">
-                            {t("Private")}
-                          </SelectItem>
-                          <SelectItem value="workspace">
-                            {t("Workspace shared")}
-                          </SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="workflow-timezone">
-                      {t("Timezone")}
-                    </FieldLabel>
-                    <Input
-                      id="workflow-timezone"
-                      value={draft.timezone}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        onUpdate({ timezone: event.target.value })
-                      }
-                      placeholder="Europe/Berlin"
-                    />
-                  </Field>
-                </div>
+                    </FieldDescription>
+                  )}
+                </Field>
                 <Field>
                   <FieldLabel htmlFor="workflow-description">
                     {t("Description")}
                   </FieldLabel>
-                  <Input
+                  <Textarea
                     id="workflow-description"
+                    minRows={2}
                     value={draft.description}
                     disabled={disabled}
                     onChange={(event) =>
@@ -3367,51 +2803,58 @@ function WorkflowsPanel({
                     placeholder={t("What this workflow produces")}
                   />
                 </Field>
-              </TabsContent>
-              <TabsContent value="schedule" className="pt-4">
-                {" "}
-                <ScheduleEditor
-                  schedule={draft.schedule}
-                  enabled={draft.enabled}
-                  nextRunAt={
-                    draft.id
-                      ? workflows.find((workflow) => workflow.id === draft.id)
-                          ?.nextRunAt
-                      : null
-                  }
-                  timezone={draft.timezone}
-                  onScheduleChange={(schedule) => onUpdate({ schedule })}
-                  onEnabledChange={(enabled) => onUpdate({ enabled })}
-                  disabled={disabled}
-                />
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-      ) : !workflows.length ? (
-        <Card className="border-dashed">
-          <CardContent className="flex min-h-96 flex-col items-center justify-center text-center">
-            <div className="rounded-full bg-muted p-3">
-              <GitBranch />
-            </div>
-            <h2 className="mt-4 font-medium">
-              {t("Create a custom workflow")}
-            </h2>
-            <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              {t(
-                "Start with a node, add a second agent, connect them, and run a parallel or fan-in graph with durable progress."
-              )}
-            </p>
-            <Button
-              className="mt-5"
-              onClick={() => onOpen()}
-              disabled={disabled}
-            >
-              <Plus data-icon="inline-start" />
-              {t("New workflow")}
-            </Button>
-          </CardContent>
-        </Card>
+                <Field>
+                  <FieldLabel htmlFor="workflow-visibility">
+                    {t("Visibility")}
+                  </FieldLabel>
+                  <Select
+                    value={draft.visibility}
+                    disabled={disabled}
+                    onValueChange={(value) =>
+                      onUpdate({
+                        visibility: (value ??
+                          "private") as WorkflowDraft["visibility"],
+                      })
+                    }
+                  >
+                    <SelectTrigger id="workflow-visibility">
+                      <SelectValue>
+                        {t(visibilityLabel(draft.visibility))}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="private">{t("Private")}</SelectItem>
+                        <SelectItem value="workspace">
+                          {t("Workspace shared")}
+                        </SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="workflow-timezone">
+                    {t("Timezone")}
+                  </FieldLabel>
+                  <Input
+                    id="workflow-timezone"
+                    value={draft.timezone}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      onUpdate({ timezone: event.target.value })
+                    }
+                    placeholder="Europe/Berlin"
+                  />
+                </Field>
+              </Inspector.SectionContent>
+            </Inspector.Section>
+          }
+          title={draft.name}
+          validating={validating}
+          validationMessage={validationMessage}
+          validationTarget={validationTarget}
+          validationTone={validationTone}
+        />
       ) : null}
     </div>
   )
@@ -3648,7 +3091,7 @@ function NodeInspector({
         </Field>
         <InspectorSection title={t("Safety & execution")}>
           {" "}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3">
             <Field>
               <FieldLabel htmlFor={`approval-${node.id}`}>
                 {t("Approval")}
@@ -3755,7 +3198,7 @@ function NodeInspector({
                       key={`${node.id}-binding-${index}`}
                       className="rounded-xl bg-muted/50 p-3"
                     >
-                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
+                      <div className="grid gap-3">
                         <Field>
                           <FieldLabel
                             htmlFor={`binding-name-${node.id}-${index}`}
@@ -3827,7 +3270,7 @@ function NodeInspector({
                         </Button>
                       </div>
                       {source === "node" && (
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <div className="mt-3 grid gap-3">
                           <Field>
                             <FieldLabel
                               htmlFor={`binding-node-${node.id}-${index}`}
@@ -3926,14 +3369,12 @@ function NodeInspector({
                       key={agent.id}
                       className="flex items-center gap-2 text-xs"
                     >
-                      <input
-                        className="size-3.5 accent-primary"
-                        type="checkbox"
+                      <Checkbox
                         checked={
                           node.delegationAgentIds?.includes(agent.id) ?? false
                         }
                         disabled={disabled}
-                        onChange={() => {
+                        onCheckedChange={() => {
                           const current = node.delegationAgentIds ?? []
                           onUpdate(node.id, {
                             delegationAgentIds: current.includes(agent.id)
@@ -3969,14 +3410,12 @@ function NodeInspector({
                     key={server.id}
                     className="flex items-center gap-2 text-xs"
                   >
-                    <input
-                      className="size-3.5 accent-primary"
-                      type="checkbox"
+                    <Checkbox
                       checked={
                         context.mcpServerIds?.includes(server.id) ?? false
                       }
                       disabled={disabled}
-                      onChange={() => {
+                      onCheckedChange={() => {
                         const current = context.mcpServerIds ?? []
                         onUpdate(node.id, {
                           context: updateContext(context, {
@@ -4013,14 +3452,12 @@ function NodeInspector({
                     key={space.id}
                     className="flex items-center gap-2 text-xs"
                   >
-                    <input
-                      className="size-3.5 accent-primary"
-                      type="checkbox"
+                    <Checkbox
                       checked={
                         context.knowledgeSpaceIds?.includes(space.id) ?? false
                       }
                       disabled={disabled}
-                      onChange={() => {
+                      onCheckedChange={() => {
                         const current = context.knowledgeSpaceIds ?? []
                         onUpdate(node.id, {
                           context: updateContext(context, {
@@ -4057,14 +3494,12 @@ function NodeInspector({
                     key={source.id}
                     className="flex items-center gap-2 text-xs"
                   >
-                    <input
-                      className="size-3.5 accent-primary"
-                      type="checkbox"
+                    <Checkbox
                       checked={
                         context.knowledgeSourceIds?.includes(source.id) ?? false
                       }
                       disabled={disabled}
-                      onChange={() => {
+                      onCheckedChange={() => {
                         const current = context.knowledgeSourceIds ?? []
                         onUpdate(node.id, {
                           context: updateContext(context, {
@@ -4673,227 +4108,237 @@ function RunsPanel({
   const pageRuns = filteredRuns.slice(currentPage * 25, (currentPage + 1) * 25)
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
-      )}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[
-          { label: t("Loaded runs"), value: runs.length },
-          {
-            label: t("In progress"),
-            value: runs.filter((run) =>
-              ["running", "queued"].includes(run.status)
-            ).length,
-          },
-          {
-            label: t("Completed"),
-            value: runs.filter((run) => run.status === "completed").length,
-          },
-          {
-            label: t("Failed"),
-            value: runs.filter((run) => run.status === "failed").length,
-          },
-        ].map((metric) => (
-          <Card key={metric.label}>
-            <CardHeader>
-              <CardDescription>{metric.label}</CardDescription>
-              <CardTitle className="tabular-nums">{metric.value}</CardTitle>
-            </CardHeader>
-          </Card>
-        ))}
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("Run history")}</CardTitle>
-          <CardDescription>
-            {t("Track execution, investigate failures, and review approvals.")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <FilterBar
-            hasActiveFilters={Boolean(query.trim()) || statusFilter !== "all"}
-            onClear={() => {
-              setQuery("")
-              setStatusFilter("all")
+      {error && <ToastFeedback message={error} type={"destructive"} />}
+      <div className="flex flex-wrap items-center gap-3">
+        <Input.Group className="w-full sm:w-80">
+          <Input.Addon>
+            <Search aria-hidden="true" />
+          </Input.Addon>
+          <Input
+            aria-label={t("Search runs")}
+            onChange={(event) => {
+              setQuery(event.target.value)
               setPage(0)
             }}
-            resultCount={filteredRuns.length}
-            resultLabel="runs"
-            resultTotal={runs.length}
-            search={{
-              label: "Search runs",
-              onChange: (value) => {
-                setQuery(value)
-                setPage(0)
-              },
-              placeholder: "Search workflows, run IDs, or results…",
-              value: query,
-            }}
-          >
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => {
-                setStatusFilter(value ?? "all")
-                setPage(0)
-              }}
-            >
-              <SelectTrigger
-                aria-label={t("Filter run status")}
-                className="h-8 min-w-36 sm:min-w-40"
-                size="sm"
-              >
-                <SelectValue>
-                  {statusFilter === "all"
-                    ? t("All statuses")
-                    : statusLabel(statusFilter)}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="all">{t("All statuses")}</SelectItem>
-                  {[...new Set(runs.map((run) => run.status))]
-                    .sort()
-                    .map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {statusLabel(status)}
-                      </SelectItem>
-                    ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </FilterBar>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("Workflow / run")}</TableHead>
-                <TableHead>{t("Status")}</TableHead>
-                <TableHead>{t("Source")}</TableHead>
-                <TableHead>{t("Started")}</TableHead>
-                <TableHead>{t("Duration")}</TableHead>
-                <TableHead>{t("Result")}</TableHead>
-                <TableHead className="text-right">{t("Actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pageRuns.map((run) => (
-                <TableRow
-                  key={run.id}
+            placeholder={t("Search workflows, run IDs, or results…")}
+            value={query}
+          />
+        </Input.Group>
+        <Chip.Group
+          aria-label={t("Filter run status")}
+          multiple={false}
+          onValueChange={(value) => {
+            setStatusFilter((value[0] as string | undefined) ?? "all")
+            setPage(0)
+          }}
+          value={[statusFilter]}
+        >
+          {["all", ...[...new Set(runs.map((run) => run.status))].sort()].map(
+            (status) => {
+              const count =
+                status === "all"
+                  ? runs.length
+                  : runs.filter((run) => run.status === status).length
+              const tone = badgeVariant(status)
+              return (
+                <Chip
+                  color={
+                    tone === "success" ||
+                    tone === "info" ||
+                    tone === "warning" ||
+                    tone === "destructive"
+                      ? tone
+                      : "primary"
+                  }
+                  key={status}
+                  size="sm"
+                  value={status}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    {status !== "all" && (
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "size-1.5 rounded-full bg-muted-foreground",
+                          tone === "success" && "bg-success",
+                          tone === "info" && "bg-info",
+                          tone === "warning" && "bg-warning",
+                          tone === "destructive" && "bg-destructive"
+                        )}
+                      />
+                    )}
+                    {status === "all" ? t("All statuses") : statusLabel(status)}
+                    <span className="text-muted-foreground tabular-nums">
+                      {count}
+                    </span>
+                  </span>
+                </Chip>
+              )
+            }
+          )}
+        </Chip.Group>
+      </div>
+      <Frame>
+        <Frame.Header>
+          <Frame.Title>{t("Run history")}</Frame.Title>
+          <Frame.Description>
+            {t("Track execution, investigate failures, and review approvals.")}
+          </Frame.Description>
+          <Frame.Action>
+            {filteredRuns.length} {t("of")} {runs.length}
+          </Frame.Action>
+        </Frame.Header>
+        <Frame.Panel>
+          {pageRuns.length === 0 ? (
+            <Frame.Row>
+              <Frame.Content className="flex flex-col items-center gap-2 py-10 text-center">
+                <span className="rounded-full bg-muted p-3 text-muted-foreground">
+                  <Activity aria-hidden="true" className="size-5" />
+                </span>
+                <Frame.Title as="p">
+                  {runs.length
+                    ? t("No runs match your search.")
+                    : t("No runs yet")}
+                </Frame.Title>
+                {!runs.length && (
+                  <Frame.Description className="max-w-xs">
+                    {t(
+                      "Run a workflow or delegate from chat and progress will appear here."
+                    )}
+                  </Frame.Description>
+                )}
+              </Frame.Content>
+            </Frame.Row>
+          ) : (
+            pageRuns.map((run) => {
+              const active = ["queued", "running", "waiting_approval"].includes(
+                run.status
+              )
+              return (
+                <Frame.Row
                   data-state={
                     showDetail && selectedID === run.id ? "selected" : undefined
                   }
+                  key={run.id}
                 >
-                  <TableCell>
-                    <Button variant="link" onClick={() => selectRun(run.id)}>
+                  <Frame.Media>
+                    <Activity aria-hidden="true" />
+                  </Frame.Media>
+                  <Frame.Content>
+                    <button
+                      className="w-fit cursor-pointer text-start text-sm font-medium hover:underline"
+                      onClick={() => selectRun(run.id)}
+                      type="button"
+                    >
                       {runName(run)}
-                    </Button>
-                    <p className="px-2 font-mono text-xs text-muted-foreground">
-                      {run.id.slice(0, 12)}
+                    </button>
+                    <Frame.Description className="truncate">
+                      {run.error || run.summary || run.id.slice(0, 12)}
+                    </Frame.Description>
+                    <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                      {run.sourceType} · {formatRunTime(run.createdAt)} ·{" "}
+                      {formatRunDuration(run.startedAt, run.finishedAt)}
                     </p>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={badgeVariant(run.status)}>
+                  </Frame.Content>
+                  <Frame.Actions>
+                    <Badge dot variant={badgeVariant(run.status)}>
                       {statusLabel(run.status)}
                     </Badge>
-                  </TableCell>
-                  <TableCell>{run.sourceType}</TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {formatRunTime(run.createdAt)}
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    {formatRunDuration(run.startedAt, run.finishedAt)}
-                  </TableCell>
-                  <TableCell className="max-w-64 truncate text-muted-foreground">
-                    {run.error || run.summary || "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      aria-label={t("Delete {value0} run", {
-                        value0: runName(run),
-                      })}
-                      disabled={
-                        disabled ||
-                        ["queued", "running", "waiting_approval"].includes(
-                          run.status
-                        )
-                      }
-                      onClick={() => setDeleteRunTarget(run)}
-                      size="icon-sm"
-                      title={
-                        ["queued", "running", "waiting_approval"].includes(
-                          run.status
-                        )
-                          ? t("Cancel this run before deleting it")
-                          : t("Delete run")
-                      }
-                      variant="ghost"
-                    >
-                      <Trash2 />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <nav
-            aria-label={t("Run history pagination")}
-            className="flex flex-wrap items-center justify-between gap-3"
-          >
-            <span className="text-xs text-muted-foreground" aria-live="polite">
-              {filteredRuns.length ? currentPage * 25 + 1 : 0}–
-              {Math.min((currentPage + 1) * 25, filteredRuns.length)} {t("of")}{" "}
-              {filteredRuns.length} {t("· 25 per page")}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentPage === 0}
-                onClick={() => setPage(currentPage - 1)}
+                    <Menu>
+                      <Menu.Trigger
+                        render={
+                          <Button
+                            aria-label={t("More actions for {value0}", {
+                              value0: runName(run),
+                            })}
+                            size="icon-sm"
+                            variant="ghost"
+                          />
+                        }
+                      >
+                        <MoreHorizontal />
+                      </Menu.Trigger>
+                      <Menu.Content align="end">
+                        <Menu.Item onClick={() => selectRun(run.id)}>
+                          {t("Run details")}
+                        </Menu.Item>
+                        <Menu.Separator />
+                        <Menu.Item
+                          disabled={disabled || active}
+                          onClick={() => setDeleteRunTarget(run)}
+                          variant="destructive"
+                        >
+                          <Trash2 />
+                          {active
+                            ? t("Cancel this run before deleting it")
+                            : t("Delete run")}
+                        </Menu.Item>
+                      </Menu.Content>
+                    </Menu>
+                  </Frame.Actions>
+                </Frame.Row>
+              )
+            })
+          )}
+        </Frame.Panel>
+        {(pageCount > 1 || nextCursor) && (
+          <Frame.Footer>
+            <nav
+              aria-label={t("Run history pagination")}
+              className="flex w-full flex-wrap items-center justify-between gap-3"
+            >
+              <span
+                className="text-xs text-muted-foreground"
+                aria-live="polite"
               >
-                {t("Previous")}
-              </Button>
-              <span className="text-xs">
-                {t("Page")} {currentPage + 1} {t("of")} {pageCount}
+                {currentPage * 25 + 1}–
+                {Math.min((currentPage + 1) * 25, filteredRuns.length)}{" "}
+                {t("of")} {filteredRuns.length}
               </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentPage >= pageCount - 1}
-                onClick={() => setPage(currentPage + 1)}
-              >
-                {t("Next")}
-              </Button>
-              {nextCursor && (
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={loadingOlder}
-                  onClick={() => void loadOlderRuns()}
+                  disabled={currentPage === 0}
+                  onClick={() => setPage(currentPage - 1)}
                 >
-                  {loadingOlder ? t("Loading…") : t("Load older runs")}
+                  {t("Previous")}
                 </Button>
-              )}
-            </div>
-          </nav>
-          {!runs.length ? (
-            <EmptyRuns />
-          ) : !filteredRuns.length ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              {t("No runs match your search.")}
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
+                <span className="text-xs">
+                  {t("Page")} {currentPage + 1} {t("of")} {pageCount}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage >= pageCount - 1}
+                  onClick={() => setPage(currentPage + 1)}
+                >
+                  {t("Next")}
+                </Button>
+                {nextCursor && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loadingOlder}
+                    onClick={() => void loadOlderRuns()}
+                  >
+                    {loadingOlder ? t("Loading…") : t("Load older runs")}
+                  </Button>
+                )}
+              </div>
+            </nav>
+          </Frame.Footer>
+        )}
+      </Frame>
       <Sheet
         open={showDetail}
+        side="right"
         onOpenChange={(open) => {
           setShowDetail(open)
           if (!open) updateAgentRunURL()
         }}
       >
-        <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-4xl">
+        <SheetContent className="w-[min(56rem,calc(100vw-2*var(--sheet-gap)))]!">
           <SheetHeader className="shrink-0 border-b pr-12">
             <SheetTitle>{t("Run details")}</SheetTitle>
             <SheetDescription>
@@ -4906,11 +4351,7 @@ function RunsPanel({
             key={selectedID}
             className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6"
           >
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{t(error)}</AlertDescription>
-              </Alert>
-            )}
+            {error && <ToastFeedback message={error} type={"destructive"} />}
             {showDetail && (detail || selectedSummary) ? (
               <RunDetail
                 run={detail ?? selectedSummary!}
@@ -4948,24 +4389,6 @@ function RunsPanel({
         }}
         onConfirm={deleteRun}
       />
-    </div>
-  )
-}
-
-function EmptyRuns() {
-  const { t } = useTranslations()
-
-  return (
-    <div className="flex flex-col items-center gap-2 py-12 text-center">
-      <div className="rounded-full bg-muted p-3">
-        <Activity />
-      </div>
-      <p className="font-medium">{t("No runs yet")}</p>
-      <p className="max-w-xs text-xs text-muted-foreground">
-        {t(
-          "Run a workflow or delegate from chat and progress will appear here."
-        )}
-      </p>
     </div>
   )
 }
@@ -5016,9 +4439,8 @@ function RunDetail({
     nodes.map((node) => node.nodeKey),
     workflow?.definition.edges ?? []
   )
-  const flowNodes: Node<FlowNodeData>[] = nodes.map((node) => ({
+  const flowNodes: GraphNode[] = nodes.map((node) => ({
     id: node.nodeKey,
-    type: "agent",
     position: runLayout[node.nodeKey],
     data: {
       label: node.nodeKey,
@@ -5029,225 +4451,249 @@ function RunDetail({
       status: node.status,
     },
   }))
-  const flowEdges: Edge[] =
+  const flowEdges =
     workflow?.definition.edges.map((edge) => ({
-      id: `${edge.from}-${edge.to}`,
-      source: edge.from,
-      target: edge.to,
+      from: edge.from,
+      to: edge.to,
     })) ?? []
 
+  const active = ["queued", "running", "waiting_approval"].includes(run.status)
+  const health = failed
+    ? t("{value0} failed", { value0: failed })
+    : completed === nodes.length && nodes.length
+      ? t("All successful")
+      : t("In progress")
+
   return (
-    <Card className="min-w-0">
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Activity data-icon="inline-start" />
-              {workflow?.name ?? "Workflow run"}
-            </CardTitle>
-            <CardDescription className="mt-1 flex flex-wrap items-center gap-2">
-              <Badge variant={badgeVariant(run.status)}>
-                {statusLabel(run.status)}
-              </Badge>
-              <span>{new Date(run.startedAt).toLocaleString(locale)}</span>
-              <span aria-hidden="true">·</span>
-              <span>{run.sourceType}</span>
-            </CardDescription>
-          </div>
-          <div className="flex gap-2">
-            {["queued", "running", "waiting_approval"].includes(run.status) && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onCancel}
-                disabled={disabled}
-              >
-                <X data-icon="inline-start" />
-                {t("Cancel")}
-              </Button>
-            )}
-            {["failed", "cancelled"].includes(run.status) && (
-              <Button size="sm" onClick={onRetry} disabled={disabled}>
-                <RotateCcw data-icon="inline-start" />
-                {t("Retry")}
-              </Button>
-            )}
-            {run.conversationId && (
-              <Button
-                size="sm"
-                variant="ghost"
-                render={<a href={`/${run.conversationId}`} />}
-              >
-                <MessageLink />
-              </Button>
-            )}
-            {!["queued", "running", "waiting_approval"].includes(
-              run.status
-            ) && (
-              <Button
-                aria-label={t("Delete run")}
-                disabled={disabled}
-                onClick={onDelete}
-                size="icon-sm"
-                title={t("Delete run")}
-                variant="ghost"
-              >
-                <Trash2 />
-              </Button>
-            )}
+    <div className="flex min-w-0 flex-col gap-6">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-2">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <Activity
+              aria-hidden="true"
+              className="size-5 text-muted-foreground"
+            />
+            {workflow?.name ?? "Workflow run"}
+          </h2>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge dot variant={badgeVariant(run.status)}>
+              {statusLabel(run.status)}
+            </Badge>
+            <span>{new Date(run.startedAt).toLocaleString(locale)}</span>
+            <span aria-hidden="true">·</span>
+            <span>{run.sourceType}</span>
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        <section
-          className="grid gap-3 sm:grid-cols-3"
-          aria-label={t("Run summary")}
-        >
-          <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
-            <p className="text-xs text-muted-foreground">
-              {t("Nodes successful")}
-            </p>
-            <p className="mt-1 text-xl font-semibold">
-              {completed}/{nodes.length || 1}
-            </p>
-          </div>
-          <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
-            <p className="text-xs text-muted-foreground">{t("Duration")}</p>
-            <p className="mt-1 flex items-center gap-2 text-xl font-semibold">
-              <Clock3 className="size-4 text-muted-foreground" />
-              {duration}
-            </p>
-          </div>
-          <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
-            <p className="text-xs text-muted-foreground">{t("Health")}</p>
-            <p className="mt-1 text-xl font-semibold">
-              {failed
-                ? t("{value0} failed", { value0: failed })
-                : completed === nodes.length && nodes.length
-                  ? t("All successful")
-                  : t("In progress")}
-            </p>
-          </div>
-        </section>
-        <Progress value={nodes.length ? (completed / nodes.length) * 100 : 0} />
+        <div className="flex items-center gap-2">
+          {active && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onCancel}
+              disabled={disabled}
+            >
+              <X data-icon="inline-start" />
+              {t("Cancel")}
+            </Button>
+          )}
+          {["failed", "cancelled"].includes(run.status) && (
+            <Button size="sm" onClick={onRetry} disabled={disabled}>
+              <RotateCcw data-icon="inline-start" />
+              {t("Retry")}
+            </Button>
+          )}
+          <Menu>
+            <Menu.Trigger
+              render={
+                <Button
+                  aria-label={t("More actions for {value0}", {
+                    value0: workflow?.name ?? "Workflow run",
+                  })}
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              <MoreHorizontal />
+            </Menu.Trigger>
+            <Menu.Content align="end">
+              {run.conversationId && (
+                <Menu.Item render={<a href={`/${run.conversationId}`} />}>
+                  <MessageLink />
+                  {t("Open conversation")}
+                </Menu.Item>
+              )}
+              <Menu.Separator />
+              <Menu.Item
+                disabled={disabled || active}
+                onClick={onDelete}
+                variant="destructive"
+              >
+                <Trash2 />
+                {active
+                  ? t("Cancel this run before deleting it")
+                  : t("Delete run")}
+              </Menu.Item>
+            </Menu.Content>
+          </Menu>
+        </div>
+      </header>
 
-        {pendingApprovals.length > 0 && (
-          <section className="flex flex-col gap-3">
-            <Separator />
-            <div>
-              <h3 className="font-medium">{t("Approvals required")}</h3>
-              <p className="text-xs text-muted-foreground">
-                {t(
-                  "The action hash is checked server-side before the decision is accepted."
-                )}
-              </p>
-            </div>
-            {pendingApprovals.map((approval) => (
-              <ApprovalCard
-                key={approval.id}
-                approval={approval}
-                onDecision={onDecision}
-              />
-            ))}
+      <PuCard size="sm">
+        <PuCard.Content className="flex flex-col gap-3">
+          <section
+            aria-label={t("Run summary")}
+            className="grid grid-cols-3 gap-6"
+          >
+            <Stat>
+              <Stat.Content>
+                <Stat.Label>{t("Nodes successful")}</Stat.Label>
+                <Stat.Value size="sm" className="text-base">
+                  {completed}/{nodes.length || 1}
+                </Stat.Value>
+              </Stat.Content>
+            </Stat>
+            <Stat>
+              <Stat.Content>
+                <Stat.Label>{t("Duration")}</Stat.Label>
+                <Stat.Value size="sm" className="text-base">
+                  {duration}
+                </Stat.Value>
+              </Stat.Content>
+            </Stat>
+            <Stat>
+              <Stat.Content>
+                <Stat.Label>{t("Health")}</Stat.Label>
+                <Stat.Value size="sm" className="text-base">
+                  {health}
+                </Stat.Value>
+              </Stat.Content>
+            </Stat>
           </section>
-        )}
+          <Progress
+            value={nodes.length ? (completed / nodes.length) * 100 : 0}
+          />
+        </PuCard.Content>
+      </PuCard>
 
-        <section
-          className="flex flex-col gap-3"
-          aria-labelledby="node-status-title"
-        >
+      {pendingApprovals.length > 0 && (
+        <section className="flex flex-col gap-3">
           <div>
-            <h3 id="node-status-title" className="font-medium">
-              {t("Node status")}
-            </h3>
+            <h3 className="font-medium">{t("Approvals required")}</h3>
             <p className="text-xs text-muted-foreground">
-              {t("Outcome and duration for every task in this run.")}
+              {t(
+                "The action hash is checked server-side before the decision is accepted."
+              )}
             </p>
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {nodes.map((node) => (
-              <RunNodeOverview key={node.id} node={node} agents={agents} />
-            ))}
-          </div>
+          {pendingApprovals.map((approval) => (
+            <ApprovalCard
+              key={approval.id}
+              approval={approval}
+              onDecision={onDecision}
+            />
+          ))}
         </section>
+      )}
 
-        {run.summary ? (
-          <section aria-labelledby="run-result-title">
-            <div className="mb-3 flex items-center gap-2">
-              <CheckCircle2 className="size-4 text-primary" />
-              <h3 id="run-result-title" className="font-medium">
-                {t("Final result")}
-              </h3>
-            </div>
-            <div className="rounded-2xl border border-primary/20 bg-primary/[0.04] p-5 sm:p-6">
-              <StaticAssistantMarkdown
-                content={run.summary}
-                className="break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      {run.summary ? (
+        <PuCard>
+          <PuCard.Header>
+            <PuCard.Title className="flex items-center gap-2">
+              <CheckCircle2
+                aria-hidden="true"
+                className="size-4 text-primary"
               />
-            </div>
-          </section>
-        ) : run.error ? (
-          <RunErrorMessage content={run.error} />
-        ) : (
-          <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
+              {t("Final result")}
+            </PuCard.Title>
+          </PuCard.Header>
+          <PuCard.Content>
+            <StaticAssistantMarkdown
+              content={run.summary}
+              className="break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+            />
+          </PuCard.Content>
+        </PuCard>
+      ) : run.error ? (
+        <RunErrorMessage content={run.error} />
+      ) : (
+        <PuAlert tone="info">
+          <PuAlert.Description>
             {t(
               "The final result will appear here when the workflow completes."
             )}
+          </PuAlert.Description>
+        </PuAlert>
+      )}
+
+      <RunFiles run={run} />
+
+      <Frame>
+        <Frame.Header>
+          <Frame.Title>{t("Node status")}</Frame.Title>
+          <Frame.Description>
+            {t("Outcome and duration for every task in this run.")}
+          </Frame.Description>
+        </Frame.Header>
+        <Frame.Panel>
+          {nodes.map((node) => (
+            <RunNodeOverview key={node.id} node={node} agents={agents} />
+          ))}
+        </Frame.Panel>
+      </Frame>
+
+      <RunDisclosure
+        title={t("Flow and execution details")}
+        description={t(
+          "Inspect the workflow graph, prompts, intermediate responses, and raw values."
+        )}
+      >
+        {flowNodes.length > 0 && (
+          <div className="mb-5 h-80 overflow-hidden rounded-xl bg-muted/50">
+            <WorkflowRunGraph
+              nodes={flowNodes.map((node) => ({
+                id: node.id,
+                position: node.position,
+                agentName: node.data.agentName,
+                instruction: node.data.instruction,
+                selected: false,
+                status: node.data.status,
+              }))}
+              edges={flowEdges}
+            />
           </div>
         )}
-
-        <RunFiles run={run} />
-
-        <RunDisclosure
-          title={t("Flow and execution details")}
-          description={t(
-            "Inspect the workflow graph, prompts, intermediate responses, and raw values."
-          )}
-        >
-          {flowNodes.length > 0 && (
-            <div className="mb-5 h-80 overflow-hidden rounded-xl bg-muted/50">
-              <WorkflowCanvas
-                nodes={flowNodes}
-                edges={flowEdges}
-                disabled
-                onConnect={() => undefined}
-                onSelectNode={() => undefined}
-                onPositionChange={() => undefined}
+        <div className="flex flex-col gap-5 rounded-2xl border bg-muted/[0.12] p-3 sm:p-5">
+          <RunUserMessage input={run.input} />
+          {nodes.map((node) => {
+            const workflowNode = workflow?.definition.nodes.find(
+              (candidate) => candidate.id === node.nodeKey
+            )
+            return (
+              <RunAgentMessage
+                key={node.id}
+                agent={agents.find((agent) => agent.id === node.agentId)}
+                events={events.filter((event) => event.nodeId === node.id)}
+                instruction={
+                  workflowNode?.instruction ?? node.definition?.instruction
+                }
+                node={node}
               />
-            </div>
-          )}
-          <div className="flex flex-col gap-5 rounded-2xl border bg-muted/[0.12] p-3 sm:p-5">
-            <RunUserMessage input={run.input} />
-            {nodes.map((node) => {
-              const workflowNode = workflow?.definition.nodes.find(
-                (candidate) => candidate.id === node.nodeKey
-              )
-              return (
-                <RunAgentMessage
-                  key={node.id}
-                  agent={agents.find((agent) => agent.id === node.agentId)}
-                  events={events.filter((event) => event.nodeId === node.id)}
-                  instruction={
-                    workflowNode?.instruction ?? node.definition?.instruction
-                  }
-                  node={node}
-                />
-              )
-            })}
-          </div>
-        </RunDisclosure>
+            )
+          })}
+        </div>
+      </RunDisclosure>
 
-        <RunDisclosure
-          title={t("Activity log")}
-          description={t(
-            "{value0} activities ({value1} raw events) for troubleshooting and audit.",
-            { value0: activityCount, value1: events.length }
-          )}
-        >
-          <RunEventLog agents={agents} events={events} nodes={nodes} />
-        </RunDisclosure>
-      </CardContent>
-    </Card>
+      <RunDisclosure
+        title={t("Activity log")}
+        description={t(
+          "{value0} activities ({value1} raw events) for troubleshooting and audit.",
+          { value0: activityCount, value1: events.length }
+        )}
+      >
+        <RunEventLog agents={agents} events={events} nodes={nodes} />
+      </RunDisclosure>
+    </div>
   )
 }
 
@@ -5637,38 +5083,33 @@ function RunNodeOverview({
   const { t } = useTranslations()
 
   return (
-    <Card size="sm">
-      <CardContent className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="rounded-md bg-muted p-1.5">
-              <Bot />
-            </div>
-            <span className="truncate text-sm font-medium">{node.nodeKey}</span>
-          </div>
-          <Badge variant={badgeVariant(node.status)}>
-            {statusLabel(node.status)}
-          </Badge>
-        </div>
-        <p className="text-xs text-muted-foreground">
+    <Frame.Row>
+      <Frame.Media>
+        <Bot aria-hidden="true" />
+      </Frame.Media>
+      <Frame.Content>
+        <Frame.Title as="p">{node.nodeKey}</Frame.Title>
+        <Frame.Description>
           {agents.find((agent) => agent.id === node.agentId)?.name ??
             "Agent unavailable"}{" "}
-          {t("· attempt")} {node.attempt || 0}
-        </p>
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Clock3 className="size-3.5" />
+          {t("· attempt")} {node.attempt || 0} ·{" "}
           {node.startedAt
             ? formatRunDuration(node.startedAt, node.finishedAt)
             : t("Not started")}
-        </p>
+        </Frame.Description>
         {node.providerTaskId && (
           <p className="text-[11px] break-all text-muted-foreground">
             {t("Remote task:")} {node.providerTaskId}
           </p>
         )}
         {node.error && <p className="text-xs text-destructive">{node.error}</p>}
-      </CardContent>
-    </Card>
+      </Frame.Content>
+      <Frame.Actions>
+        <Badge dot variant={badgeVariant(node.status)}>
+          {statusLabel(node.status)}
+        </Badge>
+      </Frame.Actions>
+    </Frame.Row>
   )
 }
 

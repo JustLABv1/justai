@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -17,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react"
 
+import { cn } from "@/lib/utils"
 import { api } from "@/lib/api"
 import {
   buildEndpointCapabilities,
@@ -32,8 +34,8 @@ import {
 } from "@/lib/endpoint-logic"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { Endpoint, EndpointKind } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,9 +43,8 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import {
   Select,
   SelectContent,
@@ -51,19 +52,15 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
-import { Card } from "@/components/ui/card"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from "@/components/panelui/select"
+import { Input } from "@/components/panelui/input"
+import { Card } from "@/components/panelui/card"
+import { Chip } from "@/components/panelui/chip"
+import { Spinner } from "@/components/panelui/spinner"
+import { Switch } from "@/components/panelui/switch"
+import { Menu } from "@/components/panelui/menu"
 import { EndpointCreationWizard } from "@/components/endpoint-creation-wizard"
+import { EndpointBadge } from "@/components/endpoint-badge"
 
 type Props = {
   endpoints: Endpoint[]
@@ -124,7 +121,8 @@ export function EndpointsView({
   const [busyId, setBusyId] = useState("")
   const [notice, setNotice] = useState("")
   const [search, setSearch] = useState("")
-  const [scopeFilter, setScopeFilter] = useState("all")
+  // "auto" hides platform endpoints while the workspace has its own.
+  const [scopeFilter, setScopeFilter] = useState("auto")
   const [statusFilter, setStatusFilter] = useState("all")
   const [kindFilter, setKindFilter] = useState<"all" | EndpointKind>("all")
   const [removeTarget, setRemoveTarget] = useState<Endpoint | null>(null)
@@ -135,6 +133,11 @@ export function EndpointsView({
   const endpointPath = apiBasePath.replace(/\/+$/, "")
   const isPlatformCatalog = apiBasePath.startsWith("/api/v1/admin/")
 
+  const hasOwnEndpoints = endpoints.some(
+    (endpoint) => endpoint.scopeType !== "global"
+  )
+  const effectiveScope =
+    scopeFilter === "auto" ? (hasOwnEndpoints ? "own" : "all") : scopeFilter
   const visibleEndpoints = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
     return endpoints.filter((endpoint) => {
@@ -150,7 +153,10 @@ export function EndpointsView({
           .filter(Boolean)
           .some((value) => value?.toLowerCase().includes(normalizedSearch))
       const matchesScope =
-        scopeFilter === "all" || endpoint.scopeType === scopeFilter
+        effectiveScope === "all" ||
+        (effectiveScope === "own"
+          ? endpoint.scopeType !== "global"
+          : endpoint.scopeType === effectiveScope)
       const matchesStatus =
         statusFilter === "all" ||
         (statusFilter === "enabled" ? endpoint.enabled : !endpoint.enabled)
@@ -161,7 +167,7 @@ export function EndpointsView({
         (kindFilter === "diarization" && endpoint.capabilities.diarization)
       return matchesSearch && matchesScope && matchesStatus && matchesKind
     })
-  }, [endpoints, kindFilter, scopeFilter, search, statusFilter])
+  }, [endpoints, kindFilter, effectiveScope, search, statusFilter])
 
   useEffect(() => {
     void api
@@ -541,11 +547,7 @@ export function EndpointsView({
           )}
         </div>
       )}
-      {notice && (
-        <div className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-          {t(notice)}
-        </div>
-      )}
+      {notice && <ToastFeedback message={notice} type={"destructive"} />}
 
       <EndpointTable
         endpoints={endpoints}
@@ -556,7 +558,8 @@ export function EndpointsView({
         )}
         busyId={busyId}
         search={search}
-        scopeFilter={scopeFilter}
+        scopeFilter={effectiveScope}
+        scopeAuto={scopeFilter === "auto"}
         statusFilter={statusFilter}
         kindFilter={kindFilter}
         onSearchChange={setSearch}
@@ -565,7 +568,7 @@ export function EndpointsView({
         onKindChange={setKindFilter}
         onClearFilters={() => {
           setSearch("")
-          setScopeFilter("all")
+          setScopeFilter("auto")
           setStatusFilter("all")
           setKindFilter("all")
         }}
@@ -618,23 +621,21 @@ export function EndpointsView({
         }}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Remove endpoint?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("Remove “")}
-              {removeTarget?.name}
-              {t(
-                "”? Existing conversations keep their stored messages, but new requests will no longer route here."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Remove endpoint?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("Remove “")}
+            {removeTarget?.name}
+            {t(
+              "”? Existing conversations keep their stored messages, but new requests will no longer route here."
+            )}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={Boolean(busyId)}>
               {t("Cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={!removeTarget || Boolean(busyId)}
-              variant="destructive"
+              tone="destructive"
               onClick={() => {
                 const target = removeTarget
                 setRemoveTarget(null)
@@ -658,6 +659,7 @@ function EndpointTable({
   busyId,
   search,
   scopeFilter,
+  scopeAuto,
   statusFilter,
   kindFilter,
   onSearchChange,
@@ -683,6 +685,7 @@ function EndpointTable({
   busyId: string
   search: string
   scopeFilter: string
+  scopeAuto: boolean
   statusFilter: string
   kindFilter: "all" | EndpointKind
   onSearchChange: (value: string) => void
@@ -701,7 +704,7 @@ function EndpointTable({
   resourceError?: string
   onRetryResource?: () => void
 }) {
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
 
   const filterKey = JSON.stringify([
     search,
@@ -710,373 +713,442 @@ function EndpointTable({
     kindFilter,
   ])
   const [pagination, setPagination] = useState({ key: filterKey, page: 1 })
-  const pageCount = Math.max(1, Math.ceil(visibleEndpoints.length / 20))
+  const pageSize = 12
+  const pageCount = Math.max(1, Math.ceil(visibleEndpoints.length / pageSize))
   const page = Math.min(
     pagination.key === filterKey ? pagination.page : 1,
     pageCount
   )
-  const pageEndpoints = visibleEndpoints.slice((page - 1) * 20, page * 20)
+  const pageEndpoints = visibleEndpoints.slice(
+    (page - 1) * pageSize,
+    page * pageSize
+  )
+  const filtering =
+    Boolean(search) ||
+    !scopeAuto ||
+    statusFilter !== "all" ||
+    kindFilter !== "all"
+  // A handful of endpoints needs no filters; they appear as the list grows.
+  const showSearch = endpoints.length > 4 || Boolean(search)
+  const showFilters = endpoints.length > 0
+  const capabilityLabel = (capability: string) =>
+    t(
+      (
+        {
+          chat: "Chat",
+          vision: "Vision",
+          embeddings: "Embeddings",
+          embedding: "Embeddings",
+          "image-generation": "Images",
+          transcription: "Transcription",
+          "realtime-transcription": "Live transcription",
+          diarization: "Speaker separation",
+          speech: "Speech",
+          tts: "Text-to-speech",
+          tools: "Tools",
+          multimodal: "Multimodal",
+        } as Record<string, string>
+      )[capability] ?? capability
+    )
+  const enabledCount = endpoints.filter((endpoint) => endpoint.enabled).length
+
   return (
-    <Card>
-      <div className="flex flex-wrap items-center gap-2 px-4">
-        <div className="relative min-w-48 flex-1">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            aria-label={t("Search endpoints")}
-            className="h-8 pl-8"
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={t("Search name, provider, model…")}
-            type="search"
-            value={search}
-          />
-        </div>
-        <Tabs
-          value={kindFilter}
-          onValueChange={(value) =>
-            onKindChange((value as "all" | EndpointKind) ?? "all")
-          }
-        >
-          <TabsList aria-label={t("Filter endpoint type")}>
-            <TabsTrigger value="all">{t("All")}</TabsTrigger>
-            <TabsTrigger value="llm">LLM</TabsTrigger>
-            <TabsTrigger value="diarization">{t("Diarization")}</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <>
-          <Select
-            value={scopeFilter}
-            onValueChange={(value) => onScopeChange(value ?? "all")}
-          >
-            <SelectTrigger
-              aria-label={t("Filter endpoint scope")}
-              className="h-8 min-w-32"
-              size="sm"
-            >
-              <SelectValue>
-                {t(
-                  scopeFilter === "global"
-                    ? "Global"
-                    : scopeFilter === "organization"
-                      ? "Workspace"
-                      : scopeFilter === "user"
-                        ? "Personal"
-                        : "All scopes"
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">{t("All scopes")}</SelectItem>
-                <SelectItem value="global">{t("Global")}</SelectItem>
-                <SelectItem value="organization">{t("Workspace")}</SelectItem>
-                <SelectItem value="user">{t("Personal")}</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Select
-            value={statusFilter}
-            onValueChange={(value) => onStatusChange(value ?? "all")}
-          >
-            <SelectTrigger
-              aria-label={t("Filter endpoint status")}
-              className="h-8 min-w-32"
-              size="sm"
-            >
-              <SelectValue>
-                {t(
-                  statusFilter === "enabled"
-                    ? "Enabled"
-                    : statusFilter === "disabled"
-                      ? "Disabled"
-                      : "All statuses"
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">{t("All statuses")}</SelectItem>
-                <SelectItem value="enabled">{t("Enabled")}</SelectItem>
-                <SelectItem value="disabled">{t("Disabled")}</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </>
-        {(search ||
-          scopeFilter !== "all" ||
-          statusFilter !== "all" ||
-          kindFilter !== "all") && (
-          <Button size="sm" variant="ghost" onClick={onClearFilters}>
-            {t("Clear filters")}
-          </Button>
-        )}
-        {showCreateAction && (
-          <Button size="sm" onClick={() => onCreate()}>
-            <Plus data-icon="inline-start" />
-            {t("Add endpoint")}
-          </Button>
-        )}
-      </div>
-      {visibleEndpoints.length > 0 ? (
-        <div className="min-w-0 overflow-x-auto px-4">
-          <table className="w-full min-w-[40rem] text-left text-xs">
-            <thead>
-              <tr className="border-b border-border text-muted-foreground">
-                <th className="p-2">{t("Endpoint")}</th>
-                <th className="p-2">{t("Endpoint type")}</th>
-                <th className="p-2">{t("Scope")}</th>
-                <th className="p-2">{t("Status")}</th>
-                <th className="p-2 text-right">{t("Actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageEndpoints.map((endpoint) => {
-                const details =
-                  providerDetails[endpoint.providerType] ??
-                  providerDetails["openai-compatible"]
-                const modelLabel =
-                  endpoint.chatModel ||
-                  endpoint.diarizationModel ||
-                  t("Model selected at request time")
-                const manageable = canManageEndpoint(endpoint)
-                const managed = endpoint.scopeType === "global"
-                const capabilities = Object.entries(endpoint.capabilities ?? {})
-                  .filter(([, enabled]) => enabled)
-                  .map(([capability]) => capability)
-                const failed = endpoint.lastTestOk === false
-                const status = !endpoint.enabled
-                  ? { label: t("Disabled"), variant: "secondary" as const }
-                  : failed
-                    ? {
-                        label: t("Check failed"),
-                        variant: "destructive" as const,
-                      }
-                    : endpoint.lastTestedAt
-                      ? { label: t("Healthy"), variant: "success" as const }
-                      : { label: t("Not tested"), variant: "outline" as const }
-                const scopeLabel = t(
-                  endpoint.scopeType === "organization"
-                    ? "Workspace"
-                    : endpoint.scopeType === "user"
-                      ? "Personal"
-                      : "Global"
-                )
-                return (
-                  <tr
-                    className="border-b border-border last:border-0"
-                    key={endpoint.id}
+    <div className="flex flex-col gap-4">
+      {(showFilters || showCreateAction) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {showFilters && (
+            <>
+              {showSearch && (
+                <Input.Group className="w-full sm:w-72">
+                  <Input.Addon>
+                    <Search aria-hidden="true" />
+                  </Input.Addon>
+                  <Input
+                    aria-label={t("Search endpoints")}
+                    onChange={(event) => onSearchChange(event.target.value)}
+                    placeholder={t("Search name, provider, model…")}
+                    type="search"
+                    value={search}
+                  />
+                </Input.Group>
+              )}
+              <Chip.Group
+                aria-label={t("Filter endpoint type")}
+                multiple={false}
+                onValueChange={(value) =>
+                  onKindChange((value[0] as "all" | EndpointKind) ?? "all")
+                }
+                value={[kindFilter]}
+              >
+                <Chip size="sm" value="all">
+                  {t("All")}
+                </Chip>
+                <Chip size="sm" value="llm">
+                  LLM
+                </Chip>
+                <Chip size="sm" value="diarization">
+                  {t("Diarization")}
+                </Chip>
+              </Chip.Group>
+              <div className="ms-auto flex flex-wrap items-center gap-2">
+                <Chip.Group
+                  aria-label={t("Filter endpoint scope")}
+                  multiple={false}
+                  onValueChange={(value) => onScopeChange(value[0] ?? "all")}
+                  value={[scopeFilter]}
+                >
+                  <Chip size="sm" value="own">
+                    {t("Own")}
+                  </Chip>
+                  <Chip size="sm" value="global">
+                    {t("Platform")}
+                  </Chip>
+                  <Chip size="sm" value="all">
+                    {t("All")}
+                  </Chip>
+                </Chip.Group>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => onStatusChange(value ?? "all")}
+                >
+                  <SelectTrigger
+                    aria-label={t("Filter endpoint status")}
+                    className="w-40"
+                    size="sm"
                   >
-                    <td className="max-w-xs p-2">
-                      <div className="flex items-center gap-3">
-                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                          <ProviderIcon provider={endpoint.providerType} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            {manageable ? (
-                              <button
-                                className="truncate rounded-sm text-left text-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                                onClick={() => onEdit(endpoint)}
-                                type="button"
-                              >
-                                {endpoint.name}
-                              </button>
-                            ) : (
-                              <p className="truncate text-sm font-medium">
-                                {endpoint.name}
-                              </p>
-                            )}
-                            {endpoint.isDefault && (
-                              <Badge variant="outline">{t("Default")}</Badge>
-                            )}
-                          </div>
-                          <p
-                            className="truncate text-xs text-muted-foreground"
-                            title={[
-                              endpoint.baseUrl,
-                              capabilities.length
-                                ? t("Capabilities: {value0}", {
-                                    value0: capabilities.join(", "),
-                                  })
-                                : t("No capabilities configured"),
-                            ].join("\n")}
+                    <SelectValue>
+                      {t(
+                        statusFilter === "enabled"
+                          ? "Enabled"
+                          : statusFilter === "disabled"
+                            ? "Disabled"
+                            : "All statuses"
+                      )}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="all">{t("All statuses")}</SelectItem>
+                      <SelectItem value="enabled">{t("Enabled")}</SelectItem>
+                      <SelectItem value="disabled">{t("Disabled")}</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                {filtering && (
+                  <Button size="sm" variant="ghost" onClick={onClearFilters}>
+                    {t("Clear filters")}
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+          {showCreateAction && (
+            <Button
+              className={showFilters ? undefined : "ms-auto"}
+              onClick={() => onCreate()}
+              size="sm"
+            >
+              <Plus data-icon="inline-start" />
+              {t("Add endpoint")}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {endpoints.length > 0 && !filtering && (
+        <p className="text-sm text-muted-foreground" aria-live="polite">
+          {t("{value0} endpoints · {value1} active", {
+            value0: endpoints.length,
+            value1: enabledCount,
+          })}
+        </p>
+      )}
+
+      {visibleEndpoints.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {pageEndpoints.map((endpoint) => {
+            const details =
+              providerDetails[endpoint.providerType] ??
+              providerDetails["openai-compatible"]
+            const modelLabel =
+              endpoint.chatModel ||
+              endpoint.diarizationModel ||
+              t("Model selected at request time")
+            const manageable = canManageEndpoint(endpoint)
+            const managed = endpoint.scopeType === "global"
+            const capabilities = Object.entries(endpoint.capabilities ?? {})
+              .filter(([, enabled]) => enabled)
+              .map(([capability]) => capability)
+            const failed = endpoint.lastTestOk === false
+            const status = !endpoint.enabled
+              ? { label: t("Disabled"), variant: "secondary" as const }
+              : failed
+                ? { label: t("Check failed"), variant: "destructive" as const }
+                : endpoint.lastTestedAt
+                  ? { label: t("Healthy"), variant: "success" as const }
+                  : { label: t("Not tested"), variant: "outline" as const }
+            const scopeLabel = t(
+              endpoint.scopeType === "organization"
+                ? "Workspace"
+                : endpoint.scopeType === "user"
+                  ? "Personal"
+                  : "Global"
+            )
+            const busy = busyId === endpoint.id
+            return (
+              <Card
+                className={cn("min-w-0", !endpoint.enabled && "opacity-80")}
+                key={endpoint.id}
+              >
+                <Card.Header>
+                  <div className="flex items-start gap-3">
+                    <EndpointBadge
+                      name={endpoint.name}
+                      logoUrl={endpoint.logoUrl}
+                      fallback={
+                        <ProviderIcon provider={endpoint.providerType} />
+                      }
+                      className="size-10 shrink-0 rounded-xl bg-muted text-muted-foreground [&_svg]:size-5"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        {manageable ? (
+                          <button
+                            className="min-w-0 truncate rounded-sm text-left text-base font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => onEdit(endpoint)}
+                            type="button"
                           >
-                            {details.label} · {modelLabel}
+                            {endpoint.name}
+                          </button>
+                        ) : (
+                          <p className="min-w-0 truncate text-base font-semibold">
+                            {endpoint.name}
                           </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-2">
-                      <Badge variant="secondary">
-                        {endpointKindFor(endpoint) === "diarization"
-                          ? t("Diarization")
-                          : "LLM"}
-                      </Badge>
-                    </td>
-                    <td className="p-2">
-                      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                        )}
                         {managed && (
                           <LockKeyhole
-                            className="size-3.5"
                             aria-label={
                               isPlatformCatalog
                                 ? t("Platform catalog")
                                 : t("Managed by platform")
                             }
+                            className="size-3.5 shrink-0 text-muted-foreground"
                           />
                         )}
-                        {scopeLabel}
-                      </span>
-                    </td>
-                    <td className="p-2">
-                      <Badge
-                        variant={status.variant}
-                        title={t(endpointHealthSummary(endpoint))}
-                      >
-                        {status.label}
-                      </Badge>
-                    </td>
-                    <td className="p-2">
-                      <div className="flex justify-end">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={t("{value0} for {value1}", {
-                                  value0: manageable ? t("Actions") : t("Test"),
-                                  value1: endpoint.name,
-                                })}
-                              />
-                            }
-                          >
-                            <MoreHorizontal aria-hidden="true" />
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuGroup>
-                              <DropdownMenuItem
-                                disabled={
-                                  !endpoint.enabled || busyId === endpoint.id
-                                }
-                                onClick={() => void onTest(endpoint)}
-                              >
-                                <Radio aria-hidden="true" />{" "}
-                                {t("Test capabilities")}
-                              </DropdownMenuItem>
-                              {manageable && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  {!endpoint.isDefault && (
-                                    <DropdownMenuItem
-                                      disabled={busyId === endpoint.id}
-                                      onClick={() => onSetDefault(endpoint)}
-                                    >
-                                      <CheckCircle2 aria-hidden="true" />{" "}
-                                      {t("Set default")}
-                                    </DropdownMenuItem>
-                                  )}
-                                  <DropdownMenuItem
-                                    disabled={busyId === endpoint.id}
-                                    className={
-                                      endpoint.enabled
-                                        ? "text-destructive focus:text-destructive"
-                                        : "text-primary focus:text-primary"
-                                    }
-                                    onClick={() => onToggle(endpoint)}
-                                  >
-                                    {endpoint.enabled
-                                      ? t("Disable")
-                                      : t("Enable")}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    disabled={busyId === endpoint.id}
-                                    onClick={() => onEdit(endpoint)}
-                                  >
-                                    <Pencil aria-hidden="true" /> {t("Edit")}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    disabled={busyId === endpoint.id}
-                                    variant="destructive"
-                                    onClick={() => onRemove(endpoint)}
-                                  >
-                                    <Trash2 aria-hidden="true" /> {t("Remove")}
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                            </DropdownMenuGroup>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        {endpoint.isDefault && (
+                          <Badge size="sm" variant="info">
+                            {t("Default")}
+                          </Badge>
+                        )}
                       </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {details.label}
+                        {" · "}
+                        {endpointKindFor(endpoint) === "diarization"
+                          ? t("Diarization")
+                          : "LLM"}
+                        {" · "}
+                        {scopeLabel}
+                      </p>
+                    </div>
+                    <Menu>
+                      <Menu.Trigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="-me-1 -mt-1 shrink-0"
+                            aria-label={t("{value0} for {value1}", {
+                              value0: manageable ? t("Actions") : t("Test"),
+                              value1: endpoint.name,
+                            })}
+                          />
+                        }
+                      >
+                        <MoreHorizontal aria-hidden="true" />
+                      </Menu.Trigger>
+                      <Menu.Content align="end">
+                        <Menu.Group>
+                          <Menu.Item
+                            disabled={!endpoint.enabled || busy}
+                            onClick={() => void onTest(endpoint)}
+                          >
+                            <Radio aria-hidden="true" />{" "}
+                            {t("Test capabilities")}
+                          </Menu.Item>
+                          {manageable && (
+                            <>
+                              <Menu.Separator />
+                              {!endpoint.isDefault && (
+                                <Menu.Item
+                                  disabled={busy}
+                                  onClick={() => onSetDefault(endpoint)}
+                                >
+                                  <CheckCircle2 aria-hidden="true" />{" "}
+                                  {t("Set default")}
+                                </Menu.Item>
+                              )}
+                              <Menu.Item
+                                disabled={busy}
+                                onClick={() => onEdit(endpoint)}
+                              >
+                                <Pencil aria-hidden="true" /> {t("Edit")}
+                              </Menu.Item>
+                              <Menu.Item
+                                disabled={busy}
+                                variant="destructive"
+                                onClick={() => onRemove(endpoint)}
+                              >
+                                <Trash2 aria-hidden="true" /> {t("Remove")}
+                              </Menu.Item>
+                            </>
+                          )}
+                        </Menu.Group>
+                      </Menu.Content>
+                    </Menu>
+                  </div>
+                </Card.Header>
+                <Card.Content className="flex flex-col gap-3">
+                  <p
+                    className="truncate rounded-lg bg-muted/60 px-2.5 py-1.5 font-mono text-xs"
+                    title={endpoint.baseUrl}
+                  >
+                    {modelLabel}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge
+                      dot
+                      size="sm"
+                      title={t(endpointHealthSummary(endpoint))}
+                      variant={status.variant}
+                    >
+                      {status.label}
+                    </Badge>
+
+                    {capabilities.slice(0, 4).map((capability) => (
+                      <Badge key={capability} size="sm" variant="secondary">
+                        {capabilityLabel(capability)}
+                      </Badge>
+                    ))}
+                    {capabilities.length > 4 && (
+                      <Badge
+                        size="sm"
+                        title={capabilities
+                          .slice(4)
+                          .map(capabilityLabel)
+                          .join(", ")}
+                        variant="secondary"
+                      >
+                        +{capabilities.length - 4}
+                      </Badge>
+                    )}
+                  </div>
+                </Card.Content>
+                <Card.Footer variant="panel">
+                  <div className="flex w-full flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {endpoint.lastTestedAt
+                        ? t("Tested {value0}", {
+                            value0: new Date(
+                              endpoint.lastTestedAt
+                            ).toLocaleDateString(locale),
+                          })
+                        : t("Not tested")}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        disabled={!endpoint.enabled || busy}
+                        onClick={() => void onTest(endpoint)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {busy ? (
+                          <Spinner data-icon="inline-start" />
+                        ) : (
+                          <Radio data-icon="inline-start" />
+                        )}
+                        {t("Test")}
+                      </Button>
+                      {manageable && (
+                        <Switch
+                          aria-label={t(
+                            endpoint.enabled ? "Disable" : "Enable"
+                          )}
+                          checked={endpoint.enabled}
+                          disabled={busy}
+                          onCheckedChange={() => onToggle(endpoint)}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </Card.Footer>
+              </Card>
+            )
+          })}
         </div>
       ) : (
-        <div className="flex min-h-40 flex-col items-center justify-center gap-3 border-t border-border/60 px-4 py-8 text-center">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
-            <Cloud aria-hidden="true" />
-          </div>
-          <div>
-            <p className="font-medium">
-              {resourceError && endpoints.length === 0
-                ? t("Endpoint inventory unavailable")
-                : endpoints.length === 0
-                  ? t("No endpoints yet")
-                  : t("No endpoints match these filters")}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {resourceError && endpoints.length === 0
-                ? t(
-                    "JustAI could not load the endpoint catalog. Retry to check again."
-                  )
-                : endpoints.length === 0
+        <Card className="border-dashed">
+          <Card.Content className="flex min-h-56 flex-col items-center justify-center gap-4 text-center">
+            <span className="rounded-full bg-muted p-3 text-muted-foreground">
+              <Cloud aria-hidden="true" className="size-6" />
+            </span>
+            <div className="flex max-w-md flex-col gap-1">
+              <p className="font-medium">
+                {resourceError && endpoints.length === 0
+                  ? t("Endpoint inventory unavailable")
+                  : endpoints.length === 0
+                    ? t("No endpoints yet")
+                    : t("No endpoints match these filters")}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {resourceError && endpoints.length === 0
                   ? t(
-                      "Connect a provider to make it available for model routing."
+                      "JustAI could not load the endpoint catalog. Retry to check again."
                     )
-                  : t("Try a different search or clear the filters.")}
-            </p>
-          </div>
-          {resourceError && endpoints.length === 0 && onRetryResource ? (
-            <Button variant="outline" size="sm" onClick={onRetryResource}>
-              {t("Retry")}
-            </Button>
-          ) : endpoints.length === 0 && !resourceError ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                onCreate(kindFilter === "all" ? undefined : kindFilter)
-              }
-            >
-              {t("Add your first")}{" "}
-              {kindFilter === "diarization"
-                ? t("diarization service")
-                : t("model endpoint")}
-            </Button>
-          ) : endpoints.length > 0 ? (
-            <Button variant="outline" size="sm" onClick={onClearFilters}>
-              {t("Clear filters")}
-            </Button>
-          ) : null}
-        </div>
+                  : endpoints.length === 0
+                    ? t(
+                        "Connect a provider to make it available for model routing."
+                      )
+                    : t("Try a different search or clear the filters.")}
+              </p>
+            </div>
+            {resourceError && endpoints.length === 0 && onRetryResource ? (
+              <Button variant="outline" onClick={onRetryResource}>
+                {t("Retry")}
+              </Button>
+            ) : endpoints.length === 0 && !resourceError ? (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  onCreate(kindFilter === "all" ? undefined : kindFilter)
+                }
+              >
+                {t("Add your first")}{" "}
+                {kindFilter === "diarization"
+                  ? t("diarization service")
+                  : t("model endpoint")}
+              </Button>
+            ) : endpoints.length > 0 ? (
+              <Button variant="outline" onClick={onClearFilters}>
+                {t("Clear filters")}
+              </Button>
+            ) : null}
+          </Card.Content>
+        </Card>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 pt-3 text-xs text-muted-foreground">
-        <span aria-live="polite">
-          {visibleEndpoints.length
-            ? t("{start}–{end} of {total}", {
-                start: (page - 1) * 20 + 1,
-                end: Math.min(page * 20, visibleEndpoints.length),
-                total: visibleEndpoints.length,
-              })
-            : t("No endpoints match these filters")}
-        </span>
-        {pageCount > 1 && (
+
+      {pageCount > 1 && (
+        <nav
+          aria-label={t("Endpoint pagination")}
+          className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground"
+        >
+          <span aria-live="polite">
+            {t("{start}–{end} of {total}", {
+              start: (page - 1) * pageSize + 1,
+              end: Math.min(page * pageSize, visibleEndpoints.length),
+              total: visibleEndpoints.length,
+            })}
+          </span>
           <div className="flex gap-1">
             <Button
               size="sm"
@@ -1095,16 +1167,16 @@ function EndpointTable({
               {t("Next page")}
             </Button>
           </div>
-        )}
-      </div>
+        </nav>
+      )}
       {hasManagedEndpoints && !isPlatformCatalog && (
-        <p className="px-4 text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {t(
             "Locked endpoints are managed by the platform and can only be changed in the Platform Admin catalog."
           )}
         </p>
       )}
-    </Card>
+    </div>
   )
 }
 

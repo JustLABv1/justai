@@ -1,11 +1,11 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import { Activity, Clock3, Info, ListOrdered, UsersRound } from "lucide-react"
+import { Activity, Clock3, Info, ListOrdered } from "lucide-react"
 
 import type { TranscriptionWorkerAnalytics } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
+import { Alert } from "@/components/panelui/alert"
+import { Badge } from "@/components/panelui/badge"
 import {
   Card,
   CardAction,
@@ -13,8 +13,9 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
+} from "@/components/panelui/card"
+import { Kpi } from "@/components/panelui/kpi"
+import { Stat } from "@/components/panelui/stat"
 
 function formatDuration(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "—"
@@ -55,9 +56,9 @@ function WorkerMetric({
         <Icon aria-hidden="true" className="size-3.5" />
         {label}
       </div>
-      <p className="mt-2 text-lg font-semibold tracking-tight tabular-nums">
-        {value}
-      </p>
+      <Stat className="mt-2">
+        <Stat.Value size="sm">{value}</Stat.Value>
+      </Stat>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{t(detail)}</p>
     </div>
   )
@@ -101,9 +102,6 @@ export function PlatformTranscriptionWorkers({
     <Card>
       <CardHeader>
         <div className="flex min-w-0 items-start gap-2.5">
-          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-            <UsersRound aria-hidden="true" className="size-4" />
-          </span>
           <div className="min-w-0">
             <CardTitle>{t("Transcription workers")}</CardTitle>
             <CardDescription>
@@ -126,9 +124,9 @@ export function PlatformTranscriptionWorkers({
               {analytics.active} / {capacity} {t("video jobs")}
             </span>
           </div>
-          <Progress
+          <Kpi.Progress
             aria-label={t("Live transcription worker utilization")}
-            className="mt-3 h-2"
+            className="mt-3"
             value={utilization}
           />
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -176,10 +174,10 @@ export function PlatformTranscriptionWorkers({
           </summary>
           <div className="mt-3">
             {" "}
-            <Alert>
+            <Alert variant="plain" tone="info">
               <Info />
-              <AlertTitle>{t("What adding workers changes")}</AlertTitle>
-              <AlertDescription>
+              <Alert.Title>{t("What adding workers changes")}</Alert.Title>
+              <Alert.Description>
                 {t(
                   "Each additional capacity slot allows one more video to transcribe at the same time. It increases throughput and shortens queues, but also increases CPU, memory, provider requests, and potentially cost. The"
                 )}{" "}
@@ -191,7 +189,7 @@ export function PlatformTranscriptionWorkers({
                   video_transcription_worker_capacity
                 </code>{" "}
                 {t("in the backend configuration to add slots.")}
-              </AlertDescription>
+              </Alert.Description>
             </Alert>
           </div>
         </details>

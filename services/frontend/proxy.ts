@@ -24,10 +24,12 @@ export const config = {
     "/conversation/:path*",
     "/chat/:path*",
     "/transcription/:path*",
+    "/live-transcription/:path*",
     "/endpoints/:path*",
     "/knowledge/:path*",
     "/mcp/:path*",
     "/settings/:path*",
+    "/workspace-settings/:path*",
     "/admin/:path*",
   ],
 }

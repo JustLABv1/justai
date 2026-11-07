@@ -1,8 +1,10 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useMemo, useState } from "react"
-import { Download, ImagePlus, Loader2, Sparkles } from "lucide-react"
+import { Download, ImagePlus, Sparkles } from "lucide-react"
 import Image from "next/image"
 
 import { api } from "@/lib/api"
@@ -181,12 +183,7 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
             </AlertDescription>
           </Alert>
         )}
-        {error && (
-          <Alert aria-live="polite" role="alert" variant="destructive">
-            <AlertTitle>{t("Image action failed")}</AlertTitle>
-            <AlertDescription>{t(error)}</AlertDescription>
-          </Alert>
-        )}
+        {error && <ToastFeedback message={error} type={"destructive"} />}
 
         <form onSubmit={(event) => void submit(event)}>
           <Tabs onValueChange={changeMode} value={mode}>
@@ -300,7 +297,7 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
               disabled={saving || !prompt.trim() || imageEndpoints.length === 0}
               type="submit"
             >
-              {saving ? <Loader2 className="animate-spin" /> : <Sparkles />}
+              {saving ? <Spinner /> : <Sparkles />}
               {saving
                 ? t("Creating…")
                 : mode === "edit"

@@ -1,7 +1,6 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import { Spinner } from "@/components/ui/spinner"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,9 +8,8 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 
 type ConfirmActionDialogProps = {
   open: boolean
@@ -24,6 +22,7 @@ type ConfirmActionDialogProps = {
   onConfirm: () => void | Promise<void>
 }
 
+/** A question that must be answered, drawn with PanelUI's AlertDialog. */
 export function ConfirmActionDialog({
   open,
   title,
@@ -38,26 +37,23 @@ export function ConfirmActionDialog({
 
   return (
     <AlertDialog
-      open={open}
       onOpenChange={(nextOpen) => {
         if (!pending) onOpenChange(nextOpen)
       }}
+      open={open}
     >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
-        </AlertDialogHeader>
+      <AlertDialogContent tone={destructive ? "destructive" : "neutral"}>
+        <AlertDialogTitle>{title}</AlertDialogTitle>
+        <AlertDialogDescription>{description}</AlertDialogDescription>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>
             {t("Cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             disabled={pending}
-            variant={destructive ? "destructive" : "default"}
-            onClick={() => void onConfirm()}
+            loading={pending}
+            onClick={() => onConfirm()}
           >
-            {pending && <Spinner data-icon="inline-start" />}
             {pending ? t("Working…") : confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>

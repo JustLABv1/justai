@@ -19,6 +19,7 @@ type VoiceAdapterOptions = {
   onConversationCreated?: (id: string) => void
   onConversationUpdated?: () => void
   onToolApproval?: (approval: ToolCallMessagePartProps | null) => void
+  onTranscript?: (item: { role: "user" | "assistant"; text: string }) => void
   onError?: (error: Error) => void
 }
 
@@ -125,6 +126,13 @@ async function setupVoiceSession(
       reject(error)
     }
   })
+
+  const emitTranscript = (item: RealtimeVoiceAdapter.TranscriptItem) => {
+    helpers.emitTranscript(item)
+    options.onTranscript?.({ role: item.role, text: item.text })
+  }
+  // A new session starts with nothing heard.
+  options.onTranscript?.({ role: "user", text: "" })
 
   const setMode = (mode: RealtimeVoiceAdapter.Mode) => {
     voiceMode = mode
@@ -318,7 +326,7 @@ async function setupVoiceSession(
           setMode("listening")
           break
         case "input.transcript.partial":
-          helpers.emitTranscript({
+          emitTranscript({
             role: "user",
             text: String(data.text ?? ""),
             isFinal: false,
@@ -326,7 +334,7 @@ async function setupVoiceSession(
           setMode("listening")
           break
         case "input.transcript.final":
-          helpers.emitTranscript({
+          emitTranscript({
             role: "user",
             text: String(data.text ?? ""),
             isFinal: true,
@@ -335,7 +343,7 @@ async function setupVoiceSession(
           break
         case "message.delta":
           assistantText += String(data.delta ?? "")
-          helpers.emitTranscript({
+          emitTranscript({
             role: "assistant",
             text: assistantText,
             isFinal: false,
@@ -344,7 +352,7 @@ async function setupVoiceSession(
           break
         case "message.completed":
           assistantText = String(data.content ?? assistantText)
-          helpers.emitTranscript({
+          emitTranscript({
             role: "assistant",
             text: assistantText,
             isFinal: true,

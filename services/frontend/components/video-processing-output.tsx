@@ -2,7 +2,8 @@
 
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useRef } from "react"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Alert } from "@/components/panelui/alert"
+import { Frame } from "@/components/panelui/frame"
 import type {
   TranscriptionSegment,
   TranscriptionSpeaker,
@@ -78,109 +79,153 @@ export function VideoProcessingOutput({
             : step === "grammar"
               ? t("Corrected transcript")
               : t("Preparing the result")
+  const count =
+    step === "transcription" && parallel?.sliceCount
+      ? t("{value0} / {value1} blocks processed", {
+          value0: parallel.completedSlices ?? 0,
+          value1: parallel.sliceCount,
+        })
+      : step === "diarization" && speakers.length
+        ? t("{value0} speakers", { value0: speakers.length })
+        : (step === "transcription" || step === "grammar") && blocks.length
+          ? t("{value0} text blocks", { value0: blocks.length })
+          : null
+  const muted = "text-sm text-muted-foreground"
   return (
-    <section
-      aria-label={t("Current step output")}
-      className="flex flex-col gap-3 rounded-xl bg-muted/40 p-4"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">{heading}</h3>
-        <span role="status" className="text-xs text-muted-foreground">
-          {step === "transcription" && parallel?.sliceCount
-            ? t("{value0} / {value1} blocks processed", {
-                value0: parallel.completedSlices ?? 0,
-                value1: parallel.sliceCount,
-              })
-            : step === "diarization" && speakers.length
-              ? t("{value0} speakers", { value0: speakers.length })
-              : (step === "transcription" || step === "grammar") &&
-                  blocks.length
-                ? t("{value0} text blocks", { value0: blocks.length })
-                : null}
-        </span>
-      </div>
-      {error ? (
-        <Alert variant="destructive">
-          <AlertTitle>{t("Processing needs attention")}</AlertTitle>
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
-      ) : null}
-      {upload.status === "queued" ? (
-        <p className="text-sm text-muted-foreground">
-          {upload.workerStatus?.queuePosition
-            ? t(
-                "Position {value0} in the queue. Processing starts when a worker is available.",
-                { value0: upload.workerStatus.queuePosition }
-              )
-            : t("Your video is queued. Processing will start automatically.")}
-        </p>
-      ) : step === "upload" ? (
-        <div className="flex flex-col gap-2 text-sm">
-          <p className="truncate">{upload.fileName}</p>
-          <p className="text-muted-foreground">
-            {(upload.bytes / 1048576).toFixed(1)} /{" "}
-            {(upload.expectedBytes / 1048576).toFixed(1)} {t("MB uploaded")}
-          </p>
-        </div>
-      ) : step === "transcription" || step === "grammar" ? (
-        blocks.length ? (
-          <div
-            ref={viewport}
-            onScroll={() => {
-              const el = viewport.current
-              if (el)
-                following.current =
-                  el.scrollHeight - el.scrollTop - el.clientHeight < 40
-            }}
-            tabIndex={0}
-            aria-label={heading}
-            className="flex max-h-64 flex-col gap-3 overflow-y-auto overscroll-contain rounded-md focus-visible:outline-2 focus-visible:outline-ring"
-          >
-            {blocks.map((block) => (
-              <div key={block.key} className={styles.result}>
-                <p className="mb-1 font-mono text-[11px] text-muted-foreground">
-                  {timestamp(block.startOffsetMs ?? 0)}
-                </p>
-                <p className="text-sm leading-6">{block.text}</p>
+    <Frame aria-label={t("Current step output")}>
+      <Frame.Header>
+        <Frame.Title>{heading}</Frame.Title>
+        {count ? (
+          <Frame.Action>
+            <span role="status">{count}</span>
+          </Frame.Action>
+        ) : null}
+      </Frame.Header>
+      <Frame.Panel>
+        {error ? (
+          <Frame.Row>
+            <Frame.Content>
+              <Alert tone="destructive" variant="plain">
+                <Alert.Title>{t("Processing needs attention")}</Alert.Title>
+                <Alert.Description>{t(error)}</Alert.Description>
+              </Alert>
+            </Frame.Content>
+          </Frame.Row>
+        ) : null}
+        {upload.status === "queued" ? (
+          <Frame.Row>
+            <Frame.Content>
+              <p className={muted}>
+                {upload.workerStatus?.queuePosition
+                  ? t(
+                      "Position {value0} in the queue. Processing starts when a worker is available.",
+                      { value0: upload.workerStatus.queuePosition }
+                    )
+                  : t(
+                      "Your video is queued. Processing will start automatically."
+                    )}
+              </p>
+            </Frame.Content>
+          </Frame.Row>
+        ) : step === "upload" ? (
+          <Frame.Row>
+            <Frame.Content>
+              <Frame.Title as="p">{upload.fileName}</Frame.Title>
+              <Frame.Description>
+                {(upload.bytes / 1048576).toFixed(1)} /{" "}
+                {(upload.expectedBytes / 1048576).toFixed(1)} {t("MB uploaded")}
+              </Frame.Description>
+            </Frame.Content>
+          </Frame.Row>
+        ) : step === "transcription" || step === "grammar" ? (
+          blocks.length ? (
+            <Frame.Row className="items-start">
+              <div
+                ref={viewport}
+                onScroll={() => {
+                  const el = viewport.current
+                  if (el)
+                    following.current =
+                      el.scrollHeight - el.scrollTop - el.clientHeight < 40
+                }}
+                tabIndex={0}
+                aria-label={heading}
+                className="flex max-h-72 min-w-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain rounded-md focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                {blocks.map((block) => (
+                  <div
+                    key={block.key}
+                    className={`${styles.result} grid grid-cols-[3rem_minmax(0,1fr)] gap-2`}
+                  >
+                    <p className="pt-0.5 font-mono text-[11px] text-muted-foreground tabular-nums">
+                      {timestamp(block.startOffsetMs ?? 0)}
+                    </p>
+                    <p className="text-sm leading-6">{block.text}</p>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </Frame.Row>
+          ) : (
+            <Frame.Row>
+              <Frame.Content>
+                <p className={muted}>
+                  {step === "grammar"
+                    ? t(
+                        "Corrected paragraphs will appear when they are available."
+                      )
+                    : t("Text blocks will appear here as they arrive.")}
+                </p>
+              </Frame.Content>
+            </Frame.Row>
+          )
+        ) : step === "diarization" ? (
+          speakers.length ? (
+            speakers.map((speaker) => (
+              <Frame.Row className={styles.result} key={speaker.id}>
+                <Frame.Content>
+                  <Frame.Title as="p">
+                    {speaker.displayName || speaker.label}
+                  </Frame.Title>
+                </Frame.Content>
+              </Frame.Row>
+            ))
+          ) : (
+            <Frame.Row>
+              <Frame.Content>
+                <p className={muted}>
+                  {error
+                    ? t(
+                        "No speaker assignments are available. Retry or continue without speaker separation."
+                      )
+                    : t(
+                        "Speaker assignments will appear when recognition finishes."
+                      )}
+                </p>
+              </Frame.Content>
+            </Frame.Row>
+          )
         ) : (
-          <p className="text-sm text-muted-foreground">
-            {step === "grammar"
-              ? t("Corrected paragraphs will appear when they are available.")
-              : t("Text blocks will appear here as they arrive.")}
-          </p>
-        )
-      ) : step === "diarization" ? (
-        speakers.length ? (
-          <ul className="flex max-h-64 flex-col gap-2 overflow-y-auto">
-            {speakers.map((s) => (
-              <li className={styles.result} key={s.id}>
-                {s.displayName || s.label}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {error
-              ? t(
-                  "No speaker assignments are available. Retry or continue without speaker separation."
-                )
-              : t("Speaker assignments will appear when recognition finishes.")}
-          </p>
-        )
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          {segments.length} {t("transcript segments and")} {speakers.length}{" "}
-          {t("speakers. Saving the transcript for review and export.")}
-        </p>
-      )}
-      {(step === "transcription" || step === "grammar") && blocks.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {t("Preview · text and speaker assignments may still change.")}
-        </p>
-      ) : null}
-    </section>
+          <Frame.Row>
+            <Frame.Content>
+              <p className={muted}>
+                {segments.length} {t("transcript segments and")}{" "}
+                {speakers.length}{" "}
+                {t("speakers. Saving the transcript for review and export.")}
+              </p>
+            </Frame.Content>
+          </Frame.Row>
+        )}
+        {(step === "transcription" || step === "grammar") &&
+        blocks.length > 0 ? (
+          <Frame.Row>
+            <Frame.Content>
+              <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                {t("Preview · text and speaker assignments may still change.")}
+              </Frame.Description>
+            </Frame.Content>
+          </Frame.Row>
+        ) : null}
+      </Frame.Panel>
+    </Frame>
   )
 }

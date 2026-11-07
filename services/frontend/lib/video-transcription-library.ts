@@ -61,7 +61,7 @@ export function videoLibraryPath(
   if (status !== "all") params.set("status", status)
   if (page > 1) params.set("page", String(page))
   if (query.trim()) params.set("query", query.trim())
-  return `${kind === "live" ? "/transcription" : "/video-transcription"}${params.size ? `?${params}` : ""}`
+  return `${kind === "live" ? "/live-transcription" : "/video-transcription"}${params.size ? `?${params}` : ""}`
 }
 
 export function videoLibraryStatus(

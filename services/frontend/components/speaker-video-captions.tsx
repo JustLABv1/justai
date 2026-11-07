@@ -1,30 +1,31 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ImageIcon, LoaderCircle } from "lucide-react"
+import { createPortal } from "react-dom"
+import { ImageIcon } from "lucide-react"
 import Image from "next/image"
 import { api } from "@/lib/api"
 import type { Endpoint, TranscriptionSpeaker } from "@/lib/types"
-import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Field, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
+import { Alert } from "@/components/panelui/alert"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
+import { Dialog } from "@/components/panelui/dialog"
+import { Field, FieldDescription, FieldLabel } from "@/components/panelui/field"
+import { Frame } from "@/components/panelui/frame"
+import { Input } from "@/components/panelui/input"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
+} from "@/components/panelui/select"
+import { Switch } from "@/components/panelui/switch"
+import { Tooltip } from "@/components/panelui/tooltip"
+import { Progress } from "@/components/ui/progress"
 
 export type CaptionRun = {
   id: string
@@ -73,6 +74,7 @@ export function SpeakerVideoCaptions({
   selectedImage,
   onSelectImage,
   onResolveSuggestion,
+  actionSlot,
 }: {
   sessionId: string
   available: boolean
@@ -86,6 +88,8 @@ export function SpeakerVideoCaptions({
     speaker: TranscriptionSpeaker,
     accept: boolean
   ) => Promise<void>
+  /** Where the quiet icon button goes when the full notice is not needed. */
+  actionSlot?: HTMLElement | null
 }) {
   const { t } = useTranslations()
 
@@ -289,290 +293,368 @@ export function SpeakerVideoCaptions({
   const failedImages =
     run?.observations.filter((item) => item.error).length ?? 0
 
+  // Only call attention to this when something is left to do or went wrong;
+  // a finished, clean run folds into a quiet icon button.
+  const unnamedSpeakers = speakers.some(
+    (speaker) => !speaker.displayName?.trim()
+  )
+  const needsAttention =
+    active ||
+    run?.status === "failed" ||
+    run?.status === "cancelled" ||
+    Boolean(run?.errorMessage) ||
+    failedImages > 0 ||
+    (run?.status === "completed" && !run.results.length) ||
+    (!run && unnamedSpeakers) ||
+    (Boolean(error) && !open)
+  const openLabel = run ? t("Review captions") : t("Read name captions")
+
+  const statusLabel = active
+    ? run?.status === "queued"
+      ? t("Waiting to start")
+      : t("Reading name captions")
+    : run?.status === "completed"
+      ? t("Caption analysis complete")
+      : run?.status === "cancelled"
+        ? t("Analysis cancelled")
+        : t("Analysis failed")
+
   return (
-    <div className="space-y-2 rounded-lg bg-muted/50 p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="font-medium">{t("Names from video captions")}</p>
-          <p className="text-xs text-muted-foreground">
+    <>
+      {needsAttention ? (
+        <Alert tone="neutral" variant="plain">
+          <Alert.Icon>
+            <ImageIcon aria-hidden="true" />
+          </Alert.Icon>
+          <Alert.Title>{t("Names from video captions")}</Alert.Title>
+          <Alert.Description>
             {t("Match printed name captions to speaker turns.")}
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => {
-            setLoadingEndpoints(true)
-            setOpen(true)
-          }}
-        >
-          <ImageIcon className="size-4" />
-          {active
-            ? t("View analysis")
-            : run
-              ? t("Review captions")
-              : t("Read name captions")}
-        </Button>
-      </div>
-      {active && (
-        <div role="status" className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            {run?.status === "queued"
-              ? t("Queued · waiting for an analysis worker")
-              : t(
-                  "Reading name captions · {value0} of {value1} images analyzed",
-                  { value0: analyzed, value1: total }
-                )}
-          </p>
-          <Progress
-            aria-label={t("Name caption analysis")}
-            value={total ? (analyzed / total) * 100 : 0}
-          />
-        </div>
-      )}
-      {!available && !active && (
-        <p className="text-xs text-muted-foreground">
-          {t(
-            "Analysis requires a completed video with an available source file."
-          )}
-        </p>
-      )}
-      {error && !open && (
-        <p role="alert" className="text-destructive">
-          {t(error)}
-        </p>
-      )}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{t("Read speaker name captions")}</DialogTitle>
-            <DialogDescription>
-              {t(
-                "Read visible text in the lower half of selected video frames and match it to audio speaker labels. Manually named speakers stay unchanged."
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {t(error)}
-            </p>
-          )}
-          {run && (
-            <div
-              className="space-y-3 rounded-lg bg-muted/50 p-3 text-sm"
-              aria-live="polite"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <p className="font-medium">
-                  {active
-                    ? run.status === "queued"
-                      ? t("Waiting to start")
-                      : t("Reading name captions")
-                    : run.status === "completed"
-                      ? t("Caption analysis complete")
-                      : run.status === "cancelled"
-                        ? t("Analysis cancelled")
-                        : t("Analysis failed")}
-                </p>
-                {active && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={cancel}
-                  >
-                    {t("Cancel analysis")}
-                  </Button>
-                )}
-              </div>
-              <p className="text-muted-foreground">
-                {analyzed} {t("of")} {total} {t("images analyzed")}
-                {failedImages
-                  ? t(" · {value0} could not be read", { value0: failedImages })
-                  : ""}
-              </p>
-              {active && (
-                <>
-                  <Progress
-                    aria-label={t("Name caption analysis")}
-                    value={total ? (analyzed / total) * 100 : 0}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t(
-                      "You can leave this page. Analysis continues in the background."
+          </Alert.Description>
+          {active ? (
+            <div role="status" className="mt-2 flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                {run?.status === "queued"
+                  ? t("Queued · waiting for an analysis worker")
+                  : t(
+                      "Reading name captions · {value0} of {value1} images analyzed",
+                      { value0: analyzed, value1: total }
                     )}
-                  </p>
-                </>
-              )}
-              {run.errorMessage && (
-                <p role="alert" className="text-destructive">
-                  {run.errorMessage}
-                </p>
-              )}
-              {run.status === "completed" && !run.results.length && (
-                <p>
-                  {t(
-                    "No reliable name captions were found. Existing speaker names remain unchanged."
-                  )}
-                </p>
-              )}
-              {run.results.map((result) => (
-                <div
-                  key={result.speakerId}
-                  className="space-y-2 rounded-md bg-background p-3"
-                >
-                  <p className="font-medium">
-                    {speakers.find((item) => item.id === result.speakerId)
-                      ?.label ?? t("Speaker")}{" "}
-                    → {result.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {result.applied
-                      ? t("Automatically applied")
-                      : result.conflict
-                        ? t("Conflicting captions · review before accepting")
-                        : t(
-                            "Suggestion · accept or dismiss in the speaker list"
-                          )}{" "}
-                    · {Math.round(result.confidence * 100)}%
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {result.evidence}
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {result.frameIndices.map((index) => (
-                      <Button
-                        key={index}
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => {
-                          onSelectImage({ runId: run.id, index })
-                        }}
-                      >
-                        <ImageIcon className="size-4" />
-                        {timestamp(run.frames[index].offsetMs)}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              ))}
+              </p>
+              <Progress
+                aria-label={t("Name caption analysis")}
+                value={total ? (analyzed / total) * 100 : 0}
+              />
             </div>
-          )}
-          {!active && (
-            <div className="space-y-4">
-              <Field>
-                <FieldLabel htmlFor="caption-endpoint">
-                  {t("Vision endpoint")}
-                </FieldLabel>
-                <Select
-                  value={endpointId}
-                  onValueChange={(value) => {
-                    setEndpointId(value ?? "")
-                    setModel("")
-                  }}
-                  items={endpoints.map((item) => ({
-                    value: item.id,
-                    label: item.name,
-                  }))}
-                >
-                  <SelectTrigger id="caption-endpoint" className="w-full">
-                    <SelectValue
-                      placeholder={
-                        loadingEndpoints
-                          ? t("Loading endpoints…")
-                          : t("Select a vision endpoint")
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {endpoints.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              {!loadingEndpoints && !endpoints.length && (
-                <p className="text-sm text-muted-foreground">
-                  {t(
-                    "Configure an enabled endpoint with vision capability in Settings → Endpoints to read video images."
-                  )}
-                </p>
+          ) : null}
+          {!available && !active ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t(
+                "Analysis requires a completed video with an available source file."
               )}
-              <Field>
-                <FieldLabel htmlFor="caption-model">
-                  {t("Vision model")}
-                </FieldLabel>
-                <Input
-                  id="caption-model"
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  placeholder={
-                    endpoint?.visionModel ||
-                    endpoint?.chatModel ||
-                    "Enter a vision model"
-                  }
-                  maxLength={200}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="caption-budget">
-                  {t("Maximum images")}
-                </FieldLabel>
-                <Select
-                  value={budget}
-                  onValueChange={(value) => setBudget(value ?? "24")}
-                  items={[
-                    { value: "12", label: "12 images" },
-                    { value: "24", label: "24 images" },
-                    { value: "48", label: "48 images" },
-                  ]}
-                >
-                  <SelectTrigger id="caption-budget" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[12, 24, 48].map((value) => (
-                      <SelectItem key={value} value={String(value)}>
-                        {value} images
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
+            </p>
+          ) : null}
+          {error && !open ? (
+            <ToastFeedback message={error} type="destructive" />
+          ) : null}
+          <Alert.Actions>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setLoadingEndpoints(true)
+                setOpen(true)
+              }}
+            >
+              {active
+                ? t("View analysis")
+                : run
+                  ? t("Review captions")
+                  : t("Read name captions")}
+            </Button>
+          </Alert.Actions>
+        </Alert>
+      ) : actionSlot ? (
+        createPortal(
+          <Tooltip.Provider>
+            <Tooltip>
+              <Tooltip.Trigger
+                render={
+                  <Button
+                    aria-label={openLabel}
+                    onClick={() => {
+                      setLoadingEndpoints(true)
+                      setOpen(true)
+                    }}
+                    size="icon-sm"
+                    variant="outline"
+                  />
+                }
+              >
+                <ImageIcon aria-hidden="true" />
+              </Tooltip.Trigger>
+              <Tooltip.Content>{openLabel}</Tooltip.Content>
+            </Tooltip>
+          </Tooltip.Provider>,
+          actionSlot
+        )
+      ) : null}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog.Content className="sm:max-w-xl">
+          <Dialog.Header
+            title={t("Read speaker name captions")}
+            description={t(
+              "Read visible text in the lower half of selected video frames and match it to audio speaker labels. Manually named speakers stay unchanged."
+            )}
+          />
+          <Dialog.Body className="flex flex-col gap-4">
+            {error ? (
+              <Alert tone="destructive" variant="plain">
+                <Alert.Description>{t(error)}</Alert.Description>
+              </Alert>
+            ) : null}
+            {run ? (
+              <Frame aria-live="polite">
+                <Frame.Header>
+                  <Frame.Title>{statusLabel}</Frame.Title>
+                  <Frame.Description>
+                    {analyzed} {t("of")} {total} {t("images analyzed")}
+                    {failedImages
+                      ? t(" · {value0} could not be read", {
+                          value0: failedImages,
+                        })
+                      : ""}
+                  </Frame.Description>
+                  {active ? (
+                    <Frame.Action>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={cancel}
+                      >
+                        {t("Cancel analysis")}
+                      </Button>
+                    </Frame.Action>
+                  ) : null}
+                </Frame.Header>
+                <Frame.Panel>
+                  {active ? (
+                    <Frame.Row>
+                      <Frame.Content>
+                        <Progress
+                          aria-label={t("Name caption analysis")}
+                          value={total ? (analyzed / total) * 100 : 0}
+                        />
+                        <Frame.Description className="mt-2">
+                          {t(
+                            "You can leave this page. Analysis continues in the background."
+                          )}
+                        </Frame.Description>
+                      </Frame.Content>
+                    </Frame.Row>
+                  ) : null}
+                  {run.errorMessage ? (
+                    <Frame.Row>
+                      <Frame.Content>
+                        <p role="alert" className="text-sm text-destructive">
+                          {run.errorMessage}
+                        </p>
+                      </Frame.Content>
+                    </Frame.Row>
+                  ) : null}
+                  {run.status === "completed" && !run.results.length ? (
+                    <Frame.Row>
+                      <Frame.Content>
+                        <Frame.Description>
+                          {t(
+                            "No reliable name captions were found. Existing speaker names remain unchanged."
+                          )}
+                        </Frame.Description>
+                      </Frame.Content>
+                    </Frame.Row>
+                  ) : null}
+                  {run.results.map((result) => (
+                    <Frame.Row key={result.speakerId}>
+                      <Frame.Content>
+                        <Frame.Title as="p">
+                          {speakers.find((item) => item.id === result.speakerId)
+                            ?.label ?? t("Speaker")}{" "}
+                          → {result.name}
+                        </Frame.Title>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <Badge
+                            size="sm"
+                            variant={
+                              result.applied
+                                ? "success"
+                                : result.conflict
+                                  ? "warning"
+                                  : "info"
+                            }
+                          >
+                            {result.applied
+                              ? t("Automatically applied")
+                              : result.conflict
+                                ? t(
+                                    "Conflicting captions · review before accepting"
+                                  )
+                                : t(
+                                    "Suggestion · accept or dismiss in the speaker list"
+                                  )}
+                          </Badge>
+                          <Badge size="sm" variant="outline">
+                            {Math.round(result.confidence * 100)}%
+                          </Badge>
+                        </div>
+                        <Frame.Description className="mt-1.5">
+                          {result.evidence}
+                        </Frame.Description>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {result.frameIndices.map((index) => (
+                            <Button
+                              key={index}
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                onSelectImage({ runId: run.id, index })
+                              }}
+                            >
+                              <ImageIcon data-icon="inline-start" />
+                              {timestamp(run.frames[index].offsetMs)}
+                            </Button>
+                          ))}
+                        </div>
+                      </Frame.Content>
+                    </Frame.Row>
+                  ))}
+                </Frame.Panel>
+              </Frame>
+            ) : null}
+            {!active ? (
+              <div className="flex flex-col gap-4">
+                <Field>
+                  <FieldLabel>{t("Vision endpoint")}</FieldLabel>
+                  <Select
+                    value={endpointId}
+                    onValueChange={(value) => {
+                      setEndpointId(value ?? "")
+                      setModel("")
+                    }}
+                    items={endpoints.map((item) => ({
+                      value: item.id,
+                      label: item.name,
+                    }))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue
+                        placeholder={
+                          loadingEndpoints
+                            ? t("Loading endpoints…")
+                            : t("Select a vision endpoint")
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {endpoints.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {!loadingEndpoints && !endpoints.length ? (
+                    <FieldDescription>
+                      {t(
+                        "Configure an enabled endpoint with vision capability in Settings → Endpoints to read video images."
+                      )}
+                    </FieldDescription>
+                  ) : null}
+                </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel>{t("Vision model")}</FieldLabel>
+                    <Input
+                      value={model}
+                      onChange={(event) => setModel(event.target.value)}
+                      placeholder={
+                        endpoint?.visionModel ||
+                        endpoint?.chatModel ||
+                        "Enter a vision model"
+                      }
+                      maxLength={200}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel>{t("Maximum images")}</FieldLabel>
+                    <Select
+                      value={budget}
+                      onValueChange={(value) => setBudget(value ?? "24")}
+                      items={[
+                        { value: "12", label: "12 images" },
+                        { value: "24", label: "24 images" },
+                        { value: "48", label: "48 images" },
+                      ]}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[12, 24, 48].map((value) => (
+                          <SelectItem key={value} value={String(value)}>
+                            {value} images
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                <p className="-mt-2 text-xs text-muted-foreground">
                   {t(
                     "Up to four images per unnamed speaker. The budget stays fixed for long videos; each image uses one model request."
                   )}
                 </p>
-              </Field>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <label
-                    htmlFor="caption-auto-apply"
-                    className="text-sm font-medium"
-                  >
-                    {t("Apply consistent matches automatically")}
-                  </label>
-                  <p className="text-xs text-muted-foreground">
+                <Frame>
+                  <Frame.Panel>
+                    <Frame.Row>
+                      <Frame.Content>
+                        <Frame.Title as="p">
+                          {t("Apply consistent matches automatically")}
+                        </Frame.Title>
+                        <Frame.Description>
+                          {t(
+                            "Requires at least three matching images across two speech turns, with no conflicting name."
+                          )}
+                        </Frame.Description>
+                      </Frame.Content>
+                      <Frame.Actions>
+                        <Switch
+                          aria-label={t(
+                            "Apply consistent matches automatically"
+                          )}
+                          checked={autoApply}
+                          onCheckedChange={setAutoApply}
+                        />
+                      </Frame.Actions>
+                    </Frame.Row>
+                  </Frame.Panel>
+                </Frame>
+                <Alert tone="info" variant="plain">
+                  <Alert.Description>
                     {t(
-                      "Requires at least three matching images across two speech turns, with no conflicting name."
+                      "Selected frame crops are sent to the chosen endpoint when you start. This reads printed names; it does not identify faces."
                     )}
-                  </p>
-                </div>
-                <Switch
-                  id="caption-auto-apply"
-                  checked={autoApply}
-                  onCheckedChange={setAutoApply}
-                />
+                  </Alert.Description>
+                </Alert>
               </div>
-              <p className="text-xs text-muted-foreground">
-                {t(
-                  "Selected frame crops are sent to the chosen endpoint when you start. This reads printed names; it does not identify faces."
-                )}
-              </p>
+            ) : null}
+          </Dialog.Body>
+          {!active ? (
+            <Dialog.Footer>
+              <Dialog.Close render={<Button variant="secondary" />}>
+                {t("Cancel")}
+              </Dialog.Close>
               <Button
-                className="w-full"
                 disabled={
                   busy ||
                   loadingEndpoints ||
@@ -586,85 +668,85 @@ export function SpeakerVideoCaptions({
                 }
                 onClick={start}
               >
-                {busy && <LoaderCircle className="size-4 animate-spin" />}
+                {busy ? <Spinner data-icon="inline-start" /> : null}
                 {run ? t("Start new analysis") : t("Start caption analysis")}
               </Button>
-            </div>
-          )}
-        </DialogContent>
+            </Dialog.Footer>
+          ) : null}
+        </Dialog.Content>
       </Dialog>
+
       <Dialog
         open={imageIndex !== null}
         onOpenChange={(value) => {
           if (!value) onSelectImage(null)
         }}
       >
-        <DialogContent className="sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>
-              {t("Caption evidence ·")} {timestamp(image?.offsetMs ?? 0)}
-            </DialogTitle>
-            <DialogDescription>
-              {observation?.caption || "Selected lower-third video crop"}
-            </DialogDescription>
-          </DialogHeader>
-          {imageError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {t(imageError)}
-            </p>
-          ) : imageURL ? (
-            <Image
-              width={960}
-              height={540}
-              unoptimized
-              src={imageURL}
-              alt={t("Video caption at {value0}: {value1}", {
-                value0: timestamp(image?.offsetMs ?? 0),
-                value1: observation?.caption ?? "",
-              })}
-              className="max-h-[60dvh] w-full rounded-lg object-contain"
-            />
-          ) : (
-            <p role="status" className="text-sm text-muted-foreground">
-              {t("Loading evidence image…")}
-            </p>
-          )}
-          <Button
-            variant="secondary"
-            onClick={() => {
-              if (image) onSeek(image.offsetMs)
-              onSelectImage(null)
-              setOpen(false)
-            }}
-          >
-            {t("Go to this moment in video")}
-          </Button>
-          {imageSpeaker?.suggestedName && imageSuggestion ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-auto text-sm">
-                {imageSpeaker.suggestedName}
-              </span>
-              <Button
-                onClick={async () => {
-                  await onResolveSuggestion(imageSpeaker, true)
-                }}
-              >
-                {t("Accept name {value0}", {
-                  value0: imageSpeaker.suggestedName,
+        <Dialog.Content className="sm:max-w-3xl">
+          <Dialog.Header
+            title={`${t("Caption evidence ·")} ${timestamp(image?.offsetMs ?? 0)}`}
+            description={
+              observation?.caption || "Selected lower-third video crop"
+            }
+          />
+          <Dialog.Body>
+            {imageError ? (
+              <Alert tone="destructive" variant="plain">
+                <Alert.Description>{t(imageError)}</Alert.Description>
+              </Alert>
+            ) : imageURL ? (
+              <Image
+                width={960}
+                height={540}
+                unoptimized
+                src={imageURL}
+                alt={t("Video caption at {value0}: {value1}", {
+                  value0: timestamp(image?.offsetMs ?? 0),
+                  value1: observation?.caption ?? "",
                 })}
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={async () => {
-                  await onResolveSuggestion(imageSpeaker, false)
-                }}
-              >
-                {t("Dismiss suggestion")}
-              </Button>
-            </div>
-          ) : null}
-        </DialogContent>
+                className="max-h-[60dvh] w-full rounded-xl object-contain"
+              />
+            ) : (
+              <p role="status" className="text-sm text-muted-foreground">
+                {t("Loading evidence image…")}
+              </p>
+            )}
+          </Dialog.Body>
+          <Dialog.Footer>
+            {imageSpeaker?.suggestedName && imageSuggestion ? (
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={async () => {
+                    await onResolveSuggestion(imageSpeaker, false)
+                  }}
+                >
+                  {t("Dismiss suggestion")}
+                </Button>
+                <Button
+                  onClick={async () => {
+                    await onResolveSuggestion(imageSpeaker, true)
+                  }}
+                >
+                  {t("Accept name {value0}", {
+                    value0: imageSpeaker.suggestedName,
+                  })}
+                </Button>
+              </>
+            ) : null}
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (image) onSeek(image.offsetMs)
+                onSelectImage(null)
+                setOpen(false)
+              }}
+            >
+              {t("Go to this moment in video")}
+            </Button>
+          </Dialog.Footer>
+        </Dialog.Content>
       </Dialog>
-    </div>
+    </>
   )
 }

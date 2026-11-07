@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { TranscriptionCard } from "./transcription-card"
 import { MentionMessageText } from "./composer-mention"
@@ -14,7 +15,6 @@ import {
   ExternalLink,
   FileText,
   Files,
-  LoaderCircle,
   Quote,
   ShieldCheck,
   Sparkles,
@@ -91,7 +91,7 @@ function RetrievalStatusPart({ data }: { data: unknown }) {
       }
     >
       {status === "started" ? (
-        <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+        <Spinner className="size-3.5" aria-hidden="true" />
       ) : (
         <FileText className="size-3.5" aria-hidden="true" />
       )}
@@ -760,10 +760,7 @@ export function AssistantMessageParts() {
           if (part.type === "indicator") {
             return (
               <span className="my-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
-                <LoaderCircle
-                  className="size-3.5 animate-spin"
-                  aria-hidden="true"
-                />
+                <Spinner className="size-3.5" aria-hidden="true" />
                 {t("Working…")}
               </span>
             )

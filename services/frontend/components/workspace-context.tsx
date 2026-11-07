@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useState, type FormEvent, type ReactNode } from "react"
 import {
@@ -8,7 +9,6 @@ import {
   Database,
   FolderKanban,
   Headphones,
-  LoaderCircle,
   NotebookPen,
   Pin,
   Plug,
@@ -410,8 +410,7 @@ export function WorkspaceContext({
 
       {loading && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <LoaderCircle className="size-3.5 animate-spin" />{" "}
-          {t("Loading attached context…")}
+          <Spinner className="size-3.5" /> {t("Loading attached context…")}
         </div>
       )}
       {visibleNotice && (
@@ -562,7 +561,7 @@ export function WorkspaceContext({
                       variant="ghost"
                     >
                       {busy === source.id ? (
-                        <LoaderCircle className="animate-spin" />
+                        <Spinner />
                       ) : visibleContext.knowledgeSources.some(
                           (item) => item.id === source.id
                         ) ? (
@@ -612,7 +611,7 @@ export function WorkspaceContext({
                         variant="ghost"
                       >
                         {busy === note.id ? (
-                          <LoaderCircle className="animate-spin" />
+                          <Spinner />
                         ) : attached ? (
                           <CheckCircle2 />
                         ) : (
@@ -679,7 +678,7 @@ export function WorkspaceContext({
                     variant="ghost"
                   >
                     {busy === server.id ? (
-                      <LoaderCircle className="animate-spin" />
+                      <Spinner />
                     ) : visibleContext.mcpServers.some(
                         (item) => item.id === server.id
                       ) ? (
@@ -742,7 +741,7 @@ export function WorkspaceContext({
                     variant="ghost"
                   >
                     {busy === session.id ? (
-                      <LoaderCircle className="animate-spin" />
+                      <Spinner />
                     ) : visibleContext.transcriptionSessions.some(
                         (item) => item.id === session.id
                       ) ? (
@@ -826,10 +825,7 @@ export function WorkspaceContext({
               </Button>
               <Button disabled={busy === "project-create"} type="submit">
                 {busy === "project-create" && (
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />
+                  <Spinner data-icon="inline-start" />
                 )}
                 {t("Create project")}
               </Button>

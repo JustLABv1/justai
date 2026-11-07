@@ -4,18 +4,18 @@ import { useTranslations } from "@/components/locale-provider"
 import { useSyncExternalStore } from "react"
 import { Check, Monitor, Moon, Sun } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/panelui/button"
 import { useThemeTransition } from "@/components/theme-provider"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  Menu as DropdownMenu,
+  MenuContent as DropdownMenuContent,
+  MenuGroup as DropdownMenuGroup,
+  MenuItem as DropdownMenuItem,
+  MenuSub as DropdownMenuSub,
+  MenuSubContent as DropdownMenuSubContent,
+  MenuSubTrigger as DropdownMenuSubTrigger,
+  MenuTrigger as DropdownMenuTrigger,
+} from "@/components/panelui/menu"
 import { cn } from "@/lib/utils"
 
 const themes = [
@@ -50,7 +50,7 @@ function ThemeSwitcher({ expanded = false }: { expanded?: boolean }) {
                 : "size-9 rounded-xl text-muted-foreground"
             )}
             title={t("Choose color theme")}
-            size={expanded ? "default" : "icon"}
+            size={expanded ? "md" : "icon"}
             variant="ghost"
           />
         }

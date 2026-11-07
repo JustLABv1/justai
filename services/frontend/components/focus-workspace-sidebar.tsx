@@ -1,19 +1,16 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
-import {
-  Fragment,
-  useMemo,
-  useState,
-  type ComponentType,
-  type SVGProps,
-} from "react"
+import { setSeasonsDisabled, useSeasonsDisabled } from "@/lib/season-preference"
+import { useMemo, useState, type ComponentType, type SVGProps } from "react"
 import {
   Archive,
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
   LogOut,
+  Leaf,
   MoreHorizontal,
   Plus,
   RotateCcw,
@@ -28,7 +25,6 @@ import {
   File01Icon,
   HeadphonesIcon,
   BubbleChatIcon,
-  Plug01Icon,
   Search01Icon,
   Settings02Icon,
   Shield01Icon,
@@ -56,7 +52,6 @@ const FolderKanban = sidebarIcon(Folder01Icon)
 const FileText = sidebarIcon(File01Icon)
 const Headphones = sidebarIcon(HeadphonesIcon)
 const MessageSquare = sidebarIcon(BubbleChatIcon)
-const Plug = sidebarIcon(Plug01Icon)
 const Search = sidebarIcon(Search01Icon)
 const Settings2 = sidebarIcon(Settings02Icon)
 const ShieldCheck = sidebarIcon(Shield01Icon)
@@ -66,24 +61,25 @@ import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
 import { LanguageMenu } from "@/components/language-switcher"
 import { ThemeMenu } from "@/components/theme-switcher"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+
+import { Avatar } from "@/components/panelui/avatar"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  Menu as DropdownMenu,
+  MenuContent as DropdownMenuContent,
+  MenuCheckboxItem as DropdownMenuCheckboxItem,
+  MenuGroup as DropdownMenuGroup,
+  MenuItem as DropdownMenuItem,
+  MenuGroupLabel as DropdownMenuLabel,
+  MenuSeparator as DropdownMenuSeparator,
+  MenuTrigger as DropdownMenuTrigger,
+} from "@/components/panelui/menu"
 import {
   Empty,
   EmptyDescription,
@@ -93,10 +89,11 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogBody,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+} from "@/components/panelui/dialog"
+import { Input } from "@/components/panelui/input"
 import {
   Sidebar,
   SidebarContent,
@@ -126,7 +123,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { resolveAPIURL } from "@/lib/api"
-import { avatarToneFor, versionedAvatarURL } from "@/lib/identity"
+import { versionedAvatarURL } from "@/lib/identity"
 
 export const railNavigation: Array<{
   id: ViewId
@@ -179,14 +176,6 @@ export const railNavigation: Array<{
     hint: "Folders, files, and transcripts",
     icon: FolderKanban,
     group: "Storage",
-  },
-  {
-    id: "integrations",
-    label: "MCP servers",
-    hint: "Manage MCP connections and tools",
-    icon: Plug,
-    group: "Connect",
-    feature: "mcp",
   },
 ]
 
@@ -257,7 +246,6 @@ export function FocusWorkspaceSidebar({
   archivedTranscriptionSessions,
   actionError,
   user,
-  userInitials,
   historyOpen,
   onHistoryOpenChange,
   onNavigate,
@@ -275,6 +263,7 @@ export function FocusWorkspaceSidebar({
   disabledFeatures,
 }: FocusWorkspaceSidebarProps) {
   const { t } = useTranslations()
+  const seasonsDisabled = useSeasonsDisabled()
 
   const [historyQuery, setHistoryQuery] = useState("")
   const [sessionQuery, setSessionQuery] = useState("")
@@ -445,11 +434,7 @@ export function FocusWorkspaceSidebar({
       role="region"
     >
       {actionError && (
-        <Alert className="shrink-0" variant="destructive">
-          <AlertDescription className="text-xs">
-            {t(actionError)}
-          </AlertDescription>
-        </Alert>
+        <ToastFeedback message={actionError} type={"destructive"} />
       )}
 
       {historyMode === "chat" ? (
@@ -552,7 +537,7 @@ export function FocusWorkspaceSidebar({
                 >
                   <BrandMark
                     aria-hidden="true"
-                    className="size-8 [&_svg]:size-full!"
+                    className="size-6 [&_svg]:size-full!"
                     cropped
                   />
                   <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
@@ -856,24 +841,20 @@ export function FocusWorkspaceSidebar({
                     />
                   }
                 >
-                  <Avatar size="sm">
-                    {user.avatarUrl && (
-                      <AvatarImage
-                        alt={t("{value0}'s profile picture", {
-                          value0: user.displayName,
-                        })}
-                        src={resolveAPIURL(
-                          versionedAvatarURL(
-                            user.avatarUrl,
-                            user.avatarVersion
-                          ) ?? user.avatarUrl
-                        )}
-                      />
-                    )}
-                    <AvatarFallback className={avatarToneFor(user.id)}>
-                      {userInitials}
-                    </AvatarFallback>
-                  </Avatar>
+                  <Avatar
+                    size="sm"
+                    name={user.displayName}
+                    src={
+                      user.avatarUrl
+                        ? resolveAPIURL(
+                            versionedAvatarURL(
+                              user.avatarUrl,
+                              user.avatarVersion
+                            ) ?? user.avatarUrl
+                          )
+                        : undefined
+                    }
+                  />
                   <span className="min-w-0 flex-1 text-left">
                     <span className="block truncate text-xs font-medium">
                       {user.displayName}
@@ -906,6 +887,15 @@ export function FocusWorkspaceSidebar({
                   <DropdownMenuSeparator />
                   <LanguageMenu />
                   <ThemeMenu />
+                  <DropdownMenuGroup>
+                    <DropdownMenuCheckboxItem
+                      checked={seasonsDisabled}
+                      onCheckedChange={setSeasonsDisabled}
+                    >
+                      <Leaf data-icon="inline-start" />
+                      {t("Disable seasons")}
+                    </DropdownMenuCheckboxItem>
+                  </DropdownMenuGroup>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => onNavigate("profile")}>
                     <UserRound data-icon="inline-start" />
@@ -1026,9 +1016,11 @@ export function FocusWorkspaceSidebar({
               </Button>
             )}
           </DialogHeader>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {historyPanel}
-          </div>
+          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {historyPanel}
+            </div>
+          </DialogBody>
         </DialogContent>
       </Dialog>
 
@@ -1267,7 +1259,7 @@ function SessionRow({
             <Button
               aria-label={t("Actions for {value0}", { value0: session.title })}
               className="absolute top-1/2 right-1 size-8 -translate-y-1/2 bg-[var(--sidebar-secondary)] opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 max-lg:opacity-100"
-              size="icon-xs"
+              size="icon-sm"
               title={t("Actions for {value0}", { value0: session.title })}
               variant="ghost"
             />

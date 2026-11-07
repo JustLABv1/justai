@@ -1,19 +1,14 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
+import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
   useTranslatedConfig,
 } from "@/components/locale-provider"
 
 import { downloadFile } from "@/lib/download-file"
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   Brain,
@@ -32,13 +27,14 @@ import {
   FolderPlus,
   Globe2,
   Link2,
-  LoaderCircle,
   MoreHorizontal,
   NotebookPen,
   Plus,
   RefreshCw,
   Search,
+  ArrowUpDown,
   Settings2,
+  Users,
   Trash2,
   Upload,
   UploadCloud,
@@ -58,23 +54,20 @@ import type {
   TranscriptionSession,
   WorkspaceProject,
 } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
-import { Button } from "@/components/ui/button"
+
+import { Badge } from "@/components/panelui/badge"
+import { Checkbox } from "@/components/panelui/checkbox"
+import { Chip } from "@/components/panelui/chip"
+import { SectionHeading } from "@/components/section-heading"
+import { publishFolderTrail } from "@/lib/knowledge-folder-trail"
+import { Button } from "@/components/panelui/button"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/panelui/card"
 import {
   Dialog,
   DialogContent,
@@ -82,7 +75,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+  DialogBody,
+} from "@/components/panelui/dialog"
 import {
   Empty,
   EmptyDescription,
@@ -90,9 +84,8 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
-import { FilterBar } from "@/components/ui/filter-bar"
-import { Label } from "@/components/ui/label"
+import { Input } from "@/components/panelui/input"
+import { Label } from "@/components/panelui/label"
 import { Progress } from "@/components/ui/progress"
 import {
   Page,
@@ -107,9 +100,9 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
+} from "@/components/panelui/select"
+import { Switch } from "@/components/panelui/switch"
+import { Textarea } from "@/components/panelui/textarea"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -118,20 +111,14 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Menu } from "@/components/panelui/menu"
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@/components/ui/sheet"
+} from "@/components/panelui/sheet"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 import { cn } from "@/lib/utils"
 
@@ -758,6 +745,19 @@ export function KnowledgeWorkspace({
     }
     return path
   }, [selectedSpace, spaces])
+
+  // Share the open folder's path with the top bar's breadcrumb.
+  const trailKey = folderPath
+    .map((folder) => `${folder.id}:${folder.name}`)
+    .join("|")
+  useEffect(() => {
+    publishFolderTrail({
+      items: folderPath.map((folder) => ({ id: folder.id, name: folder.name })),
+      select: (id) => setSpaceId(id),
+    })
+    return () => publishFolderTrail(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trailKey])
 
   const visibleItems = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
@@ -1498,7 +1498,8 @@ export function KnowledgeWorkspace({
           if (files.length) void uploadFiles(files)
         }}
       />
-      <PageHeader>
+      {/* Its title is screen-reader only and its actions live in the top bar, so on desktop it is empty: pull the page up over the gap it leaves. */}
+      <PageHeader className="sm:-mb-4">
         <PageHeading>
           <PageTitle>{t("Storage")}</PageTitle>
         </PageHeading>
@@ -1526,291 +1527,261 @@ export function KnowledgeWorkspace({
       </PageHeader>
 
       {(error || notice) && (
-        <Alert
-          aria-live="polite"
-          role={error ? "alert" : "status"}
-          variant={error ? "destructive" : "default"}
-        >
-          {error ? <X /> : <Check />}
-          <AlertTitle>
-            {error ? t("Knowledge action failed") : t("Knowledge updated")}
-          </AlertTitle>
-          <AlertDescription>{error || notice}</AlertDescription>
-        </Alert>
+        <ToastFeedback
+          message={error || notice}
+          type={error ? "destructive" : "success"}
+        />
       )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div className="min-h-0 flex-1">
           <div className="min-h-0 flex-1">
             <Card className="min-h-0 gap-0 overflow-visible rounded-none border-0 bg-transparent py-0 shadow-none ring-0">
-              <CardHeader className="gap-3 px-0 py-0 pb-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="flex items-baseline gap-2 text-sm">
-                      {selectedSpace ? (
-                        <Breadcrumb
-                          aria-label={t("Folder path")}
-                          className="min-w-0"
-                        >
-                          <BreadcrumbList className="flex-nowrap">
-                            <BreadcrumbItem>
-                              <BreadcrumbLink
-                                render={
-                                  <button
-                                    onClick={() => setSpaceId("all")}
-                                    type="button"
-                                  />
-                                }
-                              >
-                                {t("My files")}
-                              </BreadcrumbLink>
-                            </BreadcrumbItem>
-                            {folderPath.map((folder, index) => (
-                              <Fragment key={folder.id}>
-                                <BreadcrumbSeparator />
-                                <BreadcrumbItem className="min-w-0">
-                                  {index === folderPath.length - 1 ? (
-                                    <BreadcrumbPage className="truncate font-medium">
-                                      {folder.name}
-                                    </BreadcrumbPage>
-                                  ) : (
-                                    <BreadcrumbLink
-                                      className="truncate"
-                                      render={
-                                        <button
-                                          onClick={() => setSpaceId(folder.id)}
-                                          type="button"
-                                        />
-                                      }
-                                    >
-                                      {folder.name}
-                                    </BreadcrumbLink>
-                                  )}
-                                </BreadcrumbItem>
-                              </Fragment>
-                            ))}
-                          </BreadcrumbList>
-                        </Breadcrumb>
-                      ) : (
-                        <span className="truncate">{t("My files")}</span>
-                      )}
-                      <span
-                        aria-live="polite"
-                        className="shrink-0 font-normal text-muted-foreground"
+              <CardHeader className="gap-4 px-0 py-0 pb-4">
+                <SectionHeading
+                  actions={
+                    selectedSpace && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onNavigate("chat")}
                       >
-                        {t("{value0} items", { value0: libraryItemCount })}
-                      </span>
-                    </CardTitle>
-                    {selectedSpace?.description && (
-                      <CardDescription className="truncate text-xs">
-                        {selectedSpace.description}
-                      </CardDescription>
-                    )}
-                    {selectedSpace && (
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                        <span className="rounded-full border px-2 py-0.5">
-                          {selectedSpace.visibility === "workspace"
-                            ? t("Workspace")
-                            : t("Private")}
-                        </span>
-                        <span>
-                          {t("{value0} items", {
-                            value0: selectedSpace.itemCount,
-                          })}
-                        </span>
-                        <span>·</span>
-                        <span>
-                          {t("Updated")}{" "}
-                          {new Date(selectedSpace.updatedAt).toLocaleDateString(
-                            locale
-                          )}
-                        </span>
+                        {t("Start chat")}
+                      </Button>
+                    )
+                  }
+                  as="h2"
+                  count={
+                    selectedSpace
+                      ? undefined
+                      : t("{value0} items", { value0: libraryItemCount })
+                  }
+                  description={selectedSpace?.description}
+                  title={
+                    selectedSpace
+                      ? (folderPath[folderPath.length - 1]?.name ??
+                        selectedSpace.name)
+                      : t("My files")
+                  }
+                />
+                {selectedSpace && (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <Badge size="sm" variant="outline">
+                      {selectedSpace.visibility === "workspace"
+                        ? t("Workspace")
+                        : t("Private")}
+                    </Badge>
+                    <span>
+                      {t("{value0} items", {
+                        value0: selectedSpace.itemCount,
+                      })}
+                    </span>
+                    <span>·</span>
+                    <span>
+                      {t("Updated")}{" "}
+                      {new Date(selectedSpace.updatedAt).toLocaleDateString(
+                        locale
+                      )}
+                    </span>
 
-                        {selectedSpaceProblems > 0 && (
-                          <>
-                            <span>·</span>
-                            <span className="text-destructive">
-                              {selectedSpaceProblems} indexing{" "}
-                              {selectedSpaceProblems === 1
-                                ? "problem"
-                                : "problems"}
-                            </span>
-                          </>
-                        )}
-                      </div>
+                    {selectedSpaceProblems > 0 && (
+                      <>
+                        <span>·</span>
+                        <span className="text-destructive">
+                          {selectedSpaceProblems} indexing{" "}
+                          {selectedSpaceProblems === 1 ? "problem" : "problems"}
+                        </span>
+                      </>
                     )}
                   </div>
-                  {selectedSpace && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onNavigate("chat")}
+                )}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <Input.Group className="w-full sm:w-80">
+                    <Input.Addon>
+                      <Search aria-hidden="true" />
+                    </Input.Addon>
+                    <Input
+                      aria-label={t("Search this folder")}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder={t("Search this folder")}
+                      value={query}
+                    />
+                  </Input.Group>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={statusFilter}
+                      onValueChange={(value) => setStatusFilter(value ?? "all")}
                     >
-                      {t("Start chat")}
-                    </Button>
-                  )}
+                      <SelectTrigger
+                        size="sm"
+                        className="w-44 shrink-0"
+                        aria-label={t("Filter by status")}
+                      >
+                        <Settings2 data-icon="inline-start" />
+                        <SelectValue>
+                          {statusFilter === "all"
+                            ? t("All statuses")
+                            : t(itemStatusLabel(statusFilter))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t("All statuses")}</SelectItem>
+                        <SelectItem value="ready">{t("Ready")}</SelectItem>
+                        <SelectItem value="processing">
+                          {t("Processing")}
+                        </SelectItem>
+                        <SelectItem value="queued">{t("Queued")}</SelectItem>
+                        <SelectItem value="failed">{t("Failed")}</SelectItem>
+                        <SelectItem value="disabled">
+                          {t("Disabled")}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={ownershipFilter}
+                      onValueChange={(value) =>
+                        setOwnershipFilter(value ?? "all")
+                      }
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        className="w-44 shrink-0"
+                        aria-label={t("Filter by ownership")}
+                      >
+                        <Users data-icon="inline-start" />
+                        <SelectValue>
+                          {ownershipFilter === "all"
+                            ? t("All owners")
+                            : ownershipFilter === "private"
+                              ? t("Personal")
+                              : t("Workspace")}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t("All owners")}</SelectItem>
+                        <SelectItem value="private">{t("Personal")}</SelectItem>
+                        <SelectItem value="workspace">
+                          {t("Workspace")}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={sortBy}
+                      onValueChange={(value) =>
+                        setSortBy(
+                          (value as "updated" | "title" | "type") || "updated"
+                        )
+                      }
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        className="w-48 shrink-0"
+                        aria-label={t("Sort knowledge")}
+                      >
+                        <ArrowUpDown data-icon="inline-start" />
+                        <SelectValue>
+                          {sortBy === "updated"
+                            ? t("Recently updated")
+                            : sortBy === "title"
+                              ? t("Title")
+                              : t("Type")}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="updated">
+                          {t("Recently updated")}
+                        </SelectItem>
+                        <SelectItem value="title">{t("Title")}</SelectItem>
+                        <SelectItem value="type">{t("Type")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <FilterBar
-                  className="border-0 px-0 py-0"
-                  search={{
-                    value: query,
-                    onChange: setQuery,
-                    placeholder: t("Search this folder"),
-                    label: t("Search this folder"),
-                  }}
-                  hasActiveFilters={
-                    Boolean(query.trim()) ||
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <Chip.Group
+                    aria-label={t("Filter by type")}
+                    multiple={false}
+                    onValueChange={(value) =>
+                      setTypeFilter((value[0] as ItemFilter) || "all")
+                    }
+                    value={[typeFilter]}
+                  >
+                    {["all", ...Object.keys(typeLabels)].map((key) => (
+                      <Chip key={key} size="sm" value={key}>
+                        {key === "all"
+                          ? t("All types")
+                          : (typeLabels[key] ?? key)}
+                      </Chip>
+                    ))}
+                  </Chip.Group>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {Boolean(query.trim()) ||
                     typeFilter !== "all" ||
                     statusFilter !== "all" ||
                     ownershipFilter !== "all" ||
-                    sortBy !== "updated"
-                  }
-                  onClear={() => {
-                    setQuery("")
-                    setTypeFilter("all")
-                    setStatusFilter("all")
-                    setOwnershipFilter("all")
-                    setSortBy("updated")
-                  }}
-                >
-                  <Select
-                    value={typeFilter}
-                    onValueChange={(value) =>
-                      setTypeFilter((value as ItemFilter) || "all")
-                    }
-                  >
-                    <SelectTrigger
-                      aria-label={t("Filter by type")}
-                      className="min-w-32"
-                    >
-                      <SelectValue>
-                        {typeFilter === "all"
-                          ? t("All types")
-                          : (typeLabels[typeFilter] ?? t("All types"))}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t("All types")}</SelectItem>
-                      {Object.entries(typeLabels).map(([value, label]) => (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={statusFilter}
-                    onValueChange={(value) => setStatusFilter(value ?? "all")}
-                  >
-                    <SelectTrigger
-                      className="min-w-36"
-                      aria-label={t("Filter by status")}
-                    >
-                      <Settings2 data-icon="inline-start" />
-                      <SelectValue>
-                        {statusFilter === "all"
-                          ? t("All statuses")
-                          : t(itemStatusLabel(statusFilter))}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t("All statuses")}</SelectItem>
-                      <SelectItem value="ready">{t("Ready")}</SelectItem>
-                      <SelectItem value="processing">
-                        {t("Processing")}
-                      </SelectItem>
-                      <SelectItem value="queued">{t("Queued")}</SelectItem>
-                      <SelectItem value="failed">{t("Failed")}</SelectItem>
-                      <SelectItem value="disabled">{t("Disabled")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={ownershipFilter}
-                    onValueChange={(value) =>
-                      setOwnershipFilter(value ?? "all")
-                    }
-                  >
-                    <SelectTrigger
-                      className="min-w-36"
-                      aria-label={t("Filter by ownership")}
-                    >
-                      <SelectValue>
-                        {ownershipFilter === "all"
-                          ? t("All owners")
-                          : ownershipFilter === "private"
-                            ? t("Personal")
-                            : t("Workspace")}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t("All owners")}</SelectItem>
-                      <SelectItem value="private">{t("Personal")}</SelectItem>
-                      <SelectItem value="workspace">
-                        {t("Workspace")}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={sortBy}
-                    onValueChange={(value) =>
-                      setSortBy(
-                        (value as "updated" | "title" | "type") || "updated"
-                      )
-                    }
-                  >
-                    <SelectTrigger
-                      className="min-w-40"
-                      aria-label={t("Sort knowledge")}
-                    >
-                      <SelectValue>
-                        {sortBy === "updated"
-                          ? t("Recently updated")
-                          : sortBy === "title"
-                            ? t("Title")
-                            : t("Type")}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="updated">
-                        {t("Recently updated")}
-                      </SelectItem>
-                      <SelectItem value="title">{t("Title")}</SelectItem>
-                      <SelectItem value="type">{t("Type")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    className="h-9"
-                    disabled={visibleItems.length === 0}
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      setSelectedItemIds(
-                        new Set(visibleItems.map((item) => item.id))
-                      )
-                    }
-                  >
-                    <Check data-icon="inline-start" /> {t("Select visible")}
-                  </Button>
-                </FilterBar>
+                    sortBy !== "updated" ? (
+                      <Button
+                        onClick={() => {
+                          setQuery("")
+                          setTypeFilter("all")
+                          setStatusFilter("all")
+                          setOwnershipFilter("all")
+                          setSortBy("updated")
+                        }}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        {t("Clear filters")}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
                 {selectedItemIds.size > 0 && (
-                  <div className="flex translate-y-0 flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground opacity-100 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transform-none starting:translate-y-1 starting:opacity-0">
-                    <span>
+                  <div
+                    className="flex flex-wrap items-center gap-3 rounded-2xl bg-primary/5 px-3.5 py-2.5 ring-1 ring-primary/20 transition-opacity duration-200 starting:opacity-0"
+                    role="status"
+                  >
+                    <Checkbox
+                      checked={
+                        visibleItems.length > 0 &&
+                        selectedItemIds.size >= visibleItems.length
+                      }
+                      indeterminate={
+                        selectedItemIds.size > 0 &&
+                        selectedItemIds.size < visibleItems.length
+                      }
+                      label={t("Select visible")}
+                      onCheckedChange={() =>
+                        setSelectedItemIds(
+                          selectedItemIds.size >= visibleItems.length
+                            ? new Set()
+                            : new Set(visibleItems.map((item) => item.id))
+                        )
+                      }
+                    />
+                    <span className="text-sm font-medium">
                       {selectedItemIds.size} {t("selected")}
                     </span>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => setBulkDeleteOpen(true)}
-                    >
-                      <Trash2 /> {t("Delete selected")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setSelectedItemIds(new Set())}
-                    >
-                      {t("Clear")}
-                    </Button>
+                    <div className="ms-auto flex items-center gap-2">
+                      <Button
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => setBulkDeleteOpen(true)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <Trash2 data-icon="inline-start" />{" "}
+                        {t("Delete selected")}
+                      </Button>
+                      <Button
+                        aria-label={t("Clear selection")}
+                        onClick={() => setSelectedItemIds(new Set())}
+                        size="icon-sm"
+                        title={t("Clear selection")}
+                        variant="ghost"
+                      >
+                        <X />
+                      </Button>
+                    </div>
                   </div>
                 )}
               </CardHeader>
@@ -1818,7 +1789,7 @@ export function KnowledgeWorkspace({
                 <ContextMenuTrigger className="block min-h-96">
                   <CardContent
                     className={cn(
-                      "min-h-96 overflow-y-auto bg-transparent p-0 transition-colors",
+                      "-m-1.5 min-h-96 overflow-y-auto bg-transparent p-1.5 transition-colors",
                       draggingFiles && "rounded-xl bg-primary/5"
                     )}
                     onDragEnter={(event) => {
@@ -1848,7 +1819,7 @@ export function KnowledgeWorkspace({
                         role="status"
                       >
                         {busy ? (
-                          <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+                          <Spinner className="size-4 text-muted-foreground" />
                         ) : (
                           <UploadCloud className="size-4 text-primary" />
                         )}
@@ -1864,8 +1835,7 @@ export function KnowledgeWorkspace({
                         className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground"
                         role="status"
                       >
-                        <LoaderCircle className="animate-spin" />{" "}
-                        {t("Loading files…")}
+                        <Spinner /> {t("Loading files…")}
                       </div>
                     ) : loadError &&
                       visibleItems.length === 0 &&
@@ -1885,40 +1855,39 @@ export function KnowledgeWorkspace({
                       </div>
                     ) : visibleItems.length === 0 &&
                       childSpaces.length === 0 ? (
-                      <Empty className="min-h-64 border-0">
-                        <EmptyHeader>
-                          <EmptyMedia variant="icon">
-                            <FolderKanban />
-                          </EmptyMedia>
-                          <EmptyTitle>
+                      <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-[22px] border border-dashed p-8 text-center">
+                        <span className="rounded-full bg-muted p-3 text-muted-foreground">
+                          <FolderKanban aria-hidden="true" className="size-6" />
+                        </span>
+                        <div className="flex max-w-md flex-col gap-1">
+                          <p className="font-medium">
                             {query
                               ? t("No matching files")
                               : t("This folder is empty")}
-                          </EmptyTitle>
-                          <EmptyDescription>
+                          </p>
+                          <p className="text-sm text-muted-foreground">
                             {t("Drop files here or click to upload")}
                             {" · "}
                             {t(
                               "PDF, Office, email, OpenDocument and text · 25 MB each"
                             )}
-                          </EmptyDescription>
-                        </EmptyHeader>
+                          </p>
+                        </div>
                         <Button
                           disabled={busy}
-                          size="sm"
-                          variant="outline"
                           onClick={() => fileInputRef.current?.click()}
+                          variant="outline"
                         >
                           <Upload data-icon="inline-start" /> {t("Upload file")}
                         </Button>
-                      </Empty>
+                      </div>
                     ) : (
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                         {!query.trim() &&
                           childSpaces.map((folder) => (
                             <ContextMenu key={folder.id}>
                               <ContextMenuTrigger
-                                className="group flex min-w-0 cursor-pointer flex-col rounded-xl bg-secondary/70 p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-secondary hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+                                className="group flex min-w-0 cursor-pointer flex-col rounded-[20px] bg-card p-3.5 text-left ring-1 ring-foreground/10 transition-[background-color,box-shadow] hover:bg-muted/40 hover:ring-foreground/20 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
                                 onClick={() => setSpaceId(folder.id)}
                                 onKeyDown={(event) => {
                                   if (
@@ -1933,7 +1902,7 @@ export function KnowledgeWorkspace({
                                 tabIndex={0}
                               >
                                 <div className="mb-3 flex items-start justify-between gap-2">
-                                  <span className="flex size-12 items-center justify-center rounded-lg bg-muted text-primary">
+                                  <span className="flex size-11 items-center justify-center rounded-xl bg-muted text-primary">
                                     <Folder
                                       className="size-7"
                                       aria-hidden="true"
@@ -1945,8 +1914,8 @@ export function KnowledgeWorkspace({
                                       event.stopPropagation()
                                     }
                                   >
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger
+                                    <Menu>
+                                      <Menu.Trigger
                                         render={
                                           <Button
                                             aria-label={t(
@@ -1959,36 +1928,36 @@ export function KnowledgeWorkspace({
                                         }
                                       >
                                         <MoreHorizontal />
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end">
-                                        <DropdownMenuItem
+                                      </Menu.Trigger>
+                                      <Menu.Content align="end">
+                                        <Menu.Item
                                           onClick={() => setSpaceId(folder.id)}
                                         >
                                           <Folder /> {t("Open")}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem
+                                        </Menu.Item>
+                                        <Menu.Item
                                           onClick={() => {
                                             setSpaceParentId(folder.id)
                                             setSpaceOpen(true)
                                           }}
                                         >
                                           <FolderPlus /> {t("New subfolder")}
-                                        </DropdownMenuItem>
+                                        </Menu.Item>
                                         {folder.canManage && (
                                           <>
-                                            <DropdownMenuSeparator />
-                                            <DropdownMenuItem
+                                            <Menu.Separator />
+                                            <Menu.Item
                                               variant="destructive"
                                               onClick={() =>
                                                 setFolderDeleteTarget(folder)
                                               }
                                             >
                                               <Trash2 /> {t("Delete folder")}
-                                            </DropdownMenuItem>
+                                            </Menu.Item>
                                           </>
                                         )}
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
+                                      </Menu.Content>
+                                    </Menu>
                                   </div>
                                 </div>
                                 <p className="w-full truncate text-left text-sm font-medium">
@@ -2048,39 +2017,78 @@ export function KnowledgeWorkspace({
                           return (
                             <ContextMenu key={item.id}>
                               <ContextMenuTrigger
-                                aria-selected={selectedItemIds.has(item.id)}
+                                data-selected={
+                                  selectedItemIds.has(item.id) ? "" : undefined
+                                }
                                 className={cn(
-                                  "group relative flex min-w-0 cursor-pointer flex-col overflow-hidden rounded-xl bg-secondary/70 p-3 text-left shadow-xs transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] hover:-translate-y-0.5 hover:bg-secondary hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none active:scale-[0.99] motion-reduce:transform-none",
+                                  "group relative flex min-w-0 cursor-pointer flex-col overflow-hidden rounded-[20px] bg-card p-3.5 text-left ring-1 ring-foreground/10 transition-[background-color,box-shadow] duration-200 hover:bg-muted/40 hover:ring-foreground/20 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none",
                                   selectedItemIds.has(item.id) &&
-                                    "bg-primary/10 shadow-md ring-2 ring-primary/50",
+                                    "bg-primary/5 ring-2 ring-primary/50",
                                   pending &&
                                     "before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:animate-pulse before:bg-primary motion-reduce:before:animate-none",
                                   selected?.id === item.id &&
                                     "ring-2 ring-primary/30"
                                 )}
-                                onClick={() =>
-                                  setSelectedItemIds((current) => {
-                                    const next = new Set(current)
-                                    if (next.has(item.id)) next.delete(item.id)
-                                    else next.add(item.id)
-                                    return next
-                                  })
-                                }
-                                onDoubleClick={() => openInspector(item)}
+                                onClick={() => openInspector(item)}
+                                onKeyDown={(event) => {
+                                  if (
+                                    event.target === event.currentTarget &&
+                                    (event.key === "Enter" || event.key === " ")
+                                  ) {
+                                    event.preventDefault()
+                                    openInspector(item)
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
                               >
                                 <div className="mb-3 flex items-start justify-between gap-2">
-                                  <span className="flex size-12 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                                  <span
+                                    className="relative flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground"
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                  >
                                     <Icon
-                                      className="size-6"
                                       aria-hidden="true"
+                                      className={cn(
+                                        "size-6 transition-opacity",
+                                        (selectedItemIds.size > 0 ||
+                                          selectedItemIds.has(item.id)) &&
+                                          "opacity-0",
+                                        selectedItemIds.size === 0 &&
+                                          "group-focus-within:opacity-0 group-hover:opacity-0"
+                                      )}
+                                    />
+                                    <Checkbox
+                                      checked={selectedItemIds.has(item.id)}
+                                      className={cn(
+                                        "absolute transition-opacity",
+                                        selectedItemIds.size > 0
+                                          ? "opacity-100"
+                                          : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                                      )}
+                                      label={t("Select {value0}", {
+                                        value0: item.title,
+                                      })}
+                                      onCheckedChange={() =>
+                                        setSelectedItemIds((current) => {
+                                          const next = new Set(current)
+                                          if (next.has(item.id))
+                                            next.delete(item.id)
+                                          else next.add(item.id)
+                                          return next
+                                        })
+                                      }
                                     />
                                   </span>
                                   <div
                                     className="flex items-center gap-1"
                                     onClick={(event) => event.stopPropagation()}
                                   >
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger
+                                    <Menu>
+                                      <Menu.Trigger
                                         render={
                                           <Button
                                             aria-label={t(
@@ -2093,33 +2101,43 @@ export function KnowledgeWorkspace({
                                         }
                                       >
                                         <MoreHorizontal />
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end">
-                                        <DropdownMenuItem
+                                      </Menu.Trigger>
+                                      <Menu.Content align="end">
+                                        <Menu.Item
                                           onClick={() => openInspector(item)}
                                         >
                                           <Search /> {t("Open details")}
-                                        </DropdownMenuItem>
+                                        </Menu.Item>
                                         {canDeleteKnowledgeItem(item) && (
                                           <>
-                                            <DropdownMenuSeparator />
-                                            <DropdownMenuItem
+                                            <Menu.Separator />
+                                            <Menu.Item
                                               variant="destructive"
                                               onClick={() =>
                                                 setDeleteTarget(item)
                                               }
                                             >
                                               <Trash2 /> {t("Delete")}
-                                            </DropdownMenuItem>
+                                            </Menu.Item>
                                           </>
                                         )}
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
+                                      </Menu.Content>
+                                    </Menu>
                                   </div>
                                 </div>
                                 <p className="w-full truncate text-left text-sm font-medium">
                                   {item.title}
                                 </p>
+                                {source?.status === "failed" ? (
+                                  <Badge
+                                    className="mt-1.5 w-fit"
+                                    dot
+                                    size="sm"
+                                    variant="destructive"
+                                  >
+                                    {t(itemStatusLabel(source.status))}
+                                  </Badge>
+                                ) : null}
                                 <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                                   <span className="truncate">
                                     {typeLabels[item.resourceType] ??
@@ -2135,7 +2153,7 @@ export function KnowledgeWorkspace({
                                   <div className="mt-2 flex flex-col gap-1.5">
                                     <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                                       <span className="flex items-center gap-1.5">
-                                        <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" />
+                                        <Spinner className="size-3" />
                                         {source?.status === "queued"
                                           ? t(
                                               "Upload complete · Waiting to index"
@@ -2254,6 +2272,7 @@ export function KnowledgeWorkspace({
         </div>
 
         <Sheet
+          side="right"
           open={inspectorOpen && Boolean(selected)}
           onOpenChange={(open) => {
             if (open) setInspectorOpen(true)
@@ -2261,9 +2280,8 @@ export function KnowledgeWorkspace({
           }}
         >
           <SheetContent
-            className="w-full overflow-y-auto p-0 sm:max-w-xl"
-            showCloseButton={false}
-            side="right"
+            className="w-[min(36rem,calc(100vw-2*var(--sheet-gap)))]! overflow-y-auto p-0"
+            showClose={false}
           >
             <SheetHeader className="sr-only">
               <SheetTitle>{selected?.title ?? "Knowledge item"}</SheetTitle>
@@ -2581,147 +2599,141 @@ export function KnowledgeWorkspace({
       </div>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent
-          className="max-w-2xl gap-0 overflow-hidden p-0 sm:max-w-2xl sm:p-0"
-          overlayClassName="bg-black/50"
-        >
-          <DialogHeader className="border-b bg-muted/20 px-6 py-5 pr-14">
-            <DialogTitle className="text-base">
-              {t("Add knowledge")}
-            </DialogTitle>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("Add knowledge")}</DialogTitle>
             <DialogDescription>
               {t(
                 "Choose what you want JustAI to remember and make searchable."
               )}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2 p-3 sm:grid-cols-2 sm:p-4">
-            <AddKnowledgeOption
-              icon={Upload}
-              title={t("Upload a file")}
-              description={t("PDF, CSV, Markdown, text, HTML, or JSON")}
-              onClick={() => {
-                setAddOpen(false)
-                fileInputRef.current?.click()
-              }}
-            />
-            <AddKnowledgeOption
-              icon={Link2}
-              title={t("Index a URL")}
-              description={t("Make public documentation searchable")}
-              onClick={() => {
-                setAddOpen(false)
-                setUrlOpen(true)
-              }}
-            />
-            <AddKnowledgeOption
-              icon={NotebookPen}
-              title={t("Write a note")}
-              description={t("Keep durable working context close at hand")}
-              onClick={() => {
-                setAddOpen(false)
-                setNoteOpen(true)
-              }}
-            />
-            <AddKnowledgeOption
-              icon={Brain}
-              title={t("Save a memory")}
-              description={t(
-                "A preference or recurring fact used across chats"
-              )}
-              onClick={() => {
-                setAddOpen(false)
-                setMemoryOpen(true)
-              }}
-            />
-            <AddKnowledgeOption
-              icon={FileText}
-              title={t("Import a transcript")}
-              description={t("Store a recorded session in a folder")}
-              onClick={() => {
-                setAddOpen(false)
-                setTranscriptSpaceId(selectedSpace?.id ?? "none")
-                setTranscriptOpen(true)
-              }}
-            />
-          </div>
+          <DialogBody>
+            <div className="grid gap-2 p-3 sm:grid-cols-2 sm:p-4">
+              <AddKnowledgeOption
+                icon={Upload}
+                title={t("Upload a file")}
+                description={t("PDF, CSV, Markdown, text, HTML, or JSON")}
+                onClick={() => {
+                  setAddOpen(false)
+                  fileInputRef.current?.click()
+                }}
+              />
+              <AddKnowledgeOption
+                icon={Link2}
+                title={t("Index a URL")}
+                description={t("Make public documentation searchable")}
+                onClick={() => {
+                  setAddOpen(false)
+                  setUrlOpen(true)
+                }}
+              />
+              <AddKnowledgeOption
+                icon={NotebookPen}
+                title={t("Write a note")}
+                description={t("Keep durable working context close at hand")}
+                onClick={() => {
+                  setAddOpen(false)
+                  setNoteOpen(true)
+                }}
+              />
+              <AddKnowledgeOption
+                icon={Brain}
+                title={t("Save a memory")}
+                description={t(
+                  "A preference or recurring fact used across chats"
+                )}
+                onClick={() => {
+                  setAddOpen(false)
+                  setMemoryOpen(true)
+                }}
+              />
+              <AddKnowledgeOption
+                icon={FileText}
+                title={t("Import a transcript")}
+                description={t("Store a recorded session in a folder")}
+                onClick={() => {
+                  setAddOpen(false)
+                  setTranscriptSpaceId(selectedSpace?.id ?? "none")
+                  setTranscriptOpen(true)
+                }}
+              />
+            </div>
+          </DialogBody>
         </DialogContent>
       </Dialog>
 
       <Dialog open={spaceOpen} onOpenChange={setSpaceOpen}>
         <DialogContent>
-          <form onSubmit={createSpace}>
+          <form className="contents" onSubmit={createSpace}>
             <DialogHeader>
               <DialogTitle>{t("New storage folder")}</DialogTitle>
               <DialogDescription>
                 {t("Create it at the root or inside another folder.")}
               </DialogDescription>
             </DialogHeader>
-            {error && (
-              <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>{t("Could not create folder")}</AlertTitle>
-                <AlertDescription>{t(error)}</AlertDescription>
-              </Alert>
-            )}
-            <div className="flex flex-col gap-3 py-4">
-              <Label htmlFor="space-name">{t("Name")}</Label>
-              <Input
-                id="space-name"
-                value={spaceName}
-                onChange={(event) => setSpaceName(event.target.value)}
-                placeholder={t("e.g. Product launch")}
-              />
-              <Label htmlFor="space-description">{t("Description")}</Label>
-              <Textarea
-                id="space-description"
-                value={spaceDescription}
-                onChange={(event) => setSpaceDescription(event.target.value)}
-                placeholder={t("What belongs in this space?")}
-              />
-              <Label htmlFor="space-parent">{t("Parent folder")}</Label>
-              <Select
-                value={spaceParentId}
-                onValueChange={(value) => setSpaceParentId(value ?? "root")}
-              >
-                <SelectTrigger id="space-parent">
-                  <SelectValue>
-                    {spaceParentId === "root"
-                      ? t("Storage root")
-                      : (spaceTree.find((space) => space.id === spaceParentId)
-                          ?.name ?? t("Storage root"))}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="root">{t("Storage root")}</SelectItem>
-                  {spaceTree.map((space) => (
-                    <SelectItem key={space.id} value={space.id}>
-                      {`${"— ".repeat(space.depth)}${space.name}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Label htmlFor="space-visibility">{t("Visibility")}</Label>
-              <Select
-                value={spaceVisibility}
-                onValueChange={(value) =>
-                  setSpaceVisibility(
-                    (value as "private" | "workspace") || "private"
-                  )
-                }
-              >
-                <SelectTrigger id="space-visibility">
-                  <SelectValue>
-                    {spaceVisibility === "workspace"
-                      ? t("Workspace")
-                      : t("Private")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="private">{t("Private")}</SelectItem>
-                  <SelectItem value="workspace">{t("Workspace")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <DialogBody>
+              {error && <ToastFeedback message={error} type={"destructive"} />}
+              <div className="flex flex-col gap-3 py-4">
+                <Label htmlFor="space-name">{t("Name")}</Label>
+                <Input
+                  id="space-name"
+                  value={spaceName}
+                  onChange={(event) => setSpaceName(event.target.value)}
+                  placeholder={t("e.g. Product launch")}
+                />
+                <Label htmlFor="space-description">{t("Description")}</Label>
+                <Textarea
+                  id="space-description"
+                  value={spaceDescription}
+                  onChange={(event) => setSpaceDescription(event.target.value)}
+                  placeholder={t("What belongs in this space?")}
+                />
+                <Label htmlFor="space-parent">{t("Parent folder")}</Label>
+                <Select
+                  value={spaceParentId}
+                  onValueChange={(value) => setSpaceParentId(value ?? "root")}
+                >
+                  <SelectTrigger id="space-parent">
+                    <SelectValue>
+                      {spaceParentId === "root"
+                        ? t("Storage root")
+                        : (spaceTree.find((space) => space.id === spaceParentId)
+                            ?.name ?? t("Storage root"))}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="root">{t("Storage root")}</SelectItem>
+                    {spaceTree.map((space) => (
+                      <SelectItem key={space.id} value={space.id}>
+                        {`${"— ".repeat(space.depth)}${space.name}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Label htmlFor="space-visibility">{t("Visibility")}</Label>
+                <Select
+                  value={spaceVisibility}
+                  onValueChange={(value) =>
+                    setSpaceVisibility(
+                      (value as "private" | "workspace") || "private"
+                    )
+                  }
+                >
+                  <SelectTrigger id="space-visibility">
+                    <SelectValue>
+                      {spaceVisibility === "workspace"
+                        ? t("Workspace")
+                        : t("Private")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="private">{t("Private")}</SelectItem>
+                    <SelectItem value="workspace">{t("Workspace")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </DialogBody>
             <DialogFooter>
               <Button
                 type="button"
@@ -2740,7 +2752,7 @@ export function KnowledgeWorkspace({
 
       <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
         <DialogContent>
-          <form onSubmit={createNote}>
+          <form className="contents" onSubmit={createNote}>
             <DialogHeader>
               <DialogTitle>{t("Write a note")}</DialogTitle>
               <DialogDescription>
@@ -2749,29 +2761,26 @@ export function KnowledgeWorkspace({
                 )}
               </DialogDescription>
             </DialogHeader>
-            {error && (
-              <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>{t("Could not save note")}</AlertTitle>
-                <AlertDescription>{t(error)}</AlertDescription>
-              </Alert>
-            )}
-            <div className="flex flex-col gap-3 py-4">
-              <Label htmlFor="knowledge-note-title">{t("Title")}</Label>
-              <Input
-                id="knowledge-note-title"
-                value={noteTitle}
-                onChange={(event) => setNoteTitle(event.target.value)}
-                placeholder={t("Note title")}
-              />
-              <Label htmlFor="knowledge-note-content">{t("Content")}</Label>
-              <Textarea
-                id="knowledge-note-content"
-                className="min-h-36"
-                value={noteContent}
-                onChange={(event) => setNoteContent(event.target.value)}
-                placeholder={t("What should JustAI know?")}
-              />
-            </div>
+            <DialogBody>
+              {error && <ToastFeedback message={error} type={"destructive"} />}
+              <div className="flex flex-col gap-3 py-4">
+                <Label htmlFor="knowledge-note-title">{t("Title")}</Label>
+                <Input
+                  id="knowledge-note-title"
+                  value={noteTitle}
+                  onChange={(event) => setNoteTitle(event.target.value)}
+                  placeholder={t("Note title")}
+                />
+                <Label htmlFor="knowledge-note-content">{t("Content")}</Label>
+                <Textarea
+                  id="knowledge-note-content"
+                  className="min-h-36"
+                  value={noteContent}
+                  onChange={(event) => setNoteContent(event.target.value)}
+                  placeholder={t("What should JustAI know?")}
+                />
+              </div>
+            </DialogBody>
             <DialogFooter>
               <Button
                 type="button"
@@ -2793,29 +2802,26 @@ export function KnowledgeWorkspace({
 
       <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
         <DialogContent>
-          <form onSubmit={createMemory}>
+          <form className="contents" onSubmit={createMemory}>
             <DialogHeader>
               <DialogTitle>{t("Save a memory")}</DialogTitle>
               <DialogDescription>
                 {t("Keep it concise. You can disable or delete it any time.")}
               </DialogDescription>
             </DialogHeader>
-            {error && (
-              <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>{t("Could not save memory")}</AlertTitle>
-                <AlertDescription>{t(error)}</AlertDescription>
-              </Alert>
-            )}
-            <div className="py-4">
-              <Label htmlFor="knowledge-memory-content">{t("Memory")}</Label>
-              <Textarea
-                id="knowledge-memory-content"
-                maxLength={2000}
-                value={memoryContent}
-                onChange={(event) => setMemoryContent(event.target.value)}
-                placeholder={t("What should JustAI remember?")}
-              />
-            </div>
+            <DialogBody>
+              {error && <ToastFeedback message={error} type={"destructive"} />}
+              <div className="py-4">
+                <Label htmlFor="knowledge-memory-content">{t("Memory")}</Label>
+                <Textarea
+                  id="knowledge-memory-content"
+                  maxLength={2000}
+                  value={memoryContent}
+                  onChange={(event) => setMemoryContent(event.target.value)}
+                  placeholder={t("What should JustAI remember?")}
+                />
+              </div>
+            </DialogBody>
             <DialogFooter>
               <Button
                 type="button"
@@ -2834,7 +2840,7 @@ export function KnowledgeWorkspace({
 
       <Dialog open={transcriptOpen} onOpenChange={setTranscriptOpen}>
         <DialogContent>
-          <form onSubmit={importTranscript}>
+          <form className="contents" onSubmit={importTranscript}>
             <DialogHeader>
               <DialogTitle>{t("Import transcript")}</DialogTitle>
               <DialogDescription>
@@ -2843,68 +2849,74 @@ export function KnowledgeWorkspace({
                 )}
               </DialogDescription>
             </DialogHeader>
-            {error && (
-              <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>{t("Could not import transcript")}</AlertTitle>
-                <AlertDescription>{t(error)}</AlertDescription>
-              </Alert>
-            )}
-            <div className="flex flex-col gap-3 py-4">
-              <Label htmlFor="knowledge-transcript-session">
-                {t("Transcript")}
-              </Label>
-              <Select
-                value={transcriptSessionId || "none"}
-                onValueChange={(value) =>
-                  setTranscriptSessionId(value === "none" ? "" : (value ?? ""))
-                }
-              >
-                <SelectTrigger id="knowledge-transcript-session">
-                  <SelectValue>
-                    {transcriptSessionId
-                      ? (transcriptionSessions.find(
-                          (session) => session.id === transcriptSessionId
-                        )?.title ?? t("Choose a transcript"))
-                      : t("Choose a transcript")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">
-                    {t("Choose a transcript")}
-                  </SelectItem>
-                  {transcriptionSessions.map((session) => (
-                    <SelectItem key={session.id} value={session.id}>
-                      {session.title}
+            <DialogBody>
+              {error && <ToastFeedback message={error} type={"destructive"} />}
+              <div className="flex flex-col gap-3 py-4">
+                <Label htmlFor="knowledge-transcript-session">
+                  {t("Transcript")}
+                </Label>
+                <Select
+                  value={transcriptSessionId || "none"}
+                  onValueChange={(value) =>
+                    setTranscriptSessionId(
+                      value === "none" ? "" : (value ?? "")
+                    )
+                  }
+                >
+                  <SelectTrigger id="knowledge-transcript-session">
+                    <SelectValue>
+                      {transcriptSessionId
+                        ? (transcriptionSessions.find(
+                            (session) => session.id === transcriptSessionId
+                          )?.title ?? t("Choose a transcript"))
+                        : t("Choose a transcript")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      {t("Choose a transcript")}
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Label htmlFor="knowledge-transcript-space">
-                {t("Add to space")}{" "}
-                <span className="text-muted-foreground">{t("(optional)")}</span>
-              </Label>
-              <Select
-                value={transcriptSpaceId}
-                onValueChange={(value) => setTranscriptSpaceId(value ?? "none")}
-              >
-                <SelectTrigger id="knowledge-transcript-space">
-                  <SelectValue>
-                    {transcriptSpaceId === "none"
-                      ? t("Personal library")
-                      : (spaces.find((space) => space.id === transcriptSpaceId)
-                          ?.name ?? "Choose a space")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">{t("Personal library")}</SelectItem>
-                  {spaces.map((space) => (
-                    <SelectItem key={space.id} value={space.id}>
-                      {space.name}
+                    {transcriptionSessions.map((session) => (
+                      <SelectItem key={session.id} value={session.id}>
+                        {session.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Label htmlFor="knowledge-transcript-space">
+                  {t("Add to space")}{" "}
+                  <span className="text-muted-foreground">
+                    {t("(optional)")}
+                  </span>
+                </Label>
+                <Select
+                  value={transcriptSpaceId}
+                  onValueChange={(value) =>
+                    setTranscriptSpaceId(value ?? "none")
+                  }
+                >
+                  <SelectTrigger id="knowledge-transcript-space">
+                    <SelectValue>
+                      {transcriptSpaceId === "none"
+                        ? t("Personal library")
+                        : (spaces.find(
+                            (space) => space.id === transcriptSpaceId
+                          )?.name ?? "Choose a space")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      {t("Personal library")}
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                    {spaces.map((space) => (
+                      <SelectItem key={space.id} value={space.id}>
+                        {space.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </DialogBody>
             <DialogFooter>
               <Button
                 type="button"
@@ -2923,7 +2935,7 @@ export function KnowledgeWorkspace({
 
       <Dialog open={urlOpen} onOpenChange={setUrlOpen}>
         <DialogContent>
-          <form onSubmit={addUrl}>
+          <form className="contents" onSubmit={addUrl}>
             <DialogHeader>
               <DialogTitle>{t("Index a URL")}</DialogTitle>
               <DialogDescription>
@@ -2932,32 +2944,31 @@ export function KnowledgeWorkspace({
                 )}
               </DialogDescription>
             </DialogHeader>
-            {error && (
-              <Alert aria-live="polite" role="alert" variant="destructive">
-                <AlertTitle>{t("Could not index URL")}</AlertTitle>
-                <AlertDescription>{t(error)}</AlertDescription>
-              </Alert>
-            )}
-            <div className="flex flex-col gap-3 py-4">
-              <Label htmlFor="knowledge-url">{t("URL")}</Label>
-              <Input
-                id="knowledge-url"
-                type="url"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="https://docs.example.com"
-              />
-              <Label htmlFor="knowledge-url-title">
-                {t("Display title")}{" "}
-                <span className="text-muted-foreground">{t("(optional)")}</span>
-              </Label>
-              <Input
-                id="knowledge-url-title"
-                value={urlTitle}
-                onChange={(event) => setUrlTitle(event.target.value)}
-                placeholder={t("Documentation")}
-              />
-            </div>
+            <DialogBody>
+              {error && <ToastFeedback message={error} type={"destructive"} />}
+              <div className="flex flex-col gap-3 py-4">
+                <Label htmlFor="knowledge-url">{t("URL")}</Label>
+                <Input
+                  id="knowledge-url"
+                  type="url"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="https://docs.example.com"
+                />
+                <Label htmlFor="knowledge-url-title">
+                  {t("Display title")}{" "}
+                  <span className="text-muted-foreground">
+                    {t("(optional)")}
+                  </span>
+                </Label>
+                <Input
+                  id="knowledge-url-title"
+                  value={urlTitle}
+                  onChange={(event) => setUrlTitle(event.target.value)}
+                  placeholder={t("Documentation")}
+                />
+              </div>
+            </DialogBody>
             <DialogFooter>
               <Button
                 type="button"

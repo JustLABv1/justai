@@ -1,26 +1,19 @@
 "use client"
 
+import { useMemo } from "react"
 import { useTranslations } from "@/components/locale-provider"
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { Bot, Cpu, Pencil, Plug, ShieldCheck, Users } from "lucide-react"
 
 import { workspaceActivityDays } from "@/lib/workspace-activity"
 
 import { compactNumber } from "@/components/admin-usage-charts"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart"
+import { Avatar } from "@/components/panelui/avatar"
+import { Badge } from "@/components/panelui/badge"
+import { BarChart } from "@/components/panelui/bar-chart"
+import { Button } from "@/components/panelui/button"
+import { Card } from "@/components/panelui/card"
+import { Frame } from "@/components/panelui/frame"
+import { Stat } from "@/components/panelui/stat"
 import { Skeleton } from "@/components/ui/skeleton"
 import type {
   AdminAnalyticsResponse,
@@ -41,10 +34,6 @@ type WorkspaceSettingsDashboardProps = {
   onRename: () => void
 }
 
-function workspaceInitial(name: string) {
-  return name.trim().charAt(0).toUpperCase() || "W"
-}
-
 function WorkspaceActivity({
   analytics,
   loading,
@@ -53,79 +42,54 @@ function WorkspaceActivity({
   loading: boolean
 }) {
   const { t, locale } = useTranslations()
-  const data = workspaceActivityDays(analytics?.timeSeries ?? [])
-  const formatDate = (value: string) =>
-    new Intl.DateTimeFormat(locale, {
+  // 90 daily bars would be hairlines, so show the same window by week.
+  const data = useMemo(() => {
+    const format = new Intl.DateTimeFormat(locale, {
       month: "short",
       day: "numeric",
       timeZone: "UTC",
-    }).format(new Date(`${value}T00:00:00Z`))
+    })
+    const days = workspaceActivityDays(analytics?.timeSeries ?? [])
+    const weeks: { name: string; requests: number }[] = []
+    for (let end = days.length; end > 0; end -= 7) {
+      const chunk = days.slice(Math.max(0, end - 7), end)
+      weeks.unshift({
+        name: format.format(new Date(`${chunk[0].date}T00:00:00Z`)),
+        requests: chunk.reduce((sum, day) => sum + day.requests, 0),
+      })
+    }
+    return weeks
+  }, [analytics, locale])
+  const total = data.reduce((sum, day) => sum + day.requests, 0)
   return (
-    <Card size="sm" className="min-w-0">
-      <CardHeader>
-        <CardTitle>{t("Usage trends")}</CardTitle>
-        <CardDescription>
-          {t("Workspace runs over the last 90 days.")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
+    <Card className="min-w-0">
+      <Card.Content>
         {loading ? (
-          <Skeleton className="h-56 w-full" />
-        ) : data.some((day) => day.requests > 0) ? (
-          <ChartContainer
-            style={{ height: 224 }}
-            config={{
-              requests: { label: t("AI runs · 90d"), color: "var(--primary)" },
-            }}
+          <Skeleton className="h-56 w-full rounded-xl" />
+        ) : total > 0 ? (
+          <BarChart
+            aspectRatio={3}
+            data={data}
+            label={t("Workspace runs over the last 90 days.")}
+            xDataKey="name"
           >
-            <BarChart
-              accessibilityLayer
-              data={data}
-              margin={{ top: 8, right: 8, left: 0, bottom: 4 }}
-            >
-              <CartesianGrid vertical={false} stroke="var(--border)" />
-              <XAxis
-                dataKey="date"
-                tickFormatter={formatDate}
-                axisLine={false}
-                tickLine={false}
-                ticks={[
-                  data[0].date,
-                  data[29].date,
-                  data[59].date,
-                  data[89].date,
-                ]}
-                tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                tickMargin={12}
-              />
-              <YAxis
-                width={32}
-                tickCount={3}
-                tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                allowDecimals={false}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={(value) => compactNumber(value, locale)}
-              />
-              <ChartTooltip
-                cursor={{ fill: "var(--muted)", fillOpacity: 0.5 }}
-                content={<ChartTooltipContent />}
-              />
-              <Bar
-                dataKey="requests"
-                fill="var(--primary)"
-                radius={[3, 3, 0, 0]}
-                maxBarSize={20}
-                isAnimationActive={false}
-              />
-            </BarChart>
-          </ChartContainer>
+            <BarChart.Header
+              caption={t("Workspace runs over the last 90 days.")}
+              title={t("Usage trends")}
+              value={compactNumber(total, locale)}
+            />
+            <BarChart.Grid rows={4} />
+            <BarChart.Bar color="info" dataKey="requests" />
+            <BarChart.XAxis ticks={7} />
+            <BarChart.YAxis />
+            <BarChart.Tooltip labels={{ requests: t("AI runs · 90d") }} />
+          </BarChart>
         ) : (
           <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
             {t("No activity for this period.")}
           </div>
         )}
-      </CardContent>
+      </Card.Content>
     </Card>
   )
 }
@@ -177,18 +141,20 @@ export function WorkspaceSettingsDashboard({
 
   return (
     <div className="flex flex-col gap-5">
-      <Card size="sm">
-        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary text-lg font-semibold text-primary-foreground">
-            {workspaceInitial(organization.name)}
-          </div>
+      <Card>
+        <Card.Content className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <Avatar name={organization.name} shape="square" size="xl" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-heading truncate text-xl font-semibold">
+              <h2 className="truncate text-xl font-semibold tracking-tight">
                 {organization.name}
               </h2>
-              <Badge variant="secondary">{t("Current workspace")}</Badge>
-              <Badge variant="outline">{organization.role || "member"}</Badge>
+              <Badge size="sm" variant="secondary">
+                {t("Current workspace")}
+              </Badge>
+              <Badge size="sm" variant="outline">
+                {organization.role || "member"}
+              </Badge>
             </div>
             <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
               {organization.slug}
@@ -199,40 +165,48 @@ export function WorkspaceSettingsDashboard({
               <Pencil data-icon="inline-start" /> {t("Rename")}
             </Button>
           )}
-        </CardContent>
+        </Card.Content>
       </Card>
 
-      <dl className="grid grid-cols-2 gap-6 rounded-2xl bg-muted/40 p-6 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map(({ label, value, icon: Icon }) => (
-          <div key={label} className="flex flex-col gap-3">
-            <dt className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Icon className="size-3.5" aria-hidden="true" />
-              {label}
-            </dt>
-            <dd className="font-heading text-3xl font-medium tracking-tight tabular-nums">
-              {value === null ? (
-                <Skeleton className="h-9 w-16" />
-              ) : typeof value === "number" ? (
-                compactNumber(value, locale)
-              ) : (
-                value
-              )}
-            </dd>
-          </div>
+          <Card key={label}>
+            <Card.Content className="flex items-start justify-between gap-3">
+              <Stat>
+                <Stat.Content>
+                  <Stat.Label>{label}</Stat.Label>
+                  <Stat.Value size="md">
+                    {value === null ? (
+                      <Skeleton className="h-7 w-14" />
+                    ) : typeof value === "number" ? (
+                      compactNumber(value, locale)
+                    ) : (
+                      value
+                    )}
+                  </Stat.Value>
+                </Stat.Content>
+              </Stat>
+              <Icon
+                aria-hidden="true"
+                className="size-4 shrink-0 text-muted-foreground"
+              />
+            </Card.Content>
+          </Card>
         ))}
-      </dl>
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
+      </div>
+
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
         {canManage && (
           <WorkspaceActivity analytics={analytics} loading={analyticsLoading} />
         )}
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle>{t("Workspace stack")}</CardTitle>
-            <CardDescription>
+        <Frame>
+          <Frame.Header>
+            <Frame.Title>{t("Workspace stack")}</Frame.Title>
+            <Frame.Description>
               {t("Connected capacity at a glance.")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+            </Frame.Description>
+          </Frame.Header>
+          <Frame.Panel>
             {[
               {
                 label: t("Endpoints enabled"),
@@ -247,22 +221,27 @@ export function WorkspaceSettingsDashboard({
                 icon: Plug,
               },
             ].map(({ label, value, total, icon: Icon }) => (
-              <div
-                key={label}
-                className="flex items-center gap-3 rounded-xl bg-muted/50 p-4"
-              >
-                <Icon
-                  className="size-4 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <span className="flex-1 text-sm">{label}</span>
-                <span className="text-sm font-medium tabular-nums">
-                  {value} / {total}
-                </span>
-              </div>
+              <Frame.Row key={label}>
+                <Frame.Media>
+                  <Icon aria-hidden="true" />
+                </Frame.Media>
+                <Frame.Content>
+                  <Frame.Title as="p">{label}</Frame.Title>
+                </Frame.Content>
+                <Frame.Actions>
+                  <Badge
+                    size="sm"
+                    variant={
+                      value === total && total > 0 ? "success" : "outline"
+                    }
+                  >
+                    {value} / {total}
+                  </Badge>
+                </Frame.Actions>
+              </Frame.Row>
             ))}
-          </CardContent>
-        </Card>
+          </Frame.Panel>
+        </Frame>
       </div>
     </div>
   )

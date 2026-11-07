@@ -1,18 +1,16 @@
 "use client"
 
-import { Check, Languages } from "lucide-react"
+import { Check, ChevronDown, Languages } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/panelui/button"
+import { Menu } from "@/components/panelui/menu"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  MenuGroup as DropdownMenuGroup,
+  MenuItem as DropdownMenuItem,
+  MenuSub as DropdownMenuSub,
+  MenuSubContent as DropdownMenuSubContent,
+  MenuSubTrigger as DropdownMenuSubTrigger,
+} from "@/components/panelui/menu"
 
 const languages = [
   { locale: "de", label: "Deutsch" },
@@ -41,21 +39,33 @@ function LanguageOptions() {
 }
 
 export function LanguageSwitcher() {
-  const { t } = useTranslations()
+  const { t, locale, setLocale } = useTranslations()
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
+    <Menu>
+      <Menu.Trigger
         render={
           <Button variant="ghost" size="sm" aria-label={t("Choose language")} />
         }
       >
-        <Languages data-icon="inline-start" />
-        {t("Language")}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <LanguageOptions />
-      </DropdownMenuContent>
-    </DropdownMenu>
+        {locale === "de" ? "Deutsch" : "English"}
+        <ChevronDown className="size-3.5 text-muted-foreground" />
+      </Menu.Trigger>
+      <Menu.Content align="end">
+        <Menu.Group>
+          {languages.map((language) => (
+            <Menu.Item
+              key={language.locale}
+              lang={language.locale}
+              aria-current={locale === language.locale ? "true" : undefined}
+              onClick={() => setLocale(language.locale)}
+            >
+              {language.label}
+              {locale === language.locale && <Check className="ml-auto" />}
+            </Menu.Item>
+          ))}
+        </Menu.Group>
+      </Menu.Content>
+    </Menu>
   )
 }
 

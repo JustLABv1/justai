@@ -1,5 +1,9 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
+import { Spinner } from "@/components/panelui/spinner"
+import { ChoiceCards } from "@/components/panelui/choice-cards"
+import { Alert as PuAlert } from "@/components/panelui/alert"
 import {
   useTranslations,
   useTranslatedConfig,
@@ -13,7 +17,6 @@ import {
   CalendarDays,
   Check,
   Copy,
-  LoaderCircle,
   ChevronDown,
   Mic,
   MonitorUp,
@@ -40,19 +43,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+  DialogBody,
+} from "@/components/panelui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/panelui/button"
 import { Calendar } from "@/components/ui/calendar"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { Field, FieldDescription, FieldLabel } from "@/components/panelui/field"
+import { Frame } from "@/components/panelui/frame"
+import { Input } from "@/components/panelui/input"
 import {
   Popover,
   PopoverContent,
@@ -64,12 +62,13 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectLabel,
+  SelectGroupLabel,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
+} from "@/components/panelui/select"
+import { Switch } from "@/components/panelui/switch"
 import { languageItemsFor } from "@/lib/transcription-languages"
+import { cn } from "@/lib/utils"
 import { api, eventStreamURL } from "@/lib/api"
 import { SSETransport } from "@/lib/sse-transport"
 import type { SSEConnectionState } from "@/lib/sse-transport"
@@ -94,7 +93,6 @@ import type {
   TranscriptionSource,
   User,
 } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 type Snapshot = LiveTranscriptionSnapshot
 
@@ -180,6 +178,10 @@ function isYouTubePageURL(value: string) {
   } catch {
     return false
   }
+}
+
+function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
+  return <div className={cn("flex flex-col gap-5", className)} {...props} />
 }
 
 function DialogError({ message }: { message: string }) {
@@ -271,7 +273,7 @@ function ScheduleDateTimePicker({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectLabel>{t("Hour (24-hour)")}</SelectLabel>
+                <SelectGroupLabel>{t("Hour (24-hour)")}</SelectGroupLabel>
                 {hours.map((hour) => (
                   <SelectItem key={hour} value={String(hour).padStart(2, "0")}>
                     {String(hour).padStart(2, "0")}
@@ -296,7 +298,7 @@ function ScheduleDateTimePicker({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectLabel>{t("Minute")}</SelectLabel>
+                <SelectGroupLabel>{t("Minute")}</SelectGroupLabel>
                 {minutes.map((minute) => (
                   <SelectItem
                     key={minute}
@@ -338,19 +340,25 @@ function StreamScheduleFields({
 
   return (
     <>
-      <div className="flex items-center justify-between rounded-xl bg-muted/50 p-3">
-        <div>
-          <p className="text-sm font-medium">{t("Schedule capture")}</p>
-          <p className="text-xs text-muted-foreground">
-            {t("JustAI connects automatically at the selected local time.")}
-          </p>
-        </div>
-        <Switch
-          aria-label={t("Schedule livestream capture")}
-          checked={scheduled}
-          onCheckedChange={onScheduledChange}
-        />
-      </div>
+      <Frame>
+        <Frame.Panel>
+          <Frame.Row>
+            <Frame.Content>
+              <Frame.Title as="p">{t("Schedule capture")}</Frame.Title>
+              <Frame.Description>
+                {t("JustAI connects automatically at the selected local time.")}
+              </Frame.Description>
+            </Frame.Content>
+            <Frame.Actions>
+              <Switch
+                aria-label={t("Schedule livestream capture")}
+                checked={scheduled}
+                onCheckedChange={onScheduledChange}
+              />
+            </Frame.Actions>
+          </Frame.Row>
+        </Frame.Panel>
+      </Frame>
       {scheduled ? (
         <div className="grid gap-4 sm:grid-cols-2">
           <ScheduleDateTimePicker
@@ -368,11 +376,11 @@ function StreamScheduleFields({
             optional
             value={end}
           />
-          <FieldDescription className="sm:col-span-2">
+          <p className="text-xs leading-4 text-muted-foreground sm:col-span-2">
             {t(
               "Without an end time, capture stops when the stream ends. Temporary disconnects are retried for 15 minutes; the eight-hour session limit remains the final safeguard."
             )}
-          </FieldDescription>
+          </p>
         </div>
       ) : null}
     </>
@@ -503,7 +511,14 @@ export function LiveTranscriptionView({
   )
   const [title, setTitle] = useState("Room session")
   const [language, setLanguage] = useState("auto")
-  const languageItems = useMemo(() => languageItemsFor(language), [language])
+  const languageItems = useMemo(
+    () =>
+      languageItemsFor(language).map((item) => ({
+        ...item,
+        label: t(item.label),
+      })),
+    [language, t]
+  )
   const [recordAudio, setRecordAudio] = useState(false)
   const [selectedEndpoint, setSelectedEndpoint] = useState("")
   const [selectedDiarizationEndpoint, setSelectedDiarizationEndpoint] =
@@ -561,14 +576,15 @@ export function LiveTranscriptionView({
     }
   }, [streamURL])
   const streamCheckFeedback = streamURL.trim() ? (
-    <FieldDescription
+    <p
       role="status"
       aria-live="polite"
-      className={
-        streamCheck?.url === streamURL.trim() && streamCheck.error
-          ? "text-destructive"
-          : undefined
-      }
+      className={cn(
+        "text-xs leading-4 text-muted-foreground",
+        streamCheck?.url === streamURL.trim() &&
+          streamCheck.error &&
+          "text-destructive"
+      )}
     >
       {streamCheck?.url !== streamURL.trim()
         ? t("Checking livestream link…")
@@ -577,7 +593,7 @@ export function LiveTranscriptionView({
             "{value0} · Stream found. JustAI captures it on the server; your browser can be closed.",
             { value0: streamCheck.name }
           )}
-    </FieldDescription>
+    </p>
   ) : null
 
   const [botDialogOpen, setBotDialogOpen] = useState(false)
@@ -2179,7 +2195,9 @@ export function LiveTranscriptionView({
 
   return (
     <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
-      {error && !dialogOpen ? <DialogError message={error} /> : null}
+      {error && !dialogOpen ? (
+        <ToastFeedback message={error} type="destructive" />
+      ) : null}
 
       {!sessionId && !createOpen ? (
         <VideoTranscriptionLibrary
@@ -2204,10 +2222,7 @@ export function LiveTranscriptionView({
             </Link>
           ) : (
             <>
-              <LoaderCircle
-                className="size-5 animate-spin"
-                aria-hidden="true"
-              />
+              <Spinner className="size-5" aria-hidden="true" />
               {t("Opening recording…")}
             </>
           )}
@@ -2308,14 +2323,14 @@ export function LiveTranscriptionView({
                     onClick={goToPreviousWizardStep}
                     variant="outline"
                   >
-                    <ArrowLeft data-icon="inline-start" /> Back
+                    <ArrowLeft data-icon="inline-start" /> {t("Back")}
                   </Button>
                 ) : (
                   <Button
                     onClick={() => setCreateOpen(false)}
                     variant="outline"
                   >
-                    Cancel
+                    {t("Cancel")}
                   </Button>
                 )}
                 {createStep < 2 ? (
@@ -2323,7 +2338,7 @@ export function LiveTranscriptionView({
                     disabled={!canContinueWizard}
                     onClick={goToNextWizardStep}
                   >
-                    Continue <ArrowRight data-icon="inline-end" />
+                    {t("Continue")} <ArrowRight data-icon="inline-end" />
                   </Button>
                 ) : (
                   <Button
@@ -2332,15 +2347,12 @@ export function LiveTranscriptionView({
                   >
                     {starting ? (
                       <>
-                        <LoaderCircle
-                          className="animate-spin"
-                          data-icon="inline-start"
-                        />
-                        Starting…
+                        <Spinner data-icon="inline-start" />
+                        {t("Starting…")}
                       </>
                     ) : (
                       <>
-                        <Play data-icon="inline-start" /> Start session
+                        <Play data-icon="inline-start" /> {t("Start session")}
                       </>
                     )}
                   </Button>
@@ -2381,63 +2393,43 @@ export function LiveTranscriptionView({
                   )}
                 </p>
               </div>
-              <FieldSet>
-                <FieldLegend className="sr-only">
-                  {t("Audio source")}
-                </FieldLegend>
-                <div
-                  aria-label={t("Audio source")}
-                  className="grid gap-2 sm:grid-cols-2"
-                  role="radiogroup"
-                >
-                  {liveSessionSourceOptions.map((option) => {
-                    const selected = selectedWizardSource === option.key
-                    const OptionIcon = option.icon
-                    return (
-                      <button
-                        aria-checked={selected}
-                        className={cn(
-                          "group flex min-h-28 flex-col gap-3 rounded-2xl border bg-card p-3 text-left transition-[border-color,background-color,transform] duration-180 ease-out hover:border-primary/40 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/30 active:translate-y-px",
-                          selected &&
-                            "border-primary bg-primary/5 ring-1 ring-primary/20"
-                        )}
-                        key={option.key}
-                        onClick={() => selectWizardSource(option.key)}
-                        role="radio"
-                        type="button"
-                      >
-                        <span
-                          className={cn(
-                            "flex size-8 items-center justify-center rounded-xl transition-colors duration-150",
-                            selected
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted text-muted-foreground group-hover:text-foreground"
-                          )}
-                        >
-                          <OptionIcon aria-hidden="true" />
-                        </span>
-                        <span className="flex flex-col gap-1">
-                          <span className="text-sm font-medium">
-                            {option.label}
-                          </span>
-                          <span className="text-xs leading-relaxed text-muted-foreground">
-                            {option.description}
-                          </span>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </FieldSet>
-              <Alert>
-                <ShieldCheck aria-hidden="true" />
-                <AlertTitle>{t("Audio stays under your control")}</AlertTitle>
-                <AlertDescription>
+              <ChoiceCards
+                aria-label={t("Audio source")}
+                columns={2}
+                aspect="16 / 4"
+                onValueChange={(value) =>
+                  selectWizardSource(value as SessionSourceChoice)
+                }
+                value={selectedWizardSource}
+              >
+                {liveSessionSourceOptions.map((option) => {
+                  const OptionIcon = option.icon
+                  return (
+                    <ChoiceCards.Item key={option.key} value={option.key}>
+                      <ChoiceCards.Media>
+                        <OptionIcon aria-hidden="true" className="size-8" />
+                      </ChoiceCards.Media>
+                      <ChoiceCards.Label>{option.label}</ChoiceCards.Label>
+                      <ChoiceCards.Description>
+                        {option.description}
+                      </ChoiceCards.Description>
+                    </ChoiceCards.Item>
+                  )
+                })}
+              </ChoiceCards>
+              <PuAlert tone="info" variant="plain">
+                <PuAlert.Icon>
+                  <ShieldCheck aria-hidden="true" />
+                </PuAlert.Icon>
+                <PuAlert.Title>
+                  {t("Audio stays under your control")}
+                </PuAlert.Title>
+                <PuAlert.Description>
                   {t(
                     "Browser sources ask for permission only when you start. Direct URLs are encrypted at rest, and meeting bots receive a scoped ingest credential."
                   )}
-                </AlertDescription>
-              </Alert>
+                </PuAlert.Description>
+              </PuAlert>
             </div>
           ) : createStep === 1 ? (
             <div className="flex flex-col gap-5" key="setup-step">
@@ -2455,7 +2447,7 @@ export function LiveTranscriptionView({
                 </div>
                 <div>
                   <p className="text-sm font-medium">
-                    {t("Set up")} {selectedWizardSourceLabel.toLowerCase()}
+                    {t("Set up")} {selectedWizardSourceLabel}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {selectedWizardSource === "microphone"
@@ -2492,7 +2484,9 @@ export function LiveTranscriptionView({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          <SelectLabel>{t("Audio inputs")}</SelectLabel>
+                          <SelectGroupLabel>
+                            {t("Audio inputs")}
+                          </SelectGroupLabel>
                           <SelectItem value="default">
                             {t("System default")}
                           </SelectItem>
@@ -2516,55 +2510,48 @@ export function LiveTranscriptionView({
                   </Field>
                 </FieldGroup>
               ) : selectedWizardSource === "system-audio" ? (
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-3 rounded-2xl border bg-muted/20 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <MonitorUp className="text-primary" />
-                      {t("Share audio from your browser")}
-                    </div>
-                    <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-                      <div className="flex gap-2">
-                        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-background text-[0.625rem] font-semibold text-foreground">
-                          1
-                        </span>
-                        <span>
-                          {t("Keep the tab, window, or screen open.")}
-                        </span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-background text-[0.625rem] font-semibold text-foreground">
-                          2
-                        </span>
-                        <span>
-                          {t("Choose it in the native share picker.")}
-                        </span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-background text-[0.625rem] font-semibold text-foreground">
-                          3
-                        </span>
-                        <span>
-                          {t("Turn on Share audio before confirming.")}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <Alert>
-                    <AudioLines aria-hidden="true" />
-                    <AlertTitle>{t("Great for livestreams")}</AlertTitle>
-                    <AlertDescription>
+                <div className="flex flex-col gap-4">
+                  <Frame>
+                    <Frame.Header>
+                      <Frame.Title>
+                        {t("Share audio from your browser")}
+                      </Frame.Title>
+                    </Frame.Header>
+                    <Frame.Panel>
+                      {[
+                        t("Keep the tab, window, or screen open."),
+                        t("Choose it in the native share picker."),
+                        t("Turn on Share audio before confirming."),
+                      ].map((instruction, index) => (
+                        <Frame.Row key={instruction}>
+                          <Frame.Media>
+                            <span className="text-xs font-semibold tabular-nums">
+                              {index + 1}
+                            </span>
+                          </Frame.Media>
+                          <Frame.Content>
+                            <Frame.Title as="p">{instruction}</Frame.Title>
+                          </Frame.Content>
+                        </Frame.Row>
+                      ))}
+                    </Frame.Panel>
+                  </Frame>
+                  <PuAlert tone="info" variant="plain">
+                    <PuAlert.Icon>
+                      <AudioLines aria-hidden="true" />
+                    </PuAlert.Icon>
+                    <PuAlert.Title>{t("Great for livestreams")}</PuAlert.Title>
+                    <PuAlert.Description>
                       {t(
                         "Open YouTube, a TV livestream, or a webinar in a tab, then share that tab’s audio. JustAI does not need the page URL."
                       )}
-                    </AlertDescription>
-                  </Alert>
+                    </PuAlert.Description>
+                  </PuAlert>
                 </div>
               ) : selectedWizardSource === "stream" ? (
                 <FieldGroup>
                   <Field>
-                    <FieldLabel htmlFor="session-stream-name">
-                      {t("Source name")}
-                    </FieldLabel>
+                    <FieldLabel>{t("Source name")}</FieldLabel>
                     <Input
                       id="session-stream-name"
                       onChange={(event) => setStreamName(event.target.value)}
@@ -2572,9 +2559,7 @@ export function LiveTranscriptionView({
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="session-stream-url">
-                      {t("Livestream link")}
-                    </FieldLabel>
+                    <FieldLabel>{t("Livestream link")}</FieldLabel>
                     <Input
                       id="session-stream-url"
                       onChange={(event) => setStreamURL(event.target.value)}
@@ -2609,9 +2594,7 @@ export function LiveTranscriptionView({
               ) : (
                 <FieldGroup>
                   <Field>
-                    <FieldLabel htmlFor="session-bot-name">
-                      {t("Source name")}
-                    </FieldLabel>
+                    <FieldLabel>{t("Source name")}</FieldLabel>
                     <Input
                       id="session-bot-name"
                       onChange={(event) => setBotName(event.target.value)}
@@ -2631,7 +2614,9 @@ export function LiveTranscriptionView({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          <SelectLabel>{t("Adapter type")}</SelectLabel>
+                          <SelectGroupLabel>
+                            {t("Adapter type")}
+                          </SelectGroupLabel>
                           <SelectItem value="generic">
                             {t("Custom / desktop adapter")}
                           </SelectItem>
@@ -2647,7 +2632,7 @@ export function LiveTranscriptionView({
                     </Select>
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="session-bot-url">
+                    <FieldLabel>
                       {t("Meeting URL")}{" "}
                       <span className="text-muted-foreground">
                         {t("(optional)")}
@@ -2671,18 +2656,10 @@ export function LiveTranscriptionView({
             </div>
           ) : (
             <div className="flex flex-col gap-5" key="options-step">
-              <div>
-                <h2 className="text-lg font-semibold">{t("Choose options")}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("The defaults work for most sessions.")}
-                </p>
-              </div>
               <FieldGroup>
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_14rem]">
                   <Field>
-                    <FieldLabel htmlFor="session-title">
-                      {t("Session name")}
-                    </FieldLabel>
+                    <FieldLabel>{t("Session name")}</FieldLabel>
                     <Input
                       id="session-title"
                       onChange={(event) => setTitle(event.target.value)}
@@ -2712,82 +2689,96 @@ export function LiveTranscriptionView({
                   </Field>
                 </div>
 
-                <Field orientation="horizontal">
-                  <div className="flex flex-1 flex-col gap-1">
-                    <FieldLabel htmlFor="session-option-speakers">
-                      {t("Separate speakers")}
-                    </FieldLabel>
-                    <FieldDescription>
-                      {diarizationEndpoints.length === 0
-                        ? t("No speaker separation endpoint is configured.")
-                        : t(
-                            "Label who is talking after capture ends. Turns on audio recording."
-                          )}
-                    </FieldDescription>
-                  </div>
-                  <Switch
-                    checked={Boolean(selectedDiarizationEndpoint)}
-                    disabled={diarizationEndpoints.length === 0}
-                    id="session-option-speakers"
-                    onCheckedChange={(on) =>
-                      setSelectedDiarizationEndpoint(
-                        on ? (diarizationEndpoints[0]?.id ?? "") : ""
-                      )
-                    }
-                  />
-                </Field>
+                <Frame>
+                  <Frame.Header>
+                    <Frame.Title>{t("Processing")}</Frame.Title>
+                  </Frame.Header>
+                  <Frame.Panel>
+                    <Frame.Row>
+                      <Frame.Content>
+                        <Frame.Title as="p">
+                          {t("Separate speakers")}
+                        </Frame.Title>
+                        <Frame.Description>
+                          {diarizationEndpoints.length === 0
+                            ? t("No speaker separation endpoint is configured.")
+                            : t(
+                                "Label who is talking after capture ends. Turns on audio recording."
+                              )}
+                        </Frame.Description>
+                      </Frame.Content>
+                      <Frame.Actions>
+                        <Switch
+                          checked={Boolean(selectedDiarizationEndpoint)}
+                          disabled={diarizationEndpoints.length === 0}
+                          aria-label={t("Separate speakers")}
+                          id="session-option-speakers"
+                          onCheckedChange={(on) =>
+                            setSelectedDiarizationEndpoint(
+                              on ? (diarizationEndpoints[0]?.id ?? "") : ""
+                            )
+                          }
+                        />
+                      </Frame.Actions>
+                    </Frame.Row>
 
-                <Field orientation="horizontal">
-                  <div className="flex flex-1 flex-col gap-1">
-                    <FieldLabel htmlFor="session-option-grammar">
-                      {t("Polish grammar")}
-                    </FieldLabel>
-                    <FieldDescription>
-                      {grammarEndpoints.length === 0
-                        ? t("No chat endpoint is configured.")
-                        : t(
-                            "Clean up wording when capture ends. The verbatim transcript stays available."
-                          )}
-                    </FieldDescription>
-                  </div>
-                  <Switch
-                    checked={Boolean(selectedGrammarEndpoint)}
-                    disabled={grammarEndpoints.length === 0}
-                    id="session-option-grammar"
-                    onCheckedChange={(on) =>
-                      setSelectedGrammarEndpoint(
-                        on
-                          ? (grammarEndpoints.find(
-                              (endpoint) => endpoint.isDefault
-                            )?.id ??
-                              grammarEndpoints[0]?.id ??
-                              "")
-                          : ""
-                      )
-                    }
-                  />
-                </Field>
+                    <Frame.Row>
+                      <Frame.Content>
+                        <Frame.Title as="p">{t("Polish grammar")}</Frame.Title>
+                        <Frame.Description>
+                          {grammarEndpoints.length === 0
+                            ? t("No chat endpoint is configured.")
+                            : t(
+                                "Clean up wording when capture ends. The verbatim transcript stays available."
+                              )}
+                        </Frame.Description>
+                      </Frame.Content>
+                      <Frame.Actions>
+                        <Switch
+                          checked={Boolean(selectedGrammarEndpoint)}
+                          disabled={grammarEndpoints.length === 0}
+                          aria-label={t("Polish grammar")}
+                          id="session-option-grammar"
+                          onCheckedChange={(on) =>
+                            setSelectedGrammarEndpoint(
+                              on
+                                ? (grammarEndpoints.find(
+                                    (endpoint) => endpoint.isDefault
+                                  )?.id ??
+                                    grammarEndpoints[0]?.id ??
+                                    "")
+                                : ""
+                            )
+                          }
+                        />
+                      </Frame.Actions>
+                    </Frame.Row>
 
-                <Field orientation="horizontal">
-                  <div className="flex flex-1 flex-col gap-1">
-                    <FieldLabel htmlFor="session-option-record">
-                      {t("Record source audio")}
-                    </FieldLabel>
-                    <FieldDescription>
-                      {t(
-                        "Encrypted, source-separated tracks. Default retention: 30 days."
-                      )}
-                    </FieldDescription>
-                  </div>
-                  <Switch
-                    checked={
-                      recordAudio || Boolean(selectedDiarizationEndpoint)
-                    }
-                    disabled={Boolean(selectedDiarizationEndpoint)}
-                    id="session-option-record"
-                    onCheckedChange={setRecordAudio}
-                  />
-                </Field>
+                    <Frame.Row>
+                      <Frame.Content>
+                        <Frame.Title as="p">
+                          {t("Record source audio")}
+                        </Frame.Title>
+                        <Frame.Description>
+                          {t(
+                            "Encrypted, source-separated tracks. Default retention: 30 days."
+                          )}
+                        </Frame.Description>
+                      </Frame.Content>
+                      <Frame.Actions>
+                        <Switch
+                          checked={
+                            recordAudio || Boolean(selectedDiarizationEndpoint)
+                          }
+                          disabled={Boolean(selectedDiarizationEndpoint)}
+                          aria-label={t("Record source audio")}
+                          id="session-option-record"
+                          onCheckedChange={setRecordAudio}
+                        />
+                      </Frame.Actions>
+                    </Frame.Row>
+                  </Frame.Panel>
+                </Frame>
 
                 <Collapsible defaultOpen={!effectiveSelectedEndpoint}>
                   <CollapsibleTrigger className="group/advanced flex w-full items-center gap-2 rounded-lg py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -2821,9 +2812,9 @@ export function LiveTranscriptionView({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectGroup>
-                              <SelectLabel>
+                              <SelectGroupLabel>
                                 {t("Transcription providers")}
-                              </SelectLabel>
+                              </SelectGroupLabel>
                               {transcriptionEndpoints.map((endpoint) => (
                                 <SelectItem
                                   key={endpoint.id}
@@ -2864,9 +2855,9 @@ export function LiveTranscriptionView({
                             </SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
-                                <SelectLabel>
+                                <SelectGroupLabel>
                                   {t("Speaker providers")}
-                                </SelectLabel>
+                                </SelectGroupLabel>
                                 <SelectItem value="none">
                                   {t("No speaker separation")}
                                 </SelectItem>
@@ -2916,9 +2907,9 @@ export function LiveTranscriptionView({
                             </SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
-                                <SelectLabel>
+                                <SelectGroupLabel>
                                   {t("Writing providers")}
-                                </SelectLabel>
+                                </SelectGroupLabel>
                                 <SelectItem value="none">
                                   {t("Keep verbatim transcript")}
                                 </SelectItem>
@@ -2944,10 +2935,12 @@ export function LiveTranscriptionView({
                   </CollapsibleContent>
                 </Collapsible>
               </FieldGroup>
-              <Alert>
-                <ShieldCheck aria-hidden="true" />
-                <AlertTitle>{t("What happens next")}</AlertTitle>
-                <AlertDescription>
+              <PuAlert tone="info" variant="plain">
+                <PuAlert.Icon>
+                  <ShieldCheck aria-hidden="true" />
+                </PuAlert.Icon>
+                <PuAlert.Title>{t("What happens next")}</PuAlert.Title>
+                <PuAlert.Description>
                   {selectedWizardSource === "system-audio"
                     ? t(
                         "The browser opens its native share picker. Choose the tab or window and enable Share audio."
@@ -2963,8 +2956,8 @@ export function LiveTranscriptionView({
                         : t(
                             "The browser asks for microphone permission, then audio begins flowing into the room."
                           )}
-                </AlertDescription>
-              </Alert>
+                </PuAlert.Description>
+              </PuAlert>
             </div>
           )}
         </TranscriptionCreationFlow>
@@ -2986,53 +2979,51 @@ export function LiveTranscriptionView({
               )}
             </DialogDescription>
           </DialogHeader>
-          {error ? <DialogError message={error} /> : null}
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="stream-source-name">
-                {t("Source name")}
-              </FieldLabel>
-              <Input
-                id="stream-source-name"
-                onChange={(event) => setStreamName(event.target.value)}
-                value={streamName}
+          <DialogBody>
+            {error ? <DialogError message={error} /> : null}
+            <FieldGroup>
+              <Field>
+                <FieldLabel>{t("Source name")}</FieldLabel>
+                <Input
+                  id="stream-source-name"
+                  onChange={(event) => setStreamName(event.target.value)}
+                  value={streamName}
+                />
+              </Field>
+              <Field>
+                <FieldLabel>{t("Livestream link")}</FieldLabel>
+                <Input
+                  id="stream-source-url"
+                  onChange={(event) => setStreamURL(event.target.value)}
+                  placeholder="https://www.bundestag.de/mediathek/live"
+                  type="url"
+                  value={streamURL}
+                />
+                <FieldDescription>
+                  {t(
+                    "Paste a livestream webpage or direct stream link. The link is stored encrypted and checked again when capture starts."
+                  )}
+                </FieldDescription>
+              </Field>
+              {streamCheckFeedback}
+              <StreamScheduleFields
+                end={streamScheduledEnd}
+                idPrefix="stream-source"
+                onEndChange={setStreamScheduledEnd}
+                onScheduledChange={(checked) => {
+                  setStreamScheduled(checked)
+                  if (checked && !streamScheduledStart) {
+                    setStreamScheduledStart(
+                      localDateTimeValue(new Date(Date.now() + 15 * 60_000))
+                    )
+                  }
+                }}
+                onStartChange={setStreamScheduledStart}
+                scheduled={streamScheduled}
+                start={streamScheduledStart}
               />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="stream-source-url">
-                {t("Livestream link")}
-              </FieldLabel>
-              <Input
-                id="stream-source-url"
-                onChange={(event) => setStreamURL(event.target.value)}
-                placeholder="https://www.bundestag.de/mediathek/live"
-                type="url"
-                value={streamURL}
-              />
-              <FieldDescription>
-                {t(
-                  "Paste a livestream webpage or direct stream link. The link is stored encrypted and checked again when capture starts."
-                )}
-              </FieldDescription>
-            </Field>
-            {streamCheckFeedback}
-            <StreamScheduleFields
-              end={streamScheduledEnd}
-              idPrefix="stream-source"
-              onEndChange={setStreamScheduledEnd}
-              onScheduledChange={(checked) => {
-                setStreamScheduled(checked)
-                if (checked && !streamScheduledStart) {
-                  setStreamScheduledStart(
-                    localDateTimeValue(new Date(Date.now() + 15 * 60_000))
-                  )
-                }
-              }}
-              onStartChange={setStreamScheduledStart}
-              scheduled={streamScheduled}
-              start={streamScheduledStart}
-            />
-          </FieldGroup>
+            </FieldGroup>
+          </DialogBody>
           <DialogFooter>
             <Button
               onClick={() => {
@@ -3059,10 +3050,7 @@ export function LiveTranscriptionView({
             >
               {streamStarting ? (
                 <>
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />
+                  <Spinner data-icon="inline-start" />
                   {t("Connecting…")}
                 </>
               ) : (
@@ -3094,128 +3082,138 @@ export function LiveTranscriptionView({
           </DialogHeader>
           {error ? <DialogError message={error} /> : null}
           {botSetup ? (
-            <div className="flex flex-col gap-4">
-              <div className="rounded-xl bg-muted/50 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">{t("Ingest token")}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {t(
-                        "This is shown once. Store it in the adapter’s secret manager."
-                      )}
-                    </p>
+            <>
+              <DialogBody>
+                <div className="rounded-xl bg-muted/50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">{t("Ingest token")}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t(
+                          "This is shown once. Store it in the adapter’s secret manager."
+                        )}
+                      </p>
+                    </div>
+                    <Button
+                      aria-label={t("Copy bot ingest token")}
+                      onClick={() => void copyBotToken()}
+                      size="icon-sm"
+                      variant="outline"
+                    >
+                      <Copy />
+                    </Button>
                   </div>
-                  <Button
-                    aria-label={t("Copy bot ingest token")}
-                    onClick={() => void copyBotToken()}
-                    size="icon-sm"
-                    variant="outline"
-                  >
-                    <Copy />
-                  </Button>
+                  <code className="mt-3 block overflow-x-auto rounded-lg bg-background p-3 text-xs break-all">
+                    {botSetup.token}
+                  </code>
                 </div>
-                <code className="mt-3 block overflow-x-auto rounded-lg bg-background p-3 text-xs break-all">
-                  {botSetup.token}
-                </code>
-              </div>
-              <div className="rounded-xl border bg-background p-4 text-sm">
-                <p className="font-medium">{t("Adapter setup")}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {t(
-                    "Give the adapter the ingest token above. It will exchange it for a short-lived connection and begin sending meeting audio."
-                  )}
-                </p>
-              </div>
-              <Collapsible>
-                <CollapsibleTrigger
-                  render={
-                    <Button className="w-fit" size="sm" variant="ghost" />
-                  }
-                >
-                  {t("Advanced protocol details")}
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2 flex flex-col gap-2 rounded-xl border bg-muted/30 p-4 text-xs text-muted-foreground">
-                  <p>
-                    1. POST to <code>{botSetup.ticketPath}</code> with
-                    <code> Authorization: Bearer &lt;token&gt;</code>.
+                <div className="rounded-xl border bg-background p-4 text-sm">
+                  <p className="font-medium">{t("Adapter setup")}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t(
+                      "Give the adapter the ingest token above. It will exchange it for a short-lived connection and begin sending meeting audio."
+                    )}
                   </p>
-                  <p>
-                    2. Open{" "}
-                    <code>{botSetup.streamPath}?ticket=&lt;ticket&gt;</code>.
-                  </p>
-                  <p>
-                    3. Read the <code>streamId</code> from{" "}
-                    <code>transport.ready</code>. Use its{" "}
-                    <code>uploadToken</code> as <code>X-Stream-Token</code>,
-                    POST sequenced <code>transcription.start</code> to{" "}
-                    <code>/events</code>, and batched PCM16 frames to{" "}
-                    <code>/audio</code> using the{" "}
-                    <code>{botSetup.protocol}</code> format.
-                  </p>
-                </CollapsibleContent>
-              </Collapsible>
+                </div>
+                <Collapsible>
+                  <CollapsibleTrigger
+                    render={
+                      <Button className="w-fit" size="sm" variant="ghost" />
+                    }
+                  >
+                    {t("Advanced protocol details")}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2 flex flex-col gap-2 rounded-xl border bg-muted/30 p-4 text-xs text-muted-foreground">
+                    <p>
+                      1. POST to <code>{botSetup.ticketPath}</code> with
+                      <code> Authorization: Bearer &lt;token&gt;</code>.
+                    </p>
+                    <p>
+                      2. Open{" "}
+                      <code>{botSetup.streamPath}?ticket=&lt;ticket&gt;</code>.
+                    </p>
+                    <p>
+                      3. Read the <code>streamId</code> from{" "}
+                      <code>transport.ready</code>. Use its{" "}
+                      <code>uploadToken</code> as <code>X-Stream-Token</code>,
+                      POST sequenced <code>transcription.start</code> to{" "}
+                      <code>/events</code>, and batched PCM16 frames to{" "}
+                      <code>/audio</code> using the{" "}
+                      <code>{botSetup.protocol}</code> format.
+                    </p>
+                  </CollapsibleContent>
+                </Collapsible>
+              </DialogBody>
               <DialogFooter>
                 <Button onClick={() => setBotDialogOpen(false)}>
                   {t("Done")}
                 </Button>
               </DialogFooter>
-            </div>
+            </>
           ) : (
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="bot-source-name">
-                  {t("Source name")}
-                </FieldLabel>
-                <Input
-                  id="bot-source-name"
-                  onChange={(event) => setBotName(event.target.value)}
-                  value={botName}
-                />
-              </Field>
-              <Field>
-                <FieldLabel>{t("Meeting platform")}</FieldLabel>
-                <Select
-                  onValueChange={(value) => setBotPlatform(value ?? "generic")}
-                  value={botPlatform}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={t("Choose a platform")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectLabel>{t("Adapter type")}</SelectLabel>
-                      <SelectItem value="generic">
-                        {t("Custom / desktop adapter")}
-                      </SelectItem>
-                      <SelectItem value="zoom">Zoom</SelectItem>
-                      <SelectItem value="google-meet">Google Meet</SelectItem>
-                      <SelectItem value="microsoft-teams">
-                        Microsoft Teams
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="bot-meeting-url">
-                  {t("Meeting URL")}{" "}
-                  <span className="text-muted-foreground">
-                    {t("(optional)")}
-                  </span>
-                </FieldLabel>
-                <Input
-                  id="bot-meeting-url"
-                  onChange={(event) => setBotMeetingURL(event.target.value)}
-                  placeholder="https://…"
-                  type="url"
-                  value={botMeetingURL}
-                />
-                <FieldDescription>
-                  {t(
-                    "Saved encrypted for the adapter configuration; JustAI does not automatically sign in to third-party meetings."
-                  )}
-                </FieldDescription>
-              </Field>
+            <>
+              <DialogBody>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel>{t("Source name")}</FieldLabel>
+                    <Input
+                      id="bot-source-name"
+                      onChange={(event) => setBotName(event.target.value)}
+                      value={botName}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel>{t("Meeting platform")}</FieldLabel>
+                    <Select
+                      onValueChange={(value) =>
+                        setBotPlatform(value ?? "generic")
+                      }
+                      value={botPlatform}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={t("Choose a platform")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectGroupLabel>
+                            {t("Adapter type")}
+                          </SelectGroupLabel>
+                          <SelectItem value="generic">
+                            {t("Custom / desktop adapter")}
+                          </SelectItem>
+                          <SelectItem value="zoom">Zoom</SelectItem>
+                          <SelectItem value="google-meet">
+                            Google Meet
+                          </SelectItem>
+                          <SelectItem value="microsoft-teams">
+                            Microsoft Teams
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel>
+                      {t("Meeting URL")}{" "}
+                      <span className="text-muted-foreground">
+                        {t("(optional)")}
+                      </span>
+                    </FieldLabel>
+                    <Input
+                      id="bot-meeting-url"
+                      onChange={(event) => setBotMeetingURL(event.target.value)}
+                      placeholder="https://…"
+                      type="url"
+                      value={botMeetingURL}
+                    />
+                    <FieldDescription>
+                      {t(
+                        "Saved encrypted for the adapter configuration; JustAI does not automatically sign in to third-party meetings."
+                      )}
+                    </FieldDescription>
+                  </Field>
+                </FieldGroup>
+              </DialogBody>
               <DialogFooter>
                 <Button
                   onClick={() => setBotDialogOpen(false)}
@@ -3229,10 +3227,7 @@ export function LiveTranscriptionView({
                 >
                   {botStarting ? (
                     <>
-                      <LoaderCircle
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />
+                      <Spinner data-icon="inline-start" />
                       {t("Creating…")}
                     </>
                   ) : (
@@ -3242,7 +3237,7 @@ export function LiveTranscriptionView({
                   )}
                 </Button>
               </DialogFooter>
-            </FieldGroup>
+            </>
           )}
         </DialogContent>
       </Dialog>
@@ -3263,51 +3258,53 @@ export function LiveTranscriptionView({
               )}
             </DialogDescription>
           </DialogHeader>
-          {error ? <DialogError message={error} /> : null}
-          {snapshot?.session.joinCode ? (
-            <div className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/50 p-3">
-              <code className="min-w-0 flex-1 text-xs break-all text-muted-foreground">
-                {new URL(
-                  transcriptionJoinPath(snapshot.session.joinCode),
-                  typeof window === "undefined"
-                    ? "http://localhost"
-                    : window.location.origin
-                ).toString()}
-              </code>
-              <Button
-                aria-label={t("Copy room link")}
-                onClick={() => void copyJoinLink()}
-                size="icon-sm"
-                variant="outline"
-              >
-                {joinLinkCopied ? <Check /> : <Copy />}
-              </Button>
-            </div>
-          ) : null}
-          <div className="flex items-center justify-between rounded-xl bg-muted/50 p-4">
-            <span className="font-mono text-2xl font-semibold tracking-[0.32em]">
-              {snapshot?.session.joinCode ?? "--------"}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={() => void rotateJoinCode()}
-                size="sm"
-                variant="outline"
-              >
-                {t("New code")}
-              </Button>
-              {snapshot?.session.joinCode && (
+          <DialogBody>
+            {error ? <DialogError message={error} /> : null}
+            {snapshot?.session.joinCode ? (
+              <div className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/50 p-3">
+                <code className="min-w-0 flex-1 text-xs break-all text-muted-foreground">
+                  {new URL(
+                    transcriptionJoinPath(snapshot.session.joinCode),
+                    typeof window === "undefined"
+                      ? "http://localhost"
+                      : window.location.origin
+                  ).toString()}
+                </code>
                 <Button
-                  aria-label={t("Copy room code")}
-                  onClick={() => void copyJoinCode()}
+                  aria-label={t("Copy room link")}
+                  onClick={() => void copyJoinLink()}
                   size="icon-sm"
                   variant="outline"
                 >
-                  {copied ? <Check /> : <Copy />}
+                  {joinLinkCopied ? <Check /> : <Copy />}
                 </Button>
-              )}
+              </div>
+            ) : null}
+            <div className="flex items-center justify-between rounded-xl bg-muted/50 p-4">
+              <span className="font-mono text-2xl font-semibold tracking-[0.32em]">
+                {snapshot?.session.joinCode ?? "--------"}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => void rotateJoinCode()}
+                  size="sm"
+                  variant="outline"
+                >
+                  {t("New code")}
+                </Button>
+                {snapshot?.session.joinCode && (
+                  <Button
+                    aria-label={t("Copy room code")}
+                    onClick={() => void copyJoinCode()}
+                    size="icon-sm"
+                    variant="outline"
+                  >
+                    {copied ? <Check /> : <Copy />}
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          </DialogBody>
           <DialogFooter>
             <Button onClick={() => setShareOpen(false)}>{t("Done")}</Button>
           </DialogFooter>
@@ -3332,22 +3329,22 @@ export function LiveTranscriptionView({
               )}
             </DialogDescription>
           </DialogHeader>
-          {error ? <DialogError message={error} /> : null}
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="workspace-speaker-name">
-                {t("Name")}
-              </FieldLabel>
-              <Input
-                autoFocus
-                id="workspace-speaker-name"
-                onChange={(event) =>
-                  setWorkspaceSpeakerName(event.target.value)
-                }
-                value={workspaceSpeakerName}
-              />
-            </Field>
-          </FieldGroup>
+          <DialogBody>
+            {error ? <DialogError message={error} /> : null}
+            <FieldGroup>
+              <Field>
+                <FieldLabel>{t("Name")}</FieldLabel>
+                <Input
+                  autoFocus
+                  id="workspace-speaker-name"
+                  onChange={(event) =>
+                    setWorkspaceSpeakerName(event.target.value)
+                  }
+                  value={workspaceSpeakerName}
+                />
+              </Field>
+            </FieldGroup>
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={workspaceSpeakerSaving}
@@ -3364,10 +3361,7 @@ export function LiveTranscriptionView({
               onClick={() => void saveWorkspaceSpeakerName()}
             >
               {workspaceSpeakerSaving ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
+                <Spinner data-icon="inline-start" />
               ) : null}
               {t("Save name")}
             </Button>

@@ -4,14 +4,8 @@ import { useEffect, useState } from "react"
 import { ChevronsUpDown } from "lucide-react"
 import { api } from "@/lib/api"
 import { useTranslations } from "@/components/locale-provider"
-import { Button } from "@/components/ui/button"
-import {
-  Command,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
+import { Button } from "@/components/panelui/button"
+import { Command } from "@/components/panelui/command"
 import {
   Popover,
   PopoverContent,
@@ -24,10 +18,12 @@ export function AnalyticsEntityFilter({
   value,
   label,
   onChange,
+  className,
 }: {
   kind: "users" | "workspaces"
   value: string
   label?: string
+  className?: string
   onChange: (value: string) => void
 }) {
   const { t } = useTranslations()
@@ -97,6 +93,7 @@ export function AnalyticsEntityFilter({
         render={
           <Button
             size="sm"
+            className={className}
             variant="outline"
             role="combobox"
             aria-expanded={open}
@@ -120,23 +117,26 @@ export function AnalyticsEntityFilter({
         align="start"
         className="w-80 max-w-[calc(100vw-2rem)] p-0"
       >
-        <Command shouldFilter={false}>
-          <CommandInput
+        <Command
+          variant="compact"
+          filter={false}
+          search={query}
+          onSearchChange={setQuery}
+        >
+          <Command.Input
             aria-label={t(
               kind === "users" ? "Search users…" : "Search workspaces…"
             )}
             placeholder={t(
               kind === "users" ? "Search users…" : "Search workspaces…"
             )}
-            value={query}
-            onValueChange={setQuery}
           />
-          <CommandList>
-            <CommandGroup>
-              <CommandItem value="all" onSelect={() => select("")}>
+          <Command.List>
+            <Command.Group>
+              <Command.Item value="all" onSelect={() => select("")}>
                 <span className="flex-1">{t(all)}</span>
-              </CommandItem>
-            </CommandGroup>
+              </Command.Item>
+            </Command.Group>
             {failed === key ? (
               <p className="p-3 text-xs text-destructive">
                 {t("Directory search failed. Try another search.")}
@@ -152,9 +152,9 @@ export function AnalyticsEntityFilter({
                     {t("No results")}
                   </p>
                 )}
-                <CommandGroup>
+                <Command.Group>
                   {result.items.map((item) => (
-                    <CommandItem
+                    <Command.Item
                       key={item.id}
                       value={item.id}
                       onSelect={() => select(item.id, item.name)}
@@ -165,12 +165,12 @@ export function AnalyticsEntityFilter({
                           {item.detail}
                         </span>
                       </span>
-                    </CommandItem>
+                    </Command.Item>
                   ))}
-                </CommandGroup>
+                </Command.Group>
               </>
             )}
-          </CommandList>
+          </Command.List>
         </Command>
       </PopoverContent>
     </Popover>

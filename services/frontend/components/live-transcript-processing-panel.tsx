@@ -1,17 +1,17 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useState } from "react"
 import {
   Check,
-  LoaderCircle,
   CircleAlert,
   SkipForward,
   Users,
   Pencil,
   RefreshCw,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/panelui/button"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { LiveTranscriptionSnapshot } from "./live-transcription-orbit"
@@ -93,7 +93,7 @@ export function LiveTranscriptProcessingPanel({
               ) : step.status === "skipped" ? (
                 <SkipForward className="size-4" />
               ) : step.status === "processing" ? (
-                <LoaderCircle className="size-4 motion-safe:animate-spin" />
+                <Spinner className="size-4" />
               ) : (
                 <step.icon className="size-4" />
               )}

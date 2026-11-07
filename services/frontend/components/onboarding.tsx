@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import {
   useTranslations,
@@ -40,7 +41,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/panelui/spinner"
 import {
   Stepper,
   StepperContent,
@@ -239,7 +240,7 @@ export function Onboarding() {
             </AlertDescription>
           </Alert>
         ) : (
-          <Spinner aria-label={t("Loading setup")} />
+          <Spinner label={t("Loading setup")} />
         )}
       </main>
     )
@@ -576,12 +577,7 @@ export function Onboarding() {
               </div>
             </StepperContent>
           </StepperPanel>
-          {error && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("Could not continue")}</AlertTitle>
-              <AlertDescription>{t(error)}</AlertDescription>
-            </Alert>
-          )}
+          {error && <ToastFeedback message={error} type={"destructive"} />}
           <footer className="mt-auto flex items-center justify-between gap-3 pt-4">
             <Button
               disabled={busy || index === 0}

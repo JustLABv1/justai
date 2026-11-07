@@ -138,7 +138,28 @@ func Test(ctx context.Context, endpoint Endpoint) error {
 	return nil
 }
 
+// streamOpenAI asks for token usage in the stream, which OpenAI and gateways
+// such as LiteLLM only send when stream_options.include_usage is set. Some
+// servers reject that option; a refusal before any text is retried without it.
 func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc) error {
+	delivered := false
+	err := streamOpenAIOnce(ctx, endpoint, options, func(delta string) error {
+		delivered = true
+		return onDelta(delta)
+	}, true)
+	if err != nil && !delivered && rejectsStreamOptions(err) {
+		return streamOpenAIOnce(ctx, endpoint, options, onDelta, false)
+	}
+	return err
+}
+
+func rejectsStreamOptions(err error) bool {
+	text := strings.ToLower(err.Error())
+	return (strings.Contains(text, "(400)") || strings.Contains(text, "(422)")) &&
+		(strings.Contains(text, "stream_options") || strings.Contains(text, "include_usage"))
+}
+
+func streamOpenAIOnce(ctx context.Context, endpoint Endpoint, options ChatOptions, onDelta DeltaFunc, includeUsage bool) error {
 	messages := make([]map[string]any, 0, len(options.Messages))
 	for _, message := range options.Messages {
 		messages = append(messages, map[string]any{
@@ -152,6 +173,9 @@ func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, o
 		"stream":      true,
 		"temperature": endpoint.Temperature,
 		"max_tokens":  endpoint.MaxOutputTokens,
+	}
+	if includeUsage {
+		payload["stream_options"] = map[string]any{"include_usage": true}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -175,6 +199,7 @@ func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, o
 	}
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	var finalUsage *Usage
 	seenContent := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -199,8 +224,8 @@ func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, o
 		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 			continue
 		}
-		if chunk.Usage != nil && options.OnUsage != nil {
-			options.OnUsage(Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, TotalTokens: chunk.Usage.TotalTokens})
+		if chunk.Usage != nil {
+			finalUsage = &Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, TotalTokens: chunk.Usage.TotalTokens}
 		}
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
 			seenContent = true
@@ -208,6 +233,11 @@ func streamOpenAI(ctx context.Context, endpoint Endpoint, options ChatOptions, o
 				return err
 			}
 		}
+	}
+	// Reported once per call, so a gateway that repeats cumulative usage in
+	// every chunk is not counted more than once.
+	if finalUsage != nil && options.OnUsage != nil {
+		options.OnUsage(*finalUsage)
 	}
 	if err := scanner.Err(); err != nil {
 		return err

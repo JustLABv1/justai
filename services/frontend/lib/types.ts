@@ -5,7 +5,6 @@ export type ViewId =
   | "video-transcription"
   | "endpoints"
   | "knowledge"
-  | "integrations"
   | "automations"
   | "agents"
   | "mcp"

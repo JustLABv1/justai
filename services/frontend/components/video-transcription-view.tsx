@@ -1,5 +1,8 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
+import { Spinner } from "@/components/panelui/spinner"
+import { Frame } from "@/components/panelui/frame"
 import { useTranslations } from "@/components/locale-provider"
 import {
   VideoCaptionSettings,
@@ -8,7 +11,6 @@ import {
 
 import {
   ArrowLeft,
-  ArrowRight,
   AudioLines,
   Check,
   ChevronDown,
@@ -16,10 +18,11 @@ import {
   CircleAlert,
   FileText,
   FileVideo,
-  LoaderCircle,
+  MessageSquarePlus,
   Pause,
   Pencil,
   Play,
+  Plus,
   RefreshCw,
   Search,
   SkipForward,
@@ -29,7 +32,6 @@ import {
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { TranscriptionCreationFlow } from "@/components/transcription-creation-flow"
 import { VideoTranscriptionLibrary } from "@/components/video-transcription-library"
 import Link from "next/link"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -40,16 +42,15 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/panelui/card"
 import {
   Collapsible,
   CollapsibleContent,
@@ -68,14 +69,15 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+  DialogBody,
+} from "@/components/panelui/dialog"
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { Input } from "@/components/panelui/input"
 import { Progress } from "@/components/ui/progress"
 import {} from "@/components/ui/page"
 import {
@@ -83,16 +85,16 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectLabel,
+  SelectGroupLabel,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+} from "@/components/panelui/select"
+import { Button } from "@/components/panelui/button"
+import { Badge } from "@/components/panelui/badge"
+import { Tabs, TabsList, TabsTrigger } from "@/components/panelui/tabs"
 import { api, resolveAPIURL } from "@/lib/api"
 import { groupTranscriptionSegments } from "@/lib/transcription"
-import { Switch } from "@/components/ui/switch"
+import { Switch } from "@/components/panelui/switch"
 import { languageItemsFor } from "@/lib/transcription-languages"
 import { formatBytes, useFileUpload } from "@/hooks/use-file-upload"
 import { cn } from "@/lib/utils"
@@ -201,8 +203,9 @@ export function VideoTranscriptionView({
     string | null
   >(null)
   const [error, setError] = useState("")
+  const [chatStarting, setChatStarting] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
-  const [createStep, setCreateStep] = useState(0)
+  const [, setCreateStep] = useState(0)
   const [title, setTitle] = useState("Video transcript")
   const [language, setLanguage] = useState("auto")
   const [selectedEndpoint, setSelectedEndpoint] = useState("")
@@ -262,7 +265,14 @@ export function VideoTranscriptionView({
       if (file instanceof File) pickVideoFile(file)
     },
   })
-  const languageItems = useMemo(() => languageItemsFor(language), [language])
+  const languageItems = useMemo(
+    () =>
+      languageItemsFor(language).map((item) => ({
+        ...item,
+        label: t(item.label),
+      })),
+    [language, t]
+  )
   const requestRef = useRef(0)
   const videoUploadAbortRef = useRef<AbortController | null>(null)
   const videoCancelRequestedRef = useRef(false)
@@ -992,6 +1002,22 @@ export function VideoTranscriptionView({
   const interrupted = ["failed", "cancelled"].includes(
     snapshot?.videoUpload?.status ?? ""
   )
+  const startChatFromHeader = async () => {
+    if (!snapshot || chatStarting) return
+    setChatStarting(true)
+    try {
+      await onStartChat(snapshot.session.id)
+      setError("")
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : t("A chat could not be started from this transcript.")
+      )
+    } finally {
+      setChatStarting(false)
+    }
+  }
   const showProcessingView =
     isVideoProcessing ||
     (interrupted && partialTranscriptSession !== snapshot?.session.id)
@@ -1224,12 +1250,7 @@ export function VideoTranscriptionView({
 
   return (
     <div className="flex min-h-[calc(100svh-2rem)] w-full min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
-      {error && (
-        <Alert className="shrink-0" variant="destructive">
-          <AlertTitle>{t("Video transcription needs attention")}</AlertTitle>
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
-      )}
+      {error && <ToastFeedback message={error} type={"destructive"} />}
 
       {!sessionId && !snapshot && !createOpen ? (
         <VideoTranscriptionLibrary
@@ -1251,7 +1272,7 @@ export function VideoTranscriptionView({
             </Button>
           ) : (
             <>
-              <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+              <Spinner className="size-5 text-muted-foreground" />
               <p role="status" className="text-sm text-muted-foreground">
                 {t("Opening recording…")}
               </p>
@@ -1266,14 +1287,32 @@ export function VideoTranscriptionView({
                 {canCancelVideo ? (
                   <Button
                     aria-label={cancelLabel}
-                    className="flex-1 sm:flex-none"
+                    className="flex-1 text-destructive hover:text-destructive sm:flex-none"
                     disabled={videoCancelInFlight}
                     onClick={() => setCancelOpen(true)}
                     size="sm"
-                    variant="destructive"
+                    variant="outline"
                   >
                     <X data-icon="inline-start" />
                     <span>{cancelLabel}</span>
+                  </Button>
+                ) : null}
+                {snapshot && !showProcessingView ? (
+                  <Button
+                    className="flex-1 sm:flex-none"
+                    disabled={chatStarting || !snapshot.segments.length}
+                    onClick={() => void startChatFromHeader()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {chatStarting ? (
+                      <Spinner data-icon="inline-start" />
+                    ) : (
+                      <MessageSquarePlus data-icon="inline-start" />
+                    )}
+                    <span>
+                      {chatStarting ? t("Starting chat…") : t("Ask about this")}
+                    </span>
                   </Button>
                 ) : null}
                 <Button
@@ -1285,8 +1324,8 @@ export function VideoTranscriptionView({
                   size="sm"
                   variant="outline"
                 >
-                  <Upload data-icon="inline-start" />
-                  <span>{t("Add recording")}</span>
+                  <Plus data-icon="inline-start" />
+                  <span>{t("New transcription")}</span>
                 </Button>
               </>
             }
@@ -1924,6 +1963,7 @@ export function VideoTranscriptionView({
                 onError={setError}
                 onRefreshPlayback={refreshVideoPlayback}
                 onRenameSpeaker={openSpeakerRename}
+                hideAskAction
                 onStartChat={onStartChat}
                 onSnapshotChange={(updater) =>
                   setSnapshot((current) =>
@@ -1943,454 +1983,552 @@ export function VideoTranscriptionView({
       ) : null}
 
       {createOpen ? (
-        <TranscriptionCreationFlow
-          title={t("New video transcription")}
-          description={t("Upload a recording and choose how it is processed.")}
-          steps={[{ label: "Recording" }, { label: "Options" }]}
-          step={createStep}
-          onStepChange={setCreateStep}
-          busy={videoStarting}
-          footer={
-            <footer className="flex items-center justify-between gap-3">
-              <Button
-                disabled={videoStarting}
-                variant="outline"
-                onClick={() => {
-                  if (createStep > 0) {
-                    setCreateStep(createStep - 1)
-                    return
-                  }
-                  setCreateOpen(false)
-                  if (!videoUploadInFlightRef.current) setVideoFile(null)
-                }}
-              >
-                {createStep > 0 ? (
-                  <>
-                    <ArrowLeft data-icon="inline-start" /> Back
-                  </>
-                ) : (
-                  "Cancel"
-                )}
-              </Button>
-              {createStep < 1 ? (
-                <Button
-                  disabled={!videoFile}
-                  onClick={() => setCreateStep(createStep + 1)}
-                >
-                  Continue <ArrowRight data-icon="inline-end" />
-                </Button>
-              ) : (
-                <Button
-                  disabled={
-                    videoStarting || !videoFile || !effectiveSelectedEndpoint
-                  }
-                  onClick={() => void createVideoSession()}
-                >
-                  {videoStarting ? (
-                    <>
-                      <LoaderCircle
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />{" "}
-                      Preparing upload…
-                    </>
-                  ) : (
-                    <>
-                      <Upload data-icon="inline-start" /> Start upload
-                    </>
-                  )}
-                </Button>
-              )}
-            </footer>
-          }
+        <section
+          aria-label={t("New video transcription")}
+          className="mx-auto flex w-full max-w-6xl flex-col gap-5 py-2 sm:py-4"
         >
-          {createStep === 0 ? (
-            <FieldGroup>
-              <div>
-                <h2 className="text-lg font-semibold">
-                  {t("Choose a recording")}
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("Meetings, interviews, lectures — start with your video.")}
-                </p>
-              </div>
+          <header className="flex flex-col gap-1">
+            <button
+              className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+              disabled={videoStarting}
+              onClick={() => {
+                setCreateOpen(false)
+                if (!videoUploadInFlightRef.current) setVideoFile(null)
+              }}
+              type="button"
+            >
+              <ArrowLeft aria-hidden="true" className="size-3.5" />
+              {t("All recordings")}
+            </button>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              {t("New video transcription")}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {t("Upload a recording and choose how it is processed.")}
+            </p>
+          </header>
 
-              <div
-                className={cn(
-                  "flex min-h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-muted-foreground/25 bg-muted/40 p-6 text-center transition-colors outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
-                  isDragging && "border-primary bg-primary/5"
-                )}
-                onClick={openFileDialog}
-                onDragEnter={handleDragEnter}
-                onDragLeave={handleDragLeave}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault()
-                    openFileDialog()
-                  }
-                }}
-                role="button"
-                tabIndex={0}
-              >
-                <input
-                  {...getInputProps()}
-                  aria-label={t("Video file")}
-                  className="sr-only"
-                />
-                <span className="flex size-12 items-center justify-center rounded-2xl bg-background text-primary">
-                  {videoFile ? (
-                    <FileVideo aria-hidden="true" className="size-5" />
-                  ) : (
-                    <Upload aria-hidden="true" className="size-5" />
+          <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
+            <div className="flex min-w-0 flex-col gap-4">
+              <input
+                {...getInputProps()}
+                aria-label={t("Video file")}
+                className="sr-only"
+              />
+              {videoFile ? (
+                <Card>
+                  <Card.Content className="flex flex-wrap items-center gap-3">
+                    <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-primary">
+                      <FileVideo aria-hidden="true" className="size-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {videoFile.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatBytes(videoFile.size, 1)}
+                      </p>
+                    </div>
+                    <Button
+                      disabled={videoStarting}
+                      onClick={openFileDialog}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {t("Replace")}
+                    </Button>
+                    <Button
+                      aria-label={t("Remove video")}
+                      disabled={videoStarting}
+                      onClick={() => setVideoFile(null)}
+                      size="icon-sm"
+                      variant="ghost"
+                    >
+                      <X />
+                    </Button>
+                  </Card.Content>
+                </Card>
+              ) : (
+                <div
+                  className={cn(
+                    "flex min-h-56 cursor-pointer flex-col items-center justify-center gap-3 rounded-[22px] border border-dashed border-muted-foreground/30 bg-muted/30 p-6 text-center transition-colors outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring",
+                    isDragging && "border-primary bg-primary/5"
                   )}
-                </span>
-                <span className="max-w-full text-sm font-medium break-all">
-                  {videoFile?.name || "Drop your video here or click to browse"}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {videoFile
-                    ? t("{value0} · Click or drop to replace", {
-                        value0: formatBytes(videoFile.size, 1),
-                      })
-                    : t("MP4, MOV, MKV, WebM and more")}
-                </span>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_14rem]">
-                <Field>
-                  <FieldLabel htmlFor="video-session-title">
-                    {t("Name")}
-                  </FieldLabel>
-                  <Input
-                    id="video-session-title"
-                    onChange={(event) => setTitle(event.target.value)}
-                    value={title}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel>{t("Language")}</FieldLabel>
-                  <Select
-                    items={languageItems}
-                    onValueChange={(value) => setLanguage(value || "auto")}
-                    value={language}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {languageItems.map((item) => (
-                          <SelectItem key={item.value} value={item.value}>
-                            {item.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-            </FieldGroup>
-          ) : (
-            <FieldGroup>
-              <div>
-                <h2 className="text-lg font-semibold">{t("Choose options")}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("The defaults work for most recordings.")}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 rounded-xl bg-muted/60 p-3">
-                <FileVideo
-                  aria-hidden="true"
-                  className="size-5 shrink-0 text-primary"
-                />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
-                    {videoFile?.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatBytes(videoFile?.size ?? 0, 1)} ·{" "}
-                    {title.trim() || "Video transcript"}
-                  </p>
-                </div>
-              </div>
-
-              <Field orientation="horizontal">
-                <div className="flex flex-1 flex-col gap-1">
-                  <FieldLabel htmlFor="video-option-speakers">
-                    {t("Separate speakers")}
-                  </FieldLabel>
-                  <FieldDescription>
-                    {diarizationEndpoints.length === 0
-                      ? t("No speaker separation endpoint is configured.")
-                      : t("Label who is talking in the transcript.")}
-                  </FieldDescription>
-                </div>
-                <Switch
-                  checked={Boolean(effectiveDiarizationEndpoint)}
-                  disabled={diarizationEndpoints.length === 0}
-                  id="video-option-speakers"
-                  onCheckedChange={(on) =>
-                    setSelectedDiarizationEndpoint(
-                      on ? (diarizationEndpoints[0]?.id ?? "none") : "none"
-                    )
-                  }
-                />
-              </Field>
-
-              <Field orientation="horizontal">
-                <div className="flex flex-1 flex-col gap-1">
-                  <FieldLabel htmlFor="video-option-grammar">
-                    {t("Polish grammar")}
-                  </FieldLabel>
-                  <FieldDescription>
-                    {grammarEndpoints.length === 0
-                      ? t("No chat endpoint is configured.")
-                      : t(
-                          "Clean up punctuation and wording. The original stays available as Verbatim."
-                        )}
-                  </FieldDescription>
-                </div>
-                <Switch
-                  checked={Boolean(effectiveGrammarEndpoint)}
-                  disabled={grammarEndpoints.length === 0}
-                  id="video-option-grammar"
-                  onCheckedChange={(on) =>
-                    setGrammarChoice(on ? "auto" : "none")
-                  }
-                />
-              </Field>
-
-              <Collapsible defaultOpen={!effectiveSelectedEndpoint}>
-                <CollapsibleTrigger className="group/advanced flex w-full items-center gap-2 rounded-lg py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  {t("Advanced settings")}
-                  <span className="min-w-0 flex-1 truncate text-left text-xs font-normal text-muted-foreground">
-                    {selectedTranscriptionEndpoint?.name ??
-                      "No endpoint selected"}
+                  onClick={openFileDialog}
+                  onDragEnter={handleDragEnter}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      openFileDialog()
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <span className="flex size-12 items-center justify-center rounded-2xl bg-background text-primary shadow-xs">
+                    <Upload aria-hidden="true" className="size-5" />
                   </span>
-                  <ChevronDown
-                    aria-hidden="true"
-                    className="size-4 text-muted-foreground transition-transform group-data-[panel-open]/advanced:rotate-180"
-                  />
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <FieldGroup className="pt-4">
-                    <Field>
-                      <FieldLabel>{t("Transcription endpoint")}</FieldLabel>
-                      <Select
-                        items={transcriptionEndpoints.map((endpoint) => ({
-                          value: endpoint.id,
-                          label: `${endpoint.name} · ${endpoint.providerType} · ${t(transcriptionModeLabel(endpoint))}`,
-                        }))}
-                        onValueChange={(value) =>
-                          setSelectedEndpoint(value ?? "")
-                        }
-                        value={effectiveSelectedEndpoint}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue
-                            placeholder={t("Select a transcription endpoint")}
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectLabel>
-                              {t("Transcription providers")}
-                            </SelectLabel>
-                            {transcriptionEndpoints.map((endpoint) => (
-                              <SelectItem key={endpoint.id} value={endpoint.id}>
-                                {endpoint.name} · {endpoint.providerType} ·{" "}
-                                {t(transcriptionModeLabel(endpoint))}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <VideoModelField
-                      description={t(
-                        "Choose the ASR model used for the timestamped transcript."
-                      )}
-                      endpoint={selectedTranscriptionEndpoint}
-                      label={t("Transcription model")}
-                      loading={
-                        Boolean(selectedTranscriptionEndpoint) &&
-                        !modelDiscovery[
-                          videoModelKey(
-                            selectedTranscriptionEndpoint?.id ?? "",
-                            "transcription"
-                          )
-                        ]
-                      }
-                      models={modelOptionsFor(
-                        selectedTranscriptionEndpoint,
-                        "transcription"
-                      )}
-                      onValueChange={(value) =>
-                        setModelValue(
-                          selectedTranscriptionEndpoint,
-                          "transcription",
-                          value
-                        )
-                      }
-                      value={transcriptionModel}
+                  <span className="text-sm font-medium">
+                    {t("Drop your video here or click to browse")}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("MP4, MOV, MKV, WebM and more")}
+                  </span>
+                </div>
+              )}
+
+              <Card>
+                <Card.Content className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_14rem]">
+                  <Field>
+                    <FieldLabel>{t("Name")}</FieldLabel>
+                    <Input
+                      onChange={(event) => setTitle(event.target.value)}
+                      value={title}
                     />
-                    <Field>
-                      <FieldLabel>{t("Speaker separation")}</FieldLabel>
-                      <Select
+                  </Field>
+                  <Field>
+                    <FieldLabel>{t("Language")}</FieldLabel>
+                    <Select
+                      items={languageItems}
+                      onValueChange={(value) => setLanguage(value || "auto")}
+                      value={language}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {languageItems.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </Card.Content>
+              </Card>
+
+              <Frame>
+                <Frame.Header>
+                  <Frame.Title>{t("Processing")}</Frame.Title>
+                  <Frame.Description>
+                    {t("The defaults work for most recordings.")}
+                  </Frame.Description>
+                </Frame.Header>
+                <Frame.Panel>
+                  <Frame.Row render={<label />}>
+                    <Frame.Content>
+                      <Frame.Title as="p">{t("Separate speakers")}</Frame.Title>
+                      <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                        {diarizationEndpoints.length === 0
+                          ? t("No speaker separation endpoint is configured.")
+                          : t("Label who is talking in the transcript.")}
+                      </Frame.Description>
+                    </Frame.Content>
+                    <Frame.Actions>
+                      <Switch
+                        aria-label={t("Separate speakers")}
+                        checked={Boolean(effectiveDiarizationEndpoint)}
                         disabled={diarizationEndpoints.length === 0}
-                        items={[
-                          {
-                            value: "none",
-                            label: "Keep one transcript stream",
-                          },
-                          ...diarizationEndpoints.map((endpoint) => ({
-                            value: endpoint.id,
-                            label: `${endpoint.name} · ${endpoint.providerType}`,
-                          })),
-                        ]}
-                        onValueChange={(value) =>
-                          setSelectedDiarizationEndpoint(value ?? "none")
-                        }
-                        value={selectedDiarizationEndpoint}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue
-                            placeholder={t("Keep one transcript stream")}
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectLabel>
-                              {t("Diarization providers")}
-                            </SelectLabel>
-                            <SelectItem value="none">
-                              {t("Keep one transcript stream")}
-                            </SelectItem>
-                            {diarizationEndpoints.map((endpoint) => (
-                              <SelectItem key={endpoint.id} value={endpoint.id}>
-                                {endpoint.name} · {endpoint.providerType}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                      <FieldDescription>
-                        {t(
-                          "Separate speakers in the transcript when a diarization endpoint is available."
-                        )}
-                      </FieldDescription>
-                    </Field>
-                    {effectiveDiarizationEndpoint ? (
-                      <VideoModelField
-                        description={t(
-                          "Choose the diarization model used to identify speakers."
-                        )}
-                        endpoint={selectedDiarizationEndpointItem}
-                        label={t("Speaker separation model")}
-                        loading={
-                          Boolean(selectedDiarizationEndpointItem) &&
-                          !modelDiscovery[
-                            videoModelKey(
-                              selectedDiarizationEndpointItem?.id ?? "",
-                              "diarization"
-                            )
-                          ]
-                        }
-                        models={modelOptionsFor(
-                          selectedDiarizationEndpointItem,
-                          "diarization"
-                        )}
-                        onValueChange={(value) =>
-                          setModelValue(
-                            selectedDiarizationEndpointItem,
-                            "diarization",
-                            value
+                        onCheckedChange={(on) =>
+                          setSelectedDiarizationEndpoint(
+                            on
+                              ? (diarizationEndpoints[0]?.id ?? "none")
+                              : "none"
                           )
                         }
-                        value={diarizationModel}
                       />
-                    ) : null}
-                    <VideoCaptionSettings
-                      endpoints={endpoints}
-                      enabled={Boolean(effectiveDiarizationEndpoint)}
-                      value={captionOptions}
-                      onChange={setCaptionOptions}
-                    />
-                    <Field>
-                      <FieldLabel>{t("Grammar polishing")}</FieldLabel>
-                      <Select
-                        items={[
-                          { value: "none", label: "Keep verbatim transcript" },
-                          ...grammarEndpoints.map((endpoint) => ({
-                            value: endpoint.id,
-                            label: `${endpoint.name} · ${endpoint.providerType}`,
-                          })),
-                        ]}
-                        onValueChange={(value) =>
-                          setGrammarChoice(value ?? "none")
+                    </Frame.Actions>
+                  </Frame.Row>
+                  <Frame.Row render={<label />}>
+                    <Frame.Content>
+                      <Frame.Title as="p">{t("Polish grammar")}</Frame.Title>
+                      <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                        {grammarEndpoints.length === 0
+                          ? t("No chat endpoint is configured.")
+                          : t(
+                              "Clean up punctuation and wording. The original stays available as Verbatim."
+                            )}
+                      </Frame.Description>
+                    </Frame.Content>
+                    <Frame.Actions>
+                      <Switch
+                        aria-label={t("Polish grammar")}
+                        checked={Boolean(effectiveGrammarEndpoint)}
+                        disabled={grammarEndpoints.length === 0}
+                        onCheckedChange={(on) =>
+                          setGrammarChoice(on ? "auto" : "none")
                         }
-                        value={effectiveGrammarEndpoint || "none"}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue
-                            placeholder={t("Keep verbatim transcript")}
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectLabel>{t("Chat providers")}</SelectLabel>
-                            <SelectItem value="none">
-                              {t("Keep verbatim transcript")}
-                            </SelectItem>
-                            {grammarEndpoints.map((endpoint) => (
-                              <SelectItem key={endpoint.id} value={endpoint.id}>
-                                {endpoint.name} · {endpoint.providerType}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                      <FieldDescription>
-                        {t(
-                          "The original ASR output stays available under Verbatim."
-                        )}
-                      </FieldDescription>
-                    </Field>
-                    {effectiveGrammarEndpoint ? (
-                      <VideoModelField
-                        description={t(
-                          "Choose the chat model used to polish the transcript."
-                        )}
-                        endpoint={selectedGrammarEndpoint}
-                        label={t("Grammar model")}
-                        loading={
-                          Boolean(selectedGrammarEndpoint) &&
-                          !modelDiscovery[
-                            videoModelKey(
-                              selectedGrammarEndpoint?.id ?? "",
-                              "chat"
+                      />
+                    </Frame.Actions>
+                  </Frame.Row>
+                </Frame.Panel>
+              </Frame>
+
+              <Card>
+                <Card.Content>
+                  <Collapsible defaultOpen={!effectiveSelectedEndpoint}>
+                    <CollapsibleTrigger className="group/advanced flex w-full items-center gap-2 rounded-lg py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      {t("Advanced settings")}
+                      <span className="min-w-0 flex-1 truncate text-left text-xs font-normal text-muted-foreground">
+                        {selectedTranscriptionEndpoint?.name ??
+                          "No endpoint selected"}
+                      </span>
+                      <ChevronDown
+                        aria-hidden="true"
+                        className="size-4 text-muted-foreground transition-transform group-data-[panel-open]/advanced:rotate-180"
+                      />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <FieldGroup className="pt-4">
+                        <Field>
+                          <FieldLabel>{t("Transcription endpoint")}</FieldLabel>
+                          <Select
+                            items={transcriptionEndpoints.map((endpoint) => ({
+                              value: endpoint.id,
+                              label: `${endpoint.name} · ${endpoint.providerType} · ${t(transcriptionModeLabel(endpoint))}`,
+                            }))}
+                            onValueChange={(value) =>
+                              setSelectedEndpoint(value ?? "")
+                            }
+                            value={effectiveSelectedEndpoint}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue
+                                placeholder={t(
+                                  "Select a transcription endpoint"
+                                )}
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                <SelectGroupLabel>
+                                  {t("Transcription providers")}
+                                </SelectGroupLabel>
+                                {transcriptionEndpoints.map((endpoint) => (
+                                  <SelectItem
+                                    key={endpoint.id}
+                                    value={endpoint.id}
+                                  >
+                                    {endpoint.name} · {endpoint.providerType} ·{" "}
+                                    {t(transcriptionModeLabel(endpoint))}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        <VideoModelField
+                          description={t(
+                            "Choose the ASR model used for the timestamped transcript."
+                          )}
+                          endpoint={selectedTranscriptionEndpoint}
+                          label={t("Transcription model")}
+                          loading={
+                            Boolean(selectedTranscriptionEndpoint) &&
+                            !modelDiscovery[
+                              videoModelKey(
+                                selectedTranscriptionEndpoint?.id ?? "",
+                                "transcription"
+                              )
+                            ]
+                          }
+                          models={modelOptionsFor(
+                            selectedTranscriptionEndpoint,
+                            "transcription"
+                          )}
+                          onValueChange={(value) =>
+                            setModelValue(
+                              selectedTranscriptionEndpoint,
+                              "transcription",
+                              value
                             )
-                          ]
-                        }
-                        models={modelOptionsFor(
-                          selectedGrammarEndpoint,
-                          "chat"
-                        )}
-                        onValueChange={(value) =>
-                          setModelValue(selectedGrammarEndpoint, "chat", value)
-                        }
-                        value={grammarModel}
-                      />
-                    ) : null}
-                  </FieldGroup>
-                </CollapsibleContent>
-              </Collapsible>
-            </FieldGroup>
-          )}
-        </TranscriptionCreationFlow>
+                          }
+                          value={transcriptionModel}
+                        />
+                        <Field>
+                          <FieldLabel>{t("Speaker separation")}</FieldLabel>
+                          <Select
+                            disabled={diarizationEndpoints.length === 0}
+                            items={[
+                              {
+                                value: "none",
+                                label: "Keep one transcript stream",
+                              },
+                              ...diarizationEndpoints.map((endpoint) => ({
+                                value: endpoint.id,
+                                label: `${endpoint.name} · ${endpoint.providerType}`,
+                              })),
+                            ]}
+                            onValueChange={(value) =>
+                              setSelectedDiarizationEndpoint(value ?? "none")
+                            }
+                            value={selectedDiarizationEndpoint}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue
+                                placeholder={t("Keep one transcript stream")}
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                <SelectGroupLabel>
+                                  {t("Diarization providers")}
+                                </SelectGroupLabel>
+                                <SelectItem value="none">
+                                  {t("Keep one transcript stream")}
+                                </SelectItem>
+                                {diarizationEndpoints.map((endpoint) => (
+                                  <SelectItem
+                                    key={endpoint.id}
+                                    value={endpoint.id}
+                                  >
+                                    {endpoint.name} · {endpoint.providerType}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          <FieldDescription>
+                            {t(
+                              "Separate speakers in the transcript when a diarization endpoint is available."
+                            )}
+                          </FieldDescription>
+                        </Field>
+                        {effectiveDiarizationEndpoint ? (
+                          <VideoModelField
+                            description={t(
+                              "Choose the diarization model used to identify speakers."
+                            )}
+                            endpoint={selectedDiarizationEndpointItem}
+                            label={t("Speaker separation model")}
+                            loading={
+                              Boolean(selectedDiarizationEndpointItem) &&
+                              !modelDiscovery[
+                                videoModelKey(
+                                  selectedDiarizationEndpointItem?.id ?? "",
+                                  "diarization"
+                                )
+                              ]
+                            }
+                            models={modelOptionsFor(
+                              selectedDiarizationEndpointItem,
+                              "diarization"
+                            )}
+                            onValueChange={(value) =>
+                              setModelValue(
+                                selectedDiarizationEndpointItem,
+                                "diarization",
+                                value
+                              )
+                            }
+                            value={diarizationModel}
+                          />
+                        ) : null}
+                        <VideoCaptionSettings
+                          endpoints={endpoints}
+                          enabled={Boolean(effectiveDiarizationEndpoint)}
+                          value={captionOptions}
+                          onChange={setCaptionOptions}
+                        />
+                        <Field>
+                          <FieldLabel>{t("Grammar polishing")}</FieldLabel>
+                          <Select
+                            items={[
+                              {
+                                value: "none",
+                                label: "Keep verbatim transcript",
+                              },
+                              ...grammarEndpoints.map((endpoint) => ({
+                                value: endpoint.id,
+                                label: `${endpoint.name} · ${endpoint.providerType}`,
+                              })),
+                            ]}
+                            onValueChange={(value) =>
+                              setGrammarChoice(value ?? "none")
+                            }
+                            value={effectiveGrammarEndpoint || "none"}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue
+                                placeholder={t("Keep verbatim transcript")}
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                <SelectGroupLabel>
+                                  {t("Chat providers")}
+                                </SelectGroupLabel>
+                                <SelectItem value="none">
+                                  {t("Keep verbatim transcript")}
+                                </SelectItem>
+                                {grammarEndpoints.map((endpoint) => (
+                                  <SelectItem
+                                    key={endpoint.id}
+                                    value={endpoint.id}
+                                  >
+                                    {endpoint.name} · {endpoint.providerType}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          <FieldDescription>
+                            {t(
+                              "The original ASR output stays available under Verbatim."
+                            )}
+                          </FieldDescription>
+                        </Field>
+                        {effectiveGrammarEndpoint ? (
+                          <VideoModelField
+                            description={t(
+                              "Choose the chat model used to polish the transcript."
+                            )}
+                            endpoint={selectedGrammarEndpoint}
+                            label={t("Grammar model")}
+                            loading={
+                              Boolean(selectedGrammarEndpoint) &&
+                              !modelDiscovery[
+                                videoModelKey(
+                                  selectedGrammarEndpoint?.id ?? "",
+                                  "chat"
+                                )
+                              ]
+                            }
+                            models={modelOptionsFor(
+                              selectedGrammarEndpoint,
+                              "chat"
+                            )}
+                            onValueChange={(value) =>
+                              setModelValue(
+                                selectedGrammarEndpoint,
+                                "chat",
+                                value
+                              )
+                            }
+                            value={grammarModel}
+                          />
+                        ) : null}
+                      </FieldGroup>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </Card.Content>
+              </Card>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Button
+                  disabled={videoStarting}
+                  onClick={() => {
+                    setCreateOpen(false)
+                    if (!videoUploadInFlightRef.current) setVideoFile(null)
+                  }}
+                  variant="outline"
+                >
+                  {t("Cancel")}
+                </Button>
+                <div className="flex items-center gap-3">
+                  {!videoFile ? (
+                    <span className="text-xs text-muted-foreground">
+                      {t("Choose a video to continue.")}
+                    </span>
+                  ) : !effectiveSelectedEndpoint ? (
+                    <span className="text-xs text-muted-foreground">
+                      {t("Select a transcription endpoint.")}
+                    </span>
+                  ) : null}
+                  <Button
+                    disabled={
+                      videoStarting || !videoFile || !effectiveSelectedEndpoint
+                    }
+                    onClick={() => void createVideoSession()}
+                  >
+                    {videoStarting ? (
+                      <>
+                        <Spinner data-icon="inline-start" />{" "}
+                        {t("Preparing upload…")}
+                      </>
+                    ) : (
+                      <>
+                        <Upload data-icon="inline-start" />{" "}
+                        {t("Start transcription")}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <aside className="lg:sticky lg:top-4">
+              <Frame>
+                <Frame.Header>
+                  <Frame.Title>{t("What happens next")}</Frame.Title>
+                  <Frame.Description>
+                    {t("You can follow the progress on the next page.")}
+                  </Frame.Description>
+                </Frame.Header>
+                <Frame.Panel>
+                  {[
+                    {
+                      key: "upload",
+                      title: t("Upload"),
+                      detail: videoFile
+                        ? `${videoFile.name} · ${formatBytes(videoFile.size, 1)}`
+                        : t("Your video is sent securely."),
+                      on: true,
+                    },
+                    {
+                      key: "transcribe",
+                      title: t("Transcription"),
+                      detail:
+                        selectedTranscriptionEndpoint?.name ??
+                        t("No endpoint selected"),
+                      on: true,
+                    },
+                    {
+                      key: "speakers",
+                      title: t("Speaker separation"),
+                      detail: t("Who is talking is labelled in the text."),
+                      on: Boolean(effectiveDiarizationEndpoint),
+                    },
+                    {
+                      key: "grammar",
+                      title: t("Grammar polishing"),
+                      detail: t("Wording is cleaned up; the original stays."),
+                      on: Boolean(effectiveGrammarEndpoint),
+                    },
+                    {
+                      key: "summary",
+                      title: t("Summary"),
+                      detail: t("Create one once the transcript is ready."),
+                      on: true,
+                    },
+                  ]
+                    .filter((step) => step.on)
+                    .map((step, index) => (
+                      <Frame.Row key={step.key}>
+                        <Frame.Media>
+                          <span className="text-xs font-semibold tabular-nums">
+                            {index + 1}
+                          </span>
+                        </Frame.Media>
+                        <Frame.Content>
+                          <Frame.Title as="p">{step.title}</Frame.Title>
+                          <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                            {step.detail}
+                          </Frame.Description>
+                        </Frame.Content>
+                      </Frame.Row>
+                    ))}
+                </Frame.Panel>
+              </Frame>
+            </aside>
+          </div>
+        </section>
       ) : null}
 
       <Dialog
@@ -2408,25 +2546,27 @@ export function VideoTranscriptionView({
               )}
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="video-speaker-name">
-                {t("Speaker name")}
-              </FieldLabel>
-              <Input
-                autoFocus
-                id="video-speaker-name"
-                onChange={(event) => setSpeakerName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault()
-                    void saveSpeakerName()
-                  }
-                }}
-                value={speakerName}
-              />
-            </Field>
-          </FieldGroup>
+          <DialogBody>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="video-speaker-name">
+                  {t("Speaker name")}
+                </FieldLabel>
+                <Input
+                  autoFocus
+                  id="video-speaker-name"
+                  onChange={(event) => setSpeakerName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault()
+                      void saveSpeakerName()
+                    }
+                  }}
+                  value={speakerName}
+                />
+              </Field>
+            </FieldGroup>
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={speakerRenameSaving}
@@ -2440,10 +2580,7 @@ export function VideoTranscriptionView({
               onClick={() => void saveSpeakerName()}
             >
               {speakerRenameSaving ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
+                <Spinner data-icon="inline-start" />
               ) : (
                 <Pencil data-icon="inline-start" />
               )}
@@ -2455,14 +2592,12 @@ export function VideoTranscriptionView({
 
       <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Cancel this video?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(
-                "This stops the upload and cancels transcription. A completed upload is retained so you can still view the source or retry it."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Cancel this video?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(
+              "This stops the upload and cancels transcription. A completed upload is retained so you can still view the source or retry it."
+            )}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("Keep processing")}</AlertDialogCancel>
             <AlertDialogAction
@@ -2485,14 +2620,12 @@ export function VideoTranscriptionView({
         open={skipSpeakerOpen}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Skip speaker separation?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(
-                "The transcript and timestamps will be kept, but this video will not receive automatic speaker labels."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Skip speaker separation?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(
+              "The transcript and timestamps will be kept, but this video will not receive automatic speaker labels."
+            )}
+          </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={skipSpeakerInFlight}>
               {t("Keep speaker separation")}
@@ -2505,10 +2638,7 @@ export function VideoTranscriptionView({
               }}
             >
               {skipSpeakerInFlight ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
+                <Spinner data-icon="inline-start" />
               ) : (
                 <SkipForward data-icon="inline-start" />
               )}
@@ -2547,10 +2677,7 @@ function LiveTranscriptPreview({
           </p>
         </div>
         <Badge className="shrink-0" variant="outline">
-          <LoaderCircle
-            aria-hidden="true"
-            className="size-3 motion-safe:animate-spin motion-reduce:animate-none"
-          />
+          <Spinner aria-hidden="true" className="size-3" />
           {t("Live")}
         </Badge>
       </div>
@@ -2614,7 +2741,7 @@ function VideoModelField({
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            <SelectLabel>{fieldLabel}</SelectLabel>
+            <SelectGroupLabel>{fieldLabel}</SelectGroupLabel>
             {models.map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 {videoModelLabel(model)}
@@ -2727,7 +2854,9 @@ function VideoPipeline({
                   ? t("Combining transcript blocks")
                   : parallelProgress?.phase === "transcribing"
                     ? t("Transcribing your recording")
-                    : `${t(videoPipelineStepLabel(activeStep.key))} in progress`
+                    : t("{value0} in progress", {
+                        value0: t(videoPipelineStepLabel(activeStep.key)),
+                      })
             : upload.status === "queued"
               ? workersSaturated
                 ? t("Waiting to start")
@@ -2759,10 +2888,7 @@ function VideoPipeline({
                 className="size-4 text-destructive"
               />
             ) : isActive ? (
-              <LoaderCircle
-                aria-hidden="true"
-                className="size-4 animate-spin text-primary"
-              />
+              <Spinner aria-hidden="true" className="size-4 text-primary" />
             ) : upload.status === "cancelled" ? (
               <X aria-hidden="true" className="size-4 text-muted-foreground" />
             ) : (
@@ -2796,7 +2922,7 @@ function VideoPipeline({
                 disabled={skipSpeakerInFlight || skipSpeakerRequested}
                 onClick={onRequestSkipSpeakerSeparation}
                 size="sm"
-                variant="ghost"
+                variant="outline"
               >
                 <SkipForward data-icon="inline-start" />{" "}
                 {skipSpeakerRequested
@@ -2808,7 +2934,7 @@ function VideoPipeline({
               <Button
                 onClick={onViewPartialTranscript}
                 size="sm"
-                variant="ghost"
+                variant="outline"
               >
                 <FileText data-icon="inline-start" />{" "}
                 {t("View partial transcript")}
@@ -2873,16 +2999,17 @@ function VideoPipeline({
 
   return (
     <Collapsible
-      className={cn(
-        "shrink-0",
-        prominent && "mx-auto w-full max-w-3xl py-6 sm:py-10"
-      )}
+      className={cn("shrink-0", prominent && "w-full py-2 sm:py-4")}
       onOpenChange={handleOpenChange}
       open={prominent || open}
     >
       <Card
         aria-label={t("Video processing pipeline")}
-        className="flex min-h-0 flex-col gap-0 overflow-hidden py-0 shadow-none"
+        className={cn(
+          "flex min-h-0 flex-col gap-0 overflow-hidden py-0 shadow-none",
+          prominent &&
+            "overflow-visible border-0 bg-transparent shadow-none ring-0"
+        )}
       >
         {prominent ? (
           <VideoProcessingProgress
@@ -2897,6 +3024,16 @@ function VideoPipeline({
                   })
                 : overallLabel
             }
+            elapsedMs={
+              isActive && activeStep
+                ? getVideoPipelineStepDuration(
+                    activeStep,
+                    now,
+                    steps,
+                    steps.indexOf(activeStep)
+                  )
+                : undefined
+            }
             elapsed={
               isActive && activeStep
                 ? formatPipelineStepDuration(
@@ -2910,7 +3047,8 @@ function VideoPipeline({
                 : undefined
             }
           >
-            {output}
+            {/* While uploading, the progress above already says everything. */}
+            {upload.status === "uploading" && !failedStep ? null : output}
           </VideoProcessingProgress>
         ) : null}
         {!prominent ? (

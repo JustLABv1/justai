@@ -1,0 +1,42 @@
+{
+  "brand": "JustAI",
+  "tagline": "Chat · Transkription · Agents",
+  "brief": "Ein gemeinsamer Arbeitsraum für Gespräche, Transkription und handelnde Agents.",
+  "adjectives": [
+    "klar",
+    "verbunden",
+    "souverän",
+    "zugänglich"
+  ],
+  "industry": "software",
+  "brand_color": "#6B5144",
+  "tile_color": "#24211F",
+  "greyscale": false,
+  "final": true,
+  "nav": [
+    "Chat",
+    "Transkription",
+    "Agents"
+  ],
+  "concepts": [
+    {
+      "name": "Geflecht",
+      "symbol": "masters/justai-symbol.svg",
+      "lockup": "masters/justai-horizontal.svg",
+      "stacked": "masters/justai-stacked.svg",
+      "symbol_on_dark": "masters/justai-symbol-reversed.svg",
+      "lockup_on_dark": "masters/justai-horizontal-reversed.svg",
+      "symbol_on_tile": "masters/justai-symbol-reversed.svg",
+      "idea": "Zwei Stränge werden zu einem gemeinsamen Arbeitszeichen.",
+      "rationale": [
+        "Offene Mitte und eigenständige Silhouette",
+        "Einfarbig und ohne Effekte reproduzierbar",
+        "Eigene Wortmarke mit verwandter Kurvenlogik"
+      ]
+    }
+  ],
+  "recommendation": "Geflecht ist die gewählte Richtung.",
+  "next_steps": [
+    "Für die technische Integration die passenden SVG- und Web-Icon-Dateien verwenden."
+  ]
+}

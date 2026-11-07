@@ -1,4 +1,5 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useMemo, useState } from "react"
@@ -287,11 +288,7 @@ export function AutomationsView({
           )}
         </AlertDescription>
       </Alert>
-      {error && !open && (
-        <Alert aria-live="polite" role="alert" variant="destructive">
-          <AlertDescription>{t(error)}</AlertDescription>
-        </Alert>
-      )}
+      {error && !open && <ToastFeedback message={error} type={"destructive"} />}
       {automations.length === 0 ? (
         <Card className="bg-muted/30">
           <CardContent className="flex min-h-64 flex-col items-center justify-center text-center">
@@ -609,11 +606,7 @@ export function AutomationsView({
                   </SelectContent>
                 </Select>
               </Field>
-              {error && (
-                <Alert aria-live="polite" role="alert" variant="destructive">
-                  <AlertDescription>{t(error)}</AlertDescription>
-                </Alert>
-              )}
+              {error && <ToastFeedback message={error} type={"destructive"} />}
             </FieldGroup>
             <DialogFooter>
               <Button

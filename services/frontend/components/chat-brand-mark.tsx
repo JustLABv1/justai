@@ -53,7 +53,7 @@ export function ChatBrandMark({ className, isActive }: ChatBrandMarkProps) {
       className={cn("justai-chat-mark", className)}
       data-state={state}
     >
-      <BrandMark className="size-full" />
+      <BrandMark className="size-full text-inherit" />
     </span>
   )
 }

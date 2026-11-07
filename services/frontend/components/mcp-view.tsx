@@ -1,30 +1,29 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  AlertTriangle,
   Check,
   ImagePlus,
   KeyRound,
-  LoaderCircle,
   LockKeyhole,
   MoreHorizontal,
   Pencil,
   Plug,
-  ShieldCheck,
   Sparkles,
-  Square,
   TerminalSquare,
   Trash2,
-  Wrench,
+  Search,
+  ChevronDown,
   X,
 } from "lucide-react"
 
 import { APIError, api, API_URL, resolveAPIURL } from "@/lib/api"
 import type { MCPServer } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,31 +31,26 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/panelui/card"
+import { Sheet } from "@/components/panelui/sheet"
+import { Frame } from "@/components/panelui/frame"
+import { Alert } from "@/components/panelui/alert"
+import { Field } from "@/components/panelui/field"
+import { EndpointBadge } from "@/components/endpoint-badge"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible"
+import { Input } from "@/components/panelui/input"
 import {
   Select,
   SelectContent,
@@ -64,16 +58,9 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from "@/components/panelui/select"
+import { Switch } from "@/components/panelui/switch"
+import { Menu } from "@/components/panelui/menu"
 
 type Props = {
   servers: MCPServer[]
@@ -82,6 +69,7 @@ type Props = {
   userId?: string
   platformAdmin?: boolean
   createRequest?: number
+  apiBasePath?: string
   resourceError?: string
   onRetryResource?: () => void
 }
@@ -96,6 +84,7 @@ type MCPForm = {
   oauthClientId: string
   oauthScopes: string
   scopeType: string
+  scopeId: string
   allowedTools: string
   trustedReadOnly: boolean
   autoDiscover: boolean
@@ -111,6 +100,7 @@ const emptyForm: MCPForm = {
   oauthClientId: "",
   oauthScopes: "",
   scopeType: "organization",
+  scopeId: "",
   allowedTools: "",
   trustedReadOnly: false,
   autoDiscover: true,
@@ -167,10 +157,13 @@ export function MCPView({
   userId,
   platformAdmin = false,
   createRequest,
+  apiBasePath = "/api/v1/mcp/servers",
   resourceError,
   onRetryResource,
 }: Props) {
   const { t, locale } = useTranslations()
+  const isPlatformCatalog = apiBasePath === "/api/v1/admin/mcp/servers"
+  const [removePhrase, setRemovePhrase] = useState("")
 
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<MCPForm>(emptyForm)
@@ -195,9 +188,21 @@ export function MCPView({
     platformAdmin ||
     organizationRole === "owner" ||
     organizationRole === "admin"
-  const visibleServers = servers
+  const [query, setQuery] = useState("")
+  const [scope, setScope] = useState("all")
+  const [status, setStatus] = useState("all")
+  const [expandedServer, setExpandedServer] = useState<string | null>(null)
+  const visibleServers = servers.filter(
+    (server) =>
+      (scope === "all" || server.scopeType === scope) &&
+      (status === "all" || server.enabled === (status === "enabled")) &&
+      `${server.name} ${server.endpointUrl}`
+        .toLowerCase()
+        .includes(query.trim().toLowerCase())
+  )
 
   const canManageServer = (server: MCPServer) => {
+    if (isPlatformCatalog) return true
     if (server.scopeType === "global") return false
     if (userId === undefined && organizationRole === undefined) return true
     if (server.scopeType === "user") return server.scopeId === userId
@@ -252,10 +257,14 @@ export function MCPView({
     resetIconSelection()
     setForm({
       ...emptyForm,
-      scopeType: canManageOrganization ? "organization" : "user",
+      scopeType: isPlatformCatalog
+        ? "global"
+        : canManageOrganization
+          ? "organization"
+          : "user",
     })
     setOpen(true)
-  }, [canManageOrganization, resetIconSelection])
+  }, [canManageOrganization, isPlatformCatalog, resetIconSelection])
 
   useEffect(() => {
     if (!createRequest || createRequest === createRequestRef.current) return
@@ -277,6 +286,14 @@ export function MCPView({
 
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (
+      isPlatformCatalog &&
+      form.scopeType !== "global" &&
+      !form.scopeId.trim()
+    ) {
+      setDialogError("A workspace or user ID is required for this scope.")
+      return
+    }
     setSaving(true)
     setDialogError("")
     const allowedTools = form.allowedTools
@@ -285,24 +302,34 @@ export function MCPView({
       .filter(Boolean)
     try {
       let server = editingServer
-        ? await api.patch<MCPServer>(
-            `/api/v1/mcp/servers/${editingServer.id}`,
-            { ...form, allowedTools }
-          )
-        : await api.post<MCPServer>("/api/v1/mcp/servers", {
+        ? await api.patch<MCPServer>(`${apiBasePath}/${editingServer.id}`, {
             ...form,
+            scopeId: isPlatformCatalog
+              ? form.scopeType === "global"
+                ? null
+                : form.scopeId.trim()
+              : undefined,
+            allowedTools,
+          })
+        : await api.post<MCPServer>(apiBasePath, {
+            ...form,
+            scopeId: isPlatformCatalog
+              ? form.scopeType === "global"
+                ? null
+                : form.scopeId.trim()
+              : undefined,
             allowedTools,
           })
       if (iconFile) {
         const body = new FormData()
         body.set("icon", iconFile)
         server = await api.upload<MCPServer>(
-          `/api/v1/mcp/servers/${server.id}/icon`,
+          `${apiBasePath}/${server.id}/icon`,
           body
         )
       } else if (iconRemoved && editingServer) {
         server = await api.delete<MCPServer>(
-          `/api/v1/mcp/servers/${editingServer.id}/icon`
+          `${apiBasePath}/${editingServer.id}/icon`
         )
       }
       let connectionNotice = ""
@@ -311,18 +338,21 @@ export function MCPView({
       if (!editingServer && canVerifyNow) {
         try {
           const tested = await api.post<{ server?: MCPServer }>(
-            `/api/v1/mcp/servers/${server.id}/test`
+            `${apiBasePath}/${server.id}/test`
           )
           server = { ...server, ...(tested.server ?? {}), lastError: "" }
           const discovered = await api.get<{
             tools: Array<{ name: string; description?: string }>
-          }>(`/api/v1/mcp/servers/${server.id}/tools`)
+          }>(`${apiBasePath}/${server.id}/tools`)
           setTools((current) => ({
             ...current,
             [server.id]: discovered.tools,
           }))
           server = { ...server, toolCount: discovered.tools.length }
-          connectionNotice = ` Connection verified and ${discovered.tools.length} tools discovered.`
+          connectionNotice = t(
+            "Connection verified. {count} tools discovered.",
+            { count: discovered.tools.length }
+          )
         } catch (caught) {
           server = {
             ...server,
@@ -331,11 +361,16 @@ export function MCPView({
                 ? caught.message
                 : t("Verification failed."),
           }
-          connectionNotice =
-            " The server was saved, but verification needs attention."
+          connectionNotice = t(
+            "The server was saved, but verification needs attention."
+          )
         }
       } else if (!editingServer && server.authType === "oauth") {
-        connectionNotice = " Authorize OAuth to verify the connection."
+        connectionNotice = t(
+          isPlatformCatalog
+            ? "OAuth authorization is managed from the owning workspace or personal account."
+            : "Authorize OAuth to verify the connection."
+        )
       }
       onChange(
         editingServer
@@ -343,7 +378,7 @@ export function MCPView({
           : [server, ...servers]
       )
       setNotice(
-        `${form.name} is connected.${t(connectionNotice)} ${form.autoDiscover ? "Relevant tools can now be surfaced automatically." : "Add it to a chat when you want to use its tools."}`
+        `${t("{value0} was saved.", { value0: form.name })} ${connectionNotice}`
       )
     } catch (caught) {
       if (caught instanceof APIError) {
@@ -379,6 +414,7 @@ export function MCPView({
       oauthClientId: "",
       oauthScopes: "",
       scopeType: server.scopeType,
+      scopeId: server.scopeId ?? "",
       allowedTools: server.allowedTools.join(", "),
       trustedReadOnly: Boolean(server.trustedReadOnly),
       autoDiscover: Boolean(server.autoDiscover),
@@ -390,7 +426,7 @@ export function MCPView({
     setBusyId(server.id)
     try {
       const updated = await api.patch<MCPServer>(
-        `/api/v1/mcp/servers/${server.id}`,
+        `${apiBasePath}/${server.id}`,
         body
       )
       onChange(
@@ -423,10 +459,11 @@ export function MCPView({
     try {
       const result = await api.get<{
         tools: Array<{ name: string; description?: string }>
-      }>(`/api/v1/mcp/servers/${server.id}/tools`, {
+      }>(`${apiBasePath}/${server.id}/tools`, {
         signal: controller.signal,
       })
       setTools((current) => ({ ...current, [server.id]: result.tools }))
+      setExpandedServer(server.id)
       onChange(
         servers.map((item) =>
           item.id === server.id
@@ -434,7 +471,7 @@ export function MCPView({
             : item
         )
       )
-      setNotice(`${result.tools.length} allowlisted tools discovered.`)
+      setNotice(t("{count} tools discovered.", { count: result.tools.length }))
     } catch (caught) {
       if (isRequestAborted(caught)) {
         setNotice(`${server.name} tool discovery was stopped.`)
@@ -470,7 +507,7 @@ export function MCPView({
     )
     try {
       const result = await api.post<{ server?: MCPServer }>(
-        `/api/v1/mcp/servers/${server.id}/test`,
+        `${apiBasePath}/${server.id}/test`,
         undefined,
         { signal: controller.signal }
       )
@@ -481,7 +518,7 @@ export function MCPView({
             : item
         )
       )
-      setNotice(`${server.name} responded successfully.`)
+      setNotice(t("{value0} responded successfully.", { value0: server.name }))
     } catch (caught) {
       if (isRequestAborted(caught)) {
         setNotice(`${server.name} connection test was stopped.`)
@@ -523,7 +560,7 @@ export function MCPView({
   async function remove(server: MCPServer) {
     setBusyId(server.id)
     try {
-      await api.delete(`/api/v1/mcp/servers/${server.id}`)
+      await api.delete(`${apiBasePath}/${server.id}`)
       onChange(servers.filter((item) => item.id !== server.id))
     } catch (caught) {
       setNotice(
@@ -537,287 +574,196 @@ export function MCPView({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-5">
       {resourceError && (
-        <div
-          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
-          role="alert"
-        >
-          <span>
-            {t("MCP servers could not be loaded.")} {t(resourceError)}
-          </span>
+        <Alert tone="destructive" variant="plain">
+          <Alert.Title>{t("MCP servers could not be loaded.")}</Alert.Title>
+          <Alert.Description>{t(resourceError)}</Alert.Description>
           {onRetryResource && (
-            <Button size="sm" variant="outline" onClick={onRetryResource}>
-              {t("Retry")}
-            </Button>
+            <Alert.Actions>
+              <Button size="sm" variant="outline" onClick={onRetryResource}>
+                {t("Retry")}
+              </Button>
+            </Alert.Actions>
           )}
-        </div>
+        </Alert>
       )}
-      {notice && (
-        <div
-          aria-live="polite"
-          className="rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground"
-          role="status"
-        >
-          {t(notice)}
-        </div>
-      )}
-      {visibleServers.some((server) => server.scopeType === "global") && (
-        <div className="flex items-start gap-3 rounded-xl border border-dashed bg-muted/30 px-4 py-3 text-sm">
-          <LockKeyhole
-            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <div>
-            <p className="font-medium">{t("Platform-managed MCP servers")}</p>
-            <p className="mt-1 text-muted-foreground">
-              {t(
-                "These servers are inherited by this workspace and can only be changed from the Platform Admin catalog."
-              )}
-            </p>
+      {notice && <ToastFeedback message={notice} type={"info"} />}
+      <div className="flex flex-col gap-4">
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem_11rem]">
+          <div className="min-w-0">
+            <Input.Group>
+              <Input.Addon>
+                <Search className="size-4" />
+              </Input.Addon>
+              <Input
+                aria-label={t("Search MCP servers")}
+                placeholder={t("Search MCP servers")}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </Input.Group>
           </div>
+          <Select
+            value={scope}
+            onValueChange={(value) => setScope(value ?? "all")}
+          >
+            <SelectTrigger aria-label={t("Visibility")}>
+              <SelectValue>
+                {t(
+                  scope === "all"
+                    ? "All scopes"
+                    : scope === "global"
+                      ? "Platform"
+                      : scope === "user"
+                        ? "Personal"
+                        : "Workspace"
+                )}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="all">{t("All scopes")}</SelectItem>
+                <SelectItem value="organization">{t("Workspace")}</SelectItem>
+                <SelectItem value="user">{t("Personal")}</SelectItem>
+                <SelectItem value="global">{t("Platform")}</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <Select
+            value={status}
+            onValueChange={(value) => setStatus(value ?? "all")}
+          >
+            <SelectTrigger aria-label={t("Status")}>
+              <SelectValue>
+                {t(
+                  status === "all"
+                    ? "All statuses"
+                    : status === "enabled"
+                      ? "Enabled"
+                      : "Disabled"
+                )}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="all">{t("All statuses")}</SelectItem>
+                <SelectItem value="enabled">{t("Enabled")}</SelectItem>
+                <SelectItem value="disabled">{t("Disabled")}</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
-      )}
-      <div className="grid gap-3 lg:grid-cols-2">
-        {visibleServers.map((server) => {
-          const oauthState =
-            server.authType === "oauth"
-              ? oauthExpiryState(server.oauthExpiresAt)
-              : null
-          return (
-            <Card key={server.id} size="sm" className="gap-0">
-              <CardHeader className="flex-row items-start gap-3 border-b pb-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-                  {server.iconUrl ? (
-                    // MCP icons are served by JustAI, so Next Image does not need
-                    // a global host allowlist here.
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      alt=""
-                      className="size-7 rounded-md object-contain"
-                      src={resolveAPIURL(server.iconUrl)}
+        <p className="text-xs text-muted-foreground">
+          {t("{count} of {total} servers", {
+            count: visibleServers.length,
+            total: servers.length,
+          })}
+        </p>
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          {visibleServers.map((server) => {
+            const manageable = canManageServer(server)
+            const oauthState =
+              server.authType === "oauth"
+                ? oauthExpiryState(server.oauthExpiresAt)
+                : null
+            const needsOAuth =
+              server.authType === "oauth" &&
+              (!server.credentialConfigured || oauthState === "expired")
+            const health = !server.enabled
+              ? "Disabled"
+              : needsOAuth
+                ? "Authorization needed"
+                : server.lastError
+                  ? "Check failed"
+                  : server.lastTestedAt
+                    ? "Healthy"
+                    : "Not tested"
+            const discovered = tools[server.id]
+            return (
+              <Card key={server.id} size="sm">
+                <CardHeader>
+                  <div className="flex items-start gap-3">
+                    <EndpointBadge
+                      name={server.name}
+                      logoUrl={server.iconUrl}
+                      fallback={<Plug className="size-5" />}
+                      className="size-10 shrink-0 rounded-xl bg-muted object-contain text-muted-foreground"
                     />
-                  ) : (
-                    <Plug aria-hidden="true" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <CardTitle className="text-base">{server.name}</CardTitle>
-                    <Badge variant="outline">
-                      {t(mcpAuthLabel(server.authType))}
-                    </Badge>
-                  </div>
-                  <CardDescription className="mt-1 truncate font-mono text-xs">
-                    {server.endpointUrl}
-                  </CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4 pt-3">
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  {server.scopeType === "global" ? (
-                    <Badge variant="outline" className="gap-1.5">
-                      <LockKeyhole aria-hidden="true" /> {t("Platform-managed")}
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary">
-                      {server.scopeType === "organization"
-                        ? t("Workspace")
-                        : t("Personal")}
-                    </Badge>
-                  )}
-                  {!server.enabled && (
-                    <Badge variant="outline">{t("Disabled")}</Badge>
-                  )}
-                  {server.trustedReadOnly && (
-                    <Badge variant="outline" className="gap-1.5">
-                      <ShieldCheck aria-hidden="true" />
-                      {t("Trusted read-only")}
-                    </Badge>
-                  )}
-                  {server.autoDiscover && (
-                    <Badge variant="outline" className="gap-1.5">
-                      <Sparkles aria-hidden="true" />{" "}
-                      {t("Available automatically")}
-                    </Badge>
-                  )}
-                  {server.credentialConfigured && (
-                    <Badge variant="outline" className="gap-1.5">
-                      <KeyRound aria-hidden="true" />
-                      {t("Credential stored")}
-                    </Badge>
-                  )}
-                  {server.authType === "oauth" && (
-                    <Badge
-                      variant={
-                        oauthState === "expired" ? "destructive" : "outline"
-                      }
-                      title={oauthExpiryLabel(server.oauthExpiresAt)}
-                    >
-                      {oauthState === "expired"
-                        ? t("OAuth expired")
-                        : oauthState === "expiring"
-                          ? t("OAuth expiring soon")
-                          : server.oauthExpiresAt
-                            ? t("OAuth active")
-                            : server.credentialConfigured
-                              ? t("OAuth connected")
-                              : t("OAuth not authorized")}
-                    </Badge>
-                  )}
-                  <Badge variant="outline" className="gap-1.5">
-                    <ShieldCheck aria-hidden="true" />
-                    {t("Approval gated")}
-                  </Badge>
-                </div>
-                <Separator className="my-4" />
-                <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                  <div>
-                    <span className="font-medium text-foreground">
-                      {t("Protocol:")}
-                    </span>{" "}
-                    {server.protocolVersion || "Negotiating"}
-                  </div>
-                  <div>
-                    <span className="font-medium text-foreground">
-                      {t("Last test:")}
-                    </span>{" "}
-                    {server.lastTestedAt
-                      ? new Date(server.lastTestedAt).toLocaleString(locale)
-                      : t("Not tested")}
-                  </div>
-                </div>
-                <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-xs text-muted-foreground">
-                  <Wrench aria-hidden="true" className="size-3.5" />
-                  <span className="truncate">
-                    {server.toolCount
-                      ? t("{value0} discovered tools", {
-                          value0: server.toolCount,
-                        })
-                      : server.allowedTools.length
-                        ? t("{value0} allowlisted tools", {
-                            value0: server.allowedTools.length,
-                          })
-                        : t("No tools discovered yet")}
-                  </span>
-                </div>
-                {tools[server.id] && (
-                  <div className="mt-2 grid max-h-36 gap-1 overflow-y-auto sm:grid-cols-2">
-                    {tools[server.id].map((tool) => (
-                      <div
-                        key={tool.name}
-                        className="rounded-md border bg-muted/20 px-2 py-1.5"
+                    <div className="min-w-0 flex-1">
+                      <CardTitle>
+                        {manageable ? (
+                          <button
+                            type="button"
+                            onClick={() => edit(server)}
+                            className="max-w-full truncate text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            {server.name}
+                          </button>
+                        ) : (
+                          server.name
+                        )}
+                      </CardTitle>
+                      <CardDescription
+                        className="mt-1 truncate"
+                        title={server.endpointUrl}
                       >
-                        <p className="font-mono text-xs">{tool.name}</p>
-                        <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
-                          {tool.description || "No description provided"}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {server.lastError && (
-                  <div
-                    aria-live="assertive"
-                    className="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive"
-                    role="alert"
-                  >
-                    <AlertTriangle
-                      aria-hidden="true"
-                      className="mt-0.5 size-3.5 shrink-0"
-                    />
-                    <span className="min-w-0 break-words">
-                      <span className="font-medium">
-                        {t("MCP action failed:")}{" "}
-                      </span>
-                      {server.lastError}
-                    </span>
-                  </div>
-                )}
-                {canManageServer(server) && (
-                  <div className="flex items-center justify-end border-t pt-3">
-                    {activeAction?.serverId === server.id ? (
-                      <div className="flex w-full items-center justify-end gap-2">
-                        <div
-                          aria-live="polite"
-                          className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"
-                          role="status"
-                        >
-                          <LoaderCircle
-                            aria-hidden="true"
-                            className="size-3.5 shrink-0 animate-spin"
-                          />
-                          <span className="truncate">{activeAction.label}</span>
-                        </div>
-                        <Button
-                          aria-label={t("Stop action for {value0}", {
-                            value0: server.name,
-                          })}
-                          onClick={stopActiveAction}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          <Square data-icon="inline-start" aria-hidden="true" />
-                          {t("Stop")}
-                        </Button>
-                      </div>
-                    ) : (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
+                        {server.endpointUrl}
+                      </CardDescription>
+                    </div>
+                    {manageable && (
+                      <Menu>
+                        <Menu.Trigger
                           render={
                             <Button
-                              disabled={busyId === server.id}
-                              variant="outline"
-                              size="sm"
+                              variant="ghost"
+                              size="icon"
                               aria-label={t("Actions for {value0}", {
                                 value0: server.name,
                               })}
+                              disabled={Boolean(busyId)}
                             />
                           }
                         >
-                          <MoreHorizontal
-                            data-icon="inline-start"
-                            aria-hidden="true"
-                          />
-                          {t("Actions")}
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            disabled={busyId === server.id}
+                          <MoreHorizontal className="size-4" />
+                        </Menu.Trigger>
+                        <Menu.Content align="end">
+                          <Menu.Item
+                            disabled={Boolean(busyId)}
                             onClick={() => void discover(server)}
                           >
                             <TerminalSquare aria-hidden="true" />{" "}
                             {t("Discover tools")}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={busyId === server.id}
+                          </Menu.Item>
+                          <Menu.Item
+                            disabled={Boolean(busyId)}
                             onClick={() => void test(server)}
                           >
                             <Check aria-hidden="true" /> {t("Test connection")}
-                          </DropdownMenuItem>
-                          {server.authType === "oauth" && (
-                            <DropdownMenuItem
-                              disabled={busyId === server.id}
-                              onClick={() => authorize(server)}
-                            >
-                              <KeyRound aria-hidden="true" />
-                              {server.credentialConfigured
-                                ? t("Reconnect OAuth")
-                                : t("Authorize")}
-                            </DropdownMenuItem>
-                          )}
+                          </Menu.Item>
+                          {server.authType === "oauth" &&
+                            !isPlatformCatalog && (
+                              <Menu.Item
+                                disabled={Boolean(busyId)}
+                                onClick={() => authorize(server)}
+                              >
+                                <KeyRound aria-hidden="true" />
+                                {server.credentialConfigured
+                                  ? t("Reconnect OAuth")
+                                  : t("Authorize")}
+                              </Menu.Item>
+                            )}
                           {canManageServer(server) && (
                             <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                disabled={busyId === server.id}
+                              <Menu.Separator />
+                              <Menu.Item
+                                disabled={Boolean(busyId)}
                                 onClick={() => edit(server)}
                               >
                                 <Pencil aria-hidden="true" /> {t("Edit server")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={busyId === server.id}
+                              </Menu.Item>
+                              <Menu.Item
+                                disabled={Boolean(busyId)}
                                 className={
                                   server.enabled
                                     ? "text-destructive focus:text-destructive"
@@ -830,9 +776,9 @@ export function MCPView({
                                 }
                               >
                                 {server.enabled ? t("Disable") : t("Enable")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={busyId === server.id}
+                              </Menu.Item>
+                              <Menu.Item
+                                disabled={Boolean(busyId)}
                                 onClick={() =>
                                   void patchServer(server, {
                                     trustedReadOnly: !server.trustedReadOnly,
@@ -842,9 +788,9 @@ export function MCPView({
                                 {server.trustedReadOnly
                                   ? t("Remove read-only trust")
                                   : t("Trust read-only tools")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={busyId === server.id}
+                              </Menu.Item>
+                              <Menu.Item
+                                disabled={Boolean(busyId)}
                                 onClick={() =>
                                   void patchServer(server, {
                                     autoDiscover: !server.autoDiscover,
@@ -855,59 +801,268 @@ export function MCPView({
                                 {server.autoDiscover
                                   ? t("Require manual attachment")
                                   : t("Make available automatically")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={busyId === server.id}
+                              </Menu.Item>
+                              <Menu.Item
+                                disabled={Boolean(busyId)}
                                 variant="destructive"
-                                onClick={() => setRemoveTarget(server)}
+                                onClick={() => {
+                                  setRemovePhrase("")
+                                  setRemoveTarget(server)
+                                }}
                               >
                                 <Trash2 aria-hidden="true" /> {t("Remove")}
-                              </DropdownMenuItem>
+                              </Menu.Item>
                             </>
                           )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                        </Menu.Content>
+                      </Menu>
                     )}
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          )
-        })}
-        {visibleServers.length === 0 && (
-          <Card className="bg-muted/30 lg:col-span-2">
-            <CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 text-center">
-              <div className="flex size-10 items-center justify-center rounded-xl bg-muted">
-                <Plug aria-hidden="true" />
-              </div>
-              <p className="font-medium">
-                {resourceError
-                  ? t("MCP server inventory unavailable")
-                  : t("No MCP servers connected")}
-              </p>
-              <p className="max-w-md text-sm text-muted-foreground">
-                {resourceError
-                  ? t(
-                      "JustAI could not load the MCP server catalog. Retry to check again."
-                    )
-                  : t(
-                      "Add a remote server over Streamable HTTP or legacy HTTP+SSE. JustAI does not run arbitrary stdio processes from the web app."
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={
+                        health === "Healthy"
+                          ? "success"
+                          : health === "Check failed" || needsOAuth
+                            ? "destructive"
+                            : "secondary"
+                      }
+                    >
+                      {t(health)}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {t(mcpAuthLabel(server.authType))} ·{" "}
+                      {t(
+                        server.scopeType === "global"
+                          ? "Platform"
+                          : server.scopeType === "user"
+                            ? "Personal"
+                            : "Workspace"
+                      )}
+                    </span>
+                    {server.scopeType === "global" && (
+                      <LockKeyhole
+                        className="size-3.5 text-muted-foreground"
+                        aria-label={t("Managed by platform")}
+                      />
                     )}
-              </p>
-              {resourceError ? (
-                onRetryResource && (
-                  <Button variant="outline" size="sm" onClick={onRetryResource}>
-                    {t("Retry")}
-                  </Button>
-                )
-              ) : (
-                <Button variant="outline" size="sm" onClick={openCreate}>
-                  {t("Add a server")}
+                  </div>
+                  {isPlatformCatalog && server.scopeId && (
+                    <p className="text-xs break-all text-muted-foreground">
+                      {t(
+                        server.scopeType === "organization"
+                          ? "Workspace ID"
+                          : "User ID"
+                      )}
+                      : {server.scopeId}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>
+                      {t("{count} tools", {
+                        count: discovered?.length ?? server.toolCount ?? 0,
+                      })}
+                    </span>
+                    <span>
+                      {t(
+                        server.autoDiscover
+                          ? "Available automatically"
+                          : "Manual attachment"
+                      )}
+                    </span>
+                  </div>
+                  {server.trustedReadOnly && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("Trusted read-only")}
+                    </p>
+                  )}
+                  {server.authType === "oauth" && oauthState === "expiring" && (
+                    <p
+                      className="text-xs text-muted-foreground"
+                      title={oauthExpiryLabel(server.oauthExpiresAt)}
+                    >
+                      {t("OAuth expiring soon")}
+                    </p>
+                  )}
+                  {server.lastError && (
+                    <Alert tone="destructive" variant="plain">
+                      <Alert.Description>{server.lastError}</Alert.Description>
+                    </Alert>
+                  )}
+                  {manageable && needsOAuth && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => authorize(server)}
+                      disabled={Boolean(busyId)}
+                    >
+                      {t(
+                        server.credentialConfigured
+                          ? "Reconnect OAuth"
+                          : "Authorize"
+                      )}
+                    </Button>
+                  )}
+                  {expandedServer === server.id && discovered && (
+                    <Frame variant="plain">
+                      <Frame.Header>
+                        <Frame.Title>{t("Discovered tools")}</Frame.Title>
+                      </Frame.Header>
+                      <Frame.Panel className="max-h-60 overflow-y-auto">
+                        {discovered.length ? (
+                          discovered.map((tool) => (
+                            <Frame.Row key={tool.name}>
+                              <Frame.Content>
+                                <Frame.Title
+                                  as="p"
+                                  className="break-all whitespace-normal!"
+                                >
+                                  {tool.name}
+                                </Frame.Title>
+                                <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                                  {tool.description ||
+                                    t("No description provided")}
+                                </Frame.Description>
+                              </Frame.Content>
+                            </Frame.Row>
+                          ))
+                        ) : (
+                          <Frame.Row>
+                            <Frame.Description>
+                              {t("No tools discovered yet")}
+                            </Frame.Description>
+                          </Frame.Row>
+                        )}
+                      </Frame.Panel>
+                    </Frame>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {activeAction?.serverId === server.id ? (
+                      <>
+                        <span
+                          role="status"
+                          className="mr-auto flex items-center gap-2 text-xs text-muted-foreground"
+                        >
+                          <Spinner className="size-4" />
+                          {activeAction.label}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={stopActiveAction}
+                        >
+                          {t("Stop")}
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        {manageable && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={Boolean(busyId)}
+                            onClick={() => void test(server)}
+                          >
+                            {t("Test connection")}
+                          </Button>
+                        )}
+                        {manageable && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={Boolean(busyId)}
+                            onClick={() => {
+                              if (expandedServer === server.id)
+                                setExpandedServer(null)
+                              else if (discovered) setExpandedServer(server.id)
+                              else void discover(server)
+                            }}
+                          >
+                            {t(
+                              expandedServer === server.id
+                                ? "Hide tools"
+                                : "View tools"
+                            )}
+                          </Button>
+                        )}
+                        <div className="ml-auto">
+                          {manageable && (
+                            <Switch
+                              aria-label={t("Enable {value0}", {
+                                value0: server.name,
+                              })}
+                              checked={server.enabled}
+                              disabled={Boolean(busyId)}
+                              onCheckedChange={(enabled) =>
+                                void patchServer(server, { enabled })
+                              }
+                            />
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {server.lastTestedAt
+                      ? t("Last tested {value0}", {
+                          value0: new Date(server.lastTestedAt).toLocaleString(
+                            locale
+                          ),
+                        })
+                      : t("Not tested")}
+                  </p>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+        {!visibleServers.length && !resourceError && (
+          <Frame>
+            <Frame.Panel>
+              <Frame.Row className="flex-col items-start gap-3 py-8">
+                <Frame.Title as="p">
+                  {t(
+                    servers.length
+                      ? "No matching MCP servers"
+                      : "No MCP servers connected"
+                  )}
+                </Frame.Title>
+                <Frame.Description>
+                  {t(
+                    servers.length
+                      ? "Try another search or reset the filters."
+                      : "Connect a remote MCP server to bring its tools into your chats."
+                  )}
+                </Frame.Description>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={
+                    servers.length
+                      ? () => {
+                          setQuery("")
+                          setScope("all")
+                          setStatus("all")
+                        }
+                      : openCreate
+                  }
+                >
+                  {t(servers.length ? "Clear filters" : "Add MCP server")}
                 </Button>
-              )}
-            </CardContent>
-          </Card>
+              </Frame.Row>
+            </Frame.Panel>
+          </Frame>
         )}
+        {!isPlatformCatalog &&
+          servers.some((server) => server.scopeType === "global") && (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "Platform-managed servers can only be edited in the platform catalog."
+              )}
+            </p>
+          )}
       </div>
 
       <AlertDialog
@@ -917,23 +1072,36 @@ export function MCPView({
         }}
       >
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Remove MCP server?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("Remove “")}
-              {removeTarget?.name}
-              {t(
-                "”? Existing conversations keep their messages, but this server and its tools will no longer be available for new calls."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t("Remove MCP server?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("Remove “")}
+            {removeTarget?.name}
+            {t(
+              "”? Existing conversations keep their messages, but this server and its tools will no longer be available for new calls."
+            )}
+          </AlertDialogDescription>
+          {isPlatformCatalog && (
+            <Field>
+              <Field.Label>{t("Type the server name to confirm")}</Field.Label>
+              <Input
+                value={removePhrase}
+                onChange={(event) => setRemovePhrase(event.target.value)}
+                autoComplete="off"
+                placeholder={removeTarget?.name}
+              />
+            </Field>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={Boolean(busyId)}>
               {t("Cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
-              disabled={!removeTarget || Boolean(busyId)}
-              variant="destructive"
+              disabled={
+                !removeTarget ||
+                Boolean(busyId) ||
+                (isPlatformCatalog && removePhrase !== removeTarget.name)
+              }
+              tone="destructive"
               onClick={() => {
                 const target = removeTarget
                 setRemoveTarget(null)
@@ -945,9 +1113,12 @@ export function MCPView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <Dialog
+      <Sheet
+        dismissible={!saving}
+        side="right"
         open={open}
         onOpenChange={(value) => {
+          if (saving) return
           setOpen(value)
           if (!value) {
             setEditingServer(null)
@@ -957,375 +1128,474 @@ export function MCPView({
           }
         }}
       >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
+        <Sheet.Content className="w-[min(40rem,calc(100vw-2*var(--sheet-gap)))]!">
+          <Sheet.Header>
+            <Sheet.Title>
               {editingServer ? t("Edit MCP server") : t("Add MCP server")}
-            </DialogTitle>
-            <DialogDescription>
+            </Sheet.Title>
+            <Sheet.Description>
               {t(
-                "Use the server's remote HTTP endpoint. Local stdio processes stay outside this web service boundary."
+                "Connect a remote server and choose how its tools are available in your workspace."
               )}
-            </DialogDescription>
-          </DialogHeader>
-          {dialogError && (
-            <div
-              aria-live="assertive"
-              className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
-              role="alert"
-            >
-              <AlertTriangle
-                aria-hidden="true"
-                className="mt-0.5 size-4 shrink-0"
-              />
-              <span className="min-w-0 break-words">{t(dialogError)}</span>
-            </div>
-          )}
-          <form onSubmit={save}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="mcp-name">{t("Display name")}</FieldLabel>
-                <Input
-                  id="mcp-name"
-                  value={form.name}
-                  onChange={(event) => update("name", event.target.value)}
-                  placeholder="Linear tools"
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="mcp-icon">Logo</FieldLabel>
-                <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
-                  <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
-                    {iconPreview && !iconRemoved ? (
-                      // Uploaded MCP icons are served by JustAI and do not need
-                      // a Next Image host allowlist.
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        alt={t("Selected MCP logo preview")}
-                        className="size-full rounded-md object-contain"
-                        src={resolveAPIURL(iconPreview)}
-                      />
-                    ) : (
-                      <Plug
-                        aria-hidden="true"
-                        className="size-6 text-muted-foreground"
-                      />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <Input
-                      ref={iconInputRef}
-                      id="mcp-icon"
-                      type="file"
-                      className="sr-only"
-                      accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
-                      onChange={(event) =>
-                        chooseIcon(event.target.files?.[0] ?? null)
-                      }
-                    />
-                    <p className="truncate text-sm font-medium">
-                      {iconFile?.name ??
-                        (iconPreview && !iconRemoved
-                          ? t("Current logo")
-                          : t("No logo selected"))}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {t(
-                        "PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on upload"
-                      )}
-                    </p>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => iconInputRef.current?.click()}
-                      >
-                        <ImagePlus
-                          data-icon="inline-start"
-                          aria-hidden="true"
+            </Sheet.Description>
+          </Sheet.Header>
+          <form className="contents" onSubmit={save}>
+            <fieldset disabled={saving} className="contents">
+              <Sheet.Body className="flex flex-col gap-5">
+                {dialogError && (
+                  <ToastFeedback message={dialogError} type={"destructive"} />
+                )}
+                <div className="flex flex-col gap-6">
+                  <Frame variant="band">
+                    <Frame.Header>
+                      <Frame.Title>{t("Connection")}</Frame.Title>
+                    </Frame.Header>
+                    <Frame.Panel className="flex flex-col gap-5 p-4">
+                      <Field>
+                        <Field.Label>{t("Display name")}</Field.Label>
+                        <Input
+                          id="mcp-name"
+                          value={form.name}
+                          onChange={(event) =>
+                            update("name", event.target.value)
+                          }
+                          placeholder="Linear tools"
+                          required
                         />
-                        {iconPreview && !iconRemoved
-                          ? t("Replace logo")
-                          : t("Choose logo")}
-                      </Button>
-                      {((iconPreview && !iconRemoved) ||
-                        (editingServer?.iconUrl && !iconRemoved)) && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            resetIconSelection()
-                            setIconRemoved(Boolean(editingServer))
-                          }}
-                        >
-                          <X data-icon="inline-start" aria-hidden="true" />
-                          {t("Remove logo")}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="mcp-url">{t("Endpoint URL")}</FieldLabel>
-                <Input
-                  id="mcp-url"
-                  type="url"
-                  value={form.endpointUrl}
-                  onChange={(event) =>
-                    update("endpointUrl", event.target.value)
-                  }
-                  placeholder="https://mcp.example.com/mcp"
-                  required
-                />
-                <FieldDescription>
-                  {t(
-                    "Streamable HTTP is preferred; legacy HTTP+SSE is supported by the backend client."
-                  )}
-                </FieldDescription>
-              </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel>{t("Authentication")}</FieldLabel>
-                  <Select
-                    items={{
-                      none: "No auth",
-                      api_key: "Bearer token",
-                      litellm: "LiteLLM API key",
-                      oauth: "OAuth 2.1",
-                    }}
-                    value={form.authType}
-                    onValueChange={(value) =>
-                      update("authType", value ?? "none")
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="none">{t("No auth")}</SelectItem>
-                        <SelectItem value="api_key">
-                          {t("Bearer token")}
-                        </SelectItem>
-                        <SelectItem value="litellm">
-                          {t("LiteLLM API key")}
-                        </SelectItem>
-                        <SelectItem value="oauth">OAuth 2.1</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  {form.authType === "litellm" && (
-                    <FieldDescription>
-                      {t("Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.")}
-                    </FieldDescription>
-                  )}
-                  {(form.authType === "none" || form.authType === "oauth") && (
-                    <FieldDescription>
-                      {form.authType === "none"
-                        ? t("No credential is sent to this server.")
-                        : t(
-                            "Sign in with the provider after saving; JustAI manages the access and refresh tokens."
+                      </Field>
+                      <Field>
+                        <Field.Label>Logo</Field.Label>
+                        <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
+                          <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
+                            {iconPreview && !iconRemoved ? (
+                              // Uploaded MCP icons are served by JustAI and do not need
+                              // a Next Image host allowlist.
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                alt={t("Selected MCP logo preview")}
+                                className="size-full rounded-md object-contain"
+                                src={resolveAPIURL(iconPreview)}
+                              />
+                            ) : (
+                              <Plug
+                                aria-hidden="true"
+                                className="size-6 text-muted-foreground"
+                              />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <Input
+                              ref={iconInputRef}
+                              id="mcp-icon"
+                              type="file"
+                              aria-label={t("Logo")}
+                              className="sr-only"
+                              accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
+                              onChange={(event) =>
+                                chooseIcon(event.target.files?.[0] ?? null)
+                              }
+                            />
+                            <p className="truncate text-sm font-medium">
+                              {iconFile?.name ??
+                                (iconPreview && !iconRemoved
+                                  ? t("Current logo")
+                                  : t("No logo selected"))}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {t(
+                                "PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on upload"
+                              )}
+                            </p>
+                            <div className="flex flex-wrap gap-2 pt-1">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => iconInputRef.current?.click()}
+                              >
+                                <ImagePlus
+                                  data-icon="inline-start"
+                                  aria-hidden="true"
+                                />
+                                {iconPreview && !iconRemoved
+                                  ? t("Replace logo")
+                                  : t("Choose logo")}
+                              </Button>
+                              {((iconPreview && !iconRemoved) ||
+                                (editingServer?.iconUrl && !iconRemoved)) && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    resetIconSelection()
+                                    setIconRemoved(Boolean(editingServer))
+                                  }}
+                                >
+                                  <X
+                                    data-icon="inline-start"
+                                    aria-hidden="true"
+                                  />
+                                  {t("Remove logo")}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </Field>
+                      <Field>
+                        <Field.Label>{t("Endpoint URL")}</Field.Label>
+                        <Input
+                          id="mcp-url"
+                          type="url"
+                          value={form.endpointUrl}
+                          onChange={(event) =>
+                            update("endpointUrl", event.target.value)
+                          }
+                          placeholder="https://mcp.example.com/mcp"
+                          required
+                        />
+                        <Field.Description>
+                          {t(
+                            "Paste the remote MCP URL provided by your service."
                           )}
-                    </FieldDescription>
-                  )}
-                </Field>
-                <Field>
-                  <FieldLabel>{t("Visibility")}</FieldLabel>
-                  <Select
-                    items={{
-                      organization: "Workspace",
-                      user: "Only me",
-                    }}
-                    value={form.scopeType}
-                    onValueChange={(value) =>
-                      update(
-                        "scopeType",
-                        value ??
-                          (canManageOrganization ? "organization" : "user")
-                      )
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {canManageOrganization && (
-                          <SelectItem value="organization">
-                            {t("Workspace")}
-                          </SelectItem>
+                        </Field.Description>
+                      </Field>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field>
+                          <Field.Label>{t("Authentication")}</Field.Label>
+                          <Select
+                            items={{
+                              none: t("No auth"),
+                              api_key: t("Bearer token"),
+                              litellm: t("LiteLLM API key"),
+                              oauth: "OAuth 2.1",
+                            }}
+                            value={form.authType}
+                            onValueChange={(value) =>
+                              update("authType", value ?? "none")
+                            }
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                <SelectItem value="none">
+                                  {t("No auth")}
+                                </SelectItem>
+                                <SelectItem value="api_key">
+                                  {t("Bearer token")}
+                                </SelectItem>
+                                <SelectItem value="litellm">
+                                  {t("LiteLLM API key")}
+                                </SelectItem>
+                                <SelectItem value="oauth">OAuth 2.1</SelectItem>
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          {form.authType === "litellm" && (
+                            <Field.Description>
+                              {t(
+                                "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>."
+                              )}
+                            </Field.Description>
+                          )}
+                          {(form.authType === "none" ||
+                            form.authType === "oauth") && (
+                            <Field.Description>
+                              {form.authType === "none"
+                                ? t("No credential is sent to this server.")
+                                : t(
+                                    "Sign in with the provider after saving; JustAI manages the access and refresh tokens."
+                                  )}
+                            </Field.Description>
+                          )}
+                        </Field>
+                        <Field>
+                          <Field.Label>{t("Visibility")}</Field.Label>
+                          <Select
+                            items={{
+                              ...(isPlatformCatalog
+                                ? { global: t("Platform") }
+                                : {}),
+                              organization: t("Workspace"),
+                              user: t(
+                                isPlatformCatalog ? "Personal" : "Only me"
+                              ),
+                            }}
+                            disabled={
+                              isPlatformCatalog && Boolean(editingServer)
+                            }
+                            value={form.scopeType}
+                            onValueChange={(value) =>
+                              update(
+                                "scopeType",
+                                value ??
+                                  (canManageOrganization
+                                    ? "organization"
+                                    : "user")
+                              )
+                            }
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                {isPlatformCatalog && (
+                                  <SelectItem value="global">
+                                    {t("Platform")}
+                                  </SelectItem>
+                                )}
+                                {canManageOrganization && (
+                                  <SelectItem value="organization">
+                                    {t("Workspace")}
+                                  </SelectItem>
+                                )}
+                                <SelectItem value="user">
+                                  {t(
+                                    isPlatformCatalog ? "Personal" : "Only me"
+                                  )}
+                                </SelectItem>
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        {isPlatformCatalog && form.scopeType !== "global" && (
+                          <Field>
+                            <Field.Label>
+                              {t(
+                                form.scopeType === "organization"
+                                  ? "Workspace ID"
+                                  : "User ID"
+                              )}
+                            </Field.Label>
+                            <Input
+                              required
+                              disabled={Boolean(editingServer)}
+                              value={form.scopeId}
+                              onChange={(event) =>
+                                update("scopeId", event.target.value)
+                              }
+                              placeholder={t(
+                                form.scopeType === "organization"
+                                  ? "Workspace ID"
+                                  : "User ID"
+                              )}
+                            />
+                            <Field.Description>
+                              {t(
+                                "Assign this server to a specific workspace or user."
+                              )}
+                            </Field.Description>
+                          </Field>
                         )}
-                        <SelectItem value="user">{t("Only me")}</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-              {form.authType === "oauth" && (
-                <div className="grid gap-4 rounded-xl border bg-muted/35 p-3 sm:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="mcp-oauth-authorize">
-                      {t("Authorization URL")}
-                    </FieldLabel>
-                    <Input
-                      id="mcp-oauth-authorize"
-                      type="url"
-                      value={form.oauthAuthorizationUrl}
-                      onChange={(event) =>
-                        update("oauthAuthorizationUrl", event.target.value)
-                      }
-                      placeholder={t("Auto-discovered from the server")}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="mcp-oauth-token">
-                      {t("Token URL")}
-                    </FieldLabel>
-                    <Input
-                      id="mcp-oauth-token"
-                      type="url"
-                      value={form.oauthTokenUrl}
-                      onChange={(event) =>
-                        update("oauthTokenUrl", event.target.value)
-                      }
-                      placeholder={t("Auto-discovered from the server")}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="mcp-oauth-client">
-                      {t("Client ID")}
-                    </FieldLabel>
-                    <Input
-                      id="mcp-oauth-client"
-                      value={form.oauthClientId}
-                      onChange={(event) =>
-                        update("oauthClientId", event.target.value)
-                      }
-                      placeholder="public-client-id"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="mcp-oauth-scopes">
-                      {t("Scopes")}
-                    </FieldLabel>
-                    <Input
-                      id="mcp-oauth-scopes"
-                      value={form.oauthScopes}
-                      onChange={(event) =>
-                        update("oauthScopes", event.target.value)
-                      }
-                      placeholder="openid tools"
-                    />
-                  </Field>
-                  <FieldDescription className="sm:col-span-2">
-                    {t(
-                      "PKCE, resource indicators, metadata discovery, and encrypted token storage are handled by the backend. Manual URLs are an advanced compatibility override."
-                    )}
-                  </FieldDescription>
-                </div>
-              )}
-              {form.authType !== "none" && (
-                <Field>
-                  <FieldLabel htmlFor="mcp-credential">
-                    {form.authType === "oauth"
-                      ? t("Access token (optional)")
-                      : t("Bearer token")}
-                  </FieldLabel>
-                  <Input
-                    id="mcp-credential"
-                    type="password"
-                    value={form.credential}
-                    onChange={(event) =>
-                      update("credential", event.target.value)
-                    }
-                    placeholder={
-                      form.authType === "oauth"
-                        ? t("Leave blank to authorize after saving")
-                        : t("Paste the token from your MCP provider")
-                    }
-                    autoComplete="off"
-                  />
-                  <FieldDescription>
-                    {form.authType === "oauth"
-                      ? editingServer
-                        ? t(
-                            "Leave blank to keep the stored token, or authorize again after saving."
-                          )
-                        : t("Leave blank to authorize after saving.")
-                      : editingServer
-                        ? t("Leave blank to keep the stored token.")
-                        : t("Stored encrypted by JustAI.")}
-                  </FieldDescription>
-                </Field>
-              )}
-              <Field>
-                <FieldLabel htmlFor="mcp-tools">
-                  {t("Allowlisted tools")}
-                </FieldLabel>
-                <Input
-                  id="mcp-tools"
-                  value={form.allowedTools}
-                  onChange={(event) =>
-                    update("allowedTools", event.target.value)
-                  }
-                  placeholder="search, create_issue"
-                />
-                <FieldDescription>
-                  {t(
-                    "Comma-separated. Leave empty to inspect all discovered tools, subject to approval policy."
+                      </div>
+                      {form.authType !== "none" && (
+                        <Field>
+                          <Field.Label>
+                            {form.authType === "oauth"
+                              ? t("Access token (optional)")
+                              : form.authType === "litellm"
+                                ? t("LiteLLM API key")
+                                : t("Bearer token")}
+                          </Field.Label>
+                          <Input
+                            id="mcp-credential"
+                            type="password"
+                            value={form.credential}
+                            onChange={(event) =>
+                              update("credential", event.target.value)
+                            }
+                            placeholder={
+                              form.authType === "oauth"
+                                ? t("Leave blank to authorize after saving")
+                                : t("Paste the token from your MCP provider")
+                            }
+                            autoComplete="off"
+                          />
+                          <Field.Description>
+                            {form.authType === "oauth"
+                              ? editingServer
+                                ? t(
+                                    "Leave blank to keep the stored token, or authorize again after saving."
+                                  )
+                                : t("Leave blank to authorize after saving.")
+                              : editingServer
+                                ? t("Leave blank to keep the stored token.")
+                                : t("Stored encrypted by JustAI.")}
+                          </Field.Description>
+                        </Field>
+                      )}
+                    </Frame.Panel>
+                  </Frame>
+                  <Frame variant="band">
+                    <Frame.Header>
+                      <Frame.Title>{t("Tool access")}</Frame.Title>
+                    </Frame.Header>
+                    <Frame.Panel className="flex flex-col gap-5 p-4">
+                      <Field>
+                        <Field.Label>
+                          {t("Allowed tools (optional)")}
+                        </Field.Label>
+                        <Input
+                          id="mcp-tools"
+                          value={form.allowedTools}
+                          onChange={(event) =>
+                            update("allowedTools", event.target.value)
+                          }
+                          placeholder="search, create_issue"
+                        />
+                        <Field.Description>
+                          {t(
+                            "Enter tool names separated by commas. Leave empty to allow all tools under the approval policy."
+                          )}
+                        </Field.Description>
+                      </Field>
+                      <Frame.Row className="px-0">
+                        <Frame.Content>
+                          <Frame.Title as="p">
+                            {t("Available automatically")}
+                          </Frame.Title>
+                          <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                            {t(
+                              "Suggest relevant tools in chats. Calls still require approval."
+                            )}
+                          </Frame.Description>
+                        </Frame.Content>
+                        <Frame.Actions>
+                          <Switch
+                            aria-label={t("Available automatically")}
+                            checked={form.autoDiscover}
+                            onCheckedChange={(checked) =>
+                              update("autoDiscover", checked)
+                            }
+                          />
+                        </Frame.Actions>
+                      </Frame.Row>
+                    </Frame.Panel>
+                  </Frame>
+                  {form.authType === "oauth" && (
+                    <Collapsible>
+                      <Frame variant="plain">
+                        <Frame.Header>
+                          <Frame.Title>{t("OAuth overrides")}</Frame.Title>
+                          <Frame.Description>
+                            {t(
+                              "Usually discovered automatically. Change only when your provider requires it."
+                            )}
+                          </Frame.Description>
+                          <Frame.Action>
+                            <CollapsibleTrigger
+                              aria-label={t("OAuth overrides")}
+                              render={<Button variant="ghost" size="sm" />}
+                            >
+                              <ChevronDown className="size-4" />
+                            </CollapsibleTrigger>
+                          </Frame.Action>
+                        </Frame.Header>
+                      </Frame>
+                      <CollapsibleContent>
+                        <Frame>
+                          <Frame.Panel className="grid gap-4 p-4 sm:grid-cols-2">
+                            <Field>
+                              <Field.Label>
+                                {t("Authorization URL")}
+                              </Field.Label>
+                              <Input
+                                id="mcp-oauth-authorize"
+                                type="url"
+                                value={form.oauthAuthorizationUrl}
+                                onChange={(event) =>
+                                  update(
+                                    "oauthAuthorizationUrl",
+                                    event.target.value
+                                  )
+                                }
+                                placeholder={t(
+                                  "Auto-discovered from the server"
+                                )}
+                              />
+                            </Field>
+                            <Field>
+                              <Field.Label>{t("Token URL")}</Field.Label>
+                              <Input
+                                id="mcp-oauth-token"
+                                type="url"
+                                value={form.oauthTokenUrl}
+                                onChange={(event) =>
+                                  update("oauthTokenUrl", event.target.value)
+                                }
+                                placeholder={t(
+                                  "Auto-discovered from the server"
+                                )}
+                              />
+                            </Field>
+                            <Field>
+                              <Field.Label>{t("Client ID")}</Field.Label>
+                              <Input
+                                id="mcp-oauth-client"
+                                value={form.oauthClientId}
+                                onChange={(event) =>
+                                  update("oauthClientId", event.target.value)
+                                }
+                                placeholder="public-client-id"
+                              />
+                            </Field>
+                            <Field>
+                              <Field.Label>{t("Scopes")}</Field.Label>
+                              <Input
+                                id="mcp-oauth-scopes"
+                                value={form.oauthScopes}
+                                onChange={(event) =>
+                                  update("oauthScopes", event.target.value)
+                                }
+                                placeholder="openid tools"
+                              />
+                            </Field>
+                            <p className="text-xs text-muted-foreground sm:col-span-2">
+                              {t(
+                                "Only fill these in if automatic sign-in setup fails."
+                              )}
+                            </p>
+                          </Frame.Panel>
+                        </Frame>
+                      </CollapsibleContent>
+                    </Collapsible>
                   )}
-                </FieldDescription>
-              </Field>
-              <Field orientation="horizontal">
-                <div className="min-w-0 flex-1">
-                  <FieldLabel htmlFor="mcp-auto-discover">
-                    {t("Available automatically")}
-                  </FieldLabel>
-                  <FieldDescription>
-                    {t(
-                      "Let JustAI surface a small set of relevant tools without adding this server to every chat. Automatically selected calls always require approval."
-                    )}
-                  </FieldDescription>
                 </div>
-                <Switch
-                  id="mcp-auto-discover"
-                  checked={form.autoDiscover}
-                  onCheckedChange={(checked) => update("autoDiscover", checked)}
-                />
-              </Field>
-            </FieldGroup>
-            <DialogFooter className="mt-6">
+              </Sheet.Body>
+            </fieldset>
+            <Sheet.Footer className="sm:flex-row sm:justify-end">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setOpen(false)}
+                disabled={saving}
+                onClick={() => {
+                  setOpen(false)
+                  resetIconSelection()
+                  setEditingServer(null)
+                }}
               >
                 {t("Cancel")}
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? (
                   <>
-                    <LoaderCircle
-                      className="animate-spin"
-                      data-icon="inline-start"
-                      aria-hidden="true"
-                    />
+                    <Spinner data-icon="inline-start" aria-hidden="true" />
                     {t("Saving…")}
                   </>
                 ) : editingServer ? (
                   t("Save changes")
                 ) : (
-                  "Save server"
+                  t("Connect server")
                 )}
               </Button>
-            </DialogFooter>
+            </Sheet.Footer>
           </form>
-        </DialogContent>
-      </Dialog>
+        </Sheet.Content>
+      </Sheet>
     </div>
   )
 }

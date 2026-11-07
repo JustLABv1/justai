@@ -1,5 +1,7 @@
 "use client"
+import { ToastFeedback } from "@/components/toast-feedback"
 
+import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
   useTranslatedConfig,
@@ -19,7 +21,6 @@ import {
   ChevronRight,
   FileText,
   Globe2,
-  LoaderCircle,
   RefreshCw,
   Search,
   Trash2,
@@ -27,7 +28,7 @@ import {
 
 import { APIError, api } from "@/lib/api"
 import type { KnowledgeSource } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,9 +36,8 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/panelui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -425,13 +425,7 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
           }}
         />
 
-        {notice && (
-          <Alert>
-            <Search aria-hidden="true" />
-            <AlertTitle>{t("Knowledge pipeline")}</AlertTitle>
-            <AlertDescription>{t(notice)}</AlertDescription>
-          </Alert>
-        )}
+        {notice && <ToastFeedback message={notice} type={"info"} />}
 
         <div className="grid gap-3 md:grid-cols-3">
           <Metric
@@ -812,11 +806,7 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                 <Button type="submit" disabled={uploading}>
                   {uploading ? (
                     <>
-                      <LoaderCircle
-                        data-icon="inline-start"
-                        className="animate-spin"
-                        aria-hidden="true"
-                      />
+                      <Spinner data-icon="inline-start" aria-hidden="true" />
                       {t("Indexing…")}
                     </>
                   ) : (
@@ -835,25 +825,21 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
           }}
         >
           <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {t("Remove knowledge source?")}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("Remove “")}
-                {removeTarget?.title}
-                {t(
-                  "” from Knowledge? Existing messages keep their stored citations, but this source will no longer be available for new retrievals."
-                )}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
+            <AlertDialogTitle>{t("Remove knowledge source?")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("Remove “")}
+              {removeTarget?.title}
+              {t(
+                "” from Knowledge? Existing messages keep their stored citations, but this source will no longer be available for new retrievals."
+              )}
+            </AlertDialogDescription>
             <AlertDialogFooter>
               <AlertDialogCancel disabled={Boolean(busyId)}>
                 {t("Cancel")}
               </AlertDialogCancel>
               <AlertDialogAction
                 disabled={!removeTarget || Boolean(busyId)}
-                variant="destructive"
+                tone="destructive"
                 onClick={() => {
                   const target = removeTarget
                   setRemoveTarget(null)
