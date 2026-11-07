@@ -1,8 +1,9 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ImageIcon, LoaderCircle } from "lucide-react"
+import { ImageIcon } from "lucide-react"
 import Image from "next/image"
 import { api } from "@/lib/api"
 import type { Endpoint, TranscriptionSpeaker } from "@/lib/types"
@@ -586,7 +587,7 @@ export function SpeakerVideoCaptions({
                 }
                 onClick={start}
               >
-                {busy && <LoaderCircle className="size-4 animate-spin" />}
+                {busy && <Spinner className="size-4" />}
                 {run ? t("Start new analysis") : t("Start caption analysis")}
               </Button>
             </div>

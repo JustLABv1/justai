@@ -86,7 +86,7 @@ import {
 } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
-import { Spinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/panelui/spinner"
 import { Switch } from "@/components/ui/switch"
 
 type WizardStep = "type" | "connection" | "configure" | "behavior" | "review"

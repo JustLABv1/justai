@@ -14,12 +14,6 @@ import { createPortal } from "react-dom"
 import { AnimatedComposerInput } from "@/components/assistant-ui/animated-composer-input"
 import { ComposerMention } from "@/components/assistant-ui/composer-mention"
 import {
-  IconBrandOpenai,
-  IconBrandGoogle,
-  IconAsterisk,
-  IconServer,
-} from "@tabler/icons-react"
-import {
   ArrowUp,
   Bot,
   BrainCircuit,
@@ -30,7 +24,6 @@ import {
   FileText,
   History,
   Plus,
-  Search,
   ShieldCheck,
   Pencil,
   Plug,
@@ -101,12 +94,12 @@ import { BrandMark } from "@/components/brand-mark"
 import { ChatBrandMark } from "@/components/chat-brand-mark"
 import { EndpointBadge } from "@/components/endpoint-badge"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/panelui/spinner"
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+  ModelPicker,
+  type ModelPickerItem,
+  type ModelPickerProvider,
+} from "@/components/panelui/model-picker"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -2001,235 +1994,171 @@ function EmptyThread({ children }: { children?: ReactNode }) {
   )
 }
 
-function EndpointIcon({
-  provider,
-  className,
-}: {
-  provider?: string
-  className?: string
-}) {
-  const Icon =
-    provider === "openai"
-      ? IconBrandOpenai
-      : provider === "gemini"
-        ? IconBrandGoogle
-        : provider === "anthropic"
-          ? IconAsterisk
-          : IconServer
-  return <Icon className={className} stroke={1.5} aria-hidden="true" />
-}
+const ENDPOINT_MODEL_SEPARATOR = "::"
 
 export function ModelEndpointPicker({
   endpoints,
   endpointId,
-  onEndpointChange,
-  models,
+  modelsByEndpoint,
   modelId,
   modelDiscoveryLoading,
   modelDiscoveryFailed,
   onRetryModelDiscovery,
-  onModelChange,
+  onSelect,
   compact,
 }: {
   endpoints: Endpoint[]
   endpointId: string
-  onEndpointChange: (id: string) => void
-  models: DiscoveredChatModel[]
+  modelsByEndpoint: Record<string, DiscoveredChatModel[]>
   modelId: string
   modelDiscoveryLoading?: boolean
   modelDiscoveryFailed?: boolean
   onRetryModelDiscovery?: () => void
-  onModelChange: (id: string) => void
+  onSelect: (endpointId: string, modelId: string) => void
   compact: boolean
 }) {
   const { t } = useTranslations()
 
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const endpoint = endpoints.find((item) => item.id === endpointId)
-  const selectedModel = models.find((model) => model.id === modelId)
-  const modelLabel = selectedModel?.name || modelId || "Select model"
-  const filteredModels = models.filter((model) =>
-    `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase())
+  const providers = useMemo<ModelPickerProvider[]>(
+    () =>
+      endpoints.map((item) => ({
+        value: item.id,
+        label: item.name,
+        icon: (
+          <EndpointBadge
+            name={item.name}
+            logoUrl={item.logoUrl}
+            className="size-4 shrink-0 text-[8px] in-[[role=toolbar]]:size-8 in-[[role=toolbar]]:text-xs"
+          />
+        ),
+      })),
+    [endpoints]
   )
 
+  const items = useMemo<ModelPickerItem[]>(() => {
+    const result: ModelPickerItem[] = []
+    for (const item of endpoints) {
+      const models = [...(modelsByEndpoint[item.id] ?? [])]
+      // Keep the chosen model visible even if discovery did not list it.
+      if (
+        item.id === endpointId &&
+        modelId &&
+        !models.some((model) => model.id === modelId)
+      ) {
+        models.unshift({ id: modelId })
+      }
+      for (const model of models) {
+        result.push({
+          value: `${item.id}${ENDPOINT_MODEL_SEPARATOR}${model.id}`,
+          label: model.name || model.id,
+          provider: item.id,
+          description:
+            model.name && model.name !== model.id ? model.id : undefined,
+        })
+      }
+    }
+    return result
+  }, [endpoints, endpointId, modelId, modelsByEndpoint])
+
+  const [favorites, setFavorites] = useState<string[]>([])
+  const favoritesEdited = useRef(false)
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get<{ favorites?: string[] }>("/api/v1/profile/favorite-models")
+      .then((result) => {
+        // Keep a star the user set while the list was still loading.
+        if (!cancelled && !favoritesEdited.current)
+          setFavorites(result.favorites ?? [])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const anyEndpointLoading = endpoints.some(
+    (item) => modelsByEndpoint[item.id] === undefined
+  )
+  const value = modelId
+    ? `${endpointId}${ENDPOINT_MODEL_SEPARATOR}${modelId}`
+    : null
+
   return (
-    <PopoverPrimitive.Root
-      open={open}
-      onOpenChange={(value) => {
-        setOpen(value)
-        if (!value) setQuery("")
-      }}
-    >
-      <PopoverPrimitive.Trigger
-        render={<Button variant="ghost" type="button" />}
-        aria-label={t("Select LLM endpoint and chat model")}
-        title={endpoint?.name}
-        className={cn(
-          "h-8 max-w-64 min-w-0 gap-1.5 rounded-full px-2 text-sm font-normal text-muted-foreground",
-          compact && "max-w-24 sm:max-w-56"
-        )}
+    <div className="flex min-w-0 items-center gap-1">
+      <ModelPicker
+        items={items}
+        providers={providers}
+        value={value}
+        favorites={favorites}
+        onFavoritesChange={(next) => {
+          const previous = favorites
+          favoritesEdited.current = true
+          setFavorites(next)
+          api
+            .put("/api/v1/profile/favorite-models", { favorites: next })
+            .catch(() => setFavorites(previous))
+        }}
+        onValueChange={(next) => {
+          const index = next.indexOf(ENDPOINT_MODEL_SEPARATOR)
+          if (index < 0) return
+          onSelect(
+            next.slice(0, index),
+            next.slice(index + ENDPOINT_MODEL_SEPARATOR.length)
+          )
+        }}
+        label={t("Select LLM endpoint and chat model")}
+        hotkey="alt+m"
       >
-        {endpoint && endpoints.length > 1 && (
-          <EndpointBadge
-            name={endpoint.name}
-            logoUrl={endpoint.logoUrl}
-            className="size-5 shrink-0 bg-secondary text-[10px] text-secondary-foreground"
-          />
-        )}
-        <span className="truncate">{modelLabel}</span>
-        <ChevronDown
+        <ModelPicker.Trigger
+          placeholder={
+            modelDiscoveryLoading ? t("Discovering models…") : t("Select model")
+          }
           className={cn(
-            "size-4 shrink-0 transition-transform",
-            open && "rotate-180"
+            "h-8 max-w-64 min-w-0 rounded-full text-muted-foreground",
+            compact && "max-w-24 sm:max-w-56"
           )}
         />
-      </PopoverPrimitive.Trigger>
-      <PopoverPrimitive.Portal>
-        <PopoverPrimitive.Positioner
+        <ModelPicker.Content
           side="top"
           align="end"
           sideOffset={12}
-          className="z-50"
-        >
-          <PopoverPrimitive.Popup className="flex w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] bg-popover p-1 text-popover-foreground shadow-sm outline-none">
-            {endpoints.length > 1 && (
-              <div
-                aria-label={t("Endpoints")}
-                className="flex max-h-80 w-11 shrink-0 flex-col items-center gap-2 overflow-y-auto rounded-[1.25rem] bg-muted/50 p-1.5"
-                role="group"
-              >
-                <TooltipProvider delay={0}>
-                  {endpoints.map((item) => (
-                    <Tooltip key={item.id}>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            type="button"
-                            aria-label={item.name}
-                            aria-pressed={item.id === endpointId}
-                            onClick={() => {
-                              onEndpointChange(item.id)
-                              setQuery("")
-                            }}
-                            className={cn(
-                              "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                              item.id === endpointId
-                                ? "bg-primary text-primary-foreground ring-2 ring-primary ring-offset-1 ring-offset-muted hover:bg-primary/85"
-                                : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
-                            )}
-                          />
-                        }
-                      >
-                        <EndpointBadge
-                          name={item.name}
-                          logoUrl={item.logoUrl}
-                          className="size-8"
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent side="left" sideOffset={8}>
-                        {item.name}
-                      </TooltipContent>
-                    </Tooltip>
-                  ))}
-                </TooltipProvider>
-              </div>
-            )}
-            <div className="min-w-0 flex-1 p-1.5">
-              <div className="flex items-center justify-between gap-3 px-2 pt-0.5 pb-1.5">
-                <PopoverPrimitive.Title className="min-w-0 truncate text-sm font-medium text-muted-foreground">
-                  {t("Models")}
-                </PopoverPrimitive.Title>
-                <label className="flex max-w-40 min-w-0 items-center gap-1 text-muted-foreground">
-                  <input
-                    aria-label={t("Search models")}
-                    placeholder={t("Quick Search")}
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    className="w-full min-w-0 bg-transparent text-right text-sm outline-none placeholder:text-muted-foreground/60"
-                  />
-                  <Search className="size-4 shrink-0" />
-                </label>
-              </div>
-              {modelDiscoveryFailed && !modelDiscoveryLoading && (
-                <div
-                  role="status"
-                  className="mx-1 mb-1 flex items-center justify-between gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground"
-                >
-                  <span>{t("Models could not be loaded. Retrying…")}</span>
-                  {onRetryModelDiscovery && (
-                    <button
-                      type="button"
-                      onClick={onRetryModelDiscovery}
-                      className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-                    >
-                      {t("Retry now")}
-                    </button>
-                  )}
-                </div>
-              )}
-              <div
-                className="max-h-72 overflow-y-auto"
-                role="group"
-                aria-label={t("Models for {value0}", {
-                  value0: endpoint?.name ?? "endpoint",
-                })}
-              >
-                {modelDiscoveryLoading ? (
-                  <p
-                    role="status"
-                    className="p-3 text-sm text-muted-foreground"
-                  >
-                    {t("Discovering models…")}
-                  </p>
-                ) : filteredModels.length ? (
-                  filteredModels.map((model) => (
-                    <button
-                      key={model.id}
-                      type="button"
-                      aria-pressed={model.id === modelId}
-                      onClick={() => {
-                        onModelChange(model.id)
-                        setOpen(false)
-                        setQuery("")
-                      }}
-                      className={cn(
-                        "flex min-h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring",
-                        model.id === modelId && "bg-muted/50"
-                      )}
-                    >
-                      <EndpointIcon
-                        provider={endpoint?.providerType}
-                        className="size-4 shrink-0 text-muted-foreground/50"
-                      />
-                      <span className="min-w-0 flex-1 truncate text-sm">
-                        {model.name || model.id}
-                      </span>
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          "size-4 shrink-0 rounded-full border shadow-xs",
-                          model.id === modelId &&
-                            "border-[var(--composer-accent)] bg-[var(--composer-accent)] ring-3 ring-popover ring-inset"
-                        )}
-                      />
-                    </button>
-                  ))
-                ) : (
-                  <p className="p-3 text-sm text-muted-foreground">
-                    {query
-                      ? t("No matching models.")
-                      : t(
-                          "No models available. Configure an endpoint in Settings."
-                        )}
-                  </p>
-                )}
-              </div>
-            </div>
-          </PopoverPrimitive.Popup>
-        </PopoverPrimitive.Positioner>
-      </PopoverPrimitive.Portal>
-    </PopoverPrimitive.Root>
+          placeholder={t("Search models")}
+          emptyText={
+            modelDiscoveryLoading || anyEndpointLoading ? (
+              <span className="inline-flex items-center gap-2">
+                <Spinner size="md" label={t("Discovering models…")} />
+                {t("Discovering models…")}
+              </span>
+            ) : (
+              t("No models available. Configure an endpoint in Settings.")
+            )
+          }
+        />
+      </ModelPicker>
+      {anyEndpointLoading && (
+        <Spinner
+          size="sm"
+          label={t("Discovering models…")}
+          className="shrink-0 text-muted-foreground"
+        />
+      )}
+      {modelDiscoveryFailed &&
+        !modelDiscoveryLoading &&
+        onRetryModelDiscovery && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onRetryModelDiscovery}
+            title={t("Models could not be loaded. Retrying…")}
+            aria-label={t("Retry now")}
+            className="size-8 shrink-0 rounded-full text-muted-foreground"
+          >
+            <RotateCcw className="size-4" />
+          </Button>
+        )}
+    </div>
   )
 }
 
@@ -2662,13 +2591,12 @@ function Composer({
   mcpServers,
   notes,
   endpointId,
-  onEndpointChange,
-  models,
+  modelsByEndpoint,
   modelId,
   modelDiscoveryLoading,
   modelDiscoveryFailed,
   onRetryModelDiscovery,
-  onModelChange,
+  onModelSelect,
   deepContext,
   onDeepContextChange,
   compact = false,
@@ -2690,13 +2618,12 @@ function Composer({
   mcpServers: MCPServer[]
   notes: Note[]
   endpointId: string
-  onEndpointChange: (id: string) => void
-  models: DiscoveredChatModel[]
+  modelsByEndpoint: Record<string, DiscoveredChatModel[]>
   modelId: string
   modelDiscoveryLoading?: boolean
   modelDiscoveryFailed?: boolean
   onRetryModelDiscovery?: () => void
-  onModelChange: (id: string) => void
+  onModelSelect: (endpointId: string, modelId: string) => void
   deepContext: boolean
   onDeepContextChange: (enabled: boolean) => void
   compact?: boolean
@@ -3288,13 +3215,12 @@ function Composer({
                     <ModelEndpointPicker
                       endpoints={endpoints}
                       endpointId={endpointId}
-                      onEndpointChange={onEndpointChange}
-                      models={models}
+                      modelsByEndpoint={modelsByEndpoint}
                       modelId={modelId}
                       modelDiscoveryLoading={modelDiscoveryLoading}
                       modelDiscoveryFailed={modelDiscoveryFailed}
                       onRetryModelDiscovery={onRetryModelDiscovery}
-                      onModelChange={onModelChange}
+                      onSelect={onModelSelect}
                       compact={compact}
                     />
                     <VoiceControl
@@ -3611,7 +3537,6 @@ function AssistantChatSurface({
     endpoints.find((item) => item.id === selectedEndpointId) ?? activeEndpoint
   const selectedModel =
     modelByEndpoint[selectedEndpointId] ?? endpoint?.chatModel ?? ""
-  const availableModels = modelsByEndpoint[selectedEndpointId] ?? []
   const modelDiscoveryLoading =
     Boolean(selectedEndpointId) &&
     modelsByEndpoint[selectedEndpointId] === undefined
@@ -3721,6 +3646,48 @@ function AssistantChatSurface({
       cancelled = true
     }
   }, [endpoint?.chatModel, discoveryStatus, selectedEndpointId])
+
+  // The model picker lists every endpoint's models, so fetch the ones the
+  // selected endpoint's discovery does not cover. Best effort: a failure here
+  // is retried by the normal discovery when that endpoint gets selected.
+  const prefetchedEndpoints = useRef<Set<string>>(new Set())
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  useEffect(() => {
+    for (const item of endpoints) {
+      if (item.id === selectedEndpointId) continue
+      if (prefetchedEndpoints.current.has(item.id)) continue
+      prefetchedEndpoints.current.add(item.id)
+      // Not cancelled when the dependencies change: the request is per
+      // endpoint and its result is valid whichever endpoint is selected.
+      void api
+        .get<{ models?: DiscoveredChatModel[] }>(
+          `/api/v1/endpoints/${item.id}/models`
+        )
+        .then((result) => {
+          if (!mounted.current) return
+          const models = (result.models ?? []).filter((model) =>
+            model.id?.trim()
+          )
+          setModelsByEndpoint((current) => ({ ...current, [item.id]: models }))
+        })
+        .catch(() => {
+          if (!mounted.current) return
+          prefetchedEndpoints.current.delete(item.id)
+          // Stop the loading hint; selecting the endpoint retries discovery.
+          setModelsByEndpoint((current) =>
+            current[item.id] === undefined
+              ? { ...current, [item.id]: [] }
+              : current
+          )
+        })
+    }
+  }, [endpoints, selectedEndpointId])
 
   const resumableStorage = useMemo(
     () =>
@@ -3952,7 +3919,7 @@ function AssistantChatSurface({
           notes,
           endpointId: selectedEndpointId,
           endpoints,
-          models: availableModels,
+          modelsByEndpoint,
           modelDiscoveryLoading,
           modelDiscoveryFailed:
             modelDiscoveryStatus[selectedEndpointId] === "failed",
@@ -3960,12 +3927,13 @@ function AssistantChatSurface({
           modelId: selectedModel,
           deepContext,
           onDeepContextChange: setDeepContext,
-          onEndpointChange: setEndpointId,
-          onModelChange: (model) =>
+          onModelSelect: (nextEndpointId, model) => {
+            setEndpointId(nextEndpointId)
             setModelByEndpoint((current) => ({
               ...current,
-              [selectedEndpointId]: model,
-            })),
+              [nextEndpointId]: model,
+            }))
+          },
           onOpenHistory,
           onAttachMCP,
           onRemoveMCP,

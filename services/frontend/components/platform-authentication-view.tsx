@@ -1,8 +1,9 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { LoaderCircle, Plus, RefreshCw, TestTube2, Trash2 } from "lucide-react"
+import { Plus, RefreshCw, TestTube2, Trash2 } from "lucide-react"
 
 import { AdminListFooter, useAdminList } from "@/components/admin-list-controls"
 import { FilterBar } from "@/components/ui/filter-bar"
@@ -295,8 +296,7 @@ export function PlatformAuthenticationView({
               aria-live="polite"
               className="flex items-center justify-center py-10 text-sm text-muted-foreground"
             >
-              <LoaderCircle className="mr-2 size-4 animate-spin" />{" "}
-              {t("Loading providers…")}
+              <Spinner className="mr-2 size-4" /> {t("Loading providers…")}
             </div>
           ) : list.total === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
@@ -361,11 +361,7 @@ export function PlatformAuthenticationView({
                     size="sm"
                     variant="outline"
                   >
-                    {testingId === provider.id ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : (
-                      <TestTube2 />
-                    )}{" "}
+                    {testingId === provider.id ? <Spinner /> : <TestTube2 />}{" "}
                     {t("Test")}
                   </Button>
                   <Button
@@ -568,7 +564,7 @@ export function PlatformAuthenticationView({
                 {t("Cancel")}
               </Button>
               <Button disabled={saving} type="submit">
-                {saving && <LoaderCircle className="animate-spin" />}{" "}
+                {saving && <Spinner />}{" "}
                 {saving ? t("Saving…") : t("Save provider")}
               </Button>
             </DialogFooter>

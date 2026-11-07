@@ -40,7 +40,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/panelui/spinner"
 import {
   Stepper,
   StepperContent,
@@ -239,7 +239,7 @@ export function Onboarding() {
             </AlertDescription>
           </Alert>
         ) : (
-          <Spinner aria-label={t("Loading setup")} />
+          <Spinner label={t("Loading setup")} />
         )}
       </main>
     )

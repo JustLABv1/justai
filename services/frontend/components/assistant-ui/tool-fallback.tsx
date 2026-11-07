@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useRef, useState } from "react"
 import { ImageGeneration, type ImageGenerationHandle } from "img-fx"
@@ -10,7 +11,6 @@ import {
   Download,
   ExternalLink,
   FileText,
-  LoaderCircle,
   Shield,
 } from "lucide-react"
 import type {
@@ -377,7 +377,7 @@ export function GeneratedFileCard({ value }: { value: unknown }) {
         className="inline-flex items-center gap-2 rounded-lg border bg-background/60 px-2 py-1.5 text-muted-foreground"
         role="status"
       >
-        <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+        <Spinner className="size-3.5" aria-hidden="true" />
         {t("Loading file…")}
       </div>
     )
@@ -578,8 +578,8 @@ export const ToolFallback: ToolCallMessagePartComponent = (
             aria-hidden="true"
           />
         ) : isRunning ? (
-          <LoaderCircle
-            className="size-4 shrink-0 animate-spin text-muted-foreground"
+          <Spinner
+            className="size-4 shrink-0 text-muted-foreground"
             aria-hidden="true"
           />
         ) : (

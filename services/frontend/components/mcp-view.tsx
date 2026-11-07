@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
@@ -7,7 +8,6 @@ import {
   Check,
   ImagePlus,
   KeyRound,
-  LoaderCircle,
   LockKeyhole,
   MoreHorizontal,
   Pencil,
@@ -743,9 +743,9 @@ export function MCPView({
                           className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"
                           role="status"
                         >
-                          <LoaderCircle
+                          <Spinner
                             aria-hidden="true"
-                            className="size-3.5 shrink-0 animate-spin"
+                            className="size-3.5 shrink-0"
                           />
                           <span className="truncate">{activeAction.label}</span>
                         </div>
@@ -1120,7 +1120,9 @@ export function MCPView({
                   </Select>
                   {form.authType === "litellm" && (
                     <FieldDescription>
-                      {t("Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>.")}
+                      {t(
+                        "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>."
+                      )}
                     </FieldDescription>
                   )}
                   {(form.authType === "none" || form.authType === "oauth") && (
@@ -1309,11 +1311,7 @@ export function MCPView({
               <Button type="submit" disabled={saving}>
                 {saving ? (
                   <>
-                    <LoaderCircle
-                      className="animate-spin"
-                      data-icon="inline-start"
-                      aria-hidden="true"
-                    />
+                    <Spinner data-icon="inline-start" aria-hidden="true" />
                     {t("Saving…")}
                   </>
                 ) : editingServer ? (

@@ -1,7 +1,8 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import type { ReactNode } from "react"
-import { Check, Copy, FileText, LoaderCircle } from "lucide-react"
+import { Check, Copy, FileText } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -82,7 +83,7 @@ export function TranscriptionSummaryReadingView({
           aria-live="polite"
           className="mb-6 flex items-start gap-3 rounded-xl bg-muted p-4"
         >
-          <LoaderCircle className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
+          <Spinner className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div>
             <p className="text-sm font-medium">
               {t("Your summary is taking shape…")}

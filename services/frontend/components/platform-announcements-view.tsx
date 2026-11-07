@@ -1,8 +1,9 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CalendarClock, LoaderCircle, Trash2 } from "lucide-react"
+import { CalendarClock, Trash2 } from "lucide-react"
 
 import { AdminListFooter, useAdminList } from "@/components/admin-list-controls"
 import { FilterBar } from "@/components/ui/filter-bar"
@@ -301,8 +302,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
               aria-live="polite"
               className="flex items-center justify-center py-10 text-sm text-muted-foreground"
             >
-              <LoaderCircle className="mr-2 size-4 animate-spin" />{" "}
-              {t("Loading announcements…")}
+              <Spinner className="mr-2 size-4" /> {t("Loading announcements…")}
             </div>
           ) : list.total === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
@@ -597,7 +597,7 @@ export function PlatformAnnouncementsView({ createRequest }: Props) {
                 {t("Cancel")}
               </Button>
               <Button disabled={saving} type="submit">
-                {saving && <LoaderCircle className="animate-spin" />}{" "}
+                {saving && <Spinner />}{" "}
                 {saving ? t("Saving…") : t("Save announcement")}
               </Button>
             </DialogFooter>

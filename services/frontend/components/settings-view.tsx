@@ -1,8 +1,9 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { LoaderCircle, Trash2, UserPlus } from "lucide-react"
+import { Trash2, UserPlus } from "lucide-react"
 
 import { api, resolveAPIURL } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
@@ -644,8 +645,7 @@ export function SettingsView({
                   className="flex items-center gap-2 rounded-xl border p-4 text-sm text-muted-foreground"
                   role="status"
                 >
-                  <LoaderCircle className="animate-spin" />{" "}
-                  {t("Loading members…")}
+                  <Spinner /> {t("Loading members…")}
                 </div>
               ) : membersError ? (
                 <div className="flex flex-col items-start gap-3 rounded-xl border border-destructive/30 p-4 text-sm">
@@ -864,11 +864,7 @@ export function SettingsView({
               <Button disabled={saving || !workspaceName.trim()} type="submit">
                 {saving ? (
                   <>
-                    <LoaderCircle
-                      className="animate-spin"
-                      data-icon="inline-start"
-                    />{" "}
-                    {t("Creating…")}
+                    <Spinner data-icon="inline-start" /> {t("Creating…")}
                   </>
                 ) : (
                   t("Create workspace")
@@ -990,11 +986,7 @@ export function SettingsView({
               <Button disabled={saving || !memberEmail.trim()} type="submit">
                 {saving ? (
                   <>
-                    <LoaderCircle
-                      className="animate-spin"
-                      data-icon="inline-start"
-                    />{" "}
-                    {t("Adding…")}
+                    <Spinner data-icon="inline-start" /> {t("Adding…")}
                   </>
                 ) : (
                   <>

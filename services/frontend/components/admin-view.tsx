@@ -1,8 +1,9 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useMemo, useState } from "react"
-import { BarChart3, Check, LoaderCircle, ShieldCheck } from "lucide-react"
+import { BarChart3, Check, ShieldCheck } from "lucide-react"
 
 import { api } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
@@ -209,8 +210,7 @@ export function AdminView({
   if (loading) {
     return (
       <div className="flex min-h-56 items-center justify-center text-sm text-muted-foreground">
-        <LoaderCircle className="mr-2 size-4 animate-spin" />{" "}
-        {t("Loading workspace operations…")}
+        <Spinner className="mr-2 size-4" /> {t("Loading workspace operations…")}
       </div>
     )
   }
@@ -318,8 +318,7 @@ export function AdminView({
           </div>
           <div className="flex justify-end">
             <Button disabled={saving} onClick={() => void saveDefaults()}>
-              {saving && <LoaderCircle className="animate-spin" />}{" "}
-              {t("Save defaults")}
+              {saving && <Spinner />} {t("Save defaults")}
             </Button>
           </div>
         </CardContent>
@@ -375,8 +374,7 @@ export function AdminView({
               disabled={savingGlobal}
               onClick={() => void saveGlobalDefaults()}
             >
-              {savingGlobal && <LoaderCircle className="animate-spin" />}{" "}
-              {t("Save platform default")}
+              {savingGlobal && <Spinner />} {t("Save platform default")}
             </Button>
           </CardContent>
         </Card>

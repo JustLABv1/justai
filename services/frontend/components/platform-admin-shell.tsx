@@ -1,6 +1,7 @@
 "use client"
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
   useTranslatedConfig,
@@ -21,7 +22,6 @@ import {
   Globe2,
   ImagePlus,
   KeyRound,
-  LoaderCircle,
   MoreHorizontal,
   Megaphone,
   Network,
@@ -2511,9 +2511,9 @@ function InventoryView({
                               className="flex items-center gap-1.5 text-xs text-muted-foreground"
                               role="status"
                             >
-                              <LoaderCircle
+                              <Spinner
                                 aria-hidden="true"
-                                className="size-3.5 animate-spin"
+                                className="size-3.5"
                               />
                               <span>{rowAction?.label ?? t("Working…")}</span>
                             </div>

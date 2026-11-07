@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
   useTranslatedConfig,
@@ -25,7 +26,6 @@ import {
   GitBranch,
   GitMerge,
   ImageIcon,
-  LoaderCircle,
   MessageSquarePlus,
   MoreHorizontal,
   Pause,
@@ -1965,7 +1965,7 @@ export function TranscriptWorkspace({
             variant="ghost"
           >
             {chatStarting ? (
-              <LoaderCircle className="animate-spin" data-icon="inline-start" />
+              <Spinner data-icon="inline-start" />
             ) : (
               <MessageSquarePlus data-icon="inline-start" />
             )}
@@ -2736,10 +2736,7 @@ export function TranscriptWorkspace({
                             variant="outline"
                           >
                             {savingSegmentId === message.id ? (
-                              <LoaderCircle
-                                className="animate-spin"
-                                data-icon="inline-start"
-                              />
+                              <Spinner data-icon="inline-start" />
                             ) : (
                               <Check data-icon="inline-start" />
                             )}
@@ -3793,10 +3790,7 @@ export function TranscriptWorkspace({
                 onClick={() => void runInsightWorkflow()}
               >
                 {workflowRunning ? (
-                  <LoaderCircle
-                    className="motion-safe:animate-spin"
-                    data-icon="inline-start"
-                  />
+                  <Spinner data-icon="inline-start" />
                 ) : (
                   <GitBranch data-icon="inline-start" />
                 )}{" "}
@@ -3876,10 +3870,7 @@ export function TranscriptWorkspace({
               onClick={() => void createAnnotation()}
             >
               {annotationSaving ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
+                <Spinner data-icon="inline-start" />
               ) : (
                 <Bookmark data-icon="inline-start" />
               )}{" "}
@@ -3931,10 +3922,7 @@ export function TranscriptWorkspace({
               onClick={() => void identifySpeakers()}
             >
               {identifyRunning ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
+                <Spinner data-icon="inline-start" />
               ) : (
                 <Sparkles data-icon="inline-start" />
               )}{" "}
@@ -4035,10 +4023,7 @@ export function TranscriptWorkspace({
               onClick={() => void mergeSpeakers()}
             >
               {mergeSaving ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
+                <Spinner data-icon="inline-start" />
               ) : (
                 <GitMerge data-icon="inline-start" />
               )}{" "}

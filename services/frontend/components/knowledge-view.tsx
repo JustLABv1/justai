@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
   useTranslatedConfig,
@@ -19,7 +20,6 @@ import {
   ChevronRight,
   FileText,
   Globe2,
-  LoaderCircle,
   RefreshCw,
   Search,
   Trash2,
@@ -812,11 +812,7 @@ export const KnowledgeView = forwardRef<KnowledgeViewHandle, Props>(
                 <Button type="submit" disabled={uploading}>
                   {uploading ? (
                     <>
-                      <LoaderCircle
-                        data-icon="inline-start"
-                        className="animate-spin"
-                        aria-hidden="true"
-                      />
+                      <Spinner data-icon="inline-start" aria-hidden="true" />
                       {t("Indexing…")}
                     </>
                   ) : (

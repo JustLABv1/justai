@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
   useTranslatedConfig,
@@ -32,7 +33,6 @@ import {
   FolderPlus,
   Globe2,
   Link2,
-  LoaderCircle,
   MoreHorizontal,
   NotebookPen,
   Plus,
@@ -1848,7 +1848,7 @@ export function KnowledgeWorkspace({
                         role="status"
                       >
                         {busy ? (
-                          <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+                          <Spinner className="size-4 text-muted-foreground" />
                         ) : (
                           <UploadCloud className="size-4 text-primary" />
                         )}
@@ -1864,8 +1864,7 @@ export function KnowledgeWorkspace({
                         className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground"
                         role="status"
                       >
-                        <LoaderCircle className="animate-spin" />{" "}
-                        {t("Loading files…")}
+                        <Spinner /> {t("Loading files…")}
                       </div>
                     ) : loadError &&
                       visibleItems.length === 0 &&
@@ -2135,7 +2134,7 @@ export function KnowledgeWorkspace({
                                   <div className="mt-2 flex flex-col gap-1.5">
                                     <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                                       <span className="flex items-center gap-1.5">
-                                        <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" />
+                                        <Spinner className="size-3" />
                                         {source?.status === "queued"
                                           ? t(
                                               "Upload complete · Waiting to index"

@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
@@ -10,7 +11,6 @@ import {
   ChevronRight,
   FileText,
   FileVideo,
-  LoaderCircle,
   Search,
   Upload,
 } from "lucide-react"
@@ -369,7 +369,7 @@ export function VideoTranscriptionLibrary({
                       >
                         {videoLibraryPending(item.status) &&
                         !["live", "paused", "waiting"].includes(item.status) ? (
-                          <LoaderCircle className="size-3 animate-spin" />
+                          <Spinner className="size-3" />
                         ) : null}
                         {t(videoLibraryStep(item))}
                       </Badge>

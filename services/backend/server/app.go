@@ -173,6 +173,8 @@ func (a *App) Router() *gin.Engine {
 	protected.GET("/profile/transcription-summary-standard", a.getTranscriptionSummaryStandard)
 	protected.PUT("/profile/transcription-summary-standard", a.saveTranscriptionSummaryStandard)
 	protected.DELETE("/profile/transcription-summary-standard", a.deleteTranscriptionSummaryStandard)
+	protected.GET("/profile/favorite-models", a.getFavoriteModels)
+	protected.PUT("/profile/favorite-models", a.saveFavoriteModels)
 	protected.GET("/profile/avatar", a.serveProfileAvatar)
 	protected.POST("/profile/avatar", a.uploadProfileAvatar)
 	protected.DELETE("/profile/avatar", a.deleteProfileAvatar)

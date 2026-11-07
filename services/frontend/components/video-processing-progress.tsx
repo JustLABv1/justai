@@ -1,10 +1,11 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
   useTranslatedConfig,
 } from "@/components/locale-provider"
-import { Check, CircleAlert, LoaderCircle, SkipForward, X } from "lucide-react"
+import { Check, CircleAlert, SkipForward, X } from "lucide-react"
 import type { ReactNode } from "react"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
@@ -306,9 +307,9 @@ export function VideoProcessingProgress({
             </div>
           ) : running ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
-              <LoaderCircle
+              <Spinner
                 aria-hidden="true"
-                className="size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none"
+                className="size-4 shrink-0 text-primary"
               />
               {statusLabel}
               {elapsed ? t(" · {value0} elapsed", { value0: elapsed }) : ""}

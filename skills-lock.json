@@ -31,6 +31,12 @@
       "skillPath": "assistant-ui/skills/observability/SKILL.md",
       "computedHash": "8f6d74ce5866554479504e4d04bd6c74a0c0a214daae7f1a3308e8bdd16bd4d5"
     },
+    "panelui-web": {
+      "source": "panel-ui/PanelUI",
+      "sourceType": "github",
+      "skillPath": "skills/panelui-web/SKILL.md",
+      "computedHash": "277458f7f7eb5fcad2e0cff83e49deb925f1b8db0d27f38c46d8f790922cb730"
+    },
     "primitives": {
       "source": "assistant-ui/skills",
       "sourceType": "github",

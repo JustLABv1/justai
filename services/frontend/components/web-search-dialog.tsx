@@ -1,8 +1,9 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useState } from "react"
-import { ExternalLink, Globe2, Loader2, Plus, Search } from "lucide-react"
+import { ExternalLink, Globe2, Plus, Search } from "lucide-react"
 
 import { api } from "@/lib/api"
 import type { WebSearchResult } from "@/lib/types"
@@ -161,7 +162,7 @@ export function WebSearchDialog({
             value={query}
           />
           <Button disabled={searching || !query.trim()} type="submit">
-            {searching ? <Loader2 className="animate-spin" /> : <Search />}
+            {searching ? <Spinner /> : <Search />}
             {t("Search")}
           </Button>
         </form>
@@ -187,7 +188,7 @@ export function WebSearchDialog({
             type="submit"
             variant="outline"
           >
-            {previewing ? <Loader2 className="animate-spin" /> : <Globe2 />}
+            {previewing ? <Spinner /> : <Globe2 />}
             {t("Browse URL")}
           </Button>
         </form>
@@ -235,7 +236,7 @@ export function WebSearchDialog({
                           variant="ghost"
                         >
                           {previewing && preview?.url === result.url ? (
-                            <Loader2 className="animate-spin" />
+                            <Spinner />
                           ) : (
                             <Globe2 />
                           )}
@@ -251,11 +252,7 @@ export function WebSearchDialog({
                           type="button"
                           variant="ghost"
                         >
-                          {attaching === result.url ? (
-                            <Loader2 className="animate-spin" />
-                          ) : (
-                            <Plus />
-                          )}
+                          {attaching === result.url ? <Spinner /> : <Plus />}
                         </Button>
                       </div>
                     </div>
@@ -291,11 +288,7 @@ export function WebSearchDialog({
                       type="button"
                       variant="ghost"
                     >
-                      {attaching === preview.url ? (
-                        <Loader2 className="animate-spin" />
-                      ) : (
-                        <Plus />
-                      )}
+                      {attaching === preview.url ? <Spinner /> : <Plus />}
                     </Button>
                     <Button
                       aria-label={t("Open preview in a new tab")}

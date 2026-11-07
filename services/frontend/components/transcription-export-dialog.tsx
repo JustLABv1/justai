@@ -1,7 +1,8 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useState } from "react"
-import { Check, Download, LoaderCircle } from "lucide-react"
+import { Check, Download } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -323,10 +324,7 @@ export function TranscriptionExportDialog({
                 onClick={() => onDownload(remember && showSummary)}
               >
                 {exporting ? (
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />
+                  <Spinner data-icon="inline-start" />
                 ) : (
                   <Download data-icon="inline-start" />
                 )}

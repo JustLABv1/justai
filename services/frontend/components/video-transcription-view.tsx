@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import {
   VideoCaptionSettings,
@@ -16,7 +17,6 @@ import {
   CircleAlert,
   FileText,
   FileVideo,
-  LoaderCircle,
   Pause,
   Pencil,
   Play,
@@ -1251,7 +1251,7 @@ export function VideoTranscriptionView({
             </Button>
           ) : (
             <>
-              <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+              <Spinner className="size-5 text-muted-foreground" />
               <p role="status" className="text-sm text-muted-foreground">
                 {t("Opening recording…")}
               </p>
@@ -1988,11 +1988,7 @@ export function VideoTranscriptionView({
                 >
                   {videoStarting ? (
                     <>
-                      <LoaderCircle
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />{" "}
-                      Preparing upload…
+                      <Spinner data-icon="inline-start" /> Preparing upload…
                     </>
                   ) : (
                     <>
@@ -2440,10 +2436,7 @@ export function VideoTranscriptionView({
               onClick={() => void saveSpeakerName()}
             >
               {speakerRenameSaving ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
+                <Spinner data-icon="inline-start" />
               ) : (
                 <Pencil data-icon="inline-start" />
               )}
@@ -2505,10 +2498,7 @@ export function VideoTranscriptionView({
               }}
             >
               {skipSpeakerInFlight ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
+                <Spinner data-icon="inline-start" />
               ) : (
                 <SkipForward data-icon="inline-start" />
               )}
@@ -2547,10 +2537,7 @@ function LiveTranscriptPreview({
           </p>
         </div>
         <Badge className="shrink-0" variant="outline">
-          <LoaderCircle
-            aria-hidden="true"
-            className="size-3 motion-safe:animate-spin motion-reduce:animate-none"
-          />
+          <Spinner aria-hidden="true" className="size-3" />
           {t("Live")}
         </Badge>
       </div>
@@ -2759,10 +2746,7 @@ function VideoPipeline({
                 className="size-4 text-destructive"
               />
             ) : isActive ? (
-              <LoaderCircle
-                aria-hidden="true"
-                className="size-4 animate-spin text-primary"
-              />
+              <Spinner aria-hidden="true" className="size-4 text-primary" />
             ) : upload.status === "cancelled" ? (
               <X aria-hidden="true" className="size-4 text-muted-foreground" />
             ) : (

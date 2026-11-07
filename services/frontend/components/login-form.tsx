@@ -17,7 +17,7 @@ import {
   FieldSeparator,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/panelui/spinner"
 import { api, API_URL } from "@/lib/api"
 import { usePlatformConfig } from "@/components/platform-config"
 import { oidcLoginPath } from "@/lib/platform-config-logic"

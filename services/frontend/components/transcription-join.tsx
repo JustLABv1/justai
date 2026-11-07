@@ -1,7 +1,7 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import { Check, LoaderCircle, Mic, Radio, ShieldCheck } from "lucide-react"
+import { Check, Mic, Radio, ShieldCheck } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
@@ -23,7 +23,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/panelui/spinner"
 import { VoiceOrb } from "@/components/assistant-ui/voice"
 import { api, eventStreamURL } from "@/lib/api"
 import { SSETransport } from "@/lib/sse-transport"
@@ -922,10 +922,7 @@ export function TranscriptionJoin() {
                 onClick={() => void submit()}
               >
                 {submitting ? (
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />
+                  <Spinner data-icon="inline-start" />
                 ) : (
                   <Mic data-icon="inline-start" />
                 )}
@@ -948,7 +945,7 @@ export function TranscriptionJoin() {
           ) : null}
           {state === "approved" ? (
             <div className="flex flex-col items-center gap-4 py-8 text-center">
-              <LoaderCircle className="animate-spin text-primary" />
+              <Spinner className="text-primary" />
               <p className="font-medium">{t("Connecting microphone…")}</p>
             </div>
           ) : null}

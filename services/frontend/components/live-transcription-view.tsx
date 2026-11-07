@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
   useTranslatedConfig,
@@ -13,7 +14,6 @@ import {
   CalendarDays,
   Check,
   Copy,
-  LoaderCircle,
   ChevronDown,
   Mic,
   MonitorUp,
@@ -2204,10 +2204,7 @@ export function LiveTranscriptionView({
             </Link>
           ) : (
             <>
-              <LoaderCircle
-                className="size-5 animate-spin"
-                aria-hidden="true"
-              />
+              <Spinner className="size-5" aria-hidden="true" />
               {t("Opening recording…")}
             </>
           )}
@@ -2332,10 +2329,7 @@ export function LiveTranscriptionView({
                   >
                     {starting ? (
                       <>
-                        <LoaderCircle
-                          className="animate-spin"
-                          data-icon="inline-start"
-                        />
+                        <Spinner data-icon="inline-start" />
                         Starting…
                       </>
                     ) : (
@@ -3059,10 +3053,7 @@ export function LiveTranscriptionView({
             >
               {streamStarting ? (
                 <>
-                  <LoaderCircle
-                    className="animate-spin"
-                    data-icon="inline-start"
-                  />
+                  <Spinner data-icon="inline-start" />
                   {t("Connecting…")}
                 </>
               ) : (
@@ -3229,10 +3220,7 @@ export function LiveTranscriptionView({
                 >
                   {botStarting ? (
                     <>
-                      <LoaderCircle
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />
+                      <Spinner data-icon="inline-start" />
                       {t("Creating…")}
                     </>
                   ) : (
@@ -3364,10 +3352,7 @@ export function LiveTranscriptionView({
               onClick={() => void saveWorkspaceSpeakerName()}
             >
               {workspaceSpeakerSaving ? (
-                <LoaderCircle
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
+                <Spinner data-icon="inline-start" />
               ) : null}
               {t("Save name")}
             </Button>

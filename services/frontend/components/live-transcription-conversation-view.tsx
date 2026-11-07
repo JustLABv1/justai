@@ -1,5 +1,6 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import {
   useTranslations,
   useTranslatedConfig,
@@ -11,7 +12,6 @@ import {
   Bot,
   CalendarClock,
   Check,
-  LoaderCircle,
   Mic2,
   MonitorUp,
   MoreHorizontal,
@@ -627,11 +627,7 @@ export function LiveTranscriptionConversationView({
                             }
                             size="sm"
                           >
-                            {updating ? (
-                              <LoaderCircle className="motion-safe:animate-spin" />
-                            ) : (
-                              <Check />
-                            )}
+                            {updating ? <Spinner /> : <Check />}
                             {t("Accept")}
                           </Button>
                           <Button

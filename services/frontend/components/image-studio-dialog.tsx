@@ -1,8 +1,9 @@
 "use client"
 
+import { Spinner } from "@/components/panelui/spinner"
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useMemo, useState } from "react"
-import { Download, ImagePlus, Loader2, Sparkles } from "lucide-react"
+import { Download, ImagePlus, Sparkles } from "lucide-react"
 import Image from "next/image"
 
 import { api } from "@/lib/api"
@@ -300,7 +301,7 @@ export function ImageStudioDialog({ endpoints }: ImageStudioDialogProps) {
               disabled={saving || !prompt.trim() || imageEndpoints.length === 0}
               type="submit"
             >
-              {saving ? <Loader2 className="animate-spin" /> : <Sparkles />}
+              {saving ? <Spinner /> : <Sparkles />}
               {saving
                 ? t("Creating…")
                 : mode === "edit"

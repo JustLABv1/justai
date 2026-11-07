@@ -1,7 +1,7 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import { Spinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/panelui/spinner"
 import {
   AlertDialog,
   AlertDialogAction,
