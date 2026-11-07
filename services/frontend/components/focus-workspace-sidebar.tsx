@@ -546,7 +546,7 @@ export function FocusWorkspaceSidebar({
                 >
                   <BrandMark
                     aria-hidden="true"
-                    className="size-8 [&_svg]:size-full!"
+                    className="size-6 [&_svg]:size-full!"
                     cropped
                   />
                   <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">

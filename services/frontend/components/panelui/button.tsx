@@ -52,6 +52,8 @@ export interface ButtonProps extends ComponentProps<'button'> {
   shape?: 'default' | 'pill';
   /** Shows a spinner over the label, sets `aria-busy` and stops presses, keeping the width. */
   loading?: boolean;
+  /** Keep children direct for integrations whose layout depends on direct-child selectors. */
+  wrapContent?: boolean;
   /**
    * An element to draw the button as, such as `<a href="/" />` or a router's
    * link, or a function of the props and state that returns one. It takes the
@@ -89,6 +91,7 @@ function ButtonRoot({
   size,
   shape,
   loading = false,
+  wrapContent = true,
   disabled,
   type = 'button',
   className,
@@ -114,7 +117,7 @@ function ButtonRoot({
     >
       {loading ? <Spinner /> : null}
       {/* `contents`, so the label still lays out in the button's own row. */}
-      <span className={loading ? 'invisible contents' : 'contents'}>{children}</span>
+      {loading || wrapContent ? <span className={loading ? 'invisible contents' : 'contents'}>{children}</span> : children}
     </BaseButton>
   );
 }
