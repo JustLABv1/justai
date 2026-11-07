@@ -2,15 +2,17 @@
 
 import { useTranslations } from "@/components/locale-provider"
 import { useEffect, useState } from "react"
-import { Download, Play, Save } from "lucide-react"
+import { Download } from "lucide-react"
 
 import { api } from "@/lib/api"
 import { notifyError, notifySuccess } from "@/lib/feedback"
 import type { PrivacySettings } from "@/lib/types"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Alert } from "@/components/panelui/alert"
+import { Frame } from "@/components/panelui/frame"
+import { Field } from "@/components/panelui/field"
+import { Spinner } from "@/components/panelui/spinner"
 import { Button } from "@/components/panelui/button"
 import { Input } from "@/components/panelui/input"
-import { SettingsRow, SettingsSection } from "@/components/ui/settings"
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog"
 
 export function PrivacyView() {
@@ -61,7 +63,10 @@ export function PrivacyView() {
     }
   }, [loadAttempt])
 
-  function update(key: keyof PrivacySettings, value: string) {
+  function update(
+    key: Exclude<keyof PrivacySettings, "updatedAt">,
+    value: string
+  ) {
     const parsed = Number.parseInt(value, 10)
     setSettings((current) => ({
       ...current,
@@ -71,6 +76,7 @@ export function PrivacyView() {
 
   async function save(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault()
+    if (loading || loadError || saving || cleaning) return
     setSaving(true)
     setError("")
     setNotice("")
@@ -124,6 +130,7 @@ export function PrivacyView() {
   }
 
   async function runCleanup() {
+    if (loading || loadError || saving || cleaning || settingsDirty) return
     setCleaning(true)
     setError("")
     setNotice("")
@@ -137,9 +144,13 @@ export function PrivacyView() {
       }>("/api/v1/privacy/cleanup")
       const { conversations, knowledge, transcripts } = response.deleted
       setNotice(
-        `Cleanup complete: ${conversations} archived chats, ${knowledge} knowledge sources, and ${transcripts} transcripts removed.`
+        t(
+          "Cleanup complete: {conversations} archived chats, {knowledge} knowledge sources, and {transcripts} transcripts removed.",
+          { conversations, knowledge, transcripts }
+        )
       )
       notifySuccess("Retention cleanup complete")
+      setCleanupOpen(false)
     } catch (caught) {
       setError(
         notifyError(
@@ -160,157 +171,209 @@ export function PrivacyView() {
     settings.transcriptionRetentionDays !==
       savedSettings.transcriptionRetentionDays
 
+  const unavailable = loading || Boolean(loadError)
+  const retentionFields: Array<{
+    key: Exclude<keyof PrivacySettings, "updatedAt">
+    id: string
+    label: string
+    description: string
+  }> = [
+    {
+      key: "archivedConversationRetentionDays",
+      id: "archived-retention",
+      label: "Archived conversations",
+      description: "Delete archived chats after this many days.",
+    },
+    {
+      key: "knowledgeRetentionDays",
+      id: "knowledge-retention",
+      label: "Personal knowledge",
+      description: "Remove your uploaded and imported knowledge sources.",
+    },
+    {
+      key: "transcriptionRetentionDays",
+      id: "transcription-retention",
+      label: "Completed transcripts",
+      description:
+        "Remove completed or failed transcript sessions and recordings.",
+    },
+  ]
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       {(loadError || error) && (
-        <Alert
-          aria-live="polite"
-          className="flex flex-wrap items-start justify-between gap-3"
-          role="alert"
-          variant="destructive"
-        >
-          <div>
-            <AlertTitle>
-              {loadError
-                ? t("Privacy settings unavailable")
-                : t("Privacy action failed")}
-            </AlertTitle>
-            <AlertDescription>{loadError || error}</AlertDescription>
-          </div>
+        <Alert tone="destructive" variant="plain">
+          <Alert.Title>
+            {t(
+              loadError
+                ? "Privacy settings unavailable"
+                : "Privacy action failed"
+            )}
+          </Alert.Title>
+          <Alert.Description>{t(loadError || error)}</Alert.Description>
           {loadError && (
-            <Button
-              onClick={() => {
-                setLoadError("")
-                setLoading(true)
-                setLoadAttempt((attempt) => attempt + 1)
-              }}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              {t("Retry")}
-            </Button>
+            <Alert.Actions>
+              <Button
+                onClick={() => {
+                  setLoadError("")
+                  setLoading(true)
+                  setLoadAttempt((attempt) => attempt + 1)
+                }}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {t("Retry")}
+              </Button>
+            </Alert.Actions>
           )}
         </Alert>
       )}
       {notice && (
-        <Alert aria-live="polite" role="status">
-          <AlertDescription>{t(notice)}</AlertDescription>
+        <Alert tone="success" variant="plain">
+          <Alert.Description>{t(notice)}</Alert.Description>
         </Alert>
       )}
       <form onSubmit={(event) => void save(event)}>
-        <SettingsSection
-          aria-busy={loading || saving}
-          description={t(
-            "Choose how long your personal data in this workspace remains. A value of 0 means JustAI never removes it automatically."
-          )}
-          footer={
-            <>
-              {settingsDirty && (
-                <p className="mr-auto text-xs text-muted-foreground">
-                  Save before running cleanup. It uses the last saved values.
-                </p>
+        <Frame aria-busy={loading || saving}>
+          <Frame.Header>
+            <Frame.Title>{t("Retention")}</Frame.Title>
+            <Frame.Description>
+              {t(
+                "Choose how long your personal data in this workspace remains. A value of 0 means JustAI never removes it automatically."
               )}
+            </Frame.Description>
+            {loading && (
+              <Frame.Action>
+                <span
+                  role="status"
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                >
+                  <Spinner className="size-4" />
+                  {t("Loading…")}
+                </span>
+              </Frame.Action>
+            )}
+          </Frame.Header>
+          <Frame.Panel>
+            {retentionFields.map((item) => (
+              <Field
+                key={item.key}
+                disabled={unavailable || saving || cleaning}
+              >
+                <Frame.Row className="flex-wrap gap-y-3">
+                  <Frame.Content className="min-w-48">
+                    <Field.Label>{t(item.label)}</Field.Label>
+                    <Field.Description>{t(item.description)}</Field.Description>
+                  </Frame.Content>
+                  <Frame.Actions className="w-full sm:w-40">
+                    <Input.Group>
+                      <Input
+                        id={item.id}
+                        type="number"
+                        min={0}
+                        max={3650}
+                        step={1}
+                        value={settings[item.key]}
+                        disabled={unavailable || saving || cleaning}
+                        onChange={(event) =>
+                          update(item.key, event.target.value)
+                        }
+                      />
+                      <Input.Addon align="end">{t("days")}</Input.Addon>
+                    </Input.Group>
+                  </Frame.Actions>
+                </Frame.Row>
+              </Field>
+            ))}
+          </Frame.Panel>
+          <Frame.Footer className="flex flex-wrap items-center justify-between gap-3">
+            <span role="status" className="text-xs text-muted-foreground">
+              {settingsDirty
+                ? t("You have unsaved changes.")
+                : unavailable
+                  ? ""
+                  : t("Saved retention settings are applied automatically.")}
+            </span>
+            <Button
+              disabled={unavailable || saving || cleaning || !settingsDirty}
+              type="submit"
+              size="sm"
+            >
+              {saving && <Spinner className="size-4" />}
+              {t(saving ? "Saving…" : "Save changes")}
+            </Button>
+          </Frame.Footer>
+        </Frame>
+      </form>
+      <Frame>
+        <Frame.Header>
+          <Frame.Title>{t("Export your data")}</Frame.Title>
+          <Frame.Description>
+            {t("Download a copy of your personal data as JSON.")}
+          </Frame.Description>
+        </Frame.Header>
+        <Frame.Panel>
+          <Frame.Row className="flex-wrap gap-y-3">
+            <Frame.Content className="min-w-48">
+              <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                {t(
+                  "Download conversations, messages, notes, memories, projects, and personal source metadata as JSON. Binary files, recordings, and message attachments are not included."
+                )}
+              </Frame.Description>
+            </Frame.Content>
+            <Frame.Actions>
               <Button
-                disabled={loading || saving || cleaning || settingsDirty}
+                disabled={exporting}
+                onClick={() => void exportData()}
+                variant="outline"
+                size="sm"
+                type="button"
+              >
+                {exporting ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <Download className="size-4" />
+                )}
+                {t(exporting ? "Preparing export…" : "Download data export")}
+              </Button>
+            </Frame.Actions>
+          </Frame.Row>
+        </Frame.Panel>
+      </Frame>
+      <Frame>
+        <Frame.Header>
+          <Frame.Title>{t("Clean up old data")}</Frame.Title>
+          <Frame.Description>
+            {t("Apply your saved retention settings now.")}
+          </Frame.Description>
+        </Frame.Header>
+        <Frame.Panel>
+          <Frame.Row className="flex-wrap gap-y-3">
+            <Frame.Content className="min-w-48">
+              <Frame.Description className="overflow-visible! text-clip! whitespace-normal!">
+                {t(
+                  settingsDirty
+                    ? "Save before running cleanup. It uses the last saved values."
+                    : "Data older than your saved retention limits will be permanently removed. Data with a retention of 0 is kept."
+                )}
+              </Frame.Description>
+            </Frame.Content>
+            <Frame.Actions>
+              <Button
+                disabled={unavailable || saving || cleaning || settingsDirty}
                 onClick={() => setCleanupOpen(true)}
                 type="button"
                 variant="outline"
+                size="sm"
               >
-                <Play data-icon="inline-start" />
-                {cleaning ? "Running…" : "Run cleanup now"}
+                {cleaning && <Spinner className="size-4" />}
+                {t(cleaning ? "Running…" : "Run cleanup")}
               </Button>
-              <Button disabled={loading || saving} type="submit">
-                <Save data-icon="inline-start" />
-                {saving ? "Saving…" : "Save changes"}
-              </Button>
-            </>
-          }
-          title={t("Retention")}
-        >
-          <SettingsRow
-            description={t("Delete archived chats after this many days.")}
-            htmlFor="archived-retention"
-            label={t("Archived conversations")}
-          >
-            <Input
-              className="sm:max-w-32"
-              disabled={loading || saving}
-              id="archived-retention"
-              max={3650}
-              min={0}
-              onChange={(event) =>
-                update("archivedConversationRetentionDays", event.target.value)
-              }
-              type="number"
-              value={settings.archivedConversationRetentionDays}
-            />
-          </SettingsRow>
-          <SettingsRow
-            description={t(
-              "Remove your uploaded and imported knowledge sources."
-            )}
-            htmlFor="knowledge-retention"
-            label={t("Personal knowledge")}
-          >
-            <Input
-              className="sm:max-w-32"
-              disabled={loading || saving}
-              id="knowledge-retention"
-              max={3650}
-              min={0}
-              onChange={(event) =>
-                update("knowledgeRetentionDays", event.target.value)
-              }
-              type="number"
-              value={settings.knowledgeRetentionDays}
-            />
-          </SettingsRow>
-          <SettingsRow
-            description={t(
-              "Remove completed or failed transcript sessions and recordings."
-            )}
-            htmlFor="transcription-retention"
-            label={t("Completed transcripts")}
-          >
-            <Input
-              className="sm:max-w-32"
-              disabled={loading || saving}
-              id="transcription-retention"
-              max={3650}
-              min={0}
-              onChange={(event) =>
-                update("transcriptionRetentionDays", event.target.value)
-              }
-              type="number"
-              value={settings.transcriptionRetentionDays}
-            />
-          </SettingsRow>
-        </SettingsSection>
-      </form>
-
-      <SettingsSection
-        description={t(
-          "Download conversations, messages, notes, memories, projects, and personal source metadata as JSON. Binary files, recordings, and message attachments are not included."
-        )}
-        title={t("Export your data")}
-      >
-        <SettingsRow
-          description={t(
-            "Exports are generated on demand and are not stored by JustAI after the response completes."
-          )}
-          label={t("Data export")}
-        >
-          <Button
-            disabled={exporting}
-            onClick={() => void exportData()}
-            variant="outline"
-          >
-            <Download data-icon="inline-start" />
-            {exporting ? t("Preparing export…") : t("Download data export")}
-          </Button>
-        </SettingsRow>
-      </SettingsSection>
+            </Frame.Actions>
+          </Frame.Row>
+        </Frame.Panel>
+      </Frame>
       <ConfirmActionDialog
         open={cleanupOpen}
         title={t("Run retention cleanup now?")}

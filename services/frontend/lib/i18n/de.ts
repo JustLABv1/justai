@@ -4542,4 +4542,16 @@ export const de = {
     "Ein monatliches Token-Budget für dieses Mitglied festlegen.",
   "Default limit saved.": "Standardlimit gespeichert.",
   "Member limit saved.": "Mitgliedslimit gespeichert.",
+  "You have unsaved changes.": "Du hast ungespeicherte Änderungen.",
+  "Saved retention settings are applied automatically.":
+    "Gespeicherte Aufbewahrungsregeln werden automatisch angewendet.",
+  "Download a copy of your personal data as JSON.":
+    "Lade eine Kopie deiner persönlichen Daten als JSON herunter.",
+  "Clean up old data": "Alte Daten bereinigen",
+  "Apply your saved retention settings now.":
+    "Wende deine gespeicherten Aufbewahrungsregeln jetzt an.",
+  "Data older than your saved retention limits will be permanently removed. Data with a retention of 0 is kept.":
+    "Daten, die älter als die gespeicherten Aufbewahrungsfristen sind, werden dauerhaft entfernt. Daten mit einer Frist von 0 bleiben erhalten.",
+  "Cleanup complete: {conversations} archived chats, {knowledge} knowledge sources, and {transcripts} transcripts removed.":
+    "Bereinigung abgeschlossen: {conversations} archivierte Chats, {knowledge} Wissensquellen und {transcripts} Transkripte entfernt.",
 } as const
