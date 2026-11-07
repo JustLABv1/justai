@@ -4629,4 +4629,5 @@ export const de = {
   "Good morning, {name}": "Guten Morgen, {name}",
   "Good afternoon, {name}": "Guten Tag, {name}",
   "Good evening, {name}": "Guten Abend, {name}",
+  "Your name": "Dein Name",
 } as const

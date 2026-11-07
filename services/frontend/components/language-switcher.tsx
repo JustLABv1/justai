@@ -1,6 +1,6 @@
 "use client"
 
-import { Check, Languages } from "lucide-react"
+import { Check, ChevronDown, Languages } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
 import { Button } from "@/components/panelui/button"
 import { Menu } from "@/components/panelui/menu"
@@ -47,8 +47,8 @@ export function LanguageSwitcher() {
           <Button variant="ghost" size="sm" aria-label={t("Choose language")} />
         }
       >
-        <Languages data-icon="inline-start" />
-        {t("Language")}
+        {locale === "de" ? "Deutsch" : "English"}
+        <ChevronDown className="size-3.5 text-muted-foreground" />
       </Menu.Trigger>
       <Menu.Content align="end">
         <Menu.Group>
