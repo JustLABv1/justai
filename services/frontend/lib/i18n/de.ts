@@ -4349,4 +4349,14 @@ export const de = {
   "Tokens per day, last 30 days": "Tokens pro Tag, letzte 30 Tage",
   "Tokens per day": "Tokens pro Tag",
   "Usage this month": "Nutzung in diesem Monat",
+  "{value0} remote": "{value0} remote",
+  "Reusable multi-step runs": "Wiederverwendbare mehrstufige Abläufe",
+  "{value0} running": "{value0} laufend",
+  Remote: "Remote",
+  "Filter agents by kind": "Agenten nach Art filtern",
+  "Reusable workflow": "Wiederverwendbarer Workflow",
+  "Open builder": "Builder öffnen",
+  "Pick a ready-made graph and adjust it in the builder.":
+    "Wähle einen fertigen Ablauf und passe ihn im Builder an.",
+  nodes: "Knoten",
 } as const
