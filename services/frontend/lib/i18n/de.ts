@@ -4371,4 +4371,10 @@ export const de = {
   "Workflow tools": "Workflow-Werkzeuge",
   Inspector: "Inspektor",
   "Open conversation": "Unterhaltung öffnen",
+  "Resize side panel": "Seitenleiste in der Größe ändern",
+  "Hide video": "Video ausblenden",
+  "Show video": "Video einblenden",
+  Play: "Abspielen",
+  "Summary actions": "Zusammenfassungsaktionen",
+  "Audio playback": "Audiowiedergabe",
 } as const

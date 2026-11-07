@@ -26,6 +26,7 @@ export function TranscriptionSummaryReadingView({
   speakerNames,
   languageLabel,
   review,
+  actions,
 }: {
   insights: TranscriptionInsights
   processing: boolean
@@ -40,6 +41,8 @@ export function TranscriptionSummaryReadingView({
   speakerNames: string[]
   languageLabel: string
   review: ReactNode
+  /** Controls shown beside the title, such as a toolbar. */
+  actions?: ReactNode
 }) {
   const { t } = useTranslations()
   const paragraphs = summaryParagraphs(insights.summary ?? "")
@@ -76,7 +79,7 @@ export function TranscriptionSummaryReadingView({
     )
   }
   return (
-    <article className="mx-auto w-full max-w-[76ch] px-5 py-6 text-base sm:px-8 sm:py-8">
+    <article className="mx-auto w-full max-w-[76ch] px-2 pt-1 pb-6 text-base sm:px-3 sm:pt-1 sm:pb-8">
       {processing ? (
         <div
           role="status"
@@ -121,7 +124,7 @@ export function TranscriptionSummaryReadingView({
       ) : null}
       {hasContent ? (
         <>
-          <header className="mb-6">
+          <header className="mb-6 flex items-center justify-between gap-3">
             <h2 className="text-xl font-semibold tracking-tight">
               {t(
                 processing || insights.status === "failed"
@@ -129,6 +132,7 @@ export function TranscriptionSummaryReadingView({
                   : "Summary"
               )}
             </h2>
+            {actions}
           </header>
           <div className="flex flex-col gap-6">
             {paragraphs.map((paragraph, index) => (

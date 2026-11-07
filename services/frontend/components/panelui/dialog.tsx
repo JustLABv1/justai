@@ -102,7 +102,7 @@ const dialogVariants = tv({
       "before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:z-20 before:h-px before:bg-border before:opacity-0 before:transition-opacity before:content-[''] data-overflow-y-start:before:opacity-100",
     ],
     bodyViewport: 'min-h-0 flex-1 overscroll-contain rounded-[inherit] outline-none',
-    bodyContent: 'flex flex-col gap-4',
+    bodyContent: 'flex min-w-0! flex-col gap-4',
     scrollbar:
       'my-2 me-1 flex w-1.5 opacity-0 transition-opacity delay-300 data-hovering:opacity-100 data-hovering:delay-0 data-scrolling:opacity-100 data-scrolling:delay-0',
     thumb: 'relative flex-1 rounded-full bg-foreground/20',
