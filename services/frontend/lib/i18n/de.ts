@@ -4425,4 +4425,10 @@ export const de = {
   "{value0} min {value1} s": "{value0} Min. {value1} s",
   "Step {value0} of {value1}": "Schritt {value0} von {value1}",
   Discard: "Verwerfen",
+  "No file chosen": "Keine Datei ausgewählt",
+  "Current original": "Aktuelles Original",
+  "Word, Excel, PowerPoint, PDF and more":
+    "Word, Excel, PowerPoint, PDF und mehr",
+  "Remove file": "Datei entfernen",
+  "Choose file": "Datei auswählen",
 } as const
