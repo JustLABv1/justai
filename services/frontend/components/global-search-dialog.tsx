@@ -15,7 +15,6 @@ import {
   MessageSquare,
   NotebookPen,
   Plug,
-  Search,
   Settings2,
   ShieldCheck,
   UserRound,
@@ -23,14 +22,7 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
-import {
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
+import { Command } from "@/components/panelui/command"
 import type {
   AdminTab,
   SettingsTab,
@@ -38,7 +30,6 @@ import type {
   ViewId,
 } from "@/lib/types"
 import { api } from "@/lib/api"
-import { Button } from "@/components/ui/button"
 
 type GlobalSearchDialogProps = {
   open: boolean
@@ -260,17 +251,6 @@ export function GlobalSearchDialog({
     }
   }, [open, query, retryToken])
 
-  useEffect(() => {
-    function handleShortcut(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault()
-        setOpen(!open)
-      }
-    }
-    window.addEventListener("keydown", handleShortcut)
-    return () => window.removeEventListener("keydown", handleShortcut)
-  }, [open, setOpen])
-
   const groupedResults = useMemo(
     () =>
       resultGroups.map((group) => ({
@@ -312,124 +292,97 @@ export function GlobalSearchDialog({
     }
   }
 
+  const hasQuery = query.trim() !== ""
+  const hasResults = groupedResults.some((group) => group.results.length > 0)
+
   return (
-    <CommandDialog
-      description={t(
-        "Search conversations, notes, knowledge, transcripts, and projects."
-      )}
+    <Command.Dialog
+      hotkey="mod+k"
+      label={t("Universal search")}
       onOpenChange={setOpen}
       open={open}
-      title={t("Universal search")}
     >
-      <CommandInput
-        autoFocus
-        onValueChange={setQuery}
-        placeholder={t("Search everything in this workspace…")}
-        value={query}
-      />
-      <CommandList>
-        {visibleNavigationItems.length > 0 && (
-          <CommandGroup heading="Go to">
-            {visibleNavigationItems.map((item) => {
-              const Icon = item.icon
-              return (
-                <CommandItem
-                  key={item.id}
-                  onSelect={() => selectNavigation(item)}
-                  value={`${item.label} ${item.hint} ${item.keywords.join(" ")}`}
-                >
-                  <Icon />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">
-                      {item.label}
-                    </span>
-                    <span className="block truncate text-[11px] text-muted-foreground">
-                      {item.hint}
-                    </span>
-                  </span>
-                </CommandItem>
-              )
-            })}
-          </CommandGroup>
-        )}
-        {!query.trim() && (
-          <div className="flex flex-col items-center gap-2 px-6 py-10 text-center text-xs text-muted-foreground">
-            <Search className="size-5" />
-            <p>
-              {t(
-                "Search across chats, notes, knowledge, transcripts, and projects."
-              )}
-            </p>
-            <p className="flex flex-wrap items-center justify-center gap-1.5 text-[11px]">
-              <span>{t("Open anytime with")}</span>
-              <kbd className="rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
-                ⌘
-              </kbd>
-              <kbd className="rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
-                K
-              </kbd>
-              <span className="text-muted-foreground/70">{t("or")}</span>
-              <kbd className="rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
-                {t("Ctrl")}
-              </kbd>
-              <kbd className="rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
-                K
-              </kbd>
-            </p>
-          </div>
-        )}
-        {query.trim() && loading && (
-          <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-            {t("Searching workspace…")}
-          </p>
-        )}
-        {query.trim() && !loading && !error && (
-          <CommandEmpty>{t("No matching workspace content.")}</CommandEmpty>
-        )}
-        {query.trim() && !loading && error && (
-          <div
-            aria-live="assertive"
-            className="mx-3 my-2 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-            role="alert"
-          >
-            <span className="min-w-0">{t(error)}</span>
-            <Button
-              className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setRetryToken((value) => value + 1)}
-              size="sm"
-              type="button"
-              variant="outline"
+      <Command
+        filter={false}
+        label={t("Universal search")}
+        onSearchChange={setQuery}
+        search={query}
+      >
+        <Command.Input
+          placeholder={t("Search everything in this workspace…")}
+        />
+        <Command.List>
+          {visibleNavigationItems.length > 0 && (
+            <Command.Group heading={t("Go to")}>
+              {visibleNavigationItems.map((item) => {
+                const Icon = item.icon
+                return (
+                  <Command.Item
+                    icon={<Icon />}
+                    key={item.id}
+                    onSelect={() => selectNavigation(item)}
+                    subtitle={item.hint}
+                    value={`nav:${item.id}`}
+                  >
+                    {item.label}
+                  </Command.Item>
+                )
+              })}
+            </Command.Group>
+          )}
+          {hasQuery && loading && (
+            <Command.Loading>{t("Searching workspace…")}</Command.Loading>
+          )}
+          {hasQuery &&
+            !loading &&
+            !error &&
+            !hasResults &&
+            visibleNavigationItems.length === 0 && (
+              <Command.Empty>
+                {t("No matching workspace content.")}
+              </Command.Empty>
+            )}
+          {hasQuery && !loading && error && (
+            <div
+              aria-live="assertive"
+              className="mx-3 my-2 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+              role="alert"
             >
-              {t("Retry")}
-            </Button>
-          </div>
-        )}
-        {groupedResults.map((group) => {
-          if (group.results.length === 0) return null
-          const Icon = group.icon
-          return (
-            <CommandGroup heading={group.label} key={group.kind}>
-              {group.results.map((result) => (
-                <CommandItem
-                  key={`${result.kind}-${result.id}`}
-                  onSelect={() => selectResult(result)}
-                  value={`${result.kind} ${result.title} ${result.snippet}`}
-                >
-                  <Icon />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">
-                      {result.title}
-                    </span>
-                    <span className="block truncate text-[11px] text-muted-foreground">
-                      {result.snippet || "No preview available"}
-                    </span>
-                  </span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )
-        })}
-      </CommandList>
-    </CommandDialog>
+              <span className="min-w-0">{t(error)}</span>
+              <button
+                className="shrink-0 rounded-md border border-destructive/30 px-2 py-1 hover:bg-destructive/10"
+                onClick={() => setRetryToken((value) => value + 1)}
+                type="button"
+              >
+                {t("Retry")}
+              </button>
+            </div>
+          )}
+          {groupedResults.map((group) => {
+            if (group.results.length === 0) return null
+            const Icon = group.icon
+            return (
+              <Command.Group heading={group.label} key={group.kind}>
+                {group.results.map((result) => (
+                  <Command.Item
+                    icon={<Icon />}
+                    key={`${result.kind}-${result.id}`}
+                    kind={group.label}
+                    onSelect={() => selectResult(result)}
+                    subtitle={result.snippet || t("No preview available")}
+                    value={`${result.kind}-${result.id}`}
+                  >
+                    {result.title}
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            )
+          })}
+        </Command.List>
+        <Command.Footer>
+          <Command.FooterAction keys={["↵"]}>{t("Open")}</Command.FooterAction>
+        </Command.Footer>
+      </Command>
+    </Command.Dialog>
   )
 }
