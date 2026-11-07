@@ -653,6 +653,7 @@ export const de = {
   "Platform admin": "Plattformverwaltung",
   Profile: "Profil",
   "Sign out": "Abmelden",
+  "Disable seasons": "Jahreszeiten deaktivieren",
   "Recent chats": "Letzte Chats",
   "New chat": "Neuer Chat",
   "Your conversations will appear here.":

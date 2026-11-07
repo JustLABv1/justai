@@ -1,6 +1,7 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
+import { setSeasonsDisabled, useSeasonsDisabled } from "@/lib/season-preference"
 import {
   Fragment,
   useMemo,
@@ -14,6 +15,7 @@ import {
   ChevronRight,
   ChevronsUpDown,
   LogOut,
+  Leaf,
   MoreHorizontal,
   Plus,
   RotateCcw,
@@ -78,6 +80,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -275,6 +278,7 @@ export function FocusWorkspaceSidebar({
   disabledFeatures,
 }: FocusWorkspaceSidebarProps) {
   const { t } = useTranslations()
+  const seasonsDisabled = useSeasonsDisabled()
 
   const [historyQuery, setHistoryQuery] = useState("")
   const [sessionQuery, setSessionQuery] = useState("")
@@ -906,6 +910,15 @@ export function FocusWorkspaceSidebar({
                   <DropdownMenuSeparator />
                   <LanguageMenu />
                   <ThemeMenu />
+                  <DropdownMenuGroup>
+                    <DropdownMenuCheckboxItem
+                      checked={seasonsDisabled}
+                      onCheckedChange={setSeasonsDisabled}
+                    >
+                      <Leaf data-icon="inline-start" />
+                      {t("Disable seasons")}
+                    </DropdownMenuCheckboxItem>
+                  </DropdownMenuGroup>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => onNavigate("profile")}>
                     <UserRound data-icon="inline-start" />

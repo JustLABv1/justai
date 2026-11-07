@@ -125,6 +125,7 @@ import type {
   ViewId,
 } from "@/lib/types"
 import { AuroraBackdrop } from "@/components/aurora-backdrop"
+import { ComposerWeather } from "@/components/composer-weather"
 import { cn } from "@/lib/utils"
 import { chatContextLabel } from "@/lib/chat-context"
 
@@ -1447,7 +1448,13 @@ function ChatBackdrop() {
   )
   if (!shell) return null
   return createPortal(
-    <AuroraBackdrop className="absolute inset-x-0 top-0 -z-10 h-[75%]" />,
+    <>
+      <AuroraBackdrop
+        composerWeather
+        className="absolute inset-x-0 top-0 -z-10 h-[75%]"
+      />
+      <ComposerWeather />
+    </>,
     shell
   )
 }
@@ -2930,6 +2937,7 @@ function Composer({
                     compact && "flex flex-wrap items-center gap-2"
                   )}
                   data-running={isThreadRunning}
+                  data-seasonal-composer={compact ? "" : undefined}
                 >
                   <ComposerPrimitive.Quote className="mx-2 mb-1 flex items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
                     <Quote className="size-3.5 shrink-0" aria-hidden="true" />

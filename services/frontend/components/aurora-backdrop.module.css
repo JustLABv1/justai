@@ -1,0 +1,168 @@
+.backdrop {
+  container-type: size;
+}
+
+.atmosphere {
+  position: absolute;
+  inset: 0;
+  background: var(--season-wash);
+  opacity: 0.35;
+}
+
+.backdrop[data-season="spring"] {
+  --season-wash: radial-gradient(ellipse at 10% 15%, #fbcfe8, transparent 65%);
+  --particle-color: #f9b6ce;
+}
+
+.backdrop[data-season="summer"] {
+  --season-wash: radial-gradient(ellipse at 85% 5%, #fde68a, transparent 60%);
+}
+
+.sunlight {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 82% 0%, #fff3c480, transparent 65%),
+    conic-gradient(
+      from 145deg at 82% -15%,
+      transparent 0deg,
+      #ffe4a326 10deg,
+      transparent 18deg,
+      #ffe4a31a 30deg,
+      transparent 42deg
+    );
+  opacity: 0.6;
+}
+
+.foliage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0.42;
+  filter: blur(0.4px);
+}
+
+.foliageLeft,
+.foliageRight {
+  position: absolute;
+  top: -30px;
+  width: clamp(75px, 11%, 140px);
+  height: auto;
+}
+
+.foliageLeft {
+  left: -8px;
+  transform: rotate(12deg);
+}
+
+.foliageRight {
+  right: -15px;
+  top: 65px;
+  transform: scale(-0.85, 0.85) rotate(-16deg);
+}
+
+@media (max-width: 640px) {
+  .foliage {
+    opacity: 0.4;
+  }
+}
+
+.backdrop[data-season="autumn"] {
+  --season-wash: linear-gradient(140deg, #d49353, transparent 75%);
+  --particle-color: #b96426;
+}
+
+.backdrop[data-season="winter"] {
+  --season-wash: linear-gradient(155deg, #cbdff5, transparent 80%);
+  --particle-color: #fff;
+}
+
+.backdrop[data-season="autumn"] .sky {
+  filter: sepia(0.3) saturate(0.85);
+}
+
+.backdrop[data-season="winter"] .sky {
+  filter: saturate(0.55);
+}
+
+.particles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.particle {
+  position: absolute;
+  top: -35px;
+  width: var(--size);
+  height: var(--size);
+  color: var(--particle-color);
+  opacity: 0;
+  animation: drift var(--duration) var(--delay) linear infinite;
+}
+
+.particle svg {
+  width: 100%;
+  height: 100%;
+}
+
+.veins {
+  color: #683a1e;
+  opacity: 0.4;
+}
+
+[data-season="autumn"] .particle:nth-child(3n) {
+  color: #dc9b35;
+}
+
+[data-season="autumn"] .particle:nth-child(3n + 1) {
+  color: #b94e37;
+}
+
+.mote {
+  display: block;
+  width: 55%;
+  height: 40%;
+  border-radius: 80% 0 80% 40%;
+  background: currentColor;
+}
+
+[data-season="winter"] .mote {
+  width: 25%;
+  height: 25%;
+  border-radius: 50%;
+  box-shadow: 0 0 5px #ffffff80;
+}
+
+@keyframes drift {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0);
+    opacity: 0;
+  }
+  10%,
+  70% {
+    opacity: 0.65;
+  }
+  45% {
+    transform: translate3d(var(--sway), 45cqh, 0) rotate(100deg);
+  }
+  100% {
+    transform: translate3d(20px, calc(100cqh + 45px), 0) rotate(var(--turn));
+    opacity: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .particle:nth-child(n + 13) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .particles {
+    display: none;
+  }
+  .particle {
+    animation: none;
+  }
+}
