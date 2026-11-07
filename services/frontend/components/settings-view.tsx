@@ -586,251 +586,269 @@ export function SettingsView({
         </Frame>
       )}
 
-      {activeOrganization && isMembersSection && canManageMembers && (
-        <UsageAdminCard organizationId={activeOrganization.id} />
-      )}
-
       {activeOrganization && isMembersSection && (
-        <Frame>
-          <Frame.Header>
-            <Frame.Title>{t("Member directory")}</Frame.Title>
-            <Frame.Description>
-              {t("People with access to")} {activeOrganization.name}.
-            </Frame.Description>
-            {!membersLoading && (
-              <Frame.Action>
-                {memberTotal} {t(memberTotal === 1 ? "member" : "members")}
-              </Frame.Action>
-            )}
-          </Frame.Header>
-          <Frame.Panel>
-            {(memberTotal > 20 || memberSearch || memberFilter !== "all") && (
-              <Frame.Row>
-                <Frame.Content className="flex flex-row flex-wrap items-center gap-2">
-                  <Input.Group className="w-full sm:max-w-sm">
-                    <Input.Addon>
-                      <Search aria-hidden="true" />
-                    </Input.Addon>
-                    <Input
-                      aria-label={t("Search members")}
-                      placeholder={t("Search by name or email…")}
-                      value={memberSearch}
-                      onChange={(event) => {
-                        setMemberSearch(event.target.value)
-                        setMemberPage(1)
-                        memberRequest.current++
-                        setMembersLoading(true)
-                      }}
-                    />
-                  </Input.Group>
-                  <Select
-                    value={memberFilter}
-                    onValueChange={(value) => {
-                      if (value) {
-                        setMemberFilter(value)
-                        setMemberPage(1)
-                        memberRequest.current++
-                        setMembersLoading(true)
-                      }
-                    }}
-                  >
-                    <SelectTrigger
-                      aria-label={t("Filter by role")}
-                      className="w-40"
-                    >
-                      <SelectValue>
-                        {memberFilter === "all"
-                          ? t("All roles")
-                          : t(
-                              memberFilter === "owner"
-                                ? "Owner"
-                                : memberFilter === "admin"
-                                  ? "Admin"
-                                  : "Member"
-                            )}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {[
-                          ["all", "All roles"],
-                          ["owner", "Owner"],
-                          ["admin", "Admin"],
-                          ["member", "Member"],
-                        ].map(([value, label]) => (
-                          <SelectItem key={value} value={value}>
-                            {t(label)}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Frame.Content>
-              </Frame.Row>
-            )}
-            {membersError ? (
-              <Frame.Row>
-                <Frame.Content className="items-start gap-3">
-                  <p className="text-sm text-destructive" role="alert">
-                    {t("Members could not be loaded.")}
-                  </p>
-                  <Button
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                    onClick={() => void loadMembers()}
-                  >
-                    {t("Try again")}
-                  </Button>
-                </Frame.Content>
-              </Frame.Row>
-            ) : membersLoading ? (
-              <Frame.Row>
-                <Frame.Content>
+        <UsageAdminCard
+          key={activeOrganization.id}
+          organizationId={activeOrganization.id}
+          canManage={canManageMembers}
+        >
+          {(renderMemberUsage) => (
+            <Frame>
+              <Frame.Header>
+                <Frame.Title>{t("Member directory")}</Frame.Title>
+                <Frame.Description>
+                  {t("People with access to")} {activeOrganization.name}.
+                </Frame.Description>
+                {!membersLoading && (
+                  <Frame.Action>
+                    {memberTotal} {t(memberTotal === 1 ? "member" : "members")}
+                  </Frame.Action>
+                )}
+              </Frame.Header>
+              <Frame.Panel>
+                {(memberTotal > 20 ||
+                  memberSearch ||
+                  memberFilter !== "all") && (
+                  <Frame.Row>
+                    <Frame.Content className="flex flex-row flex-wrap items-center gap-2">
+                      <Input.Group className="w-full sm:max-w-sm">
+                        <Input.Addon>
+                          <Search aria-hidden="true" />
+                        </Input.Addon>
+                        <Input
+                          aria-label={t("Search members")}
+                          placeholder={t("Search by name or email…")}
+                          value={memberSearch}
+                          onChange={(event) => {
+                            setMemberSearch(event.target.value)
+                            setMemberPage(1)
+                            memberRequest.current++
+                            setMembersLoading(true)
+                          }}
+                        />
+                      </Input.Group>
+                      <Select
+                        value={memberFilter}
+                        onValueChange={(value) => {
+                          if (value) {
+                            setMemberFilter(value)
+                            setMemberPage(1)
+                            memberRequest.current++
+                            setMembersLoading(true)
+                          }
+                        }}
+                      >
+                        <SelectTrigger
+                          aria-label={t("Filter by role")}
+                          className="w-40"
+                        >
+                          <SelectValue>
+                            {memberFilter === "all"
+                              ? t("All roles")
+                              : t(
+                                  memberFilter === "owner"
+                                    ? "Owner"
+                                    : memberFilter === "admin"
+                                      ? "Admin"
+                                      : "Member"
+                                )}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {[
+                              ["all", "All roles"],
+                              ["owner", "Owner"],
+                              ["admin", "Admin"],
+                              ["member", "Member"],
+                            ].map(([value, label]) => (
+                              <SelectItem key={value} value={value}>
+                                {t(label)}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Frame.Content>
+                  </Frame.Row>
+                )}
+                {membersError ? (
+                  <Frame.Row>
+                    <Frame.Content className="items-start gap-3">
+                      <p className="text-sm text-destructive" role="alert">
+                        {t("Members could not be loaded.")}
+                      </p>
+                      <Button
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                        onClick={() => void loadMembers()}
+                      >
+                        {t("Try again")}
+                      </Button>
+                    </Frame.Content>
+                  </Frame.Row>
+                ) : membersLoading ? (
+                  <Frame.Row>
+                    <Frame.Content>
+                      <p
+                        aria-live="polite"
+                        className="flex items-center gap-2 text-sm text-muted-foreground"
+                        role="status"
+                      >
+                        <Spinner /> {t("Loading members…")}
+                      </p>
+                    </Frame.Content>
+                  </Frame.Row>
+                ) : members.length === 0 ? (
+                  <Frame.Row>
+                    <Frame.Content>
+                      <p className="text-center text-sm text-muted-foreground">
+                        {t("No members found.")}
+                      </p>
+                    </Frame.Content>
+                  </Frame.Row>
+                ) : (
+                  members.map((member) => (
+                    <Frame.Row key={member.id} className="flex-wrap gap-y-3">
+                      <Frame.Media>
+                        <Avatar
+                          name={member.displayName || member.email}
+                          size="sm"
+                          src={
+                            member.avatarUrl
+                              ? resolveAPIURL(
+                                  versionedAvatarURL(
+                                    member.avatarUrl,
+                                    member.avatarVersion
+                                  ) ?? member.avatarUrl
+                                )
+                              : undefined
+                          }
+                        />
+                      </Frame.Media>
+                      <Frame.Content>
+                        <Frame.Title as="p">{member.displayName}</Frame.Title>
+                        <Frame.Description>
+                          {member.email} · {t("Joined")}{" "}
+                          {formatDate(member.createdAt, locale)}
+                        </Frame.Description>
+                      </Frame.Content>
+                      <Frame.Actions className="ml-auto flex-wrap justify-end gap-3">
+                        {renderMemberUsage(member.id)}
+                        <Select
+                          disabled={
+                            !canManageMembers ||
+                            Boolean(updatingMemberId) ||
+                            (!user.platformAdmin &&
+                              activeOrganization.role === "admin" &&
+                              member.role !== "member")
+                          }
+                          onValueChange={(value) => {
+                            if (value)
+                              void updateMemberRole(member, value as MemberRole)
+                          }}
+                          value={member.role}
+                        >
+                          <SelectTrigger
+                            className="w-32"
+                            aria-label={t("Role for {value0}", {
+                              value0: member.displayName,
+                            })}
+                          >
+                            <SelectValue>
+                              {t(
+                                member.role === "owner"
+                                  ? "Owner"
+                                  : member.role === "admin"
+                                    ? "Admin"
+                                    : "Member"
+                              )}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectItem value="member">
+                                {t("Member")}
+                              </SelectItem>
+                              <SelectItem value="admin">
+                                {t("Admin")}
+                              </SelectItem>
+                              {(activeOrganization.role === "owner" ||
+                                user.platformAdmin) && (
+                                <SelectItem value="owner">
+                                  {t("Owner")}
+                                </SelectItem>
+                              )}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        {canManageMembers && member.role !== "owner" && (
+                          <Button
+                            aria-label={t("Remove {value0}", {
+                              value0: member.displayName,
+                            })}
+                            onClick={() => setRemoveTarget(member)}
+                            size="icon-sm"
+                            title={t("Remove {value0}", {
+                              value0: member.displayName,
+                            })}
+                            variant="ghost"
+                          >
+                            <Trash2 className="text-destructive" />
+                          </Button>
+                        )}
+                      </Frame.Actions>
+                    </Frame.Row>
+                  ))
+                )}
+              </Frame.Panel>
+              {!membersError && memberFiltered > 20 && (
+                <nav
+                  aria-label={t("Member pagination")}
+                  className="mt-4 flex flex-wrap items-center justify-between gap-3"
+                >
                   <p
                     aria-live="polite"
-                    className="flex items-center gap-2 text-sm text-muted-foreground"
-                    role="status"
+                    className="text-xs text-muted-foreground"
                   >
-                    <Spinner /> {t("Loading members…")}
+                    {t("{start}–{end} of {total}", {
+                      start: (memberPage - 1) * 20 + 1,
+                      end: Math.min(memberPage * 20, memberFiltered),
+                      total: memberFiltered,
+                    })}
                   </p>
-                </Frame.Content>
-              </Frame.Row>
-            ) : members.length === 0 ? (
-              <Frame.Row>
-                <Frame.Content>
-                  <p className="text-center text-sm text-muted-foreground">
-                    {t("No members found.")}
-                  </p>
-                </Frame.Content>
-              </Frame.Row>
-            ) : (
-              members.map((member) => (
-                <Frame.Row key={member.id}>
-                  <Frame.Media>
-                    <Avatar
-                      name={member.displayName || member.email}
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
                       size="sm"
-                      src={
-                        member.avatarUrl
-                          ? resolveAPIURL(
-                              versionedAvatarURL(
-                                member.avatarUrl,
-                                member.avatarVersion
-                              ) ?? member.avatarUrl
-                            )
-                          : undefined
-                      }
-                    />
-                  </Frame.Media>
-                  <Frame.Content>
-                    <Frame.Title as="p">{member.displayName}</Frame.Title>
-                    <Frame.Description>
-                      {member.email} · {t("Joined")}{" "}
-                      {formatDate(member.createdAt, locale)}
-                    </Frame.Description>
-                  </Frame.Content>
-                  <Frame.Actions>
-                    <Select
-                      disabled={
-                        !canManageMembers ||
-                        Boolean(updatingMemberId) ||
-                        (!user.platformAdmin &&
-                          activeOrganization.role === "admin" &&
-                          member.role !== "member")
-                      }
-                      onValueChange={(value) => {
-                        if (value)
-                          void updateMemberRole(member, value as MemberRole)
+                      disabled={membersLoading || memberPage === 1}
+                      onClick={() => {
+                        setMemberPage(memberPage - 1)
+                        setMembersLoading(true)
                       }}
-                      value={member.role}
                     >
-                      <SelectTrigger
-                        className="w-32"
-                        aria-label={t("Role for {value0}", {
-                          value0: member.displayName,
-                        })}
-                      >
-                        <SelectValue>
-                          {t(
-                            member.role === "owner"
-                              ? "Owner"
-                              : member.role === "admin"
-                                ? "Admin"
-                                : "Member"
-                          )}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem value="member">{t("Member")}</SelectItem>
-                          <SelectItem value="admin">{t("Admin")}</SelectItem>
-                          {(activeOrganization.role === "owner" ||
-                            user.platformAdmin) && (
-                            <SelectItem value="owner">{t("Owner")}</SelectItem>
-                          )}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    {canManageMembers && member.role !== "owner" && (
-                      <Button
-                        aria-label={t("Remove {value0}", {
-                          value0: member.displayName,
-                        })}
-                        onClick={() => setRemoveTarget(member)}
-                        size="icon-sm"
-                        title={t("Remove {value0}", {
-                          value0: member.displayName,
-                        })}
-                        variant="ghost"
-                      >
-                        <Trash2 className="text-destructive" />
-                      </Button>
-                    )}
-                  </Frame.Actions>
-                </Frame.Row>
-              ))
-            )}
-          </Frame.Panel>
-          {!membersError && memberFiltered > 20 && (
-            <nav
-              aria-label={t("Member pagination")}
-              className="mt-4 flex flex-wrap items-center justify-between gap-3"
-            >
-              <p aria-live="polite" className="text-xs text-muted-foreground">
-                {t("{start}–{end} of {total}", {
-                  start: (memberPage - 1) * 20 + 1,
-                  end: Math.min(memberPage * 20, memberFiltered),
-                  total: memberFiltered,
-                })}
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={membersLoading || memberPage === 1}
-                  onClick={() => {
-                    setMemberPage(memberPage - 1)
-                    setMembersLoading(true)
-                  }}
-                >
-                  {t("Previous page")}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={membersLoading || memberPage * 20 >= memberFiltered}
-                  onClick={() => {
-                    setMemberPage(memberPage + 1)
-                    setMembersLoading(true)
-                  }}
-                >
-                  {t("Next page")}
-                </Button>
-              </div>
-            </nav>
+                      {t("Previous page")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        membersLoading || memberPage * 20 >= memberFiltered
+                      }
+                      onClick={() => {
+                        setMemberPage(memberPage + 1)
+                        setMembersLoading(true)
+                      }}
+                    >
+                      {t("Next page")}
+                    </Button>
+                  </div>
+                </nav>
+              )}
+            </Frame>
           )}
-        </Frame>
+        </UsageAdminCard>
       )}
 
       <Dialog

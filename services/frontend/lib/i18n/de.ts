@@ -4480,4 +4480,66 @@ export const de = {
   "Browse models": "Modelle durchsuchen",
   "Choose whether this endpoint is available and used by default for new chats.":
     "Lege fest, ob dieser Endpunkt verfügbar ist und standardmäßig für neue Chats verwendet wird.",
+  "{count} of {total} servers": "{count} von {total} Servern",
+  "{count} tools": "{count} Tools",
+  "Manual attachment": "Manuell hinzufügen",
+  "Authorization needed": "Anmeldung erforderlich",
+  "Discovered tools": "Erkannte Tools",
+  "Hide tools": "Tools ausblenden",
+  "View tools": "Tools ansehen",
+  "Last tested {value0}": "Zuletzt getestet: {value0}",
+  "No matching MCP servers": "Keine passenden MCP-Server",
+  "Try another search or reset the filters.":
+    "Versuche eine andere Suche oder setze die Filter zurück.",
+  "Connect a remote MCP server to bring its tools into your chats.":
+    "Verbinde einen MCP-Server, um seine Tools in deinen Chats zu verwenden.",
+  "Platform-managed servers can only be edited in the platform catalog.":
+    "Von der Plattform verwaltete Server können nur im Plattformkatalog bearbeitet werden.",
+  "Connect a remote server and choose how its tools are available in your workspace.":
+    "Verbinde einen Server und lege fest, wie seine Tools in deinem Workspace verfügbar sind.",
+  "Tool access": "Tool-Zugriff",
+  "OAuth overrides": "OAuth-Anpassungen",
+  "Usually discovered automatically. Change only when your provider requires it.":
+    "Wird normalerweise automatisch erkannt. Nur ändern, wenn dein Anbieter es erfordert.",
+  "Suggest relevant tools in chats. Calls still require approval.":
+    "Passende Tools in Chats vorschlagen. Aufrufe erfordern weiterhin eine Freigabe.",
+  "Paste the remote MCP URL provided by your service.":
+    "Füge die MCP-URL deines Anbieters ein.",
+  "Connect server": "Server verbinden",
+  "{count} tools discovered.": "{count} Tools erkannt.",
+  "{value0} responded successfully.": "{value0} hat erfolgreich geantwortet.",
+  "Connection verified. {count} tools discovered.":
+    "Verbindung geprüft. {count} Tools erkannt.",
+  "The server was saved, but verification needs attention.":
+    "Der Server wurde gespeichert, aber die Verbindung konnte nicht bestätigt werden.",
+  "Authorize OAuth to verify the connection.":
+    "Melde dich per OAuth an, um die Verbindung zu prüfen.",
+  "{value0} was saved.": "{value0} wurde gespeichert.",
+  "Allowed tools (optional)": "Erlaubte Tools (optional)",
+  "Enter tool names separated by commas. Leave empty to allow all tools under the approval policy.":
+    "Tool-Namen durch Kommas trennen. Leer lassen, um alle Tools gemäß den Freigaberegeln zu erlauben.",
+  "Only fill these in if automatic sign-in setup fails.":
+    "Nur ausfüllen, wenn die automatische Einrichtung der Anmeldung fehlschlägt.",
+  "Monthly token allowance": "Monatliches Token-Budget",
+  "Applies to members without a personal limit.":
+    "Gilt für Mitglieder ohne persönliches Limit.",
+  "Leave empty or enter 0 for no limit.":
+    "Leer lassen oder 0 eingeben für kein Limit.",
+  "Save default": "Standard speichern",
+  "Usage resets each month. Members at their limit cannot start new answers.":
+    "Die Nutzung wird monatlich zurückgesetzt. Bei erreichtem Limit sind keine neuen Antworten möglich.",
+  "{count} members": "{count} Mitglieder",
+  "{count} member": "{count} Mitglied",
+  "No member usage yet this month.":
+    "Noch keine Mitgliedernutzung in diesem Monat.",
+  "Monthly tokens": "Monatliche Tokens",
+  "Monthly limit reached": "Monatslimit erreicht",
+  "Personal setting": "Persönliche Einstellung",
+  "Set limit for {value0}": "Limit für {value0} festlegen",
+  "This member has no monthly token cap.":
+    "Für dieses Mitglied gilt kein monatliches Token-Limit.",
+  "Set a monthly token allowance for this member.":
+    "Ein monatliches Token-Budget für dieses Mitglied festlegen.",
+  "Default limit saved.": "Standardlimit gespeichert.",
+  "Member limit saved.": "Mitgliedslimit gespeichert.",
 } as const

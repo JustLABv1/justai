@@ -1,31 +1,19 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 
 import { useTranslations } from "@/components/locale-provider"
 import { Spinner } from "@/components/panelui/spinner"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
+import { Alert } from "@/components/panelui/alert"
+import { Button } from "@/components/panelui/button"
+import { Frame } from "@/components/panelui/frame"
+import { Field } from "@/components/panelui/field"
+import { Input } from "@/components/panelui/input"
+import { Dialog } from "@/components/panelui/dialog"
+import { RadioGroup } from "@/components/panelui/radio-group"
+import { Usage } from "@/components/panelui/usage"
 import { api } from "@/lib/api"
 import { notifyUsageChanged } from "@/lib/use-usage"
-import { cn } from "@/lib/utils"
 import type {
   MemberLimitMode,
   MemberUsage,
@@ -38,7 +26,15 @@ function parseLimit(value: string) {
 }
 
 /** Workspace owners and admins: this month's usage per member, and who may use how much. */
-export function UsageAdminCard({ organizationId }: { organizationId: string }) {
+export function UsageAdminCard({
+  organizationId,
+  canManage = true,
+  children,
+}: {
+  organizationId: string
+  canManage?: boolean
+  children: (renderMemberUsage: (memberId: string) => ReactNode) => ReactNode
+}) {
   const { t, locale } = useTranslations()
   const [usage, setUsage] = useState<OrganizationUsage | null>(null)
   const [error, setError] = useState("")
@@ -49,6 +45,7 @@ export function UsageAdminCard({ organizationId }: { organizationId: string }) {
   const [memberLimit, setMemberLimit] = useState("")
   const [saving, setSaving] = useState(false)
   const [dialogError, setDialogError] = useState("")
+  const [notice, setNotice] = useState("")
 
   const number = new Intl.NumberFormat(locale)
   const compact = new Intl.NumberFormat(locale, {
@@ -60,6 +57,7 @@ export function UsageAdminCard({ organizationId }: { organizationId: string }) {
   const load = useCallback(() => setReloadKey((key) => key + 1), [])
 
   useEffect(() => {
+    if (!canManage) return
     let cancelled = false
     api
       .get<OrganizationUsage>(
@@ -86,7 +84,7 @@ export function UsageAdminCard({ organizationId }: { organizationId: string }) {
     return () => {
       cancelled = true
     }
-  }, [organizationId, reloadKey])
+  }, [organizationId, reloadKey, canManage])
 
   async function saveDefault() {
     const limit = defaultLimit.trim() === "" ? null : parseLimit(defaultLimit)
@@ -95,6 +93,8 @@ export function UsageAdminCard({ organizationId }: { organizationId: string }) {
       return
     }
     setSavingDefault(true)
+    setError("")
+    setNotice("")
     try {
       await api.put(
         `/api/v1/organizations/${organizationId}/admin/usage/default`,
@@ -104,6 +104,7 @@ export function UsageAdminCard({ organizationId }: { organizationId: string }) {
       )
       load()
       notifyUsageChanged()
+      setNotice("Default limit saved.")
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -140,12 +141,15 @@ export function UsageAdminCard({ organizationId }: { organizationId: string }) {
       return
     }
     setSaving(true)
+    setDialogError("")
+    setNotice("")
     try {
       await api.put(
         `/api/v1/organizations/${organizationId}/admin/usage/members/${editing.id}`,
         { mode, monthlyTokenLimit: mode === "limit" ? limit : null }
       )
       setEditing(null)
+      setNotice("Member limit saved.")
       load()
       notifyUsageChanged()
     } catch (caught) {
@@ -159,186 +163,242 @@ export function UsageAdminCard({ organizationId }: { organizationId: string }) {
     }
   }
 
-  return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>{t("Usage and limits")}</CardTitle>
-        <CardDescription className="mt-1 text-sm">
-          {t(
-            "Tokens each member used this month. A limit stops new answers once it is reached, until the month resets."
-          )}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6 pt-0">
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{t(error)}</AlertDescription>
-          </Alert>
-        )}
-        <section className="grid gap-1.5">
-          <label className="text-sm font-medium" htmlFor="usage-default-limit">
-            {t("Default monthly limit per member")}
-          </label>
-          <p className="text-xs text-muted-foreground">
-            {t(
-              "Applies to everyone without a personal limit. Leave empty or enter 0 for no limit."
-            )}
-          </p>
-          <div className="mt-1 flex max-w-md gap-2">
-            <div className="relative min-w-0 flex-1">
-              <Input
-                className="pr-16"
-                id="usage-default-limit"
-                inputMode="numeric"
-                onChange={(event) => setDefaultLimit(event.target.value)}
-                placeholder={t("No limit")}
-                value={defaultLimit}
+  const defaultLimitLabel = usage?.defaultMonthlyTokenLimit
+    ? `${number.format(usage.defaultMonthlyTokenLimit)} ${t("tokens")}`
+    : t("No limit")
+
+  function renderMemberUsage(memberId: string) {
+    const member = usage?.members.find((item) => item.id === memberId)
+    if (!canManage || !member) return null
+    const limit = member.monthlyTokenLimit
+    const hasLimit = limit !== null && limit > 0
+    return (
+      <>
+        <div className="w-48 shrink-0">
+          {hasLimit ? (
+            <Usage
+              value={member.totalTokens}
+              limit={limit}
+              label={t("Monthly tokens")}
+              locales={locale}
+            >
+              <Usage.Meter
+                label={t("Monthly tokens")}
+                value={Math.min(member.totalTokens, limit)}
+                limit={limit}
+                display={`${compact.format(member.totalTokens)} / ${compact.format(limit)}`}
+                note={
+                  member.totalTokens >= limit
+                    ? t("Monthly limit reached")
+                    : t(
+                        member.limitSource === "member"
+                          ? "Personal setting"
+                          : "Workspace default"
+                      )
+                }
               />
-              <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground">
-                {t("tokens")}
+            </Usage>
+          ) : (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium tabular-nums">
+                {number.format(member.totalTokens)} {t("tokens")}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t("No limit")}
               </span>
             </div>
-            <Button
-              disabled={savingDefault || !usage}
-              onClick={() => void saveDefault()}
-              type="button"
-            >
-              {savingDefault && <Spinner />} {t("Save")}
-            </Button>
-          </div>
-        </section>
-        <section className="grid gap-2">
-          <h3 className="text-sm font-medium">{t("Members this month")}</h3>
-          {!usage && !error ? (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner /> {t("Loading usage…")}
-            </p>
-          ) : (
-            <ul className="divide-y rounded-xl border">
-              {usage?.members.map((member) => {
-                const limit = member.monthlyTokenLimit
-                const share =
-                  limit && limit > 0
-                    ? Math.min(100, (member.totalTokens / limit) * 100)
-                    : 0
-                return (
-                  <li
-                    className="grid items-center gap-x-6 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_15rem_auto]"
-                    key={member.id}
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        {member.displayName}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {member.email}
-                      </p>
-                    </div>
-                    <div className="grid gap-1.5">
-                      <div className="flex items-baseline justify-between gap-2 text-xs">
-                        <span
-                          className="font-medium tabular-nums"
-                          title={number.format(member.totalTokens)}
-                        >
-                          {compact.format(member.totalTokens)} {t("tokens")}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {limit === null
-                            ? t("No limit")
-                            : `${t("of")} ${compact.format(limit)}${
-                                member.limitSource === "member"
-                                  ? ` · ${t("personal")}`
-                                  : ""
-                              }`}
-                        </span>
-                      </div>
-                      {limit !== null && (
-                        <Progress
-                          aria-label={t("Used of the monthly limit")}
-                          className={cn(
-                            "gap-0",
-                            share >= 90 &&
-                              "[&_[data-slot=progress-indicator]]:bg-destructive"
-                          )}
-                          value={share}
-                        />
-                      )}
-                    </div>
-                    <Button
-                      onClick={() => edit(member)}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      {t("Set limit")}
-                    </Button>
-                  </li>
-                )
-              })}
-            </ul>
           )}
-        </section>
-      </CardContent>
-      <Dialog
-        onOpenChange={(open) => !open && setEditing(null)}
-        open={editing !== null}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("Monthly limit")}</DialogTitle>
-            <DialogDescription>{editing?.displayName}</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2" role="radiogroup">
-            {(
-              [
-                ["inherit", t("Workspace default")],
-                ["unlimited", t("No limit")],
-                ["limit", t("Custom limit")],
-              ] as const
-            ).map(([value, label]) => (
-              <label className="flex items-center gap-2 text-sm" key={value}>
-                <input
-                  checked={mode === value}
-                  name="usage-mode"
-                  onChange={() => setMode(value)}
-                  type="radio"
+        </div>
+        <Button
+          onClick={() => edit(member)}
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-label={t("Set limit for {value0}", {
+            value0: member.displayName,
+          })}
+        >
+          {t("Set limit")}
+        </Button>
+      </>
+    )
+  }
+
+  if (!canManage) return children(() => null)
+
+  return (
+    <section aria-label={t("Usage and limits")} className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">{t("Usage and limits")}</h2>
+        <span className="text-xs text-muted-foreground">
+          {t("Monthly token allowance")}
+        </span>
+      </div>
+      {error && (
+        <Alert tone="destructive" variant="plain">
+          <Alert.Description>{t(error)}</Alert.Description>
+          {!usage && (
+            <Alert.Actions>
+              <Button variant="outline" size="sm" onClick={load}>
+                {t("Retry")}
+              </Button>
+            </Alert.Actions>
+          )}
+        </Alert>
+      )}
+      {notice && (
+        <Alert tone="success" variant="plain">
+          <Alert.Description>{t(notice)}</Alert.Description>
+        </Alert>
+      )}
+      <Frame variant="band">
+        <Frame.Header>
+          <Frame.Title>{t("Workspace default")}</Frame.Title>
+          <Frame.Description>
+            {t("Applies to members without a personal limit.")}
+          </Frame.Description>
+        </Frame.Header>
+        <Frame.Panel className="p-4">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              void saveDefault()
+            }}
+            className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+          >
+            <Field disabled={savingDefault || !usage}>
+              <Field.Label>{t("Default monthly limit per member")}</Field.Label>
+              <Input.Group>
+                <Input
+                  id="usage-default-limit"
+                  aria-label={t("Default monthly limit per member")}
+                  inputMode="numeric"
+                  value={defaultLimit}
+                  onChange={(event) => setDefaultLimit(event.target.value)}
+                  placeholder={t("No limit")}
+                  disabled={savingDefault || !usage}
                 />
-                {label}
-              </label>
-            ))}
-            {mode === "limit" && (
-              <Input
-                aria-label={t("Monthly limit in tokens")}
-                inputMode="numeric"
-                onChange={(event) => setMemberLimit(event.target.value)}
-                placeholder="1000000"
-                value={memberLimit}
-              />
-            )}
-          </div>
-          {dialogError && (
-            <Alert variant="destructive">
-              <AlertDescription>{t(dialogError)}</AlertDescription>
-            </Alert>
-          )}
-          <DialogFooter>
+                <Input.Addon align="end">{t("tokens")}</Input.Addon>
+              </Input.Group>
+              <Field.Description>
+                {t("Leave empty or enter 0 for no limit.")}
+              </Field.Description>
+            </Field>
             <Button
-              onClick={() => setEditing(null)}
-              type="button"
-              variant="ghost"
+              className="sm:self-center"
+              disabled={savingDefault || !usage}
+              type="submit"
+              size="sm"
             >
-              {t("Cancel")}
+              {savingDefault && <Spinner className="size-4" />}
+              {t("Save default")}
             </Button>
-            <Button
-              disabled={saving}
-              onClick={() => void saveMember()}
-              type="button"
-            >
-              {saving && <Spinner />} {t("Save")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+          </form>
+        </Frame.Panel>
+      </Frame>
+      {children(renderMemberUsage)}
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) setEditing(null)
+        }}
+      >
+        <Dialog.Content className="sm:max-w-lg">
+          <Dialog.Header
+            title={t("Monthly limit")}
+            description={editing?.displayName}
+          />
+          <form
+            className="contents"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void saveMember()
+            }}
+          >
+            <Dialog.Body>
+              <RadioGroup
+                aria-label={t("Monthly limit")}
+                value={mode}
+                onValueChange={(value) => {
+                  if (
+                    value === "inherit" ||
+                    value === "unlimited" ||
+                    value === "limit"
+                  ) {
+                    setMode(value)
+                    setDialogError("")
+                  }
+                }}
+                disabled={saving}
+              >
+                <RadioGroup.Card value="inherit" appearance="filled">
+                  <RadioGroup.CardBody>
+                    <RadioGroup.CardTitle>
+                      {t("Workspace default")}
+                    </RadioGroup.CardTitle>
+                    <RadioGroup.CardDescription>
+                      {defaultLimitLabel}
+                    </RadioGroup.CardDescription>
+                  </RadioGroup.CardBody>
+                </RadioGroup.Card>
+                <RadioGroup.Card value="unlimited" appearance="filled">
+                  <RadioGroup.CardBody>
+                    <RadioGroup.CardTitle>{t("No limit")}</RadioGroup.CardTitle>
+                    <RadioGroup.CardDescription>
+                      {t("This member has no monthly token cap.")}
+                    </RadioGroup.CardDescription>
+                  </RadioGroup.CardBody>
+                </RadioGroup.Card>
+                <RadioGroup.Card value="limit" appearance="filled">
+                  <RadioGroup.CardBody>
+                    <RadioGroup.CardTitle>
+                      {t("Custom limit")}
+                    </RadioGroup.CardTitle>
+                    <RadioGroup.CardDescription>
+                      {t("Set a monthly token allowance for this member.")}
+                    </RadioGroup.CardDescription>
+                  </RadioGroup.CardBody>
+                </RadioGroup.Card>
+              </RadioGroup>
+              {mode === "limit" && (
+                <Field disabled={saving} invalid={Boolean(dialogError)}>
+                  <Field.Label>{t("Monthly limit in tokens")}</Field.Label>
+                  <Input.Group>
+                    <Input
+                      inputMode="numeric"
+                      disabled={saving}
+                      value={memberLimit}
+                      onChange={(event) => setMemberLimit(event.target.value)}
+                      placeholder="1000000"
+                      autoFocus
+                    />
+                    <Input.Addon align="end">{t("tokens")}</Input.Addon>
+                  </Input.Group>
+                </Field>
+              )}
+              {dialogError && (
+                <Alert tone="destructive" variant="plain">
+                  <Alert.Description>{t(dialogError)}</Alert.Description>
+                </Alert>
+              )}
+            </Dialog.Body>
+            <Dialog.Footer>
+              <Button
+                disabled={saving}
+                onClick={() => setEditing(null)}
+                variant="secondary"
+                type="button"
+              >
+                {t("Cancel")}
+              </Button>
+              <Button disabled={saving} type="submit">
+                {saving && <Spinner className="size-4" />}
+                {t("Save changes")}
+              </Button>
+            </Dialog.Footer>
+          </form>
+        </Dialog.Content>
       </Dialog>
-    </Card>
+    </section>
   )
 }
