@@ -5,6 +5,7 @@ import {
   getServerWelcomeGreeting,
   subscribeToWelcomeGreeting,
 } from "@/lib/welcome-greeting"
+import { storageReferenceItems } from "@/lib/composer-storage-references"
 import { useTranslations } from "@/components/locale-provider"
 import {
   useCallback,
@@ -2461,7 +2462,10 @@ function Composer({
     composerText.startsWith("/") && !/\s/.test(composerText)
       ? composerText.slice(1)
       : null
-  const [storageFiles, setStorageFiles] = useState<KnowledgeItem[]>([])
+  const [storageResult, setStorageResult] = useState<{
+    query: string
+    items: KnowledgeItem[]
+  } | null>(null)
   const [storageLoading, setStorageLoading] = useState(false)
   const [storageError, setStorageError] = useState<string | null>(null)
   useEffect(() => {
@@ -2471,20 +2475,29 @@ function Composer({
       setStorageLoading(true)
       setStorageError(null)
       const params = new URLSearchParams({
-        type: "source",
         limit: "100",
         q: storageQuery,
       })
-      void api
-        .get<{ items: KnowledgeItem[] }>(`/api/v1/knowledge/items?${params}`, {
-          signal: controller.signal,
+      void Promise.all(
+        ["source", "note", "transcript"].map((type) => {
+          const query = new URLSearchParams(params)
+          query.set("type", type)
+          return api.get<{ items: KnowledgeItem[] }>(
+            `/api/v1/knowledge/items?${query}`,
+            { signal: controller.signal }
+          )
         })
-        .then(({ items }) => {
-          if (!controller.signal.aborted) setStorageFiles(items)
+      )
+        .then((results) => {
+          if (!controller.signal.aborted)
+            setStorageResult({
+              query: storageQuery,
+              items: results.flatMap((result) => result.items),
+            })
         })
         .catch(() => {
           if (!controller.signal.aborted) {
-            setStorageFiles([])
+            setStorageResult({ query: storageQuery, items: [] })
             setStorageError(
               "Storage files could not be loaded. Close and reopen / to retry."
             )
@@ -2578,23 +2591,11 @@ function Composer({
   }, [conversationContext.notes, notes, t])
 
   const contextItems = useMemo<Unstable_TriggerItem[]>(() => {
-    const files = new Map<
-      string,
-      { id: string; title: string; status: string }
-    >(
-      conversationContext.knowledgeSources.map((source) => [
-        source.id,
-        { id: source.id, title: source.title, status: source.status },
-      ])
-    )
-    for (const file of storageFiles)
-      files.set(file.resourceId, {
-        id: file.resourceId,
-        title: file.title,
-        status: file.status,
-      })
-    return [
-      ...Array.from(files.values()).map((source) => ({
+    const catalog =
+      storageResult?.query === storageQuery ? storageResult.items : []
+    const items: Unstable_TriggerItem[] = [
+      ...storageReferenceItems(catalog),
+      ...conversationContext.knowledgeSources.map((source) => ({
         id: `knowledge:${source.id}`,
         type: "knowledge",
         label: source.title,
@@ -2610,7 +2611,8 @@ function Composer({
         metadata: { resourceId: session.id },
       })),
     ]
-  }, [conversationContext, noteItems, storageFiles])
+    return Array.from(new Map(items.map((item) => [item.id, item])).values())
+  }, [conversationContext, noteItems, storageResult, storageQuery])
 
   const [attachingMcpIds, setAttachingMcpIds] = useState<Set<string>>(new Set())
   const pendingMcpIds = useRef(new Set<string>())
@@ -2764,7 +2766,10 @@ function Composer({
   // Typing @ or / opens a list, which stays shut when there is nothing to list.
   const commandQuery =
     /^[@/]\S*$/.test(composerText) &&
-    !(commandTrigger === "/" && storageLoading)
+    !(
+      commandTrigger === "/" &&
+      (storageLoading || storageResult?.query !== storageQuery)
+    )
       ? composerText.slice(1).toLowerCase()
       : null
   const commandsEmpty =
@@ -2842,23 +2847,25 @@ function Composer({
                 error: true,
                 onDismiss: () => setNoteAttachError(null),
               }
-            : emptyCommandsText
-              ? { text: emptyCommandsText }
-              : usageLimitReached(usage)
-                ? {
-                    text: t(
-                      "Monthly usage limit reached. Answers resume on {value0}.",
-                      {
-                        value0: new Intl.DateTimeFormat(locale, {
-                          day: "numeric",
-                          month: "long",
-                          timeZone: "UTC",
-                        }).format(new Date(usage!.periodEnd)),
-                      }
-                    ),
-                    error: true,
-                  }
-                : null
+            : storageQuery !== null && storageError
+              ? { text: t(storageError), error: true }
+              : emptyCommandsText
+                ? { text: emptyCommandsText }
+                : usageLimitReached(usage)
+                  ? {
+                      text: t(
+                        "Monthly usage limit reached. Answers resume on {value0}.",
+                        {
+                          value0: new Intl.DateTimeFormat(locale, {
+                            day: "numeric",
+                            month: "long",
+                            timeZone: "UTC",
+                          }).format(new Date(usage!.periodEnd)),
+                        }
+                      ),
+                      error: true,
+                    }
+                  : null
 
   return (
     <div
