@@ -4613,4 +4613,11 @@ export const de = {
   "All resource types": "Alle Ressourcentypen",
   "Filter options could not be loaded.":
     "Filteroptionen konnten nicht geladen werden.",
+  "Favorite agent": "Bevorzugter Agent",
+  "Favorite model": "Bevorzugtes Modell",
+  Milestones: "Meilensteine",
+  "No favorite agent yet": "Noch kein bevorzugter Agent",
+  "No model preference yet": "Noch kein bevorzugtes Modell",
+  "Choose the language used throughout JustAI.":
+    "Wähle die Sprache für die gesamte JustAI-Oberfläche.",
 } as const

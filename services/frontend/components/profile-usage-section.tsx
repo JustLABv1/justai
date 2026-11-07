@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Flame, Gauge, MessageSquare } from "lucide-react"
+import { Gauge } from "lucide-react"
 
 import { useTranslations } from "@/components/locale-provider"
 import { BarChart } from "@/components/panelui/bar-chart"
@@ -10,9 +10,10 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-} from "@/components/ui/card"
+} from "@/components/panelui/card"
 import { PageSection } from "@/components/ui/page"
-import { Progress } from "@/components/ui/progress"
+import { Kpi } from "@/components/panelui/kpi"
+import { Stat } from "@/components/panelui/stat"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import type { UsageDay } from "@/lib/usage"
@@ -79,12 +80,14 @@ export function ProfileUsageSection() {
               <CardDescription>{t("Tokens this month")}</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2">
-              <p className="font-heading text-2xl font-semibold tracking-tight">
-                {number.format(usage.totalTokens)}
-              </p>
+              <Stat>
+                <Stat.Value size="sm">
+                  {number.format(usage.totalTokens)}
+                </Stat.Value>
+              </Stat>
               {limit !== null ? (
                 <>
-                  <Progress
+                  <Kpi.Progress
                     aria-label={t("Used of the monthly limit")}
                     className="gap-0"
                     value={share}
@@ -108,13 +111,11 @@ export function ProfileUsageSection() {
               <CardDescription>{t("Requests this month")}</CardDescription>
             </CardHeader>
             <CardContent className="flex items-center gap-2">
-              <MessageSquare
-                aria-hidden="true"
-                className="size-4 text-muted-foreground"
-              />
-              <p className="font-heading text-2xl font-semibold tracking-tight">
-                {number.format(usage.requests)}
-              </p>
+              <Stat>
+                <Stat.Value size="sm">
+                  {number.format(usage.requests)}
+                </Stat.Value>
+              </Stat>
             </CardContent>
           </Card>
           <Card size="sm">
@@ -122,13 +123,9 @@ export function ProfileUsageSection() {
               <CardDescription>{t("Active days (last 30)")}</CardDescription>
             </CardHeader>
             <CardContent className="flex items-center gap-2">
-              <Flame
-                aria-hidden="true"
-                className="size-4 text-muted-foreground"
-              />
-              <p className="font-heading text-2xl font-semibold tracking-tight">
-                {days ? activeDays : "–"}
-              </p>
+              <Stat>
+                <Stat.Value size="sm">{days ? activeDays : "–"}</Stat.Value>
+              </Stat>
             </CardContent>
           </Card>
         </div>
