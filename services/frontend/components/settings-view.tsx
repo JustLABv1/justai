@@ -17,7 +17,7 @@ import type {
   User,
 } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Avatar } from "@/components/panelui/avatar"
+import { MemberDirectoryRow } from "@/components/member-directory-row"
 import { Frame } from "@/components/panelui/frame"
 import { Button } from "@/components/panelui/button"
 import {
@@ -710,96 +710,96 @@ export function SettingsView({
                   </Frame.Row>
                 ) : (
                   members.map((member) => (
-                    <Frame.Row key={member.id} className="flex-wrap gap-y-3">
-                      <Frame.Media>
-                        <Avatar
-                          name={member.displayName || member.email}
-                          size="sm"
-                          src={
-                            member.avatarUrl
-                              ? resolveAPIURL(
-                                  versionedAvatarURL(
-                                    member.avatarUrl,
-                                    member.avatarVersion
-                                  ) ?? member.avatarUrl
+                    <MemberDirectoryRow
+                      key={member.id}
+                      name={member.displayName}
+                      email={member.email}
+                      avatarUrl={
+                        member.avatarUrl
+                          ? resolveAPIURL(
+                              versionedAvatarURL(
+                                member.avatarUrl,
+                                member.avatarVersion
+                              ) ?? member.avatarUrl
+                            )
+                          : undefined
+                      }
+                      detail={
+                        <>
+                          {t("Joined")} {formatDate(member.createdAt, locale)}
+                        </>
+                      }
+                      actions={
+                        <>
+                          {renderMemberUsage(member.id)}
+                          <Select
+                            disabled={
+                              !canManageMembers ||
+                              Boolean(updatingMemberId) ||
+                              (!user.platformAdmin &&
+                                activeOrganization.role === "admin" &&
+                                member.role !== "member")
+                            }
+                            onValueChange={(value) => {
+                              if (value)
+                                void updateMemberRole(
+                                  member,
+                                  value as MemberRole
                                 )
-                              : undefined
-                          }
-                        />
-                      </Frame.Media>
-                      <Frame.Content>
-                        <Frame.Title as="p">{member.displayName}</Frame.Title>
-                        <Frame.Description>
-                          {member.email} · {t("Joined")}{" "}
-                          {formatDate(member.createdAt, locale)}
-                        </Frame.Description>
-                      </Frame.Content>
-                      <Frame.Actions className="ml-auto flex-wrap justify-end gap-3">
-                        {renderMemberUsage(member.id)}
-                        <Select
-                          disabled={
-                            !canManageMembers ||
-                            Boolean(updatingMemberId) ||
-                            (!user.platformAdmin &&
-                              activeOrganization.role === "admin" &&
-                              member.role !== "member")
-                          }
-                          onValueChange={(value) => {
-                            if (value)
-                              void updateMemberRole(member, value as MemberRole)
-                          }}
-                          value={member.role}
-                        >
-                          <SelectTrigger
-                            className="w-32"
-                            aria-label={t("Role for {value0}", {
-                              value0: member.displayName,
-                            })}
+                            }}
+                            value={member.role}
                           >
-                            <SelectValue>
-                              {t(
-                                member.role === "owner"
-                                  ? "Owner"
-                                  : member.role === "admin"
-                                    ? "Admin"
-                                    : "Member"
-                              )}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              <SelectItem value="member">
-                                {t("Member")}
-                              </SelectItem>
-                              <SelectItem value="admin">
-                                {t("Admin")}
-                              </SelectItem>
-                              {(activeOrganization.role === "owner" ||
-                                user.platformAdmin) && (
-                                <SelectItem value="owner">
-                                  {t("Owner")}
+                            <SelectTrigger
+                              className="w-32"
+                              aria-label={t("Role for {value0}", {
+                                value0: member.displayName,
+                              })}
+                            >
+                              <SelectValue>
+                                {t(
+                                  member.role === "owner"
+                                    ? "Owner"
+                                    : member.role === "admin"
+                                      ? "Admin"
+                                      : "Member"
+                                )}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                <SelectItem value="member">
+                                  {t("Member")}
                                 </SelectItem>
-                              )}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                        {canManageMembers && member.role !== "owner" && (
-                          <Button
-                            aria-label={t("Remove {value0}", {
-                              value0: member.displayName,
-                            })}
-                            onClick={() => setRemoveTarget(member)}
-                            size="icon-sm"
-                            title={t("Remove {value0}", {
-                              value0: member.displayName,
-                            })}
-                            variant="ghost"
-                          >
-                            <Trash2 className="text-destructive" />
-                          </Button>
-                        )}
-                      </Frame.Actions>
-                    </Frame.Row>
+                                <SelectItem value="admin">
+                                  {t("Admin")}
+                                </SelectItem>
+                                {(activeOrganization.role === "owner" ||
+                                  user.platformAdmin) && (
+                                  <SelectItem value="owner">
+                                    {t("Owner")}
+                                  </SelectItem>
+                                )}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          {canManageMembers && member.role !== "owner" && (
+                            <Button
+                              aria-label={t("Remove {value0}", {
+                                value0: member.displayName,
+                              })}
+                              onClick={() => setRemoveTarget(member)}
+                              size="icon-sm"
+                              title={t("Remove {value0}", {
+                                value0: member.displayName,
+                              })}
+                              variant="ghost"
+                            >
+                              <Trash2 className="text-destructive" />
+                            </Button>
+                          )}
+                        </>
+                      }
+                    />
                   ))
                 )}
               </Frame.Panel>

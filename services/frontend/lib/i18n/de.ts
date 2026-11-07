@@ -4554,4 +4554,29 @@ export const de = {
     "Daten, die älter als die gespeicherten Aufbewahrungsfristen sind, werden dauerhaft entfernt. Daten mit einer Frist von 0 bleiben erhalten.",
   "Cleanup complete: {conversations} archived chats, {knowledge} knowledge sources, and {transcripts} transcripts removed.":
     "Bereinigung abgeschlossen: {conversations} archivierte Chats, {knowledge} Wissensquellen und {transcripts} Transkripte entfernt.",
+  "Updated {value0}": "Aktualisiert: {value0}",
+  "Last 30 days · daily requests": "Letzte 30 Tage · tägliche Anfragen",
+  "Daily platform requests over the last 30 days":
+    "Tägliche Plattformanfragen der letzten 30 Tage",
+  "Platform inventory": "Plattformbestand",
+  "Manage people, workspaces and connections.":
+    "Personen, Workspaces und Verbindungen verwalten.",
+  "Manage accounts and access across the platform.":
+    "Konten und Zugriffsrechte auf der gesamten Plattform verwalten.",
+  "Changing platform administrator access affects every workspace and platform control.":
+    "Änderungen am Plattformadministratorzugriff betreffen alle Workspaces und die gesamte Plattformverwaltung.",
+  "{count} user": "{count} Person",
+  "{count} users": "{count} Personen",
+  "Workspace directory": "Workspace-Verzeichnis",
+  "Manage workspaces, members and access across the platform.":
+    "Workspaces, Mitglieder und Zugriffsrechte auf der gesamten Plattform verwalten.",
+  "{count} workspace": "{count} Workspace",
+  "{count} workspaces": "{count} Workspaces",
+  "A workspace or user ID is required for this scope.":
+    "Für diesen Bereich ist eine Workspace- oder Benutzer-ID erforderlich.",
+  "Assign this server to a specific workspace or user.":
+    "Diesen Server einem bestimmten Workspace oder Benutzer zuweisen.",
+  "Type the server name to confirm": "Zur Bestätigung den Servernamen eingeben",
+  "OAuth authorization is managed from the owning workspace or personal account.":
+    "Die OAuth-Autorisierung wird im zugehörigen Workspace oder persönlichen Konto verwaltet.",
 } as const

@@ -68,6 +68,7 @@ type Props = {
   userId?: string
   platformAdmin?: boolean
   createRequest?: number
+  apiBasePath?: string
   resourceError?: string
   onRetryResource?: () => void
 }
@@ -82,6 +83,7 @@ type MCPForm = {
   oauthClientId: string
   oauthScopes: string
   scopeType: string
+  scopeId: string
   allowedTools: string
   trustedReadOnly: boolean
   autoDiscover: boolean
@@ -97,6 +99,7 @@ const emptyForm: MCPForm = {
   oauthClientId: "",
   oauthScopes: "",
   scopeType: "organization",
+  scopeId: "",
   allowedTools: "",
   trustedReadOnly: false,
   autoDiscover: true,
@@ -153,10 +156,13 @@ export function MCPView({
   userId,
   platformAdmin = false,
   createRequest,
+  apiBasePath = "/api/v1/mcp/servers",
   resourceError,
   onRetryResource,
 }: Props) {
   const { t, locale } = useTranslations()
+  const isPlatformCatalog = apiBasePath === "/api/v1/admin/mcp/servers"
+  const [removePhrase, setRemovePhrase] = useState("")
 
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<MCPForm>(emptyForm)
@@ -195,6 +201,7 @@ export function MCPView({
   )
 
   const canManageServer = (server: MCPServer) => {
+    if (isPlatformCatalog) return true
     if (server.scopeType === "global") return false
     if (userId === undefined && organizationRole === undefined) return true
     if (server.scopeType === "user") return server.scopeId === userId
@@ -249,10 +256,14 @@ export function MCPView({
     resetIconSelection()
     setForm({
       ...emptyForm,
-      scopeType: canManageOrganization ? "organization" : "user",
+      scopeType: isPlatformCatalog
+        ? "global"
+        : canManageOrganization
+          ? "organization"
+          : "user",
     })
     setOpen(true)
-  }, [canManageOrganization, resetIconSelection])
+  }, [canManageOrganization, isPlatformCatalog, resetIconSelection])
 
   useEffect(() => {
     if (!createRequest || createRequest === createRequestRef.current) return
@@ -274,6 +285,14 @@ export function MCPView({
 
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (
+      isPlatformCatalog &&
+      form.scopeType !== "global" &&
+      !form.scopeId.trim()
+    ) {
+      setDialogError("A workspace or user ID is required for this scope.")
+      return
+    }
     setSaving(true)
     setDialogError("")
     const allowedTools = form.allowedTools
@@ -282,24 +301,34 @@ export function MCPView({
       .filter(Boolean)
     try {
       let server = editingServer
-        ? await api.patch<MCPServer>(
-            `/api/v1/mcp/servers/${editingServer.id}`,
-            { ...form, allowedTools }
-          )
-        : await api.post<MCPServer>("/api/v1/mcp/servers", {
+        ? await api.patch<MCPServer>(`${apiBasePath}/${editingServer.id}`, {
             ...form,
+            scopeId: isPlatformCatalog
+              ? form.scopeType === "global"
+                ? null
+                : form.scopeId.trim()
+              : undefined,
+            allowedTools,
+          })
+        : await api.post<MCPServer>(apiBasePath, {
+            ...form,
+            scopeId: isPlatformCatalog
+              ? form.scopeType === "global"
+                ? null
+                : form.scopeId.trim()
+              : undefined,
             allowedTools,
           })
       if (iconFile) {
         const body = new FormData()
         body.set("icon", iconFile)
         server = await api.upload<MCPServer>(
-          `/api/v1/mcp/servers/${server.id}/icon`,
+          `${apiBasePath}/${server.id}/icon`,
           body
         )
       } else if (iconRemoved && editingServer) {
         server = await api.delete<MCPServer>(
-          `/api/v1/mcp/servers/${editingServer.id}/icon`
+          `${apiBasePath}/${editingServer.id}/icon`
         )
       }
       let connectionNotice = ""
@@ -308,12 +337,12 @@ export function MCPView({
       if (!editingServer && canVerifyNow) {
         try {
           const tested = await api.post<{ server?: MCPServer }>(
-            `/api/v1/mcp/servers/${server.id}/test`
+            `${apiBasePath}/${server.id}/test`
           )
           server = { ...server, ...(tested.server ?? {}), lastError: "" }
           const discovered = await api.get<{
             tools: Array<{ name: string; description?: string }>
-          }>(`/api/v1/mcp/servers/${server.id}/tools`)
+          }>(`${apiBasePath}/${server.id}/tools`)
           setTools((current) => ({
             ...current,
             [server.id]: discovered.tools,
@@ -336,7 +365,11 @@ export function MCPView({
           )
         }
       } else if (!editingServer && server.authType === "oauth") {
-        connectionNotice = t("Authorize OAuth to verify the connection.")
+        connectionNotice = t(
+          isPlatformCatalog
+            ? "OAuth authorization is managed from the owning workspace or personal account."
+            : "Authorize OAuth to verify the connection."
+        )
       }
       onChange(
         editingServer
@@ -380,6 +413,7 @@ export function MCPView({
       oauthClientId: "",
       oauthScopes: "",
       scopeType: server.scopeType,
+      scopeId: server.scopeId ?? "",
       allowedTools: server.allowedTools.join(", "),
       trustedReadOnly: Boolean(server.trustedReadOnly),
       autoDiscover: Boolean(server.autoDiscover),
@@ -391,7 +425,7 @@ export function MCPView({
     setBusyId(server.id)
     try {
       const updated = await api.patch<MCPServer>(
-        `/api/v1/mcp/servers/${server.id}`,
+        `${apiBasePath}/${server.id}`,
         body
       )
       onChange(
@@ -424,7 +458,7 @@ export function MCPView({
     try {
       const result = await api.get<{
         tools: Array<{ name: string; description?: string }>
-      }>(`/api/v1/mcp/servers/${server.id}/tools`, {
+      }>(`${apiBasePath}/${server.id}/tools`, {
         signal: controller.signal,
       })
       setTools((current) => ({ ...current, [server.id]: result.tools }))
@@ -472,7 +506,7 @@ export function MCPView({
     )
     try {
       const result = await api.post<{ server?: MCPServer }>(
-        `/api/v1/mcp/servers/${server.id}/test`,
+        `${apiBasePath}/${server.id}/test`,
         undefined,
         { signal: controller.signal }
       )
@@ -525,7 +559,7 @@ export function MCPView({
   async function remove(server: MCPServer) {
     setBusyId(server.id)
     try {
-      await api.delete(`/api/v1/mcp/servers/${server.id}`)
+      await api.delete(`${apiBasePath}/${server.id}`)
       onChange(servers.filter((item) => item.id !== server.id))
     } catch (caught) {
       setNotice(
@@ -710,17 +744,18 @@ export function MCPView({
                           >
                             <Check aria-hidden="true" /> {t("Test connection")}
                           </Menu.Item>
-                          {server.authType === "oauth" && (
-                            <Menu.Item
-                              disabled={Boolean(busyId)}
-                              onClick={() => authorize(server)}
-                            >
-                              <KeyRound aria-hidden="true" />
-                              {server.credentialConfigured
-                                ? t("Reconnect OAuth")
-                                : t("Authorize")}
-                            </Menu.Item>
-                          )}
+                          {server.authType === "oauth" &&
+                            !isPlatformCatalog && (
+                              <Menu.Item
+                                disabled={Boolean(busyId)}
+                                onClick={() => authorize(server)}
+                              >
+                                <KeyRound aria-hidden="true" />
+                                {server.credentialConfigured
+                                  ? t("Reconnect OAuth")
+                                  : t("Authorize")}
+                              </Menu.Item>
+                            )}
                           {canManageServer(server) && (
                             <>
                               <Menu.Separator />
@@ -773,7 +808,10 @@ export function MCPView({
                               <Menu.Item
                                 disabled={Boolean(busyId)}
                                 variant="destructive"
-                                onClick={() => setRemoveTarget(server)}
+                                onClick={() => {
+                                  setRemovePhrase("")
+                                  setRemoveTarget(server)
+                                }}
                               >
                                 <Trash2 aria-hidden="true" /> {t("Remove")}
                               </Menu.Item>
@@ -814,6 +852,16 @@ export function MCPView({
                       />
                     )}
                   </div>
+                  {isPlatformCatalog && server.scopeId && (
+                    <p className="text-xs break-all text-muted-foreground">
+                      {t(
+                        server.scopeType === "organization"
+                          ? "Workspace ID"
+                          : "User ID"
+                      )}
+                      : {server.scopeId}
+                    </p>
+                  )}
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                     <span>
                       {t("{count} tools", {
@@ -1010,13 +1058,14 @@ export function MCPView({
             </Frame.Panel>
           </Frame>
         )}
-        {servers.some((server) => server.scopeType === "global") && (
-          <p className="text-xs text-muted-foreground">
-            {t(
-              "Platform-managed servers can only be edited in the platform catalog."
-            )}
-          </p>
-        )}
+        {!isPlatformCatalog &&
+          servers.some((server) => server.scopeType === "global") && (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "Platform-managed servers can only be edited in the platform catalog."
+              )}
+            </p>
+          )}
       </div>
 
       <AlertDialog
@@ -1034,12 +1083,27 @@ export function MCPView({
               "”? Existing conversations keep their messages, but this server and its tools will no longer be available for new calls."
             )}
           </AlertDialogDescription>
+          {isPlatformCatalog && (
+            <Field>
+              <Field.Label>{t("Type the server name to confirm")}</Field.Label>
+              <Input
+                value={removePhrase}
+                onChange={(event) => setRemovePhrase(event.target.value)}
+                autoComplete="off"
+                placeholder={removeTarget?.name}
+              />
+            </Field>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={Boolean(busyId)}>
               {t("Cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
-              disabled={!removeTarget || Boolean(busyId)}
+              disabled={
+                !removeTarget ||
+                Boolean(busyId) ||
+                (isPlatformCatalog && removePhrase !== removeTarget.name)
+              }
               tone="destructive"
               onClick={() => {
                 const target = removeTarget
@@ -1257,9 +1321,17 @@ export function MCPView({
                           <Field.Label>{t("Visibility")}</Field.Label>
                           <Select
                             items={{
+                              ...(isPlatformCatalog
+                                ? { global: t("Platform") }
+                                : {}),
                               organization: t("Workspace"),
-                              user: t("Only me"),
+                              user: t(
+                                isPlatformCatalog ? "Personal" : "Only me"
+                              ),
                             }}
+                            disabled={
+                              isPlatformCatalog && Boolean(editingServer)
+                            }
                             value={form.scopeType}
                             onValueChange={(value) =>
                               update(
@@ -1276,18 +1348,54 @@ export function MCPView({
                             </SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
+                                {isPlatformCatalog && (
+                                  <SelectItem value="global">
+                                    {t("Platform")}
+                                  </SelectItem>
+                                )}
                                 {canManageOrganization && (
                                   <SelectItem value="organization">
                                     {t("Workspace")}
                                   </SelectItem>
                                 )}
                                 <SelectItem value="user">
-                                  {t("Only me")}
+                                  {t(
+                                    isPlatformCatalog ? "Personal" : "Only me"
+                                  )}
                                 </SelectItem>
                               </SelectGroup>
                             </SelectContent>
                           </Select>
                         </Field>
+                        {isPlatformCatalog && form.scopeType !== "global" && (
+                          <Field>
+                            <Field.Label>
+                              {t(
+                                form.scopeType === "organization"
+                                  ? "Workspace ID"
+                                  : "User ID"
+                              )}
+                            </Field.Label>
+                            <Input
+                              required
+                              disabled={Boolean(editingServer)}
+                              value={form.scopeId}
+                              onChange={(event) =>
+                                update("scopeId", event.target.value)
+                              }
+                              placeholder={t(
+                                form.scopeType === "organization"
+                                  ? "Workspace ID"
+                                  : "User ID"
+                              )}
+                            />
+                            <Field.Description>
+                              {t(
+                                "Assign this server to a specific workspace or user."
+                              )}
+                            </Field.Description>
+                          </Field>
+                        )}
                       </div>
                       {form.authType !== "none" && (
                         <Field>
