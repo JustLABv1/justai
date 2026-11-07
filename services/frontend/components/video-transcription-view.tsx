@@ -48,7 +48,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/panelui/card"
 import {
   Collapsible,
   CollapsibleContent,
@@ -67,14 +67,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+} from "@/components/panelui/dialog"
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { Input } from "@/components/panelui/input"
 import { Progress } from "@/components/ui/progress"
 import {} from "@/components/ui/page"
 import {
@@ -82,16 +82,16 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectLabel,
+  SelectGroupLabel,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+} from "@/components/panelui/select"
+import { Button } from "@/components/panelui/button"
+import { Badge } from "@/components/panelui/badge"
+import { Tabs, TabsList, TabsTrigger } from "@/components/panelui/tabs"
 import { api, resolveAPIURL } from "@/lib/api"
 import { groupTranscriptionSegments } from "@/lib/transcription"
-import { Switch } from "@/components/ui/switch"
+import { Switch } from "@/components/panelui/switch"
 import { languageItemsFor } from "@/lib/transcription-languages"
 import { formatBytes, useFileUpload } from "@/hooks/use-file-upload"
 import { cn } from "@/lib/utils"
@@ -2191,9 +2191,9 @@ export function VideoTranscriptionView({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            <SelectLabel>
+                            <SelectGroupLabel>
                               {t("Transcription providers")}
-                            </SelectLabel>
+                            </SelectGroupLabel>
                             {transcriptionEndpoints.map((endpoint) => (
                               <SelectItem key={endpoint.id} value={endpoint.id}>
                                 {endpoint.name} · {endpoint.providerType} ·{" "}
@@ -2258,9 +2258,9 @@ export function VideoTranscriptionView({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            <SelectLabel>
+                            <SelectGroupLabel>
                               {t("Diarization providers")}
-                            </SelectLabel>
+                            </SelectGroupLabel>
                             <SelectItem value="none">
                               {t("Keep one transcript stream")}
                             </SelectItem>
@@ -2336,7 +2336,9 @@ export function VideoTranscriptionView({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            <SelectLabel>{t("Chat providers")}</SelectLabel>
+                            <SelectGroupLabel>
+                              {t("Chat providers")}
+                            </SelectGroupLabel>
                             <SelectItem value="none">
                               {t("Keep verbatim transcript")}
                             </SelectItem>
@@ -2596,7 +2598,7 @@ function VideoModelField({
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            <SelectLabel>{fieldLabel}</SelectLabel>
+            <SelectGroupLabel>{fieldLabel}</SelectGroupLabel>
             {models.map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 {videoModelLabel(model)}

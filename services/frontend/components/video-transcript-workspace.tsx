@@ -53,7 +53,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/panelui/card"
 import {
   Dialog,
   DialogContent,
@@ -61,27 +61,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty"
+} from "@/components/panelui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/panelui/input"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
+import { Menu } from "@/components/panelui/menu"
 import {
   Select,
   SelectContent,
@@ -89,10 +74,10 @@ import {
   SelectGroup,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
-import { Checkbox } from "@/components/ui/checkbox"
+} from "@/components/panelui/select"
+import { Tabs, TabsList, TabsTrigger } from "@/components/panelui/tabs"
+import { Textarea } from "@/components/panelui/textarea"
+import { Checkbox } from "@/components/panelui/checkbox"
 import { api } from "@/lib/api"
 import { TranscriptionExportDialog } from "@/components/transcription-export-dialog"
 import {
@@ -214,6 +199,27 @@ const insightLanguageOptionsMessages = [
   { value: "ko", label: "Korean" },
   { value: "zh", label: "Chinese" },
 ] as const
+
+function Empty({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center gap-2 text-center",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+function EmptyHeader(props: React.ComponentProps<"div">) {
+  return <div className="flex flex-col items-center gap-1" {...props} />
+}
+function EmptyTitle(props: React.ComponentProps<"p">) {
+  return <p className="text-sm font-medium" {...props} />
+}
+function EmptyDescription(props: React.ComponentProps<"p">) {
+  return <p className="max-w-sm text-xs text-muted-foreground" {...props} />
+}
 
 function formatVideoDuration(durationMs: number) {
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1000))
@@ -1971,8 +1977,8 @@ export function TranscriptWorkspace({
             )}
             {chatStarting ? t("Starting chat…") : t("Ask about this")}
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger
+          <Menu>
+            <Menu.Trigger
               render={
                 <Button
                   aria-label={t("More actions")}
@@ -1982,11 +1988,11 @@ export function TranscriptWorkspace({
               }
             >
               <MoreHorizontal />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuGroup>
+            </Menu.Trigger>
+            <Menu.Content align="end" className="w-52">
+              <Menu.Group>
                 {workspaceView === "insights" ? (
-                  <DropdownMenuItem
+                  <Menu.Item
                     disabled={
                       standardLoading ||
                       insightsProcessing ||
@@ -1996,16 +2002,16 @@ export function TranscriptWorkspace({
                   >
                     <Pencil data-icon="inline-start" />
                     {t(insightsReady ? "Adjust summary" : "Generate summary")}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 ) : null}
                 {insightsReady ? (
-                  <DropdownMenuItem onClick={() => void openWorkflowDialog()}>
+                  <Menu.Item onClick={() => void openWorkflowDialog()}>
                     <GitBranch data-icon="inline-start" />
                     {t("Use in workflow")}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 ) : null}
                 {workspaceView === "insights" && mediaKind !== "none" ? (
-                  <DropdownMenuItem
+                  <Menu.Item
                     onClick={() => {
                       if (summaryRecordingOpen)
                         (mediaKind === "audio"
@@ -2019,14 +2025,14 @@ export function TranscriptWorkspace({
                     {t(
                       summaryRecordingOpen ? "Hide recording" : "Show recording"
                     )}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 ) : null}
-                <DropdownMenuItem onClick={() => setWorkspaceView("details")}>
+                <Menu.Item onClick={() => setWorkspaceView("details")}>
                   <Clock3 data-icon="inline-start" /> {t("Transcript details")}
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                </Menu.Item>
+              </Menu.Group>
+            </Menu.Content>
+          </Menu>
           <Button
             disabled={
               !snapshot.segments.length ||
@@ -2458,8 +2464,8 @@ export function TranscriptWorkspace({
                   )}
                   {editorOpen ? t("Done editing") : t("Edit")}
                 </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
+                <Menu>
+                  <Menu.Trigger
                     render={
                       <Button
                         aria-label={t("Transcript tools")}
@@ -2469,11 +2475,11 @@ export function TranscriptWorkspace({
                     }
                   >
                     <MoreHorizontal aria-hidden="true" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel>{t("Text version")}</DropdownMenuLabel>
-                      <DropdownMenuRadioGroup
+                  </Menu.Trigger>
+                  <Menu.Content align="end" className="w-52">
+                    <Menu.Group>
+                      <Menu.GroupLabel>{t("Text version")}</Menu.GroupLabel>
+                      <Menu.RadioGroup
                         value={transcriptMode}
                         onValueChange={(value) => {
                           if (
@@ -2484,33 +2490,30 @@ export function TranscriptWorkspace({
                             setTranscriptMode(value)
                         }}
                       >
-                        <DropdownMenuRadioItem
-                          value="verbatim"
-                          disabled={editorOpen}
-                        >
+                        <Menu.RadioItem value="verbatim" disabled={editorOpen}>
                           {t("As spoken")}
-                        </DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem
+                        </Menu.RadioItem>
+                        <Menu.RadioItem
                           value="polished"
                           disabled={editorOpen || !polishedAvailable}
                         >
                           {t("Cleaned up")}
-                        </DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem
+                        </Menu.RadioItem>
+                        <Menu.RadioItem
                           value="edited"
                           disabled={editorOpen || !editedAvailable}
                         >
                           {t("My edits")}
-                        </DropdownMenuRadioItem>
-                      </DropdownMenuRadioGroup>
-                      <DropdownMenuItem
+                        </Menu.RadioItem>
+                      </Menu.RadioGroup>
+                      <Menu.Item
                         onClick={() => setFiltersOpen((current) => !current)}
                       >
                         <CircleAlert data-icon="inline-start" />{" "}
                         {filtersOpen ? t("Hide filters") : t("Show filters")}
-                      </DropdownMenuItem>
+                      </Menu.Item>
                       {canPolishTranscript ? (
-                        <DropdownMenuItem
+                        <Menu.Item
                           disabled={polishProcessing}
                           onClick={() => void polishTranscript()}
                         >
@@ -2520,11 +2523,11 @@ export function TranscriptWorkspace({
                             : polishedAvailable
                               ? t("Re-polish transcript")
                               : t("Polish transcript")}
-                        </DropdownMenuItem>
+                        </Menu.Item>
                       ) : null}
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    </Menu.Group>
+                  </Menu.Content>
+                </Menu>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
