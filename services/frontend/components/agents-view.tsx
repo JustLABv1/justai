@@ -40,14 +40,6 @@ import {
   X,
 } from "lucide-react"
 import { layoutAgentGraph } from "@/lib/agent-graph-layout"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/panelui/table"
 import { RunFiles } from "@/components/agent-run-files"
 import { Inspector } from "@/components/panelui/inspector"
 import { WorkflowEditor, WorkflowRunGraph } from "@/components/workflow-editor"
@@ -90,6 +82,7 @@ import { Menu } from "@/components/panelui/menu"
 import { Stat } from "@/components/panelui/stat"
 import { Tabs as PuTabs } from "@/components/panelui/tabs"
 import { Badge } from "@/components/panelui/badge"
+import { Chip } from "@/components/panelui/chip"
 import { Checkbox } from "@/components/panelui/checkbox"
 import { Button } from "@/components/panelui/button"
 import {
@@ -117,7 +110,6 @@ import {
   FieldLegend,
 } from "@/components/ui/field"
 import { Input } from "@/components/panelui/input"
-import { FilterBar } from "@/components/ui/filter-bar"
 import {
   Page,
   PageActions,
@@ -488,21 +480,24 @@ function cloneWorkflow(workflow: AgentWorkflow): WorkflowDraft {
 
 function badgeVariant(
   status: string
-): "default" | "secondary" | "destructive" | "outline" {
+):
+  | "default"
+  | "secondary"
+  | "destructive"
+  | "outline"
+  | "success"
+  | "info"
+  | "warning" {
   if (
-    [
-      "failed",
-      "cancelled",
-      "disabled",
-      "degraded",
-      "expired",
-      "rejected",
-    ].includes(status)
+    ["failed", "disabled", "degraded", "expired", "rejected"].includes(status)
   )
     return "destructive"
-  if (["completed", "approved", "ready"].includes(status)) return "default"
-  if (["running", "waiting_approval", "pending", "queued"].includes(status))
-    return "secondary"
+  if (["completed", "approved", "ready", "active", "enabled"].includes(status))
+    return "success"
+  if (status === "running") return "info"
+  if (["waiting_approval", "pending", "queued"].includes(status))
+    return "warning"
+  if (status === "cancelled") return "secondary"
   return "outline"
 }
 
@@ -1558,7 +1553,7 @@ export function AgentsView({
             {t("Runs")}
           </PuTabs.Trigger>
         </PuTabs.List>
-        <PuTabs.Content value="agents" className="pt-6">
+        <PuTabs.Content value="agents" className="pt-1">
           {loading && !agents.length ? (
             <LoadingState label={t("Loading agents…")} />
           ) : (
@@ -1578,7 +1573,7 @@ export function AgentsView({
             />
           )}
         </PuTabs.Content>
-        <PuTabs.Content value="workflows" className="pt-6">
+        <PuTabs.Content value="workflows" className="pt-1">
           <WorkflowsPanel
             workflows={workflows}
             draft={workflowDraft}
@@ -1615,7 +1610,7 @@ export function AgentsView({
             disabled={disabled}
           />
         </PuTabs.Content>
-        <PuTabs.Content value="runs" className="pt-6">
+        <PuTabs.Content value="runs" className="pt-1">
           <RunsPanel
             nextCursor={runsCursor}
             onCursorChange={setRunsCursor}
@@ -4135,222 +4130,236 @@ function RunsPanel({
           <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[
-          { label: t("Loaded runs"), value: runs.length },
-          {
-            label: t("In progress"),
-            value: runs.filter((run) =>
-              ["running", "queued"].includes(run.status)
-            ).length,
-          },
-          {
-            label: t("Completed"),
-            value: runs.filter((run) => run.status === "completed").length,
-          },
-          {
-            label: t("Failed"),
-            value: runs.filter((run) => run.status === "failed").length,
-          },
-        ].map((metric) => (
-          <Card key={metric.label}>
-            <CardHeader>
-              <CardDescription>{metric.label}</CardDescription>
-              <CardTitle className="tabular-nums">{metric.value}</CardTitle>
-            </CardHeader>
-          </Card>
-        ))}
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("Run history")}</CardTitle>
-          <CardDescription>
-            {t("Track execution, investigate failures, and review approvals.")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <FilterBar
-            hasActiveFilters={Boolean(query.trim()) || statusFilter !== "all"}
-            onClear={() => {
-              setQuery("")
-              setStatusFilter("all")
+      <div className="flex flex-wrap items-center gap-3">
+        <Input.Group className="w-full sm:w-80">
+          <Input.Addon>
+            <Search aria-hidden="true" />
+          </Input.Addon>
+          <Input
+            aria-label={t("Search runs")}
+            onChange={(event) => {
+              setQuery(event.target.value)
               setPage(0)
             }}
-            resultCount={filteredRuns.length}
-            resultLabel="runs"
-            resultTotal={runs.length}
-            search={{
-              label: "Search runs",
-              onChange: (value) => {
-                setQuery(value)
-                setPage(0)
-              },
-              placeholder: "Search workflows, run IDs, or results…",
-              value: query,
-            }}
-          >
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => {
-                setStatusFilter(value ?? "all")
-                setPage(0)
-              }}
-            >
-              <SelectTrigger
-                aria-label={t("Filter run status")}
-                className="h-8 min-w-36 sm:min-w-40"
-                size="sm"
-              >
-                <SelectValue>
-                  {statusFilter === "all"
-                    ? t("All statuses")
-                    : statusLabel(statusFilter)}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="all">{t("All statuses")}</SelectItem>
-                  {[...new Set(runs.map((run) => run.status))]
-                    .sort()
-                    .map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {statusLabel(status)}
-                      </SelectItem>
-                    ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </FilterBar>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("Workflow / run")}</TableHead>
-                <TableHead>{t("Status")}</TableHead>
-                <TableHead>{t("Source")}</TableHead>
-                <TableHead>{t("Started")}</TableHead>
-                <TableHead>{t("Duration")}</TableHead>
-                <TableHead>{t("Result")}</TableHead>
-                <TableHead className="text-right">{t("Actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pageRuns.map((run) => (
-                <TableRow
-                  key={run.id}
+            placeholder={t("Search workflows, run IDs, or results…")}
+            value={query}
+          />
+        </Input.Group>
+        <Chip.Group
+          aria-label={t("Filter run status")}
+          multiple={false}
+          onValueChange={(value) => {
+            setStatusFilter((value[0] as string | undefined) ?? "all")
+            setPage(0)
+          }}
+          value={[statusFilter]}
+        >
+          {["all", ...[...new Set(runs.map((run) => run.status))].sort()].map(
+            (status) => {
+              const count =
+                status === "all"
+                  ? runs.length
+                  : runs.filter((run) => run.status === status).length
+              const tone = badgeVariant(status)
+              return (
+                <Chip
+                  color={
+                    tone === "success" ||
+                    tone === "info" ||
+                    tone === "warning" ||
+                    tone === "destructive"
+                      ? tone
+                      : "primary"
+                  }
+                  key={status}
+                  size="sm"
+                  value={status}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    {status !== "all" && (
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "size-1.5 rounded-full bg-muted-foreground",
+                          tone === "success" && "bg-success",
+                          tone === "info" && "bg-info",
+                          tone === "warning" && "bg-warning",
+                          tone === "destructive" && "bg-destructive"
+                        )}
+                      />
+                    )}
+                    {status === "all" ? t("All statuses") : statusLabel(status)}
+                    <span className="text-muted-foreground tabular-nums">
+                      {count}
+                    </span>
+                  </span>
+                </Chip>
+              )
+            }
+          )}
+        </Chip.Group>
+      </div>
+      <Frame>
+        <Frame.Header>
+          <Frame.Title>{t("Run history")}</Frame.Title>
+          <Frame.Description>
+            {t("Track execution, investigate failures, and review approvals.")}
+          </Frame.Description>
+          <Frame.Action>
+            {filteredRuns.length} {t("of")} {runs.length}
+          </Frame.Action>
+        </Frame.Header>
+        <Frame.Panel>
+          {pageRuns.length === 0 ? (
+            <Frame.Row>
+              <Frame.Content className="flex flex-col items-center gap-2 py-10 text-center">
+                <span className="rounded-full bg-muted p-3 text-muted-foreground">
+                  <Activity aria-hidden="true" className="size-5" />
+                </span>
+                <Frame.Title as="p">
+                  {runs.length
+                    ? t("No runs match your search.")
+                    : t("No runs yet")}
+                </Frame.Title>
+                {!runs.length && (
+                  <Frame.Description className="max-w-xs">
+                    {t(
+                      "Run a workflow or delegate from chat and progress will appear here."
+                    )}
+                  </Frame.Description>
+                )}
+              </Frame.Content>
+            </Frame.Row>
+          ) : (
+            pageRuns.map((run) => {
+              const active = ["queued", "running", "waiting_approval"].includes(
+                run.status
+              )
+              return (
+                <Frame.Row
                   data-state={
                     showDetail && selectedID === run.id ? "selected" : undefined
                   }
+                  key={run.id}
                 >
-                  <TableCell>
-                    <Button variant="link" onClick={() => selectRun(run.id)}>
+                  <Frame.Media>
+                    <Activity aria-hidden="true" />
+                  </Frame.Media>
+                  <Frame.Content>
+                    <button
+                      className="w-fit cursor-pointer text-start text-sm font-medium hover:underline"
+                      onClick={() => selectRun(run.id)}
+                      type="button"
+                    >
                       {runName(run)}
-                    </Button>
-                    <p className="px-2 font-mono text-xs text-muted-foreground">
-                      {run.id.slice(0, 12)}
+                    </button>
+                    <Frame.Description className="truncate">
+                      {run.error || run.summary || run.id.slice(0, 12)}
+                    </Frame.Description>
+                    <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                      {run.sourceType} · {formatRunTime(run.createdAt)} ·{" "}
+                      {formatRunDuration(run.startedAt, run.finishedAt)}
                     </p>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={badgeVariant(run.status)}>
+                  </Frame.Content>
+                  <Frame.Actions>
+                    <Badge dot variant={badgeVariant(run.status)}>
                       {statusLabel(run.status)}
                     </Badge>
-                  </TableCell>
-                  <TableCell>{run.sourceType}</TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {formatRunTime(run.createdAt)}
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    {formatRunDuration(run.startedAt, run.finishedAt)}
-                  </TableCell>
-                  <TableCell className="max-w-64 truncate text-muted-foreground">
-                    {run.error || run.summary || "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      aria-label={t("Delete {value0} run", {
-                        value0: runName(run),
-                      })}
-                      disabled={
-                        disabled ||
-                        ["queued", "running", "waiting_approval"].includes(
-                          run.status
-                        )
-                      }
-                      onClick={() => setDeleteRunTarget(run)}
-                      size="icon-sm"
-                      title={
-                        ["queued", "running", "waiting_approval"].includes(
-                          run.status
-                        )
-                          ? t("Cancel this run before deleting it")
-                          : t("Delete run")
-                      }
-                      variant="ghost"
-                    >
-                      <Trash2 />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <nav
-            aria-label={t("Run history pagination")}
-            className="flex flex-wrap items-center justify-between gap-3"
-          >
-            <span className="text-xs text-muted-foreground" aria-live="polite">
-              {filteredRuns.length ? currentPage * 25 + 1 : 0}–
-              {Math.min((currentPage + 1) * 25, filteredRuns.length)} {t("of")}{" "}
-              {filteredRuns.length} {t("· 25 per page")}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentPage === 0}
-                onClick={() => setPage(currentPage - 1)}
+                    <Menu>
+                      <Menu.Trigger
+                        render={
+                          <Button
+                            aria-label={t("More actions for {value0}", {
+                              value0: runName(run),
+                            })}
+                            size="icon-sm"
+                            variant="ghost"
+                          />
+                        }
+                      >
+                        <MoreHorizontal />
+                      </Menu.Trigger>
+                      <Menu.Content align="end">
+                        <Menu.Item onClick={() => selectRun(run.id)}>
+                          {t("Run details")}
+                        </Menu.Item>
+                        <Menu.Separator />
+                        <Menu.Item
+                          disabled={disabled || active}
+                          onClick={() => setDeleteRunTarget(run)}
+                          variant="destructive"
+                        >
+                          <Trash2 />
+                          {active
+                            ? t("Cancel this run before deleting it")
+                            : t("Delete run")}
+                        </Menu.Item>
+                      </Menu.Content>
+                    </Menu>
+                  </Frame.Actions>
+                </Frame.Row>
+              )
+            })
+          )}
+        </Frame.Panel>
+        {(pageCount > 1 || nextCursor) && (
+          <Frame.Footer>
+            <nav
+              aria-label={t("Run history pagination")}
+              className="flex w-full flex-wrap items-center justify-between gap-3"
+            >
+              <span
+                className="text-xs text-muted-foreground"
+                aria-live="polite"
               >
-                {t("Previous")}
-              </Button>
-              <span className="text-xs">
-                {t("Page")} {currentPage + 1} {t("of")} {pageCount}
+                {currentPage * 25 + 1}–
+                {Math.min((currentPage + 1) * 25, filteredRuns.length)}{" "}
+                {t("of")} {filteredRuns.length}
               </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentPage >= pageCount - 1}
-                onClick={() => setPage(currentPage + 1)}
-              >
-                {t("Next")}
-              </Button>
-              {nextCursor && (
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={loadingOlder}
-                  onClick={() => void loadOlderRuns()}
+                  disabled={currentPage === 0}
+                  onClick={() => setPage(currentPage - 1)}
                 >
-                  {loadingOlder ? t("Loading…") : t("Load older runs")}
+                  {t("Previous")}
                 </Button>
-              )}
-            </div>
-          </nav>
-          {!runs.length ? (
-            <EmptyRuns />
-          ) : !filteredRuns.length ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              {t("No runs match your search.")}
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
+                <span className="text-xs">
+                  {t("Page")} {currentPage + 1} {t("of")} {pageCount}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage >= pageCount - 1}
+                  onClick={() => setPage(currentPage + 1)}
+                >
+                  {t("Next")}
+                </Button>
+                {nextCursor && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loadingOlder}
+                    onClick={() => void loadOlderRuns()}
+                  >
+                    {loadingOlder ? t("Loading…") : t("Load older runs")}
+                  </Button>
+                )}
+              </div>
+            </nav>
+          </Frame.Footer>
+        )}
+      </Frame>
       <Sheet
         open={showDetail}
+        side="right"
         onOpenChange={(open) => {
           setShowDetail(open)
           if (!open) updateAgentRunURL()
         }}
       >
-        <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-4xl">
+        <SheetContent className="w-[min(56rem,calc(100vw-2*var(--sheet-gap)))]!">
           <SheetHeader className="shrink-0 border-b pr-12">
             <SheetTitle>{t("Run details")}</SheetTitle>
             <SheetDescription>
@@ -4405,24 +4414,6 @@ function RunsPanel({
         }}
         onConfirm={deleteRun}
       />
-    </div>
-  )
-}
-
-function EmptyRuns() {
-  const { t } = useTranslations()
-
-  return (
-    <div className="flex flex-col items-center gap-2 py-12 text-center">
-      <div className="rounded-full bg-muted p-3">
-        <Activity />
-      </div>
-      <p className="font-medium">{t("No runs yet")}</p>
-      <p className="max-w-xs text-xs text-muted-foreground">
-        {t(
-          "Run a workflow or delegate from chat and progress will appear here."
-        )}
-      </p>
     </div>
   )
 }
@@ -4491,221 +4482,243 @@ function RunDetail({
       to: edge.to,
     })) ?? []
 
+  const active = ["queued", "running", "waiting_approval"].includes(run.status)
+  const health = failed
+    ? t("{value0} failed", { value0: failed })
+    : completed === nodes.length && nodes.length
+      ? t("All successful")
+      : t("In progress")
+
   return (
-    <Card className="min-w-0">
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Activity data-icon="inline-start" />
-              {workflow?.name ?? "Workflow run"}
-            </CardTitle>
-            <CardDescription className="mt-1 flex flex-wrap items-center gap-2">
-              <Badge variant={badgeVariant(run.status)}>
-                {statusLabel(run.status)}
-              </Badge>
-              <span>{new Date(run.startedAt).toLocaleString(locale)}</span>
-              <span aria-hidden="true">·</span>
-              <span>{run.sourceType}</span>
-            </CardDescription>
-          </div>
-          <div className="flex gap-2">
-            {["queued", "running", "waiting_approval"].includes(run.status) && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onCancel}
-                disabled={disabled}
-              >
-                <X data-icon="inline-start" />
-                {t("Cancel")}
-              </Button>
-            )}
-            {["failed", "cancelled"].includes(run.status) && (
-              <Button size="sm" onClick={onRetry} disabled={disabled}>
-                <RotateCcw data-icon="inline-start" />
-                {t("Retry")}
-              </Button>
-            )}
-            {run.conversationId && (
-              <Button
-                size="sm"
-                variant="ghost"
-                render={<a href={`/${run.conversationId}`} />}
-              >
-                <MessageLink />
-              </Button>
-            )}
-            {!["queued", "running", "waiting_approval"].includes(
-              run.status
-            ) && (
-              <Button
-                aria-label={t("Delete run")}
-                disabled={disabled}
-                onClick={onDelete}
-                size="icon-sm"
-                title={t("Delete run")}
-                variant="ghost"
-              >
-                <Trash2 />
-              </Button>
-            )}
+    <div className="flex min-w-0 flex-col gap-6">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-2">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <Activity
+              aria-hidden="true"
+              className="size-5 text-muted-foreground"
+            />
+            {workflow?.name ?? "Workflow run"}
+          </h2>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge dot variant={badgeVariant(run.status)}>
+              {statusLabel(run.status)}
+            </Badge>
+            <span>{new Date(run.startedAt).toLocaleString(locale)}</span>
+            <span aria-hidden="true">·</span>
+            <span>{run.sourceType}</span>
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        <section
-          className="grid gap-3 sm:grid-cols-3"
-          aria-label={t("Run summary")}
-        >
-          <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
-            <p className="text-xs text-muted-foreground">
-              {t("Nodes successful")}
-            </p>
-            <p className="mt-1 text-xl font-semibold">
-              {completed}/{nodes.length || 1}
-            </p>
-          </div>
-          <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
-            <p className="text-xs text-muted-foreground">{t("Duration")}</p>
-            <p className="mt-1 flex items-center gap-2 text-xl font-semibold">
-              <Clock3 className="size-4 text-muted-foreground" />
-              {duration}
-            </p>
-          </div>
-          <div className="rounded-xl border bg-muted/[0.18] px-4 py-3">
-            <p className="text-xs text-muted-foreground">{t("Health")}</p>
-            <p className="mt-1 text-xl font-semibold">
-              {failed
-                ? t("{value0} failed", { value0: failed })
-                : completed === nodes.length && nodes.length
-                  ? t("All successful")
-                  : t("In progress")}
-            </p>
-          </div>
-        </section>
-        <Progress value={nodes.length ? (completed / nodes.length) * 100 : 0} />
+        <div className="flex items-center gap-2">
+          {active && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onCancel}
+              disabled={disabled}
+            >
+              <X data-icon="inline-start" />
+              {t("Cancel")}
+            </Button>
+          )}
+          {["failed", "cancelled"].includes(run.status) && (
+            <Button size="sm" onClick={onRetry} disabled={disabled}>
+              <RotateCcw data-icon="inline-start" />
+              {t("Retry")}
+            </Button>
+          )}
+          <Menu>
+            <Menu.Trigger
+              render={
+                <Button
+                  aria-label={t("More actions for {value0}", {
+                    value0: workflow?.name ?? "Workflow run",
+                  })}
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              <MoreHorizontal />
+            </Menu.Trigger>
+            <Menu.Content align="end">
+              {run.conversationId && (
+                <Menu.Item render={<a href={`/${run.conversationId}`} />}>
+                  <MessageLink />
+                  {t("Open conversation")}
+                </Menu.Item>
+              )}
+              <Menu.Separator />
+              <Menu.Item
+                disabled={disabled || active}
+                onClick={onDelete}
+                variant="destructive"
+              >
+                <Trash2 />
+                {active
+                  ? t("Cancel this run before deleting it")
+                  : t("Delete run")}
+              </Menu.Item>
+            </Menu.Content>
+          </Menu>
+        </div>
+      </header>
 
-        {pendingApprovals.length > 0 && (
-          <section className="flex flex-col gap-3">
-            <Separator />
-            <div>
-              <h3 className="font-medium">{t("Approvals required")}</h3>
-              <p className="text-xs text-muted-foreground">
-                {t(
-                  "The action hash is checked server-side before the decision is accepted."
-                )}
-              </p>
-            </div>
-            {pendingApprovals.map((approval) => (
-              <ApprovalCard
-                key={approval.id}
-                approval={approval}
-                onDecision={onDecision}
-              />
-            ))}
+      <PuCard size="sm">
+        <PuCard.Content className="flex flex-col gap-3">
+          <section
+            aria-label={t("Run summary")}
+            className="grid grid-cols-3 gap-6"
+          >
+            <Stat>
+              <Stat.Content>
+                <Stat.Label>{t("Nodes successful")}</Stat.Label>
+                <Stat.Value size="sm" className="text-base">
+                  {completed}/{nodes.length || 1}
+                </Stat.Value>
+              </Stat.Content>
+            </Stat>
+            <Stat>
+              <Stat.Content>
+                <Stat.Label>{t("Duration")}</Stat.Label>
+                <Stat.Value size="sm" className="text-base">
+                  {duration}
+                </Stat.Value>
+              </Stat.Content>
+            </Stat>
+            <Stat>
+              <Stat.Content>
+                <Stat.Label>{t("Health")}</Stat.Label>
+                <Stat.Value size="sm" className="text-base">
+                  {health}
+                </Stat.Value>
+              </Stat.Content>
+            </Stat>
           </section>
-        )}
+          <Progress
+            value={nodes.length ? (completed / nodes.length) * 100 : 0}
+          />
+        </PuCard.Content>
+      </PuCard>
 
-        <section
-          className="flex flex-col gap-3"
-          aria-labelledby="node-status-title"
-        >
+      {pendingApprovals.length > 0 && (
+        <section className="flex flex-col gap-3">
           <div>
-            <h3 id="node-status-title" className="font-medium">
-              {t("Node status")}
-            </h3>
+            <h3 className="font-medium">{t("Approvals required")}</h3>
             <p className="text-xs text-muted-foreground">
-              {t("Outcome and duration for every task in this run.")}
+              {t(
+                "The action hash is checked server-side before the decision is accepted."
+              )}
             </p>
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {nodes.map((node) => (
-              <RunNodeOverview key={node.id} node={node} agents={agents} />
-            ))}
-          </div>
+          {pendingApprovals.map((approval) => (
+            <ApprovalCard
+              key={approval.id}
+              approval={approval}
+              onDecision={onDecision}
+            />
+          ))}
         </section>
+      )}
 
-        {run.summary ? (
-          <section aria-labelledby="run-result-title">
-            <div className="mb-3 flex items-center gap-2">
-              <CheckCircle2 className="size-4 text-primary" />
-              <h3 id="run-result-title" className="font-medium">
-                {t("Final result")}
-              </h3>
-            </div>
-            <div className="rounded-2xl border border-primary/20 bg-primary/[0.04] p-5 sm:p-6">
-              <StaticAssistantMarkdown
-                content={run.summary}
-                className="break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      {run.summary ? (
+        <PuCard>
+          <PuCard.Header>
+            <PuCard.Title className="flex items-center gap-2">
+              <CheckCircle2
+                aria-hidden="true"
+                className="size-4 text-primary"
               />
-            </div>
-          </section>
-        ) : run.error ? (
-          <RunErrorMessage content={run.error} />
-        ) : (
-          <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
+              {t("Final result")}
+            </PuCard.Title>
+          </PuCard.Header>
+          <PuCard.Content>
+            <StaticAssistantMarkdown
+              content={run.summary}
+              className="break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+            />
+          </PuCard.Content>
+        </PuCard>
+      ) : run.error ? (
+        <RunErrorMessage content={run.error} />
+      ) : (
+        <PuAlert tone="info">
+          <PuAlert.Description>
             {t(
               "The final result will appear here when the workflow completes."
             )}
+          </PuAlert.Description>
+        </PuAlert>
+      )}
+
+      <RunFiles run={run} />
+
+      <Frame>
+        <Frame.Header>
+          <Frame.Title>{t("Node status")}</Frame.Title>
+          <Frame.Description>
+            {t("Outcome and duration for every task in this run.")}
+          </Frame.Description>
+        </Frame.Header>
+        <Frame.Panel>
+          {nodes.map((node) => (
+            <RunNodeOverview key={node.id} node={node} agents={agents} />
+          ))}
+        </Frame.Panel>
+      </Frame>
+
+      <RunDisclosure
+        title={t("Flow and execution details")}
+        description={t(
+          "Inspect the workflow graph, prompts, intermediate responses, and raw values."
+        )}
+      >
+        {flowNodes.length > 0 && (
+          <div className="mb-5 h-80 overflow-hidden rounded-xl bg-muted/50">
+            <WorkflowRunGraph
+              nodes={flowNodes.map((node) => ({
+                id: node.id,
+                position: node.position,
+                agentName: node.data.agentName,
+                instruction: node.data.instruction,
+                selected: false,
+                status: node.data.status,
+              }))}
+              edges={flowEdges}
+            />
           </div>
         )}
-
-        <RunFiles run={run} />
-
-        <RunDisclosure
-          title={t("Flow and execution details")}
-          description={t(
-            "Inspect the workflow graph, prompts, intermediate responses, and raw values."
-          )}
-        >
-          {flowNodes.length > 0 && (
-            <div className="mb-5 h-80 overflow-hidden rounded-xl bg-muted/50">
-              <WorkflowRunGraph
-                nodes={flowNodes.map((node) => ({
-                  id: node.id,
-                  position: node.position,
-                  agentName: node.data.agentName,
-                  instruction: node.data.instruction,
-                  selected: false,
-                  status: node.data.status,
-                }))}
-                edges={flowEdges}
+        <div className="flex flex-col gap-5 rounded-2xl border bg-muted/[0.12] p-3 sm:p-5">
+          <RunUserMessage input={run.input} />
+          {nodes.map((node) => {
+            const workflowNode = workflow?.definition.nodes.find(
+              (candidate) => candidate.id === node.nodeKey
+            )
+            return (
+              <RunAgentMessage
+                key={node.id}
+                agent={agents.find((agent) => agent.id === node.agentId)}
+                events={events.filter((event) => event.nodeId === node.id)}
+                instruction={
+                  workflowNode?.instruction ?? node.definition?.instruction
+                }
+                node={node}
               />
-            </div>
-          )}
-          <div className="flex flex-col gap-5 rounded-2xl border bg-muted/[0.12] p-3 sm:p-5">
-            <RunUserMessage input={run.input} />
-            {nodes.map((node) => {
-              const workflowNode = workflow?.definition.nodes.find(
-                (candidate) => candidate.id === node.nodeKey
-              )
-              return (
-                <RunAgentMessage
-                  key={node.id}
-                  agent={agents.find((agent) => agent.id === node.agentId)}
-                  events={events.filter((event) => event.nodeId === node.id)}
-                  instruction={
-                    workflowNode?.instruction ?? node.definition?.instruction
-                  }
-                  node={node}
-                />
-              )
-            })}
-          </div>
-        </RunDisclosure>
+            )
+          })}
+        </div>
+      </RunDisclosure>
 
-        <RunDisclosure
-          title={t("Activity log")}
-          description={t(
-            "{value0} activities ({value1} raw events) for troubleshooting and audit.",
-            { value0: activityCount, value1: events.length }
-          )}
-        >
-          <RunEventLog agents={agents} events={events} nodes={nodes} />
-        </RunDisclosure>
-      </CardContent>
-    </Card>
+      <RunDisclosure
+        title={t("Activity log")}
+        description={t(
+          "{value0} activities ({value1} raw events) for troubleshooting and audit.",
+          { value0: activityCount, value1: events.length }
+        )}
+      >
+        <RunEventLog agents={agents} events={events} nodes={nodes} />
+      </RunDisclosure>
+    </div>
   )
 }
 
@@ -5095,38 +5108,33 @@ function RunNodeOverview({
   const { t } = useTranslations()
 
   return (
-    <Card size="sm">
-      <CardContent className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="rounded-md bg-muted p-1.5">
-              <Bot />
-            </div>
-            <span className="truncate text-sm font-medium">{node.nodeKey}</span>
-          </div>
-          <Badge variant={badgeVariant(node.status)}>
-            {statusLabel(node.status)}
-          </Badge>
-        </div>
-        <p className="text-xs text-muted-foreground">
+    <Frame.Row>
+      <Frame.Media>
+        <Bot aria-hidden="true" />
+      </Frame.Media>
+      <Frame.Content>
+        <Frame.Title as="p">{node.nodeKey}</Frame.Title>
+        <Frame.Description>
           {agents.find((agent) => agent.id === node.agentId)?.name ??
             "Agent unavailable"}{" "}
-          {t("· attempt")} {node.attempt || 0}
-        </p>
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Clock3 className="size-3.5" />
+          {t("· attempt")} {node.attempt || 0} ·{" "}
           {node.startedAt
             ? formatRunDuration(node.startedAt, node.finishedAt)
             : t("Not started")}
-        </p>
+        </Frame.Description>
         {node.providerTaskId && (
           <p className="text-[11px] break-all text-muted-foreground">
             {t("Remote task:")} {node.providerTaskId}
           </p>
         )}
         {node.error && <p className="text-xs text-destructive">{node.error}</p>}
-      </CardContent>
-    </Card>
+      </Frame.Content>
+      <Frame.Actions>
+        <Badge dot variant={badgeVariant(node.status)}>
+          {statusLabel(node.status)}
+        </Badge>
+      </Frame.Actions>
+    </Frame.Row>
   )
 }
 

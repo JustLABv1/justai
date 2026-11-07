@@ -4369,4 +4369,5 @@ export const de = {
   "Workflow inspector": "Workflow-Inspektor",
   "Workflow tools": "Workflow-Werkzeuge",
   Inspector: "Inspektor",
+  "Open conversation": "Unterhaltung öffnen",
 } as const
