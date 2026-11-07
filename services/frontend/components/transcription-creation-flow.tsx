@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef, type ReactNode } from "react"
 import { Check } from "lucide-react"
+import { Card } from "@/components/panelui/card"
 import {
   Stepper,
   StepperIndicator,
@@ -64,7 +65,7 @@ export function TranscriptionCreationFlow({
   return (
     <section
       aria-label={title}
-      className="mx-auto flex w-full max-w-3xl flex-col gap-6 py-4 sm:py-8"
+      className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-2 sm:py-4"
       onPointerDown={() => {
         keyboard.current = false
       }}
@@ -73,7 +74,7 @@ export function TranscriptionCreationFlow({
       }}
     >
       <header className="mx-auto flex w-full max-w-2xl flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
           {title}
         </h1>
         <p className="max-w-xl text-sm text-muted-foreground">{description}</p>
@@ -106,19 +107,19 @@ export function TranscriptionCreationFlow({
             ))}
           </StepperNav>
         </Stepper>
-        <div className="min-w-0 rounded-3xl bg-card p-5 sm:p-7">
+        <Card className="min-w-0 p-5 sm:p-6">
           <div
             ref={panel}
             tabIndex={-1}
             role="group"
             aria-label={`Step ${step + 1} of ${steps.length}: ${steps[step].label}`}
-            className="min-h-72 outline-none"
+            className="outline-none"
             aria-busy={busy}
           >
             {children}
           </div>
-          <div className="mt-8">{footer}</div>
-        </div>
+          <div className="mt-4">{footer}</div>
+        </Card>
       </div>
     </section>
   )

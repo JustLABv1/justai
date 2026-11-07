@@ -4,15 +4,15 @@ import { Spinner } from "@/components/panelui/spinner"
 import { useState } from "react"
 import { Check, Download } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
-import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
+import { Button } from "@/components/panelui/button"
+import { Checkbox } from "@/components/panelui/checkbox"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+} from "@/components/panelui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   Select,
@@ -21,9 +21,14 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+} from "@/components/panelui/select"
+import { Switch } from "@/components/panelui/switch"
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/panelui/tabs"
 import { SummaryOmissionReview } from "@/components/transcription-summary-omissions"
 import { TranscriptionSummaryExportEditor } from "@/components/transcription-summary-export-editor"
 import type { TranscriptionInsights } from "@/lib/types"

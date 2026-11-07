@@ -18,8 +18,8 @@ import {
 } from "react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import {
   Collapsible,
   CollapsibleContent,
@@ -32,14 +32,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+} from "@/components/panelui/dialog"
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { Input } from "@/components/panelui/input"
 import {
   MessageScroller,
   MessageScrollerButton,

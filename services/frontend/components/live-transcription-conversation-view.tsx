@@ -30,8 +30,8 @@ import { useMemo, useState, type ReactNode } from "react"
 
 import type { LiveTranscriptionOrbitProps } from "@/components/live-transcription-orbit"
 import type { LiveTranscriptionCaptureViewMode } from "@/components/live-transcription-source-view"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import { RealtimeConnectionStatus } from "@/components/realtime-connection-status"
 import type { SSEConnectionState } from "@/lib/sse-transport"
 import {

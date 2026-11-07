@@ -8,7 +8,7 @@ import { useSearchParams } from "next/navigation"
 import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
 import { TranscriptionParticipantRoom } from "@/components/transcription-participant-room"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/panelui/button"
 import {
   Card,
   CardContent,
@@ -22,7 +22,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { Input } from "@/components/panelui/input"
 import { Spinner } from "@/components/panelui/spinner"
 import { VoiceOrb } from "@/components/assistant-ui/voice"
 import { api, eventStreamURL } from "@/lib/api"

@@ -3,8 +3,8 @@
 import { useState } from "react"
 import { Pencil, RotateCcw, X } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@/components/panelui/button"
+import { Textarea } from "@/components/panelui/textarea"
 import type { TranscriptionInsights } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {

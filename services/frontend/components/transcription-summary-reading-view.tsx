@@ -4,8 +4,8 @@ import { Spinner } from "@/components/panelui/spinner"
 import type { ReactNode } from "react"
 import { Check, Copy, FileText } from "lucide-react"
 import { useTranslations } from "@/components/locale-provider"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/panelui/button"
+import { Badge } from "@/components/panelui/badge"
 import type {
   TranscriptionInsights,
   TranscriptionInsightChapter,

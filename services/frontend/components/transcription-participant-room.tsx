@@ -7,8 +7,8 @@ import { useEffect, useMemo, useRef, type CSSProperties } from "react"
 import type { LiveTranscriptionSnapshot } from "@/components/live-transcription-orbit"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import {
   Card,
   CardContent,

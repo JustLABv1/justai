@@ -1,7 +1,7 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/panelui/button"
 import { type SummaryOmission } from "@/lib/transcription-summary-standard"
 
 export function SummaryOmissionReview({

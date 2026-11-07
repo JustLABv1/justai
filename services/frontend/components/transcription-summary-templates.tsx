@@ -3,7 +3,7 @@
 import { Pencil, Plus, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { useTranslations } from "@/components/locale-provider"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/panelui/button"
 import {
   Dialog,
   DialogContent,
@@ -11,10 +11,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+} from "@/components/panelui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/panelui/input"
+import { Textarea } from "@/components/panelui/textarea"
 import {
   Select,
   SelectContent,
@@ -22,7 +22,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@/components/panelui/select"
 import {
   DropdownMenu,
   DropdownMenuContent,

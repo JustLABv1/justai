@@ -110,7 +110,8 @@ export function workspacePath(
   }
 
   if (view === "transcription" || view === "video-transcription") {
-    return sessionId ? `/${view}/${encodeURIComponent(sessionId)}` : `/${view}`
+    const base = view === "transcription" ? "live-transcription" : view
+    return sessionId ? `/${base}/${encodeURIComponent(sessionId)}` : `/${base}`
   }
 
   if (view === "settings") {
@@ -169,7 +170,13 @@ export function parseWorkspaceRoute(
     }
   }
 
-  if (section === "transcription" && segments[1] !== "join") {
+  // `/transcription/...` is the old address of the live transcription page;
+  // it keeps resolving so existing bookmarks work. `/transcription/join` is
+  // the participant link and stays a page of its own.
+  if (
+    (section === "live-transcription" || section === "transcription") &&
+    segments[1] !== "join"
+  ) {
     return {
       view: "transcription",
       conversationId: null,

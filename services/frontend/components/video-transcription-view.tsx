@@ -1965,7 +1965,7 @@ export function VideoTranscriptionView({
               >
                 {createStep > 0 ? (
                   <>
-                    <ArrowLeft data-icon="inline-start" /> Back
+                    <ArrowLeft data-icon="inline-start" /> {t("Back")}
                   </>
                 ) : (
                   "Cancel"
@@ -1976,7 +1976,7 @@ export function VideoTranscriptionView({
                   disabled={!videoFile}
                   onClick={() => setCreateStep(createStep + 1)}
                 >
-                  Continue <ArrowRight data-icon="inline-end" />
+                  {t("Continue")} <ArrowRight data-icon="inline-end" />
                 </Button>
               ) : (
                 <Button
