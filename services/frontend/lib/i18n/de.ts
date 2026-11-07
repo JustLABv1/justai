@@ -4387,4 +4387,41 @@ export const de = {
     "Aufgaben und Entscheidungen zum Nachverfolgen.",
   "Summary overview": "Überblick",
   "New transcription": "Neue Transkription",
+  Replace: "Ersetzen",
+  "Remove video": "Video entfernen",
+  "Drop your video here or click to browse":
+    "Zieh dein Video hierher oder klicke zum Auswählen",
+  "Choose a video to continue.": "Wähle ein Video, um fortzufahren.",
+  "Select a transcription endpoint.": "Wähle einen Transkriptions-Endpunkt.",
+  "Start transcription": "Transkription starten",
+  "You can follow the progress on the next page.":
+    "Den Fortschritt siehst du auf der nächsten Seite.",
+  "Your video is sent securely.": "Dein Video wird sicher übertragen.",
+  "Who is talking is labelled in the text.":
+    "Wer spricht, wird im Text gekennzeichnet.",
+  "Wording is cleaned up; the original stays.":
+    "Formulierungen werden geglättet; das Original bleibt erhalten.",
+  "Create one once the transcript is ready.":
+    "Erstelle sie, sobald das Transkript fertig ist.",
+  "No endpoint selected": "Kein Endpunkt ausgewählt",
+  "Detect automatically": "Automatisch erkennen",
+  "{value0} / {value1} MB uploaded": "{value0} / {value1} MB hochgeladen",
+  "{value0} / {value1} audio blocks transcribed":
+    "{value0} / {value1} Audioblöcke transkribiert",
+  "{value0} / {value1} caption images analyzed":
+    "{value0} / {value1} Einblendungsbilder analysiert",
+  "{value0} / {value1} text blocks polished":
+    "{value0} / {value1} Textblöcke geglättet",
+  "Waiting for caption analysis · {value0} images selected":
+    "Warte auf die Einblendungsanalyse · {value0} Bilder ausgewählt",
+  "{value0} s": "{value0} s",
+  "{value0} min": "{value0} Min.",
+  "{value0} h {value1} min": "{value0} Std. {value1} Min.",
+  "{value0} elapsed": "{value0} vergangen",
+  "about {value0} left": "noch etwa {value0}",
+  "Estimating the remaining time…": "Restzeit wird geschätzt …",
+  "{value0} in progress": "{value0} läuft",
+  "under 1 s": "unter 1 s",
+  "{value0} min {value1} s": "{value0} Min. {value1} s",
+  "Step {value0} of {value1}": "Schritt {value0} von {value1}",
 } as const

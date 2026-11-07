@@ -510,7 +510,14 @@ export function LiveTranscriptionView({
   )
   const [title, setTitle] = useState("Room session")
   const [language, setLanguage] = useState("auto")
-  const languageItems = useMemo(() => languageItemsFor(language), [language])
+  const languageItems = useMemo(
+    () =>
+      languageItemsFor(language).map((item) => ({
+        ...item,
+        label: t(item.label),
+      })),
+    [language, t]
+  )
   const [recordAudio, setRecordAudio] = useState(false)
   const [selectedEndpoint, setSelectedEndpoint] = useState("")
   const [selectedDiarizationEndpoint, setSelectedDiarizationEndpoint] =
