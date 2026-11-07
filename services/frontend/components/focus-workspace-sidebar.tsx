@@ -66,25 +66,25 @@ import { AssistantThreadList } from "@/components/assistant-ui/thread-list"
 import { GlobalSearchDialog } from "@/components/global-search-dialog"
 import { LanguageMenu } from "@/components/language-switcher"
 import { ThemeMenu } from "@/components/theme-switcher"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Alert } from "@/components/panelui/alert"
+import { Avatar } from "@/components/panelui/avatar"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  Menu as DropdownMenu,
+  MenuContent as DropdownMenuContent,
+  MenuCheckboxItem as DropdownMenuCheckboxItem,
+  MenuGroup as DropdownMenuGroup,
+  MenuItem as DropdownMenuItem,
+  MenuGroupLabel as DropdownMenuLabel,
+  MenuSeparator as DropdownMenuSeparator,
+  MenuTrigger as DropdownMenuTrigger,
+} from "@/components/panelui/menu"
 import {
   Empty,
   EmptyDescription,
@@ -94,10 +94,11 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogBody,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+} from "@/components/panelui/dialog"
+import { Input } from "@/components/panelui/input"
 import {
   Sidebar,
   SidebarContent,
@@ -127,7 +128,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { resolveAPIURL } from "@/lib/api"
-import { avatarToneFor, versionedAvatarURL } from "@/lib/identity"
+import { versionedAvatarURL } from "@/lib/identity"
 
 export const railNavigation: Array<{
   id: ViewId
@@ -250,7 +251,6 @@ export function FocusWorkspaceSidebar({
   archivedTranscriptionSessions,
   actionError,
   user,
-  userInitials,
   historyOpen,
   onHistoryOpenChange,
   onNavigate,
@@ -439,10 +439,10 @@ export function FocusWorkspaceSidebar({
       role="region"
     >
       {actionError && (
-        <Alert className="shrink-0" variant="destructive">
-          <AlertDescription className="text-xs">
+        <Alert className="shrink-0" tone="destructive" variant="plain">
+          <Alert.Description className="text-xs">
             {t(actionError)}
-          </AlertDescription>
+          </Alert.Description>
         </Alert>
       )}
 
@@ -850,24 +850,20 @@ export function FocusWorkspaceSidebar({
                     />
                   }
                 >
-                  <Avatar size="sm">
-                    {user.avatarUrl && (
-                      <AvatarImage
-                        alt={t("{value0}'s profile picture", {
-                          value0: user.displayName,
-                        })}
-                        src={resolveAPIURL(
-                          versionedAvatarURL(
-                            user.avatarUrl,
-                            user.avatarVersion
-                          ) ?? user.avatarUrl
-                        )}
-                      />
-                    )}
-                    <AvatarFallback className={avatarToneFor(user.id)}>
-                      {userInitials}
-                    </AvatarFallback>
-                  </Avatar>
+                  <Avatar
+                    size="sm"
+                    name={user.displayName}
+                    src={
+                      user.avatarUrl
+                        ? resolveAPIURL(
+                            versionedAvatarURL(
+                              user.avatarUrl,
+                              user.avatarVersion
+                            ) ?? user.avatarUrl
+                          )
+                        : undefined
+                    }
+                  />
                   <span className="min-w-0 flex-1 text-left">
                     <span className="block truncate text-xs font-medium">
                       {user.displayName}
@@ -1029,9 +1025,11 @@ export function FocusWorkspaceSidebar({
               </Button>
             )}
           </DialogHeader>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {historyPanel}
-          </div>
+          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {historyPanel}
+            </div>
+          </DialogBody>
         </DialogContent>
       </Dialog>
 
@@ -1270,7 +1268,7 @@ function SessionRow({
             <Button
               aria-label={t("Actions for {value0}", { value0: session.title })}
               className="absolute top-1/2 right-1 size-8 -translate-y-1/2 bg-[var(--sidebar-secondary)] opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 max-lg:opacity-100"
-              size="icon-xs"
+              size="icon-sm"
               title={t("Actions for {value0}", { value0: session.title })}
               variant="ghost"
             />

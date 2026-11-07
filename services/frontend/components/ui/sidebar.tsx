@@ -8,7 +8,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/panelui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -513,7 +513,7 @@ const sidebarMenuButtonVariants = cva(
 )
 
 function SidebarMenuButton({
-  render,
+  render = <Button variant="ghost" className="justify-start text-left" />,
   isActive = false,
   variant = "default",
   size = "default",

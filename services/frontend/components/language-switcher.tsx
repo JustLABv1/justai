@@ -5,12 +5,12 @@ import { useTranslations } from "@/components/locale-provider"
 import { Button } from "@/components/panelui/button"
 import { Menu } from "@/components/panelui/menu"
 import {
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-} from "@/components/ui/dropdown-menu"
+  MenuGroup as DropdownMenuGroup,
+  MenuItem as DropdownMenuItem,
+  MenuSub as DropdownMenuSub,
+  MenuSubContent as DropdownMenuSubContent,
+  MenuSubTrigger as DropdownMenuSubTrigger,
+} from "@/components/panelui/menu"
 
 const languages = [
   { locale: "de", label: "Deutsch" },

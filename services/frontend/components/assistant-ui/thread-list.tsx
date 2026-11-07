@@ -31,28 +31,29 @@ import {
   useChatRuntime,
 } from "@assistant-ui/react-ai-sdk"
 
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/panelui/button"
+import { Badge } from "@/components/panelui/badge"
 import {
   Dialog,
   DialogContent,
+  DialogBody,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+} from "@/components/panelui/dialog"
+import { Input } from "@/components/panelui/input"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  Menu as DropdownMenu,
+  MenuContent as DropdownMenuContent,
+  MenuCheckboxItem as DropdownMenuCheckboxItem,
+  MenuItem as DropdownMenuItem,
+  MenuSeparator as DropdownMenuSeparator,
+  MenuSub as DropdownMenuSub,
+  MenuSubContent as DropdownMenuSubContent,
+  MenuSubTrigger as DropdownMenuSubTrigger,
+  MenuTrigger as DropdownMenuTrigger,
+} from "@/components/panelui/menu"
 import type {
   Conversation,
   ConversationFolder,
@@ -386,7 +387,7 @@ function AssistantThreadItem({
                     value0: thread.title || "conversation",
                   })}
                   className="absolute top-1/2 right-1 size-7 -translate-y-1/2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                  size="icon-xs"
+                  size="icon-sm"
                   title={t("Actions for {value0}", {
                     value0: thread.title || "conversation",
                   })}
@@ -1128,136 +1129,140 @@ export function AssistantThreadList({
               {t("Rename or delete the labels used to organize your chats.")}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-5">
-            <section className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-medium">{t("Folders")}</h3>
-                <Badge variant="secondary">{folders.length}</Badge>
-              </div>
-              {folders.length > 0 ? (
-                <div className="flex flex-col gap-1">
-                  {folders.map((folder) => (
-                    <div
-                      className="flex min-w-0 items-center gap-2 rounded-lg border border-border px-2.5 py-2"
-                      key={folder.id}
-                    >
-                      <Folder className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate text-xs">
-                        {folder.name}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          aria-label={t("Edit folder {value0}", {
-                            value0: folder.name,
-                          })}
-                          onClick={() =>
-                            startLabelEdit({
-                              kind: "folder",
-                              id: folder.id,
-                              name: folder.name,
-                            })
-                          }
-                          size="icon-sm"
-                          title={t("Edit folder {value0}", {
-                            value0: folder.name,
-                          })}
-                          variant="ghost"
-                        >
-                          <Pencil />
-                        </Button>
-                        <Button
-                          aria-label={t("Delete folder {value0}", {
-                            value0: folder.name,
-                          })}
-                          className="text-destructive hover:text-destructive"
-                          onClick={() =>
-                            startLabelDelete({
-                              kind: "folder",
-                              id: folder.id,
-                              name: folder.name,
-                            })
-                          }
-                          size="icon-sm"
-                          title={t("Delete folder {value0}", {
-                            value0: folder.name,
-                          })}
-                          variant="ghost"
-                        >
-                          <Trash2 />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4">
+            <div className="flex flex-col gap-5">
+              <section className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-medium">{t("Folders")}</h3>
+                  <Badge variant="secondary">{folders.length}</Badge>
                 </div>
-              ) : (
-                <p className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                  {t("No folders yet.")}
-                </p>
-              )}
-            </section>
-            <section className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-medium">{t("Tags")}</h3>
-                <Badge variant="secondary">{tags.length}</Badge>
-              </div>
-              {tags.length > 0 ? (
-                <div className="flex flex-col gap-1">
-                  {tags.map((tag) => (
-                    <div
-                      className="flex min-w-0 items-center gap-2 rounded-lg border border-border px-2.5 py-2"
-                      key={tag.id}
-                    >
-                      <Tag className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate text-xs">
-                        {tag.name}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          aria-label={t("Edit tag {value0}", {
-                            value0: tag.name,
-                          })}
-                          onClick={() =>
-                            startLabelEdit({
-                              kind: "tag",
-                              id: tag.id,
-                              name: tag.name,
-                            })
-                          }
-                          size="icon-sm"
-                          title={t("Edit tag {value0}", { value0: tag.name })}
-                          variant="ghost"
-                        >
-                          <Pencil />
-                        </Button>
-                        <Button
-                          aria-label={t("Delete tag {value0}", {
-                            value0: tag.name,
-                          })}
-                          className="text-destructive hover:text-destructive"
-                          onClick={() =>
-                            startLabelDelete({
-                              kind: "tag",
-                              id: tag.id,
-                              name: tag.name,
-                            })
-                          }
-                          size="icon-sm"
-                          title={t("Delete tag {value0}", { value0: tag.name })}
-                          variant="ghost"
-                        >
-                          <Trash2 />
-                        </Button>
+                {folders.length > 0 ? (
+                  <div className="flex flex-col gap-1">
+                    {folders.map((folder) => (
+                      <div
+                        className="flex min-w-0 items-center gap-2 rounded-lg border border-border px-2.5 py-2"
+                        key={folder.id}
+                      >
+                        <Folder className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-xs">
+                          {folder.name}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            aria-label={t("Edit folder {value0}", {
+                              value0: folder.name,
+                            })}
+                            onClick={() =>
+                              startLabelEdit({
+                                kind: "folder",
+                                id: folder.id,
+                                name: folder.name,
+                              })
+                            }
+                            size="icon-sm"
+                            title={t("Edit folder {value0}", {
+                              value0: folder.name,
+                            })}
+                            variant="ghost"
+                          >
+                            <Pencil />
+                          </Button>
+                          <Button
+                            aria-label={t("Delete folder {value0}", {
+                              value0: folder.name,
+                            })}
+                            className="text-destructive hover:text-destructive"
+                            onClick={() =>
+                              startLabelDelete({
+                                kind: "folder",
+                                id: folder.id,
+                                name: folder.name,
+                              })
+                            }
+                            size="icon-sm"
+                            title={t("Delete folder {value0}", {
+                              value0: folder.name,
+                            })}
+                            variant="ghost"
+                          >
+                            <Trash2 />
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                    {t("No folders yet.")}
+                  </p>
+                )}
+              </section>
+              <section className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-medium">{t("Tags")}</h3>
+                  <Badge variant="secondary">{tags.length}</Badge>
                 </div>
-              ) : (
-                <p className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                  {t("No tags yet.")}
-                </p>
-              )}
-            </section>
-          </div>
+                {tags.length > 0 ? (
+                  <div className="flex flex-col gap-1">
+                    {tags.map((tag) => (
+                      <div
+                        className="flex min-w-0 items-center gap-2 rounded-lg border border-border px-2.5 py-2"
+                        key={tag.id}
+                      >
+                        <Tag className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-xs">
+                          {tag.name}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            aria-label={t("Edit tag {value0}", {
+                              value0: tag.name,
+                            })}
+                            onClick={() =>
+                              startLabelEdit({
+                                kind: "tag",
+                                id: tag.id,
+                                name: tag.name,
+                              })
+                            }
+                            size="icon-sm"
+                            title={t("Edit tag {value0}", { value0: tag.name })}
+                            variant="ghost"
+                          >
+                            <Pencil />
+                          </Button>
+                          <Button
+                            aria-label={t("Delete tag {value0}", {
+                              value0: tag.name,
+                            })}
+                            className="text-destructive hover:text-destructive"
+                            onClick={() =>
+                              startLabelDelete({
+                                kind: "tag",
+                                id: tag.id,
+                                name: tag.name,
+                              })
+                            }
+                            size="icon-sm"
+                            title={t("Delete tag {value0}", {
+                              value0: tag.name,
+                            })}
+                            variant="ghost"
+                          >
+                            <Trash2 />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                    {t("No tags yet.")}
+                  </p>
+                )}
+              </section>
+            </div>
+          </DialogBody>
         </DialogContent>
       </Dialog>
       <Dialog
@@ -1279,26 +1284,28 @@ export function AssistantThreadList({
               {t("The new name will be applied everywhere this label appears.")}
             </DialogDescription>
           </DialogHeader>
-          <Input
-            aria-label={
-              labelEditTarget?.kind === "folder"
-                ? t("Folder name")
-                : t("Tag name")
-            }
-            autoFocus
-            maxLength={labelEditTarget?.kind === "folder" ? 80 : 40}
-            onChange={(event) => setLabelEditName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault()
-                void submitLabelEdit()
+          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4">
+            <Input
+              aria-label={
+                labelEditTarget?.kind === "folder"
+                  ? t("Folder name")
+                  : t("Tag name")
               }
-            }}
-            value={labelEditName}
-          />
-          {labelError && (
-            <p className="text-xs text-destructive">{t(labelError)}</p>
-          )}
+              autoFocus
+              maxLength={labelEditTarget?.kind === "folder" ? 80 : 40}
+              onChange={(event) => setLabelEditName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  void submitLabelEdit()
+                }
+              }}
+              value={labelEditName}
+            />
+            {labelError && (
+              <p className="text-xs text-destructive">{t(labelError)}</p>
+            )}
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={labelEditSaving}
@@ -1344,9 +1351,11 @@ export function AssistantThreadList({
                   })}
             </DialogDescription>
           </DialogHeader>
-          {labelError && (
-            <p className="text-xs text-destructive">{t(labelError)}</p>
-          )}
+          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4">
+            {labelError && (
+              <p className="text-xs text-destructive">{t(labelError)}</p>
+            )}
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={labelDeleteSaving}
@@ -1383,19 +1392,21 @@ export function AssistantThreadList({
               )}
             </DialogDescription>
           </DialogHeader>
-          <Input
-            aria-label={t("Chat name")}
-            autoFocus
-            maxLength={160}
-            onChange={(event) => setRenameTitle(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault()
-                void submitRename()
-              }
-            }}
-            value={renameTitle}
-          />
+          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4">
+            <Input
+              aria-label={t("Chat name")}
+              autoFocus
+              maxLength={160}
+              onChange={(event) => setRenameTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  void submitRename()
+                }
+              }}
+              value={renameTitle}
+            />
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={renameSaving}
@@ -1432,27 +1443,29 @@ export function AssistantThreadList({
               {t("Organize chats so they are easier to find later.")}
             </DialogDescription>
           </DialogHeader>
-          <Input
-            aria-label={
-              labelDialog === "folder" ? t("Folder name") : t("Tag name")
-            }
-            autoFocus
-            maxLength={80}
-            onChange={(event) => setLabelName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault()
-                void createLabel()
+          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4">
+            <Input
+              aria-label={
+                labelDialog === "folder" ? t("Folder name") : t("Tag name")
               }
-            }}
-            placeholder={
-              labelDialog === "folder" ? t("Project work") : t("Important")
-            }
-            value={labelName}
-          />
-          {labelError && (
-            <p className="text-xs text-destructive">{t(labelError)}</p>
-          )}
+              autoFocus
+              maxLength={80}
+              onChange={(event) => setLabelName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  void createLabel()
+                }
+              }}
+              placeholder={
+                labelDialog === "folder" ? t("Project work") : t("Important")
+              }
+              value={labelName}
+            />
+            {labelError && (
+              <p className="text-xs text-destructive">{t(labelError)}</p>
+            )}
+          </DialogBody>
           <DialogFooter>
             <Button
               disabled={labelSaving}
