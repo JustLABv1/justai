@@ -21,6 +21,7 @@ import {
   FileText,
   History,
   Pencil,
+  AudioLines,
   Mic,
   MicOff,
   Plug,
@@ -80,10 +81,7 @@ import {
   ChatAttachmentPreview,
   ChatMessageAttachment,
 } from "@/components/assistant-ui/attachment-preview"
-import {
-  VoiceControl,
-  VoiceToolApproval,
-} from "@/components/assistant-ui/voice"
+import { VoiceToolApproval } from "@/components/assistant-ui/voice"
 import {
   MCPApprovalCards,
   MCPApprovalProvider,
@@ -2661,11 +2659,11 @@ function Composer({
     composer.send()
     setPendingRefs([])
   }
-  const canSubmit =
-    !sendBlocked &&
-    (composerText.trim() !== "" ||
-      composerAttachments.length > 0 ||
-      pendingRefs.length > 0)
+  const hasContent =
+    composerText.trim() !== "" ||
+    composerAttachments.length > 0 ||
+    pendingRefs.length > 0
+  const canSubmit = !sendBlocked && hasContent
   const attachmentAccept = useAuiState(
     (state) => state.composer.attachmentAccept
   )
@@ -3070,7 +3068,7 @@ function Composer({
                             onSelect={onModelSelect}
                             compact={compact}
                           />
-                          <VoiceControl className="shrink-0" />
+
                           {isThreadRunning ? (
                             <ComposerPrimitive.Cancel
                               aria-label={t("Cancel response")}
@@ -3079,14 +3077,28 @@ function Composer({
                               <RotateCcw className="size-4" />
                             </ComposerPrimitive.Cancel>
                           ) : (
+                            // One button: the microphone while there is nothing to send, the
+                            // arrow as soon as there is.
                             <button
-                              aria-label={t("Send message")}
+                              aria-label={
+                                hasContent
+                                  ? t("Send message")
+                                  : t("Start voice")
+                              }
                               className="flex size-8 items-center justify-center rounded-full bg-[var(--composer-accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                              disabled={!canSubmit}
-                              onClick={submitMessage}
+                              disabled={hasContent && !canSubmit}
+                              onClick={
+                                hasContent
+                                  ? submitMessage
+                                  : voiceControls.connect
+                              }
                               type="button"
                             >
-                              <ArrowUp className="size-4" />
+                              {hasContent ? (
+                                <ArrowUp className="size-4" />
+                              ) : (
+                                <AudioLines className="size-4" />
+                              )}
                             </button>
                           )}
                         </div>

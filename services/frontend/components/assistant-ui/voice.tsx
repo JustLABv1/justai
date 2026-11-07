@@ -1,26 +1,8 @@
 "use client"
 
-import { useTranslations } from "@/components/locale-provider"
-import { Mic } from "lucide-react"
-import { useVoiceControls } from "@assistant-ui/react"
 import type { ToolCallMessagePartProps } from "@assistant-ui/react"
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback"
-import { Prompt } from "@/components/panelui/prompt"
 import { cn } from "@/lib/utils"
-
-/** Starts a voice session. While one runs, the composer shows its Prompt.Recorder instead. */
-export function VoiceControl({ className }: { className?: string }) {
-  const { t } = useTranslations()
-
-  const controls = useVoiceControls()
-  return (
-    <div className={cn("relative flex items-center", className)}>
-      <Prompt.Tool label={t("Start voice")} onClick={controls.connect}>
-        <Mic />
-      </Prompt.Tool>
-    </div>
-  )
-}
 
 /** A tool the voice session wants approved, shown over the composer. */
 export function VoiceToolApproval({
