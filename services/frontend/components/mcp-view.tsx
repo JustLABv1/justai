@@ -23,8 +23,8 @@ import {
 
 import { APIError, api, API_URL, resolveAPIURL } from "@/lib/api"
 import type { MCPServer } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/panelui/badge"
+import { Button } from "@/components/panelui/button"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,7 +40,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/panelui/card"
 import {
   Dialog,
   DialogContent,
@@ -48,14 +48,15 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+  DialogBody,
+} from "@/components/panelui/dialog"
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { Input } from "@/components/panelui/input"
 import {
   Select,
   SelectContent,
@@ -63,16 +64,10 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@/components/panelui/select"
 import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Switch } from "@/components/panelui/switch"
+import { Menu } from "@/components/panelui/menu"
 
 type Props = {
   servers: MCPServer[]
@@ -762,8 +757,8 @@ export function MCPView({
                         </Button>
                       </div>
                     ) : (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
+                      <Menu>
+                        <Menu.Trigger
                           render={
                             <Button
                               disabled={busyId === server.id}
@@ -780,23 +775,23 @@ export function MCPView({
                             aria-hidden="true"
                           />
                           {t("Actions")}
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
+                        </Menu.Trigger>
+                        <Menu.Content align="end">
+                          <Menu.Item
                             disabled={busyId === server.id}
                             onClick={() => void discover(server)}
                           >
                             <TerminalSquare aria-hidden="true" />{" "}
                             {t("Discover tools")}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
+                          </Menu.Item>
+                          <Menu.Item
                             disabled={busyId === server.id}
                             onClick={() => void test(server)}
                           >
                             <Check aria-hidden="true" /> {t("Test connection")}
-                          </DropdownMenuItem>
+                          </Menu.Item>
                           {server.authType === "oauth" && (
-                            <DropdownMenuItem
+                            <Menu.Item
                               disabled={busyId === server.id}
                               onClick={() => authorize(server)}
                             >
@@ -804,18 +799,18 @@ export function MCPView({
                               {server.credentialConfigured
                                 ? t("Reconnect OAuth")
                                 : t("Authorize")}
-                            </DropdownMenuItem>
+                            </Menu.Item>
                           )}
                           {canManageServer(server) && (
                             <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
+                              <Menu.Separator />
+                              <Menu.Item
                                 disabled={busyId === server.id}
                                 onClick={() => edit(server)}
                               >
                                 <Pencil aria-hidden="true" /> {t("Edit server")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
+                              </Menu.Item>
+                              <Menu.Item
                                 disabled={busyId === server.id}
                                 className={
                                   server.enabled
@@ -829,8 +824,8 @@ export function MCPView({
                                 }
                               >
                                 {server.enabled ? t("Disable") : t("Enable")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
+                              </Menu.Item>
+                              <Menu.Item
                                 disabled={busyId === server.id}
                                 onClick={() =>
                                   void patchServer(server, {
@@ -841,8 +836,8 @@ export function MCPView({
                                 {server.trustedReadOnly
                                   ? t("Remove read-only trust")
                                   : t("Trust read-only tools")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
+                              </Menu.Item>
+                              <Menu.Item
                                 disabled={busyId === server.id}
                                 onClick={() =>
                                   void patchServer(server, {
@@ -854,18 +849,18 @@ export function MCPView({
                                 {server.autoDiscover
                                   ? t("Require manual attachment")
                                   : t("Make available automatically")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
+                              </Menu.Item>
+                              <Menu.Item
                                 disabled={busyId === server.id}
                                 variant="destructive"
                                 onClick={() => setRemoveTarget(server)}
                               >
                                 <Trash2 aria-hidden="true" /> {t("Remove")}
-                              </DropdownMenuItem>
+                              </Menu.Item>
                             </>
                           )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                        </Menu.Content>
+                      </Menu>
                     )}
                   </div>
                 )}
@@ -965,338 +960,346 @@ export function MCPView({
               )}
             </DialogDescription>
           </DialogHeader>
-          {dialogError && (
-            <div
-              aria-live="assertive"
-              className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
-              role="alert"
-            >
-              <AlertTriangle
-                aria-hidden="true"
-                className="mt-0.5 size-4 shrink-0"
-              />
-              <span className="min-w-0 break-words">{t(dialogError)}</span>
-            </div>
-          )}
-          <form onSubmit={save}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="mcp-name">{t("Display name")}</FieldLabel>
-                <Input
-                  id="mcp-name"
-                  value={form.name}
-                  onChange={(event) => update("name", event.target.value)}
-                  placeholder="Linear tools"
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="mcp-icon">Logo</FieldLabel>
-                <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
-                  <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
-                    {iconPreview && !iconRemoved ? (
-                      // Uploaded MCP icons are served by JustAI and do not need
-                      // a Next Image host allowlist.
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        alt={t("Selected MCP logo preview")}
-                        className="size-full rounded-md object-contain"
-                        src={resolveAPIURL(iconPreview)}
-                      />
-                    ) : (
-                      <Plug
-                        aria-hidden="true"
-                        className="size-6 text-muted-foreground"
-                      />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <Input
-                      ref={iconInputRef}
-                      id="mcp-icon"
-                      type="file"
-                      className="sr-only"
-                      accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
-                      onChange={(event) =>
-                        chooseIcon(event.target.files?.[0] ?? null)
-                      }
-                    />
-                    <p className="truncate text-sm font-medium">
-                      {iconFile?.name ??
-                        (iconPreview && !iconRemoved
-                          ? t("Current logo")
-                          : t("No logo selected"))}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {t(
-                        "PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on upload"
-                      )}
-                    </p>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => iconInputRef.current?.click()}
-                      >
-                        <ImagePlus
-                          data-icon="inline-start"
-                          aria-hidden="true"
-                        />
-                        {iconPreview && !iconRemoved
-                          ? t("Replace logo")
-                          : t("Choose logo")}
-                      </Button>
-                      {((iconPreview && !iconRemoved) ||
-                        (editingServer?.iconUrl && !iconRemoved)) && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            resetIconSelection()
-                            setIconRemoved(Boolean(editingServer))
-                          }}
-                        >
-                          <X data-icon="inline-start" aria-hidden="true" />
-                          {t("Remove logo")}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="mcp-url">{t("Endpoint URL")}</FieldLabel>
-                <Input
-                  id="mcp-url"
-                  type="url"
-                  value={form.endpointUrl}
-                  onChange={(event) =>
-                    update("endpointUrl", event.target.value)
-                  }
-                  placeholder="https://mcp.example.com/mcp"
-                  required
-                />
-                <FieldDescription>
-                  {t(
-                    "Streamable HTTP is preferred; legacy HTTP+SSE is supported by the backend client."
-                  )}
-                </FieldDescription>
-              </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel>{t("Authentication")}</FieldLabel>
-                  <Select
-                    items={{
-                      none: "No auth",
-                      api_key: "Bearer token",
-                      litellm: "LiteLLM API key",
-                      oauth: "OAuth 2.1",
-                    }}
-                    value={form.authType}
-                    onValueChange={(value) =>
-                      update("authType", value ?? "none")
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="none">{t("No auth")}</SelectItem>
-                        <SelectItem value="api_key">
-                          {t("Bearer token")}
-                        </SelectItem>
-                        <SelectItem value="litellm">
-                          {t("LiteLLM API key")}
-                        </SelectItem>
-                        <SelectItem value="oauth">OAuth 2.1</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  {form.authType === "litellm" && (
-                    <FieldDescription>
-                      {t(
-                        "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>."
-                      )}
-                    </FieldDescription>
-                  )}
-                  {(form.authType === "none" || form.authType === "oauth") && (
-                    <FieldDescription>
-                      {form.authType === "none"
-                        ? t("No credential is sent to this server.")
-                        : t(
-                            "Sign in with the provider after saving; JustAI manages the access and refresh tokens."
-                          )}
-                    </FieldDescription>
-                  )}
-                </Field>
-                <Field>
-                  <FieldLabel>{t("Visibility")}</FieldLabel>
-                  <Select
-                    items={{
-                      organization: "Workspace",
-                      user: "Only me",
-                    }}
-                    value={form.scopeType}
-                    onValueChange={(value) =>
-                      update(
-                        "scopeType",
-                        value ??
-                          (canManageOrganization ? "organization" : "user")
-                      )
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {canManageOrganization && (
-                          <SelectItem value="organization">
-                            {t("Workspace")}
-                          </SelectItem>
-                        )}
-                        <SelectItem value="user">{t("Only me")}</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-              {form.authType === "oauth" && (
-                <div className="grid gap-4 rounded-xl border bg-muted/35 p-3 sm:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="mcp-oauth-authorize">
-                      {t("Authorization URL")}
-                    </FieldLabel>
-                    <Input
-                      id="mcp-oauth-authorize"
-                      type="url"
-                      value={form.oauthAuthorizationUrl}
-                      onChange={(event) =>
-                        update("oauthAuthorizationUrl", event.target.value)
-                      }
-                      placeholder={t("Auto-discovered from the server")}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="mcp-oauth-token">
-                      {t("Token URL")}
-                    </FieldLabel>
-                    <Input
-                      id="mcp-oauth-token"
-                      type="url"
-                      value={form.oauthTokenUrl}
-                      onChange={(event) =>
-                        update("oauthTokenUrl", event.target.value)
-                      }
-                      placeholder={t("Auto-discovered from the server")}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="mcp-oauth-client">
-                      {t("Client ID")}
-                    </FieldLabel>
-                    <Input
-                      id="mcp-oauth-client"
-                      value={form.oauthClientId}
-                      onChange={(event) =>
-                        update("oauthClientId", event.target.value)
-                      }
-                      placeholder="public-client-id"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="mcp-oauth-scopes">
-                      {t("Scopes")}
-                    </FieldLabel>
-                    <Input
-                      id="mcp-oauth-scopes"
-                      value={form.oauthScopes}
-                      onChange={(event) =>
-                        update("oauthScopes", event.target.value)
-                      }
-                      placeholder="openid tools"
-                    />
-                  </Field>
-                  <FieldDescription className="sm:col-span-2">
-                    {t(
-                      "PKCE, resource indicators, metadata discovery, and encrypted token storage are handled by the backend. Manual URLs are an advanced compatibility override."
-                    )}
-                  </FieldDescription>
+          <form className="contents" onSubmit={save}>
+            <DialogBody>
+              {dialogError && (
+                <div
+                  aria-live="assertive"
+                  className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
+                  role="alert"
+                >
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0"
+                  />
+                  <span className="min-w-0 break-words">{t(dialogError)}</span>
                 </div>
               )}
-              {form.authType !== "none" && (
+
+              <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="mcp-credential">
-                    {form.authType === "oauth"
-                      ? t("Access token (optional)")
-                      : t("Bearer token")}
+                  <FieldLabel htmlFor="mcp-name">
+                    {t("Display name")}
                   </FieldLabel>
                   <Input
-                    id="mcp-credential"
-                    type="password"
-                    value={form.credential}
+                    id="mcp-name"
+                    value={form.name}
+                    onChange={(event) => update("name", event.target.value)}
+                    placeholder="Linear tools"
+                    required
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="mcp-icon">Logo</FieldLabel>
+                  <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-2">
+                    <div className="flex size-14 shrink-0 items-center justify-center rounded-md border bg-background p-1">
+                      {iconPreview && !iconRemoved ? (
+                        // Uploaded MCP icons are served by JustAI and do not need
+                        // a Next Image host allowlist.
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          alt={t("Selected MCP logo preview")}
+                          className="size-full rounded-md object-contain"
+                          src={resolveAPIURL(iconPreview)}
+                        />
+                      ) : (
+                        <Plug
+                          aria-hidden="true"
+                          className="size-6 text-muted-foreground"
+                        />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <Input
+                        ref={iconInputRef}
+                        id="mcp-icon"
+                        type="file"
+                        className="sr-only"
+                        accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
+                        onChange={(event) =>
+                          chooseIcon(event.target.files?.[0] ?? null)
+                        }
+                      />
+                      <p className="truncate text-sm font-medium">
+                        {iconFile?.name ??
+                          (iconPreview && !iconRemoved
+                            ? t("Current logo")
+                            : t("No logo selected"))}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {t(
+                          "PNG, JPEG, GIF, WebP, or ICO · Max 2 MB · optimized on upload"
+                        )}
+                      </p>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => iconInputRef.current?.click()}
+                        >
+                          <ImagePlus
+                            data-icon="inline-start"
+                            aria-hidden="true"
+                          />
+                          {iconPreview && !iconRemoved
+                            ? t("Replace logo")
+                            : t("Choose logo")}
+                        </Button>
+                        {((iconPreview && !iconRemoved) ||
+                          (editingServer?.iconUrl && !iconRemoved)) && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              resetIconSelection()
+                              setIconRemoved(Boolean(editingServer))
+                            }}
+                          >
+                            <X data-icon="inline-start" aria-hidden="true" />
+                            {t("Remove logo")}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="mcp-url">{t("Endpoint URL")}</FieldLabel>
+                  <Input
+                    id="mcp-url"
+                    type="url"
+                    value={form.endpointUrl}
                     onChange={(event) =>
-                      update("credential", event.target.value)
+                      update("endpointUrl", event.target.value)
                     }
-                    placeholder={
-                      form.authType === "oauth"
-                        ? t("Leave blank to authorize after saving")
-                        : t("Paste the token from your MCP provider")
-                    }
-                    autoComplete="off"
+                    placeholder="https://mcp.example.com/mcp"
+                    required
                   />
                   <FieldDescription>
-                    {form.authType === "oauth"
-                      ? editingServer
-                        ? t(
-                            "Leave blank to keep the stored token, or authorize again after saving."
-                          )
-                        : t("Leave blank to authorize after saving.")
-                      : editingServer
-                        ? t("Leave blank to keep the stored token.")
-                        : t("Stored encrypted by JustAI.")}
-                  </FieldDescription>
-                </Field>
-              )}
-              <Field>
-                <FieldLabel htmlFor="mcp-tools">
-                  {t("Allowlisted tools")}
-                </FieldLabel>
-                <Input
-                  id="mcp-tools"
-                  value={form.allowedTools}
-                  onChange={(event) =>
-                    update("allowedTools", event.target.value)
-                  }
-                  placeholder="search, create_issue"
-                />
-                <FieldDescription>
-                  {t(
-                    "Comma-separated. Leave empty to inspect all discovered tools, subject to approval policy."
-                  )}
-                </FieldDescription>
-              </Field>
-              <Field orientation="horizontal">
-                <div className="min-w-0 flex-1">
-                  <FieldLabel htmlFor="mcp-auto-discover">
-                    {t("Available automatically")}
-                  </FieldLabel>
-                  <FieldDescription>
                     {t(
-                      "Let JustAI surface a small set of relevant tools without adding this server to every chat. Automatically selected calls always require approval."
+                      "Streamable HTTP is preferred; legacy HTTP+SSE is supported by the backend client."
                     )}
                   </FieldDescription>
+                </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel>{t("Authentication")}</FieldLabel>
+                    <Select
+                      items={{
+                        none: "No auth",
+                        api_key: "Bearer token",
+                        litellm: "LiteLLM API key",
+                        oauth: "OAuth 2.1",
+                      }}
+                      value={form.authType}
+                      onValueChange={(value) =>
+                        update("authType", value ?? "none")
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="none">{t("No auth")}</SelectItem>
+                          <SelectItem value="api_key">
+                            {t("Bearer token")}
+                          </SelectItem>
+                          <SelectItem value="litellm">
+                            {t("LiteLLM API key")}
+                          </SelectItem>
+                          <SelectItem value="oauth">OAuth 2.1</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    {form.authType === "litellm" && (
+                      <FieldDescription>
+                        {t(
+                          "Enter the LiteLLM key without Bearer. Sent as x-litellm-api-key: Bearer <key>."
+                        )}
+                      </FieldDescription>
+                    )}
+                    {(form.authType === "none" ||
+                      form.authType === "oauth") && (
+                      <FieldDescription>
+                        {form.authType === "none"
+                          ? t("No credential is sent to this server.")
+                          : t(
+                              "Sign in with the provider after saving; JustAI manages the access and refresh tokens."
+                            )}
+                      </FieldDescription>
+                    )}
+                  </Field>
+                  <Field>
+                    <FieldLabel>{t("Visibility")}</FieldLabel>
+                    <Select
+                      items={{
+                        organization: "Workspace",
+                        user: "Only me",
+                      }}
+                      value={form.scopeType}
+                      onValueChange={(value) =>
+                        update(
+                          "scopeType",
+                          value ??
+                            (canManageOrganization ? "organization" : "user")
+                        )
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {canManageOrganization && (
+                            <SelectItem value="organization">
+                              {t("Workspace")}
+                            </SelectItem>
+                          )}
+                          <SelectItem value="user">{t("Only me")}</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
                 </div>
-                <Switch
-                  id="mcp-auto-discover"
-                  checked={form.autoDiscover}
-                  onCheckedChange={(checked) => update("autoDiscover", checked)}
-                />
-              </Field>
-            </FieldGroup>
+                {form.authType === "oauth" && (
+                  <div className="grid gap-4 rounded-xl border bg-muted/35 p-3 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="mcp-oauth-authorize">
+                        {t("Authorization URL")}
+                      </FieldLabel>
+                      <Input
+                        id="mcp-oauth-authorize"
+                        type="url"
+                        value={form.oauthAuthorizationUrl}
+                        onChange={(event) =>
+                          update("oauthAuthorizationUrl", event.target.value)
+                        }
+                        placeholder={t("Auto-discovered from the server")}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="mcp-oauth-token">
+                        {t("Token URL")}
+                      </FieldLabel>
+                      <Input
+                        id="mcp-oauth-token"
+                        type="url"
+                        value={form.oauthTokenUrl}
+                        onChange={(event) =>
+                          update("oauthTokenUrl", event.target.value)
+                        }
+                        placeholder={t("Auto-discovered from the server")}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="mcp-oauth-client">
+                        {t("Client ID")}
+                      </FieldLabel>
+                      <Input
+                        id="mcp-oauth-client"
+                        value={form.oauthClientId}
+                        onChange={(event) =>
+                          update("oauthClientId", event.target.value)
+                        }
+                        placeholder="public-client-id"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="mcp-oauth-scopes">
+                        {t("Scopes")}
+                      </FieldLabel>
+                      <Input
+                        id="mcp-oauth-scopes"
+                        value={form.oauthScopes}
+                        onChange={(event) =>
+                          update("oauthScopes", event.target.value)
+                        }
+                        placeholder="openid tools"
+                      />
+                    </Field>
+                    <FieldDescription className="sm:col-span-2">
+                      {t(
+                        "PKCE, resource indicators, metadata discovery, and encrypted token storage are handled by the backend. Manual URLs are an advanced compatibility override."
+                      )}
+                    </FieldDescription>
+                  </div>
+                )}
+                {form.authType !== "none" && (
+                  <Field>
+                    <FieldLabel htmlFor="mcp-credential">
+                      {form.authType === "oauth"
+                        ? t("Access token (optional)")
+                        : t("Bearer token")}
+                    </FieldLabel>
+                    <Input
+                      id="mcp-credential"
+                      type="password"
+                      value={form.credential}
+                      onChange={(event) =>
+                        update("credential", event.target.value)
+                      }
+                      placeholder={
+                        form.authType === "oauth"
+                          ? t("Leave blank to authorize after saving")
+                          : t("Paste the token from your MCP provider")
+                      }
+                      autoComplete="off"
+                    />
+                    <FieldDescription>
+                      {form.authType === "oauth"
+                        ? editingServer
+                          ? t(
+                              "Leave blank to keep the stored token, or authorize again after saving."
+                            )
+                          : t("Leave blank to authorize after saving.")
+                        : editingServer
+                          ? t("Leave blank to keep the stored token.")
+                          : t("Stored encrypted by JustAI.")}
+                    </FieldDescription>
+                  </Field>
+                )}
+                <Field>
+                  <FieldLabel htmlFor="mcp-tools">
+                    {t("Allowlisted tools")}
+                  </FieldLabel>
+                  <Input
+                    id="mcp-tools"
+                    value={form.allowedTools}
+                    onChange={(event) =>
+                      update("allowedTools", event.target.value)
+                    }
+                    placeholder="search, create_issue"
+                  />
+                  <FieldDescription>
+                    {t(
+                      "Comma-separated. Leave empty to inspect all discovered tools, subject to approval policy."
+                    )}
+                  </FieldDescription>
+                </Field>
+                <Field orientation="horizontal">
+                  <div className="min-w-0 flex-1">
+                    <FieldLabel htmlFor="mcp-auto-discover">
+                      {t("Available automatically")}
+                    </FieldLabel>
+                    <FieldDescription>
+                      {t(
+                        "Let JustAI surface a small set of relevant tools without adding this server to every chat. Automatically selected calls always require approval."
+                      )}
+                    </FieldDescription>
+                  </div>
+                  <Switch
+                    id="mcp-auto-discover"
+                    checked={form.autoDiscover}
+                    onCheckedChange={(checked) =>
+                      update("autoDiscover", checked)
+                    }
+                  />
+                </Field>
+              </FieldGroup>
+            </DialogBody>
             <DialogFooter className="mt-6">
               <Button
                 type="button"

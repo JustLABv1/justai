@@ -21,6 +21,7 @@ import { Button } from "@/components/panelui/button"
 import { Card } from "@/components/panelui/card"
 import { Chip } from "@/components/panelui/chip"
 import { Input } from "@/components/panelui/input"
+import { SectionHeading } from "@/components/section-heading"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VideoTranscriptionThumbnail } from "@/components/video-transcription-thumbnail"
 import { api } from "@/lib/api"
@@ -189,27 +190,21 @@ export function VideoTranscriptionLibrary({
       aria-labelledby="video-library-title"
       className="mx-auto flex w-full max-w-7xl flex-col gap-6"
     >
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1
-            id="video-library-title"
-            className="text-xl font-semibold tracking-tight"
-          >
-            {t(kind === "live" ? "Your live sessions" : "Your recordings")}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("Pick up where you left off, or add a new recording.")}
-          </p>
-        </div>
-        <Button onClick={onCreate}>
-          {kind === "live" ? (
-            <Mic data-icon="inline-start" />
-          ) : (
-            <Upload data-icon="inline-start" />
-          )}
-          {t(kind === "live" ? "New live session" : "Add recording")}
-        </Button>
-      </header>
+      <SectionHeading
+        actions={
+          <Button onClick={onCreate}>
+            {kind === "live" ? (
+              <Mic data-icon="inline-start" />
+            ) : (
+              <Upload data-icon="inline-start" />
+            )}
+            {t(kind === "live" ? "New live session" : "Add recording")}
+          </Button>
+        }
+        description={t("Pick up where you left off, or add a new recording.")}
+        id="video-library-title"
+        title={t(kind === "live" ? "Your live sessions" : "Your recordings")}
+      />
       <div className="flex flex-wrap items-center gap-3">
         <Input.Group className="w-full sm:w-80">
           <Input.Addon>

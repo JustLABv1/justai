@@ -1,7 +1,14 @@
 "use client"
 
 import { useTranslations } from "@/components/locale-provider"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  Fragment,
+} from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Home, Info } from "lucide-react"
 import { ChatView } from "@/components/chat-view"
@@ -9,10 +16,10 @@ import { BrandMark } from "@/components/brand-mark"
 import { LiveTranscriptionView } from "@/components/live-transcription-view"
 import { TemplatesView } from "@/components/templates-view"
 import { KnowledgeWorkspace } from "@/components/knowledge-workspace"
+import { useFolderTrail } from "@/lib/knowledge-folder-trail"
 import { ProfileView } from "@/components/profile-view"
 import { PlatformAdminShell } from "@/components/platform-admin-shell"
 import { SettingsShell } from "@/components/settings-shell"
-import { IntegrationsView } from "@/components/integrations-view"
 import { AutomationsView } from "@/components/automations-view"
 import { VideoTranscriptionView } from "@/components/video-transcription-view"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -30,6 +37,7 @@ import {
 import {
   Breadcrumb,
   BreadcrumbItem,
+  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
@@ -1411,16 +1419,6 @@ export function Workspace({
                 }
               />
             )}
-            {activeView === "integrations" && (
-              <IntegrationsView
-                servers={servers}
-                onChange={setServers}
-                organization={activeOrganization}
-                user={user}
-                resourceError={featureErrors.mcp}
-                onRetry={() => setReloadToken((value) => value + 1)}
-              />
-            )}
             {activeView === "automations" && (
               <AutomationsView
                 automations={automations}
@@ -1516,6 +1514,7 @@ function FeatureDisabledPanel({ label }: { label: string }) {
 
 function WorkspaceHeader({ activeView }: { activeView: ViewId }) {
   const { t } = useTranslations()
+  const folderTrail = useFolderTrail()
 
   const item = railNavigation.find((entry) => entry.id === activeView)
   const label =
@@ -1536,7 +1535,7 @@ function WorkspaceHeader({ activeView }: { activeView: ViewId }) {
           <BreadcrumbItem>
             <Home aria-label={t("Home")} className="size-3.5" />
           </BreadcrumbItem>
-          {item?.group && (
+          {item?.group && t(item.group) !== t(label) && (
             <>
               <BreadcrumbSeparator />
               <BreadcrumbItem className="text-muted-foreground">
@@ -1545,9 +1544,50 @@ function WorkspaceHeader({ activeView }: { activeView: ViewId }) {
             </>
           )}
           <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{t(label)}</BreadcrumbPage>
-          </BreadcrumbItem>
+          {activeView === "knowledge" && folderTrail?.items.length ? (
+            <>
+              <BreadcrumbItem>
+                <BreadcrumbLink
+                  render={
+                    <button
+                      onClick={() => folderTrail.select("all")}
+                      type="button"
+                    />
+                  }
+                >
+                  {t(label)}
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              {folderTrail.items.map((folder, index) => (
+                <Fragment key={folder.id}>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem className="min-w-0">
+                    {index === folderTrail.items.length - 1 ? (
+                      <BreadcrumbPage className="truncate">
+                        {folder.name}
+                      </BreadcrumbPage>
+                    ) : (
+                      <BreadcrumbLink
+                        className="truncate"
+                        render={
+                          <button
+                            onClick={() => folderTrail.select(folder.id)}
+                            type="button"
+                          />
+                        }
+                      >
+                        {folder.name}
+                      </BreadcrumbLink>
+                    )}
+                  </BreadcrumbItem>
+                </Fragment>
+              ))}
+            </>
+          ) : (
+            <BreadcrumbItem>
+              <BreadcrumbPage>{t(label)}</BreadcrumbPage>
+            </BreadcrumbItem>
+          )}
         </BreadcrumbList>
       </Breadcrumb>
       <div

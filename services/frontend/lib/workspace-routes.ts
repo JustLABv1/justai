@@ -7,7 +7,6 @@ const validViews: ViewId[] = [
   "video-transcription",
   "endpoints",
   "knowledge",
-  "integrations",
   "automations",
   "agents",
   "mcp",
@@ -116,8 +115,8 @@ export function workspacePath(
 
   if (view === "settings") {
     return settingsTab === "workspace"
-      ? "/settings"
-      : `/settings?tab=${encodeURIComponent(settingsTab)}`
+      ? "/workspace-settings"
+      : `/workspace-settings?tab=${encodeURIComponent(settingsTab)}`
   }
 
   if (view === "admin") {
@@ -138,7 +137,7 @@ export function workspacePath(
         ? `/knowledge?item=${encodeURIComponent(conversationId)}`
         : "/knowledge"
     }
-    return `/settings?tab=${view}`
+    return `/workspace-settings?tab=${view}`
   }
 
   if (view === "notes") {
@@ -198,7 +197,8 @@ export function parseWorkspaceRoute(
     }
   }
 
-  if (section === "settings") {
+  // `/settings` is the old address of Workspace settings; it redirects.
+  if (section === "settings" || section === "workspace-settings") {
     const settingsTab = parseSettingsTab(searchParams.get("tab"))
     if (settingsTab === "knowledge") {
       const source = searchParams.get("source")
@@ -223,6 +223,12 @@ export function parseWorkspaceRoute(
       settingsTab,
       adminTab: "overview",
       agentTab: "agents",
+      legacyRedirect:
+        section === "settings"
+          ? settingsTab === "workspace"
+            ? "/workspace-settings"
+            : `/workspace-settings?tab=${encodeURIComponent(settingsTab)}`
+          : undefined,
     }
   }
 
@@ -248,15 +254,21 @@ export function parseWorkspaceRoute(
     }
   }
 
-  if (section === "endpoints" || section === "mcp") {
+  // `/integrations` was the MCP servers page; it now lives in Settings → Tools.
+  if (
+    section === "endpoints" ||
+    section === "mcp" ||
+    section === "integrations"
+  ) {
     return {
       view: "settings",
       conversationId: null,
       sessionId: null,
       targetId: null,
-      settingsTab: section,
+      settingsTab: section === "integrations" ? "mcp" : section,
       adminTab: "overview",
       agentTab: "agents",
+      legacyRedirect: `/workspace-settings?tab=${section === "integrations" ? "mcp" : section}`,
     }
   }
 

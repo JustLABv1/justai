@@ -17,14 +17,9 @@ import { EndpointsView } from "@/components/endpoints-view"
 import { MCPView } from "@/components/mcp-view"
 import { PrivacyView } from "@/components/privacy-view"
 import { SettingsView } from "@/components/settings-view"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/panelui/button"
 import { Page, PageActions, PageTitle } from "@/components/ui/page"
-import {
-  Tabs,
-  ScrollableTabsList,
-  TabsTrigger,
-  TabsContent,
-} from "@/components/ui/tabs"
+import { Tabs } from "@/components/panelui/tabs"
 import type {
   Endpoint,
   MCPServer,
@@ -182,21 +177,21 @@ export function SettingsShell({
       <Tabs
         value={activeTab}
         onValueChange={(value) => onTabChange(value as SettingsTab)}
-        className="gap-6"
       >
-        <ScrollableTabsList
-          aria-label={t("Workspace settings sections")}
-          variant="line"
-        >
+        <Tabs.List aria-label={t("Workspace settings sections")}>
           {visibleTabs.map(({ id, label, icon: Icon }) => (
-            <TabsTrigger key={id} value={id}>
+            <Tabs.Trigger key={id} value={id}>
               <Icon aria-hidden="true" />
               {label}
-            </TabsTrigger>
+            </Tabs.Trigger>
           ))}
-        </ScrollableTabsList>
+        </Tabs.List>
 
-        <TabsContent key={activeTab} value={activeTab} className="min-w-0">
+        <Tabs.Content
+          key={activeTab}
+          value={activeTab}
+          className="min-w-0 pt-1"
+        >
           {activeTab !== "lifecycle" && (
             <div className="mb-4 px-1">
               <p className="max-w-2xl text-sm text-muted-foreground">
@@ -257,7 +252,7 @@ export function SettingsShell({
               platformAdmin={user.platformAdmin}
             />
           ) : null}
-        </TabsContent>
+        </Tabs.Content>
       </Tabs>
     </Page>
   )

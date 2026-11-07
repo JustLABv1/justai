@@ -30,7 +30,6 @@ import {
   File01Icon,
   HeadphonesIcon,
   BubbleChatIcon,
-  Plug01Icon,
   Search01Icon,
   Settings02Icon,
   Shield01Icon,
@@ -58,7 +57,6 @@ const FolderKanban = sidebarIcon(Folder01Icon)
 const FileText = sidebarIcon(File01Icon)
 const Headphones = sidebarIcon(HeadphonesIcon)
 const MessageSquare = sidebarIcon(BubbleChatIcon)
-const Plug = sidebarIcon(Plug01Icon)
 const Search = sidebarIcon(Search01Icon)
 const Settings2 = sidebarIcon(Settings02Icon)
 const ShieldCheck = sidebarIcon(Shield01Icon)
@@ -182,14 +180,6 @@ export const railNavigation: Array<{
     hint: "Folders, files, and transcripts",
     icon: FolderKanban,
     group: "Storage",
-  },
-  {
-    id: "integrations",
-    label: "MCP servers",
-    hint: "Manage MCP connections and tools",
-    icon: Plug,
-    group: "Connect",
-    feature: "mcp",
   },
 ]
 

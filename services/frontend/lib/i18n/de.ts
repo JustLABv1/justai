@@ -4431,4 +4431,22 @@ export const de = {
     "Word, Excel, PowerPoint, PDF und mehr",
   "Remove file": "Datei entfernen",
   "Choose file": "Datei auswählen",
+  "File or URL": "Datei oder URL",
+  Note: "Notiz",
+  "Select {value0}": "{value0} auswählen",
+  "Clear selection": "Auswahl aufheben",
+  "Remove yourself from this workspace.": "Entferne dich aus diesem Workspace.",
+  "Hide this workspace without deleting its content.":
+    "Blendet diesen Workspace aus, ohne seine Inhalte zu löschen.",
+  "Permanently remove it and its content. This cannot be undone.":
+    "Entfernt ihn und seine Inhalte endgültig. Das kann nicht rückgängig gemacht werden.",
+  "Save server": "Server speichern",
+  "{value0} endpoints · {value1} active": "{value0} Endpunkte · {value1} aktiv",
+  "Tested {value0}": "Getestet am {value0}",
+  Images: "Bilder",
+  Speech: "Sprache",
+  Multimodal: "Multimodal",
+  "Endpoint pagination": "Endpunkt-Seitennavigation",
+  "Text-to-speech": "Sprachausgabe",
+  Own: "Eigene",
 } as const

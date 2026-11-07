@@ -142,7 +142,8 @@ const navigationItemsMessages: NavigationItem[] = [
     hint: "Manage MCP connections and tools",
     keywords: ["mcp", "tools", "servers", "integrations"],
     icon: Plug,
-    view: "integrations",
+    view: "settings",
+    settingsTab: "mcp",
     feature: "mcp",
   },
   {
